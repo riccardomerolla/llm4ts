@@ -1,0 +1,106 @@
+import * as Schema from "effect/Schema"
+import { Capability } from "@llm4ts/core/Capability"
+import { LlmError } from "@llm4ts/core/Errors"
+
+export class PersistenceError extends Schema.TaggedErrorClass<PersistenceError>()("Persistence", {
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Defect())
+}) {}
+
+export class PlanParseError extends Schema.TaggedErrorClass<PlanParseError>()("PlanParse", {
+  message: Schema.String
+}) {}
+
+export class UnsupportedSchemaVersion extends Schema.TaggedErrorClass<UnsupportedSchemaVersion>()(
+  "UnsupportedSchemaVersion",
+  {
+    path: Schema.String,
+    expected: Schema.Int,
+    actual: Schema.Int
+  }
+) {
+  get message(): string {
+    return `unsupported schema version in ${this.path}: expected ${this.expected}, received ${this.actual}`
+  }
+}
+
+export class WorkspacePathError extends Schema.TaggedErrorClass<WorkspacePathError>()(
+  "WorkspacePath",
+  {
+    path: Schema.String,
+    message: Schema.String
+  }
+) {}
+
+export class WorkspaceLimitError extends Schema.TaggedErrorClass<WorkspaceLimitError>()(
+  "WorkspaceLimit",
+  {
+    operation: Schema.String,
+    limit: Schema.Int,
+    actual: Schema.Int
+  }
+) {
+  get message(): string {
+    return `${this.operation} exceeded limit ${this.limit}; received ${this.actual}`
+  }
+}
+
+export class WorkspaceIoError extends Schema.TaggedErrorClass<WorkspaceIoError>()("WorkspaceIo", {
+  operation: Schema.String,
+  path: Schema.String,
+  message: Schema.String,
+  cause: Schema.optionalKey(Schema.Defect())
+}) {}
+
+export class FlowAborted extends Schema.TaggedErrorClass<FlowAborted>()("Aborted", {
+  message: Schema.String
+}) {}
+
+export class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("Process", {
+  message: Schema.String,
+  detail: Schema.String
+}) {}
+
+export class FlowLlmError extends Schema.TaggedErrorClass<FlowLlmError>()("Llm", {
+  message: Schema.String,
+  cause: Schema.optionalKey(LlmError)
+}) {}
+
+export class FlowCapabilityDenied extends Schema.TaggedErrorClass<FlowCapabilityDenied>()(
+  "CapabilityDenied",
+  {
+    capability: Capability,
+    operation: Schema.String
+  }
+) {
+  get message(): string {
+    const capability =
+      this.capability._tag === "Exec" ? `Exec(${this.capability.command})` : this.capability._tag
+    return `capability ${capability} denied for ${this.operation}`
+  }
+}
+
+export class BudgetExceeded extends Schema.TaggedErrorClass<BudgetExceeded>()("BudgetExceeded", {
+  metric: Schema.Literals(["tokens", "costUsd"]),
+  limit: Schema.Number,
+  actual: Schema.Number
+}) {
+  get message(): string {
+    return `${this.metric} budget exceeded: limit ${this.limit}, actual ${this.actual}`
+  }
+}
+
+export const FlowError = Schema.Union([
+  PersistenceError,
+  PlanParseError,
+  UnsupportedSchemaVersion,
+  WorkspacePathError,
+  WorkspaceLimitError,
+  WorkspaceIoError,
+  FlowAborted,
+  ProcessError,
+  FlowLlmError,
+  FlowCapabilityDenied,
+  BudgetExceeded
+])
+export type FlowError = typeof FlowError.Type

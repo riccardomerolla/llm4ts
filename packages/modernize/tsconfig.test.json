@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["test"],
+  "references": [
+    { "path": "tsconfig.src.json" },
+    { "path": "../core/tsconfig.src.json" },
+    { "path": "../flow/tsconfig.src.json" },
+    { "path": "../runner/tsconfig.src.json" }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noEmit": true,
+    "rootDir": "test",
+    "tsBuildInfoFile": ".tsbuildinfo/test.tsbuildinfo",
+    "rewriteRelativeImportExtensions": false,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@llm4ts/core/*": ["../core/src/*"],
+      "@llm4ts/flow/*": ["../flow/src/*"],
+      "@llm4ts/runner/*": ["../runner/src/*"],
+      "@llm4ts/modernize/*": ["./src/*"]
+    }
+  }
+}

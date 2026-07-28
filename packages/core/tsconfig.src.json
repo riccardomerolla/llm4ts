@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["src"],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": ".tsbuildinfo/src.tsbuildinfo",
+    "paths": {
+      "@llm4ts/core/*": ["./src/*"]
+    }
+  }
+}

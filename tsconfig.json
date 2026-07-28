@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@llm4ts/core/*": ["./packages/core/src/*"],
+      "@llm4ts/flow/*": ["./packages/flow/src/*"],
+      "@llm4ts/runner/*": ["./packages/runner/src/*"],
+      "@llm4ts/modernize/*": ["./packages/modernize/src/*"],
+      "@llm4ts/js/*": ["./packages/js/src/*"]
+    }
+  },
+  "include": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/flow" },
+    { "path": "./packages/runner" },
+    { "path": "./packages/modernize" },
+    { "path": "./packages/js" },
+    { "path": "./examples" }
+  ]
+}

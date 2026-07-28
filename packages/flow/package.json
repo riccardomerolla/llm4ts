@@ -1,0 +1,64 @@
+{
+  "name": "@llm4ts/flow",
+  "version": "0.1.0",
+  "description": "Effect-native LLM workflow, persistence, review, and repository automation",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./Classified": "./dist/Classified.js",
+    "./FlowError": "./dist/FlowError.js",
+    "./FlowContext": "./dist/FlowContext.js",
+    "./FlowEvents": "./dist/FlowEvents.js",
+    "./FlowRecorder": "./dist/FlowRecorder.js",
+    "./CapabilityGuard": "./dist/CapabilityGuard.js",
+    "./CostLedger": "./dist/CostLedger.js",
+    "./CostTracker": "./dist/CostTracker.js",
+    "./Equiv": "./dist/Equiv.js",
+    "./EquivReport": "./dist/EquivReport.js",
+    "./AzureDevOpsTool": "./dist/AzureDevOpsTool.js",
+    "./Bench": "./dist/Bench.js",
+    "./BenchReport": "./dist/BenchReport.js",
+    "./GitTool": "./dist/GitTool.js",
+    "./GitHubTool": "./dist/GitHubTool.js",
+    "./Interaction": "./dist/Interaction.js",
+    "./Mermaid": "./dist/Mermaid.js",
+    "./McpServer": "./dist/McpServer.js",
+    "./Plan": "./dist/Plan.js",
+    "./PlanExecution": "./dist/PlanExecution.js",
+    "./PriceList": "./dist/PriceList.js",
+    "./Persistence": "./dist/Persistence.js",
+    "./Pack": "./dist/Pack.js",
+    "./Provenance": "./dist/Provenance.js",
+    "./Review": "./dist/Review.js",
+    "./ReviewCache": "./dist/ReviewCache.js",
+    "./Replay": "./dist/Replay.js",
+    "./SpecChecks": "./dist/SpecChecks.js",
+    "./Survey": "./dist/Survey.js",
+    "./Package": "./dist/Package.js",
+    "./TransientRetry": "./dist/TransientRetry.js",
+    "./Workspace": "./dist/Workspace.js",
+    "./WorkspaceLayout": "./dist/WorkspaceLayout.js",
+    "./WorkspaceTools": "./dist/WorkspaceTools.js"
+  },
+  "scripts": {
+    "clean": "tsc -b tsconfig.json --clean",
+    "test": "vitest run test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/riccardomerolla/llm4ts.git",
+    "directory": "packages/flow"
+  },
+  "dependencies": {
+    "@llm4ts/core": "workspace:*",
+    "effect": "beta"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "moduleDetection": "force",
+    "composite": true,
+    "downlevelIteration": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "declaration": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+    "lib": ["ES2022"],
+    "isolatedModules": true,
+    "sourceMap": true,
+    "declarationMap": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "strictNullChecks": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "incremental": true,
+    "forceConsistentCasingInFileNames": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnostics": true,
+        "diagnosticSeverity": {
+          "anyUnknownInErrorContext": "warning",
+          "catchUnfailableEffect": "error",
+          "classSelfMismatch": "error",
+          "effectInVoidSuccess": "error",
+          "floatingEffect": "error",
+          "globalErrorInEffectCatch": "error",
+          "globalErrorInEffectFailure": "error",
+          "leakingRequirements": "warning",
+          "missingEffectContext": "error",
+          "missingEffectError": "error",
+          "missingEffectServiceDependency": "error",
+          "missingLayerContext": "error",
+          "missingReturnYieldStar": "error",
+          "missingStarInYieldEffectGen": "error",
+          "multipleEffectProvide": "error",
+          "nonObjectEffectServiceType": "error",
+          "returnEffectInGen": "error",
+          "runEffectInsideEffect": "warning",
+          "strictBooleanExpressions": "warning",
+          "tryCatchInEffectGen": "error",
+          "unknownInEffectCatch": "warning",
+          "unnecessaryFailYieldableError": "warning",
+          "unsupportedServiceAccessors": "error"
+        }
+      }
+    ]
+  }
+}

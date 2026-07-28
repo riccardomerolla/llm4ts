@@ -1,0 +1,35 @@
+{
+  "name": "@llm4ts/js",
+  "version": "0.1.0",
+  "description": "Promise and exception facade for llm4ts",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": "./dist/Client.js",
+    "./Client": "./dist/Client.js",
+    "./Package": "./dist/Package.js"
+  },
+  "scripts": {
+    "clean": "tsc -b tsconfig.json --clean",
+    "test": "vitest run test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/riccardomerolla/llm4ts.git",
+    "directory": "packages/js"
+  },
+  "dependencies": {
+    "@llm4ts/core": "workspace:*",
+    "@llm4ts/flow": "workspace:*",
+    "@llm4ts/runner": "workspace:*",
+    "effect": "beta"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@llm4ts/examples",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "basic": "node --experimental-strip-types basic.ts",
+    "plain-js": "node plain-js.mjs"
+  },
+  "dependencies": {
+    "@llm4ts/core": "workspace:*",
+    "@llm4ts/flow": "workspace:*",
+    "@llm4ts/js": "workspace:*",
+    "@llm4ts/runner": "workspace:*",
+    "effect": "beta"
+  }
+}

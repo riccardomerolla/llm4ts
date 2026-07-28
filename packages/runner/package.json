@@ -1,0 +1,53 @@
+{
+  "name": "@llm4ts/runner",
+  "version": "0.1.0",
+  "description": "Node runner, CLI, terminal, and MCP composition for llm4ts",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "llm4ts": "./dist/cli-main.js"
+  },
+  "exports": {
+    "./Cli": "./dist/Cli.js",
+    "./CoderPolicy": "./dist/CoderPolicy.js",
+    "./Connectors": "./dist/Connectors.js",
+    "./FlowArgs": "./dist/FlowArgs.js",
+    "./FlowRunner": "./dist/FlowRunner.js",
+    "./ExampleFlow": "./dist/ExampleFlow.js",
+    "./McpStdio": "./dist/McpStdio.js",
+    "./NodeHttpClient": "./dist/NodeHttpClient.js",
+    "./NodeGeminiCliExecutor": "./dist/NodeGeminiCliExecutor.js",
+    "./NodePlainFileStore": "./dist/NodePlainFileStore.js",
+    "./NodeProcessExecutor": "./dist/NodeProcessExecutor.js",
+    "./NodeTemporaryFiles": "./dist/NodeTemporaryFiles.js",
+    "./NodeWorkspace": "./dist/NodeWorkspace.js",
+    "./NodeRuntime": "./dist/NodeRuntime.js",
+    "./ReviewFingerprint": "./dist/ReviewFingerprint.js",
+    "./Terminal": "./dist/Terminal.js",
+    "./TerminalInteraction": "./dist/TerminalInteraction.js",
+    "./Package": "./dist/Package.js"
+  },
+  "scripts": {
+    "clean": "tsc -b tsconfig.json --clean",
+    "test": "vitest run test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/riccardomerolla/llm4ts.git",
+    "directory": "packages/runner"
+  },
+  "dependencies": {
+    "@effect/platform-node": "beta",
+    "@llm4ts/core": "workspace:*",
+    "@llm4ts/flow": "workspace:*",
+    "effect": "beta"
+  }
+}
