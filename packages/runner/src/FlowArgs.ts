@@ -24,7 +24,9 @@ export const parseFlowArgs = (args: ReadonlyArray<string>): FlowArgsParseResult 
   let parsed: FlowArgs = {}
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index] ?? ""
-    if (argument === "--prompt-file") {
+    if (argument === "--") {
+      continue
+    } else if (argument === "--prompt-file") {
       const value = args[index + 1]
       if (value === undefined) {
         return {

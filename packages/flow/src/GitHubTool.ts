@@ -10,7 +10,21 @@ export class IssueRef extends Schema.Class<IssueRef>("IssueRef")({
   owner: Schema.String,
   repo: Schema.String,
   number: Schema.Int
-}) {}
+}) {
+  get shortRef(): string {
+    return `${this.owner}/${this.repo}#${this.number}`
+  }
+}
+
+export const parseIssueRef = (input: string): IssueRef | undefined => {
+  const match = /^([^/\s]+)\/([^#\s]+)#(\d+)$/.exec(input.trim())
+  const owner = match?.[1]
+  const repo = match?.[2]
+  const number = Number.parseInt(match?.[3] ?? "", 10)
+  return owner === undefined || repo === undefined || !Number.isInteger(number) || number <= 0
+    ? undefined
+    : IssueRef.make({ owner, repo, number })
+}
 
 export class Issue extends Schema.Class<Issue>("Issue")({
   title: Schema.String,

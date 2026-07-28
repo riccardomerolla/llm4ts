@@ -22,6 +22,7 @@ import { nodeGeminiCliExecutor } from "./NodeGeminiCliExecutor.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
 import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
+import { prepareConnector } from "./Connectors.ts"
 import {
   consumeTerminalEvents,
   makePlainTerminalSurface,
@@ -64,6 +65,7 @@ export interface FlowRunnerOptions {
   readonly runId?: string
   readonly verbosity?: Verbosity
   readonly surface?: TerminalSurface
+  readonly environment?: Readonly<Record<string, string | undefined>>
 }
 
 export interface FlowRunnerBundle {
@@ -86,21 +88,32 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   dependencies: FlowRunnerDependencies
 ): Effect.fn.Return<FlowRunnerBundle, FlowError> {
   const events = yield* makeFlowEventHub()
+  const coderConfig = prepareConnector(
+    options.coder,
+    options.workDir,
+    options.environment ?? process.env
+  )
+  const reasoning = reasoningConfig(options.coder, options.reasoning)
+  const reasoningPrepared = prepareConnector(
+    reasoning,
+    options.workDir,
+    options.environment ?? process.env
+  )
   const coder = yield* dependencies.registry
-    .resolve(options.coder)
+    .resolve(coderConfig)
     .pipe(Effect.mapError((cause) => FlowLlmError.make({ message: cause.message, cause })))
-  const reasoning = yield* dependencies.registry
-    .resolve(reasoningConfig(options.coder, options.reasoning))
+  const reasoningService = yield* dependencies.registry
+    .resolve(reasoningPrepared)
     .pipe(Effect.mapError((cause) => FlowLlmError.make({ message: cause.message, cause })))
   const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
     dependencies.registry
-      .resolve(configuration)
+      .resolve(prepareConnector(configuration, options.workDir, options.environment ?? process.env))
       .pipe(Effect.mapError((cause) => FlowLlmError.make({ message: cause.message, cause })))
   )
   return {
     events,
     context: FlowContext.of({
-      reasoning,
+      reasoning: reasoningService,
       coder,
       git: makeGitTool(dependencies.process, options.workDir, events),
       hosting: makeGitHubTool(dependencies.process, options.workDir, events),

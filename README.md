@@ -49,6 +49,8 @@ console.log(response.content)
 ```
 
 The `mock` provider performs no network calls and requires no credentials.
+Real HTTP-provider, coding-agent, fully local, and judge examples are documented
+in [examples/README.md](examples/README.md).
 
 ## Documentation
 

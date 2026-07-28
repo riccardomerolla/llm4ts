@@ -10,3 +10,12 @@
 - Added the six-phase resumable modernization product with human approval gates.
 - Added the Promise/exception JavaScript facade and reproducible npm package
   metadata.
+- Added source-compatible API configuration enrichment at runner resolution,
+  including default endpoints, redacted environment credentials, and target
+  repository rooting for CLI agents.
+- Added opt-in real examples for HTTP providers, edit-capable coding CLIs, a
+  fully local LM Studio-to-pi handoff, and repeated LLM-as-a-Judge evaluation.
+- Added atomic stateful chat, structured planning/readiness, file-scoped bounded
+  review/fix loops, lint gates, and structured pull-request summaries.
+- Added resumable implementation, GitHub issue-to-PR, and executable
+  specification-driven development examples.

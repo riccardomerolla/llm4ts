@@ -21,11 +21,16 @@ export list; the following modules are the main entry points.
 
 - `@llm4ts/flow/FlowContext` and `FlowEvents`: workflow dependencies and event
   protocol.
-- `@llm4ts/flow/Plan`, `PlanExecution`, and `Persistence`: resumable work.
+- `@llm4ts/flow/Chat`: atomic, serialized conversation history for coding
+  agents.
+- `@llm4ts/flow/Plan`, `Planner`, `PlanExecution`, and `Persistence`: structured
+  planning and resumable work.
 - `@llm4ts/flow/Workspace*`: contained filesystem access and workspace tools.
 - `@llm4ts/flow/GitTool`, `GitHubTool`, and `AzureDevOpsTool`: audited repository
   and forge boundaries.
-- `@llm4ts/flow/Pack`, `Review`, `SpecChecks`, and `Survey`: review and discovery.
+- `@llm4ts/flow/Reviewer`, `Pack`, `Review`, `SpecChecks`, and `Survey`:
+  file-scoped review lenses, bounded review/fix loops, and discovery.
+- `@llm4ts/flow/PrSummary`: structured pull-request titles and bodies.
 - `@llm4ts/flow/Replay`, `Equiv`, and `EquivReport`: offline replay and
   behavioral proof.
 
@@ -33,7 +38,8 @@ export list; the following modules are the main entry points.
 
 - `@llm4ts/runner/FlowRunner`: `runEmbedded`, `runNode`, and Node dependency
   presets.
-- `@llm4ts/runner/Connectors`: edit-capable CLI presets.
+- `@llm4ts/runner/Connectors`: API presets, source-compatible environment
+  enrichment, immutable configuration transforms, and edit-capable CLI presets.
 - `@llm4ts/runner/Cli`: command-line composition.
 - `@llm4ts/runner/McpStdio`: JSON-RPC MCP stdio transport.
 

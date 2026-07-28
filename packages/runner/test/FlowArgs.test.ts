@@ -11,6 +11,16 @@ const temporaryDirectory = Effect.acquireRelease(
 )
 
 describe("flow CLI arguments", () => {
+  it("accepts the package-manager argument separator", () => {
+    assert.deepStrictEqual(parseFlowArgs(["--", "do it", "--repo", "target"]), {
+      ok: true,
+      value: {
+        promptText: "do it",
+        repo: "target"
+      }
+    })
+  })
+
   it("parses prompt sources, repository aliases, and rejects unknown flags", () => {
     assert.deepStrictEqual(parseFlowArgs([" do it "]), {
       ok: true,

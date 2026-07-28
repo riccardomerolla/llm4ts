@@ -63,6 +63,10 @@ reference release.
 | `llm4zio/observability/StreamRecorder.scala`          | `StreamRecorderSpec.scala`                                      | `@llm4ts/core/observability/StreamRecorder`            | `Observability.test.ts`                  | ambient stream signals               |
 | CSP observability contracts                           | clean-spec black-box contracts                                  | `@llm4ts/core/observability/*`                         | `Observability.test.ts`                  | metrics, tracing, logs, redaction    |
 | `llm4zio/flow/Plan.scala`, `PlanStore.scala`          | `PlanSpec.scala`, `PlanStoreSpec.scala`                         | `@llm4ts/flow/Plan`, `Persistence`                     | `Plan.test.ts`, runner persistence       | Markdown plans and recovery          |
+| `llm4zio/flow/Chat.scala`                             | `ChatSpec.scala`                                                | `@llm4ts/flow/Chat`                                    | `Chat.test.ts`                           | atomic serialized chat history       |
+| `llm4zio/flow/Planner.scala`, `Verdict.scala`         | `PlannerSpec.scala`                                             | `@llm4ts/flow/Planner`                                 | `Planner.test.ts`                        | structured planning and readiness    |
+| `llm4zio/flow/LlmReview.scala`, `Reviewer.scala`      | `LlmReviewSpec.scala`                                           | `@llm4ts/flow/Review`, `Reviewer`                      | `Review.test.ts`                         | bounded scoped review/fix loop       |
+| `llm4zio/flow/PrSummary.scala`                        | `PrSummarySpec.scala`                                           | `@llm4ts/flow/PrSummary`                               | `PrSummary.test.ts`                      | structured PR summary                |
 | `llm4zio/flow/ImplementLoop.scala`                    | `ImplementLoopSpec.scala`, plan failure specs                   | `@llm4ts/flow/PlanExecution`                           | `PlanExecution.test.ts`                  | resumable task transitions           |
 | `llm4zio/flow/Workspace.scala`                        | `WorkspaceSpec.scala`                                           | `@llm4ts/flow/WorkspaceLayout`                         | `Plan.test.ts`                           | bookkeeping namespace                |
 | `llm4zio/flow/Provenance.scala`                       | `ProvenanceSpec.scala`                                          | `@llm4ts/flow/Provenance`                              | runner persistence                       | clean-room evidence chain            |
@@ -73,7 +77,7 @@ reference release.
 | `llm4zio/flow/AdoTool.scala`                          | `AdoToolSpec.scala`                                             | `@llm4ts/flow/AzureDevOpsTool`                         | `AzureDevOpsTool.test.ts`                | Azure DevOps HTTP bridge             |
 | `llm4zio/flow/ReviewCache.scala`                      | `ReviewCacheSpec.scala`                                         | `@llm4ts/flow/ReviewCache`                             | `ReviewSurvey.test.ts`                   | content-addressed review cache       |
 | `llm4zio/flow/SpecChecks.scala`, `Survey.scala`       | specification and survey specs                                  | `@llm4ts/flow/SpecChecks`, `Survey`                    | `ReviewSurvey.test.ts`                   | deterministic review evidence        |
-| `llm4zio/flow/Pack.scala`, `Reviewer.scala`           | pack parser and reviewer specs                                  | `@llm4ts/flow/Pack`                                    | `Pack.test.ts`                           | review-pack configuration            |
+| `llm4zio/flow/Pack.scala`, `Reviewer.scala`           | pack parser and reviewer specs                                  | `@llm4ts/flow/Pack`, `Reviewer`                        | `Pack.test.ts`, `Review.test.ts`         | review-pack configuration            |
 | `llm4zio/flow/FlowTrace.scala`, `Replay*.scala`       | trace and replay specs                                          | `@llm4ts/flow/FlowRecorder`, `Replay`                  | `ReplayMermaid.test.ts`                  | versioned deterministic replay       |
 | `llm4zio/flow/Mermaid.scala`                          | `MermaidSpec.scala`                                             | `@llm4ts/flow/Mermaid`                                 | `ReplayMermaid.test.ts`                  | pure flow visualization              |
 | `llm4zio/flow/PriceList.scala`, `Cost*.scala`         | pricing, tracker, and ledger specs                              | `@llm4ts/flow/PriceList`, `CostTracker`, `CostLedger`  | `Cost.test.ts`                           | estimated cost and budgets           |
@@ -84,6 +88,9 @@ reference release.
 | `llm4zio/runner/Terminal*.scala`, `FlowArgs.scala`    | terminal, verbosity, and argument specs                         | `@llm4ts/runner/Terminal`, `FlowArgs`                  | `Terminal.test.ts`, `FlowArgs.test.ts`   | safe interactive CLI                 |
 | `llm4zio/flow/McpServer.scala`, runner MCP transport  | MCP protocol and transport specs                                | `@llm4ts/flow/McpServer`, `@llm4ts/runner/McpStdio`    | `McpServer.test.ts`, `McpStdio.test.ts`  | JSON-RPC stdio bridge                |
 | `llm4zio/runner/ExampleFlow.scala`, source examples   | example integration specifications                              | `@llm4ts/runner/ExampleFlow`, `@llm4ts/examples`       | executable mock smoke example            | public API composition               |
+| `examples/implement.sc`, `local.sc`                   | live connector integration behavior                             | `examples/implement.ts`, `local.ts`                    | typed build + opt-in execution           | real coding-agent examples           |
+| `examples/issue-pr.sc`, `sdd.sc`                      | issue delivery and executable SDD gates                         | `examples/issue-pr.ts`, `sdd.ts`                       | typed build; live execution is opt-in    | persistent delivery examples         |
+| `examples/judge-suite.sc`                             | repeated LLM-as-a-Judge example                                 | `examples/judge-suite.ts`                              | typed build; live execution is opt-in    | evaluation example                   |
 | `llm4zio-modernize/modernize/*.scala`                 | phase and artifact-resume behavior                              | `@llm4ts/modernize/Modernize`, `Approval`, `Artifacts` | `Modernize.test.ts`, `Artifacts.test.ts` | six-phase modernization product      |
 | `llm4zio-java/javaapi/*.scala`                        | `JavaApiSpec.scala`, facade mock-flow behavior                  | `@llm4ts/js`, `@llm4ts/js/Client`                      | `Client.test.ts`, typed docs example     | language-friendly facade             |
 
@@ -234,6 +241,18 @@ reference release.
 - The executable example is a separate workspace package and defaults to the
   deterministic mock connector, keeping examples runnable without credentials
   or installed provider CLIs.
+- Runner composition now mirrors the source `DefaultFlowContext.prepare`
+  boundary: API presets acquire missing default URLs and cloud credentials
+  immediately before registry resolution, while CLI presets are rooted in the
+  target repository. Explicit configuration wins, and keys become `Redacted`
+  before entering provider code.
+- Real examples are opt-in executable consumers of public APIs: HTTP streaming,
+  resumable CLI implementation, issue-to-PR delivery, executable SDD gates, LM
+  Studio plus pi local handoff, and repeated LLM-as-a-Judge scoring. Default CI
+  still runs only mocked contract tests.
+- The TypeScript reviewer model lives in its own dependency-free subpath and is
+  re-exported by `Pack`. This avoids a runtime module cycle while preserving the
+  source relationship between packs and reviewer lenses.
 - Modernization persists an explicit versioned six-phase checkpoint document.
   A failed or process-interrupted phase is retried without rerunning completed
   predecessors; extraction specs, verification vectors, and implementation

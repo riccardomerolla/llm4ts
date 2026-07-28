@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
 import { ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { makeConnectorRegistry } from "@llm4ts/core/ConnectorRegistry"
@@ -24,6 +25,52 @@ const files = (state: Ref.Ref<Readonly<Record<string, string>>>): PlainFileStore
 })
 
 describe("embedded runner", () => {
+  it.effect("prepares API defaults and redacted environment credentials before resolution", () =>
+    Effect.gen(function* () {
+      const process = yield* makeFakeProcessExecutor()
+      const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+      const captured = yield* Ref.make<ApiConnectorConfig | undefined>(undefined)
+      const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+      const registry = makeConnectorRegistry([
+        {
+          connectorId: ConnectorIds.OpenAI,
+          kind: "Api",
+          create: (configuration) =>
+            configuration instanceof ApiConnectorConfig
+              ? Ref.set(captured, configuration).pipe(Effect.as(mock))
+              : Effect.succeed(mock)
+        }
+      ])
+
+      yield* makeFlowRunnerContext(
+        {
+          workDir: "/repo",
+          workspace: "/repo",
+          userPrompt: "do it",
+          coder: ApiConnectorConfig.make({
+            connectorId: ConnectorIds.OpenAI,
+            model: "gpt-test"
+          }),
+          environment: {
+            OPENAI_API_KEY: "secret"
+          }
+        },
+        {
+          registry,
+          process: process.executor,
+          files: files(state)
+        }
+      )
+      const prepared = yield* Ref.get(captured)
+
+      assert.strictEqual(prepared?.baseUrl, "https://api.openai.com/v1")
+      assert.strictEqual(
+        prepared?.apiKey === undefined ? undefined : Redacted.value(prepared.apiKey),
+        "secret"
+      )
+    })
+  )
+
   it.effect(
     "builds an injectable context and composes event, trace, terminal, and cost subscribers",
     () =>

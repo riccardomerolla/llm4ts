@@ -15,6 +15,7 @@ import {
   makeGitHubTool,
   outcomeFromChecksJson,
   parseIssue,
+  parseIssueRef,
   parsePullRequestUrl,
   prChecksArgs,
   prCreateArgs,
@@ -22,6 +23,18 @@ import {
 } from "@llm4ts/flow/GitHubTool"
 
 describe("GitHub tool protocol", () => {
+  it("parses canonical issue references", () => {
+    assert.deepStrictEqual(
+      parseIssueRef("owner/repo#42"),
+      IssueRef.make({
+        owner: "owner",
+        repo: "repo",
+        number: 42
+      })
+    )
+    assert.isUndefined(parseIssueRef("not-an-issue"))
+  })
+
   it("builds deterministic argv and parses PR URLs", () => {
     const issue = IssueRef.make({
       owner: "acme",

@@ -20,11 +20,28 @@ arguments, events, or persisted flow artifacts.
 ## CLI connectors
 
 The Node runner exports presets for Claude, Codex, Gemini, Pi, Antigravity, Grok,
-Cursor, and OpenCode. Their native CLIs own authentication. The compatibility
-selector still reads `LLM4ZIO_CODER`; accepted values are `claude`, `codex`,
-`gemini`, `pi`, `agy`, `grok`, `cursor`, and `opencode`.
+Cursor, and OpenCode. Their native CLIs own authentication. `LLM4TS_CODER`
+selects `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, or
+`opencode`. The source-compatible `LLM4ZIO_CODER` name remains a lower-priority
+fallback.
 
 `LLM4TS_VERBOSITY` accepts `quiet`, `normal`, `verbose`, or `debug`.
+
+## API connectors
+
+The runner exports `openAI`, `anthropic`, `geminiApi`, `lmStudio`, `ollama`, and
+`mock` presets. Before registry resolution it fills a missing provider base URL
+and reads a missing cloud credential from:
+
+| Connector  | Environment credential                             |
+| ---------- | -------------------------------------------------- |
+| OpenAI     | `OPENAI_API_KEY`                                   |
+| Anthropic  | `ANTHROPIC_API_KEY`                                |
+| Gemini API | `GEMINI_API_KEY`, falling back to `GOOGLE_API_KEY` |
+
+Explicit `baseUrl` and redacted `apiKey` values always win. LM Studio and Ollama
+use their local default endpoints and require no credential. See the
+[real examples](../examples/README.md) for runnable commands.
 
 ## Capabilities
 
