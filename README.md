@@ -52,6 +52,13 @@ The `mock` provider performs no network calls and requires no credentials.
 Real HTTP-provider, coding-agent, fully local, and judge examples are documented
 in [examples/README.md](examples/README.md).
 
+Seed a disposable repository for a complete persistent workflow:
+
+```sh
+examples/seed.sh implement
+LLM4TS_CODER=codex examples/seed.sh implement --run
+```
+
 ## Documentation
 
 - [API guide](docs/api.md)

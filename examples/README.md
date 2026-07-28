@@ -22,6 +22,54 @@ Build the packages once before running scripts from the workspace:
 pnpm build
 ```
 
+## Seed a complete workflow
+
+`seed.sh` copies a minimal starter into a new directory, initializes a clean
+`main` branch, commits the baseline, and prints the complete flow command. The
+flow remains in this workspace; no llm4ts source is copied into the target
+repository.
+
+```sh
+examples/seed.sh implement
+examples/seed.sh sdd /path/to/new-project
+examples/seed.sh local
+```
+
+The same entry point is available through pnpm:
+
+```sh
+pnpm --filter @llm4ts/examples seed -- implement
+```
+
+Pass `--run` to seed and immediately start the live flow:
+
+```sh
+LLM4TS_CODER=codex examples/seed.sh implement --run
+LLM4TS_CODER=codex examples/seed.sh sdd /path/to/new-project --run
+```
+
+For issue-to-PR, supply a real issue reference. The new repository must also
+have a GitHub `origin` remote before the flow reaches its push stage:
+
+```sh
+examples/seed.sh issue-pr /path/to/new-project \
+  --prompt "owner/repository#42"
+```
+
+Available mappings:
+
+| Example                             | Starter          | Baseline verification |
+| ----------------------------------- | ---------------- | --------------------- |
+| `implement`, `local`                | Rust calculator  | `cargo test`          |
+| `issue-pr`                          | Scala calculator | `sbt test`            |
+| `sdd`                               | Java todo CLI    | `mvn test`            |
+| `cli-implement` compatibility alias | Rust calculator  | `cargo test`          |
+
+An explicit destination must be empty; the script refuses to merge a starter
+into an existing project. Without a destination it creates a temporary
+directory. `--run` invokes real coding agents and may edit, commit, push, or
+open a pull request according to the selected example.
+
 ## Real API provider
 
 Select a provider and model:

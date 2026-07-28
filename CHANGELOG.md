@@ -19,3 +19,5 @@
   review/fix loops, lint gates, and structured pull-request summaries.
 - Added resumable implementation, GitHub issue-to-PR, and executable
   specification-driven development examples.
+- Added disposable Rust, Scala, and Java starter repositories plus a seed/run
+  script for complete implementation, local, issue-to-PR, and SDD workflows.

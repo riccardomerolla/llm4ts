@@ -11,6 +11,7 @@
     "issue-pr": "node --experimental-strip-types issue-pr.ts",
     "judge-suite": "node --experimental-strip-types judge-suite.ts",
     "local": "node --experimental-strip-types local.ts",
+    "seed": "bash seed.sh",
     "sdd": "node --experimental-strip-types sdd.ts",
     "plain-js": "node plain-js.mjs"
   },

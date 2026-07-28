@@ -90,6 +90,7 @@ reference release.
 | `llm4zio/runner/ExampleFlow.scala`, source examples   | example integration specifications                              | `@llm4ts/runner/ExampleFlow`, `@llm4ts/examples`       | executable mock smoke example            | public API composition               |
 | `examples/implement.sc`, `local.sc`                   | live connector integration behavior                             | `examples/implement.ts`, `local.ts`                    | typed build + opt-in execution           | real coding-agent examples           |
 | `examples/issue-pr.sc`, `sdd.sc`                      | issue delivery and executable SDD gates                         | `examples/issue-pr.ts`, `sdd.ts`                       | typed build; live execution is opt-in    | persistent delivery examples         |
+| `examples/seed.sh`, `examples/starters/*`             | disposable runnable example repositories                        | `examples/seed.sh`, `examples/starters/*`              | Rust, Maven, and sbt starter builds      | example harness isolation            |
 | `examples/judge-suite.sc`                             | repeated LLM-as-a-Judge example                                 | `examples/judge-suite.ts`                              | typed build; live execution is opt-in    | evaluation example                   |
 | `llm4zio-modernize/modernize/*.scala`                 | phase and artifact-resume behavior                              | `@llm4ts/modernize/Modernize`, `Approval`, `Artifacts` | `Modernize.test.ts`, `Artifacts.test.ts` | six-phase modernization product      |
 | `llm4zio-java/javaapi/*.scala`                        | `JavaApiSpec.scala`, facade mock-flow behavior                  | `@llm4ts/js`, `@llm4ts/js/Client`                      | `Client.test.ts`, typed docs example     | language-friendly facade             |
@@ -253,6 +254,11 @@ reference release.
 - The TypeScript reviewer model lives in its own dependency-free subpath and is
   re-exported by `Pack`. This avoids a runtime module cycle while preserving the
   source relationship between packs and reviewer lenses.
+- Seeded example repositories keep the flow script in the llm4ts workspace and
+  copy only the selected starter. Unlike the source harness, no local-publish
+  mode is needed because pnpm workspace resolution supplies the implementation.
+  Explicit destinations must be empty, and generated build artifacts are
+  ignored before the baseline commit.
 - Modernization persists an explicit versioned six-phase checkpoint document.
   A failed or process-interrupted phase is retried without rerunning completed
   predecessors; extraction specs, verification vectors, and implementation
