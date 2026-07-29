@@ -46,8 +46,16 @@ Blast radius: one flow module + tests; additive, default unchanged.
       latter uses a reviewer that reports one issue only on its first call, to
       force exactly one fix round, and asserts the history-length sequence
       `[2, 4, 2]`).
-- [ ] Update `docs/api.md` (Flow section) and, once shipped in a release,
-      simplify `tools/loop/` to use it.
+- [x] Update `docs/api.md` (Flow section). Done in `854258d`.
+- [ ] Once shipped in a release, simplify `tools/loop/` to use it: replace the
+      hand-rolled `perTask` loop in `tools/loop/src/Loop.ts:231-283` (git
+      checkpoint → `makeChat(context.coder)` → `ask` → `reviewAndFixLoop` →
+      gate check → commit → cost-budget check, with the whole attempt rolled
+      back to that checkpoint on error) with `implementPlanFlow`
+      called with `chatPerTask: true`. **Blocked:** the `chatPerTask` commits
+      (`32d607f`, `d3fe79d`, `854258d`) landed after the `v0.1.3` tag — no
+      release includes this feature yet. Package versions are still `0.1.3`,
+      matching the tag, so nothing has been bumped for the next release.
 
 ## References
 
