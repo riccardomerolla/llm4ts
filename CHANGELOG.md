@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- No functional changes. Releases now publish through npm trusted publishing
+  (OIDC) instead of a long-lived token, with provenance attestation retained.
+
 ## 0.1.0
 
 - Added `@llm4ts/flow/Flow` with `implementPlanFlow` (the plan → branch →
