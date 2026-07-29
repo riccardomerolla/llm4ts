@@ -14,15 +14,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "pnpm"
-          registry-url: "https://registry.npmjs.org"
+
+      # pnpm publish delegates to the system npm CLI; trusted publishing (OIDC)
+      # needs npm >= 11.5.1, newer than the one bundled with Node 22.
+      - run: npm install -g npm@latest
 
       - run: pnpm install --frozen-lockfile
 
@@ -43,6 +46,5 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node scripts/pack-smoke.mjs
+      # Authenticates via npm trusted publishing (OIDC) — no token required.
       - run: pnpm --recursive --filter "./packages/**" publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
