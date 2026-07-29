@@ -16,3 +16,4 @@ coverage/
 .repos/
 repos/
 .ralph-auto/
+.llm4ts/
