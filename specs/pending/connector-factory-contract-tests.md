@@ -9,7 +9,7 @@ Blast radius: tests only. No production code changes.
 
 ## Tasks
 
-- [ ] `packages/core/test/Connector.test.ts` covering `makeApiConnector`:
+- [x] `packages/core/test/Connector.test.ts` covering `makeApiConnector`:
       derived `kind`/`capabilities` defaults, `executeStructured` as the
       [value] projection of `executeStructuredWithUsage`, and
       `timedHealthCheck` mapping availability → Healthy/Valid vs
