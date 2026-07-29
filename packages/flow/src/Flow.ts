@@ -3,8 +3,8 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { collect } from "@llm4ts/core/Streaming"
 import { makeChat } from "./Chat.ts"
 import type { FlowContextShape } from "./FlowContext.ts"
-import { FlowLlmError, type FlowError } from "./FlowError.ts"
-import { AssistantMessage, type FlowEventsShape } from "./FlowEvents.ts"
+import { FlowAborted, FlowLlmError, type FlowError } from "./FlowError.ts"
+import { AssistantMessage, Info, type FlowEventsShape } from "./FlowEvents.ts"
 import type { Plan, Task } from "./Plan.ts"
 import type { PlanStoreShape } from "./Persistence.ts"
 import { implementTaskLoop, stage } from "./PlanExecution.ts"
@@ -55,17 +55,37 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
   return yield* implementTaskLoop(options.store, context.events, options.planPath, plan, (task) =>
     Effect.gen(function* () {
       yield* coder.ask(plan.taskPrompt(task))
+      const produced = yield* context.git.diffAll
+      if (produced.trim().length === 0) {
+        yield* context.events.publish(
+          Info.make({
+            message: `task "${task.title}" produced no changes (already satisfied); skipping review and commit`
+          })
+        )
+        return
+      }
       yield* reviewAndFixLoop({
         reviewers: options.reviewers ?? minimalReviewers,
         reviewerService: flowReviewer(context),
         coder,
         taskTitle: task.title,
-        currentDiff: context.git.diff,
+        currentDiff: context.git.diffAll,
         events: context.events,
         ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
         ...(options.lint === undefined ? {} : { lint: options.lint }),
         ...(options.format === undefined ? {} : { format: options.format })
       })
+      if (options.lint !== undefined) {
+        const gate = yield* options.lint
+        if (!gate.isClean) {
+          return yield* FlowAborted.make({
+            message: [
+              `task "${task.title}": the lint gate is still failing after review settled; refusing to commit`,
+              ...gate.issues.map((issue) => `- [${issue.severity}] ${issue.title}`)
+            ].join("\n")
+          })
+        }
+      }
       yield* context.git.commitAll((options.commitMessage ?? defaultCommitMessage)(plan, task))
     })
   )

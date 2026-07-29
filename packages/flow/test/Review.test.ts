@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { InvalidRequestError } from "@llm4ts/core/Errors"
+import { InvalidRequestError, ParseError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk } from "@llm4ts/core/Models"
 import { makeChat } from "@llm4ts/flow/Chat"
@@ -159,6 +159,82 @@ describe("reviewAndFixLoop", () => {
         chosen.map((reviewer) => reviewer.name),
         ["test"]
       )
+    })
+  )
+})
+
+describe("structured-output robustness", () => {
+  it.effect("decodes reviewer output that omits confidence, description, and summary", () =>
+    Effect.gen(function* () {
+      const result = yield* Schema.decodeUnknownEffect(ReviewResult)({
+        issues: [{ severity: "Warning", title: "missing fields" }]
+      })
+
+      assert.strictEqual(result.issues[0]?.confidence, 1)
+      assert.strictEqual(result.issues[0]?.description, "")
+      assert.strictEqual(result.summary, "")
+    })
+  )
+
+  it.effect("retries the reviewer once when its reply fails schema validation", () =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make(0)
+      const asks = yield* Ref.make(0)
+      const events = yield* makeCollectingFlowEvents
+      const coder = yield* makeChat(coderService(asks))
+      const flaky: LlmServiceShape = {
+        ...reviewerService(Ref.makeUnsafe<ReadonlyArray<unknown>>([]), Ref.makeUnsafe(0)),
+        executeStructured: (_prompt, schema, _jsonSchema) =>
+          Ref.updateAndGet(calls, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Effect.fail(ParseError.make({ message: "malformed reviewer reply", raw: "{" }))
+                : Schema.decodeUnknownEffect(schema)({ issues: [], summary: "clean" }).pipe(
+                    Effect.orDie
+                  )
+            )
+          )
+      }
+      const result = yield* reviewAndFixLoop({
+        reviewers: [lens()],
+        reviewerService: flaky,
+        coder,
+        taskTitle: "task",
+        currentDiff: Effect.succeed("diff"),
+        events
+      })
+
+      assert.isTrue(result.isClean)
+      assert.strictEqual(yield* Ref.get(calls), 2)
+    })
+  )
+
+  it.effect("fails typed when the reviewer reply stays malformed after the retry", () =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make(0)
+      const asks = yield* Ref.make(0)
+      const events = yield* makeCollectingFlowEvents
+      const coder = yield* makeChat(coderService(asks))
+      const broken: LlmServiceShape = {
+        ...reviewerService(Ref.makeUnsafe<ReadonlyArray<unknown>>([]), Ref.makeUnsafe(0)),
+        executeStructured: (_prompt, _schema, _jsonSchema) =>
+          Ref.updateAndGet(calls, (count) => count + 1).pipe(
+            Effect.andThen(Effect.fail(ParseError.make({ message: "still malformed", raw: "{" })))
+          )
+      }
+      const error = yield* Effect.flip(
+        reviewAndFixLoop({
+          reviewers: [lens()],
+          reviewerService: broken,
+          coder,
+          taskTitle: "task",
+          currentDiff: Effect.succeed("diff"),
+          events
+        })
+      )
+
+      assert.strictEqual(error._tag, "Llm")
+      assert.strictEqual(yield* Ref.get(calls), 2)
     })
   )
 })

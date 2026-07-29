@@ -92,3 +92,11 @@ every gap it exposes as a spec in `specs/pending/`.
 pnpm typecheck   # tsc against the published @llm4ts/* types
 pnpm test        # deterministic checkbox-sync tests (no network, no provider)
 ```
+
+## Exit codes and pipelines
+
+The loop exits non-zero on failure (fail-fast: rollback, gate output, trace
+path). When piping its output — `pnpm loop ... | tee run.log` — remember that
+a plain pipeline reports the **last** command's exit code, so use
+`set -o pipefail` (or invoke without a pipe) if anything downstream depends on
+the loop's result.

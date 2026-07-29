@@ -12,7 +12,10 @@ export class Dimension extends Schema.Class<Dimension>("Dimension")({
 export class DimensionScore extends Schema.Class<DimensionScore>("DimensionScore")({
   name: Schema.String,
   score: Schema.Int,
-  reasoning: Schema.String.pipe(Schema.withConstructorDefault(Effect.succeed("")))
+  reasoning: Schema.String.pipe(
+    Schema.withConstructorDefault(Effect.succeed("")),
+    Schema.withDecodingDefaultKey(Effect.succeed(""))
+  )
 }) {}
 
 export class EvalResult extends Schema.Class<EvalResult>("EvalResult")({

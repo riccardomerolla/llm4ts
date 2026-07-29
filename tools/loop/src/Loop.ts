@@ -8,7 +8,7 @@ import { checkCostBudget, CostBudget, makeCostRecord } from "@llm4ts/flow/CostLe
 import { makeCostTracker } from "@llm4ts/flow/CostTracker"
 import { flowReviewer } from "@llm4ts/flow/Flow"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
-import type { FlowError } from "@llm4ts/flow/FlowError"
+import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { implementTaskLoop } from "@llm4ts/flow/PlanExecution"
@@ -224,16 +224,34 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
                 const attempt = Effect.gen(function* () {
                   const chat = yield* makeChat(context.coder)
                   yield* chat.ask(plan.taskPrompt(task))
+                  const produced = yield* context.git.diffAll
+                  if (produced.trim().length === 0) {
+                    yield* context.events.publish(
+                      Info.make({
+                        message: `task "${task.title}" produced no changes (already satisfied); skipping review and commit`
+                      })
+                    )
+                    return
+                  }
                   yield* reviewAndFixLoop({
                     reviewers: minimalReviewers,
                     reviewerService: flowReviewer(context),
                     coder: chat,
                     taskTitle: task.title,
-                    currentDiff: context.git.diff,
+                    currentDiff: context.git.diffAll,
                     events: context.events,
                     maxRounds,
                     lint: ciGate
                   })
+                  const gate = yield* ciGate
+                  if (!gate.isClean) {
+                    return yield* FlowAborted.make({
+                      message: [
+                        `task "${task.title}": the CI gate is still failing after review settled; refusing to commit`,
+                        ...gate.issues.map((issue) => `- [${issue.severity}] ${issue.title}`)
+                      ].join("\n")
+                    })
+                  }
                   yield* context.git.commitAll(`${plan.epicId}: ${task.title}`)
                   yield* tracker.awaitDrained(bundle.events)
                   const cells = yield* tracker.cells

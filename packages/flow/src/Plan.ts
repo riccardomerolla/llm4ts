@@ -5,7 +5,10 @@ import { PlanParseError } from "./FlowError.ts"
 export class Task extends Schema.Class<Task>("Task")({
   title: Schema.String,
   description: Schema.String,
-  completed: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false)))
+  completed: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(Effect.succeed(false)),
+    Schema.withDecodingDefaultKey(Effect.succeed(false))
+  )
 }) {}
 
 export class Plan extends Schema.Class<Plan>("Plan")({

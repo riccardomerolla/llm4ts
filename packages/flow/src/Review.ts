@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import type { LlmError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import type { JsonSchema } from "@llm4ts/core/Models"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
@@ -16,16 +17,25 @@ export type Severity = typeof Severity.Type
 export class ReviewIssue extends Schema.Class<ReviewIssue>("ReviewIssue")({
   severity: Severity,
   title: Schema.String,
-  description: Schema.String.pipe(Schema.withConstructorDefault(Effect.succeed(""))),
+  description: Schema.String.pipe(
+    Schema.withConstructorDefault(Effect.succeed("")),
+    Schema.withDecodingDefaultKey(Effect.succeed(""))
+  ),
   file: Schema.optionalKey(Schema.String),
   line: Schema.optionalKey(Schema.Int),
   suggestion: Schema.optionalKey(Schema.String),
-  confidence: Schema.Number.pipe(Schema.withConstructorDefault(Effect.succeed(1)))
+  confidence: Schema.Number.pipe(
+    Schema.withConstructorDefault(Effect.succeed(1)),
+    Schema.withDecodingDefaultKey(Effect.succeed(1))
+  )
 }) {}
 
 export class ReviewResult extends Schema.Class<ReviewResult>("ReviewResult")({
   issues: Schema.Array(ReviewIssue),
-  summary: Schema.String.pipe(Schema.withConstructorDefault(Effect.succeed("")))
+  summary: Schema.String.pipe(
+    Schema.withConstructorDefault(Effect.succeed("")),
+    Schema.withDecodingDefaultKey(Effect.succeed(""))
+  )
 }) {
   get isClean(): boolean {
     return this.issues.length === 0
@@ -273,14 +283,22 @@ const reviewWith = (
   lens: Reviewer,
   taskTitle: string,
   diff: string
-): Effect.Effect<ReviewResult, FlowLlmError> =>
-  service
-    .executeStructured(
-      `${lens.systemPrompt}\n\n${reviewPrompt(taskTitle, diff)}`,
-      ReviewResult,
-      reviewJsonSchema
-    )
-    .pipe(Effect.mapError(FlowLlmError.from))
+): Effect.Effect<ReviewResult, FlowLlmError> => {
+  const prompt = `${lens.systemPrompt}\n\n${reviewPrompt(taskTitle, diff)}`
+  const attempt = (text: string): Effect.Effect<ReviewResult, LlmError> =>
+    service.executeStructured(text, ReviewResult, reviewJsonSchema)
+  return attempt(prompt).pipe(
+    Effect.catch((error) =>
+      error._tag === "ParseError"
+        ? attempt(
+            `${prompt}\n\nYour previous reply failed schema validation: ${error.message}\n` +
+              "Return ONLY valid JSON matching the schema."
+          )
+        : Effect.fail(error)
+    ),
+    Effect.mapError(FlowLlmError.from)
+  )
+}
 
 export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop")(function* (
   options: ReviewAndFixOptions

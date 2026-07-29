@@ -13,6 +13,7 @@ import { makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { Plan, Task } from "@llm4ts/flow/Plan"
+import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 import { makeMemoryPlainFileStore, makePlanStore } from "@llm4ts/flow/Persistence"
 
 const unused = InvalidRequestError.make({ message: "unused in test" })
@@ -56,7 +57,7 @@ const makeFakeGit = (log: Ref.Ref<GitLog>): GitToolShape => ({
   status: Effect.succeed(""),
   currentBranch: Effect.succeed("main"),
   diff: Effect.succeed("diff --git a/file b/file"),
-  diffAll: Effect.succeed(""),
+  diffAll: Effect.succeed("diff --git a/file b/file\n+new content"),
   defaultBase: Effect.succeed("main"),
   diffVsBase: (_base, _threeDot) => Effect.succeed(""),
   changedFilesVsBase: (_base, _threeDot) => Effect.succeed([]),
@@ -159,6 +160,93 @@ describe("Flow", () => {
       const asked = yield* Ref.make<ReadonlyArray<string>>([])
       const content = yield* completeAndPublish(coderService(asked), events, "say hi")
       assert.strictEqual(content, "done")
+    })
+  )
+})
+
+describe("Flow gate and diff safety", () => {
+  it.effect("refuses to commit when the lint gate is still failing after review settles", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const asked = yield* Ref.make<ReadonlyArray<string>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      const plan = Plan.make({
+        epicId: "epic-red",
+        tasks: [Task.make({ title: "impossible task", description: "cannot go green" })]
+      })
+      const redGate = Effect.succeed(
+        ReviewResult.make({
+          issues: [
+            ReviewIssue.make({ severity: "Critical", title: "typecheck failed", description: "" })
+          ],
+          summary: "gate red"
+        })
+      )
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: coderService(asked),
+        git: makeFakeGit(gitLog),
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+
+      const error = yield* Effect.flip(
+        implementPlanFlow(context, {
+          store,
+          planPath: ".llm4ts/plan-red.md",
+          plan: Effect.succeed(plan),
+          maxRounds: 1,
+          lint: redGate
+        })
+      )
+      const log = yield* Ref.get(gitLog)
+
+      assert.strictEqual(error._tag, "Aborted")
+      assert.match(error.message, /refusing to commit/)
+      assert.deepStrictEqual(log.commits, [])
+    })
+  )
+
+  it.effect("skips review and commit for tasks that produce no changes", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const asked = yield* Ref.make<ReadonlyArray<string>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      const plan = Plan.make({
+        epicId: "epic-noop",
+        tasks: [Task.make({ title: "already done", description: "nothing to change" })]
+      })
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: coderService(asked),
+        git: { ...makeFakeGit(gitLog), diffAll: Effect.succeed("") },
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+
+      const completed = yield* implementPlanFlow(context, {
+        store,
+        planPath: ".llm4ts/plan-noop.md",
+        plan: Effect.succeed(plan)
+      })
+      const log = yield* Ref.get(gitLog)
+
+      assert.isTrue(completed.tasks.every((task) => task.completed))
+      assert.deepStrictEqual(log.commits, [])
     })
   )
 })

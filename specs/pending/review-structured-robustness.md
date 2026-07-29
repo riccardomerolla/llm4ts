@@ -17,16 +17,16 @@ pattern likely exists on other LLM-boundary schemas too.
 
 ## Tasks
 
-- [ ] Make `ReviewIssue.confidence`/`description` and `ReviewResult.summary`
+- [x] Make `ReviewIssue.confidence`/`description` and `ReviewResult.summary`
       tolerant at decode time (decoding-side defaults or optional-with-
       normalization), keeping constructor ergonomics. Audit other schemas
       decoded from model output (`Planner`, `PrSummary`, judge/eval schemas)
       for the same constructor-default-at-decode-boundary mistake.
-- [ ] Verify `reviewJsonSchema` (and sibling hand-written JSON schemas) marks
+- [x] Verify `reviewJsonSchema` (and sibling hand-written JSON schemas) marks
       truly-optional fields as optional so the model is not misled.
-- [ ] Add one bounded retry in `reviewWith` on `ParseError`: re-ask the
+- [x] Add one bounded retry in `reviewWith` on `ParseError`: re-ask the
       reviewer with the parse error appended, before failing the flow.
-- [ ] Regression tests: reviewer output missing optional fields decodes; a
+- [x] Regression tests: reviewer output missing optional fields decodes; a
       persistently malformed reviewer fails typed after the retry.
 
 ## Related finding: no-op task diffs
@@ -37,7 +37,7 @@ because the coder had already folded that test into task 1's commit, so task
 short-circuit tasks whose diff is empty (skip review, mark complete with an
 Info event) instead of asking reviewers to review nothing.
 
-- [ ] Empty-diff short-circuit in the per-task loop, with a test.
+- [x] Empty-diff short-circuit in the per-task loop, with a test.
 
 ## Critical finding: settling with open issues must not auto-commit
 
@@ -48,13 +48,13 @@ the open issue _was the failing CI gate_. The loop committed a task that
 failed typecheck and tests, turning main red. Bounded review and
 commit-worthiness are different judgments:
 
-- [ ] After review settles, the committing loop (`implementPlanFlow` and the
+- [x] After review settles, the committing loop (`implementPlanFlow` and the
       dogfood harness) must re-check the gate (or `result.isClean` when a
       lint gate is configured) and treat a still-red gate as task failure
       (rollback + fail fast), never as commit-worthy.
-- [ ] Consider a `settled-with-issues` signal in the `reviewAndFixLoop`
+- [x] Consider a `settled-with-issues` signal in the `reviewAndFixLoop`
       return value (distinct from clean) so callers cannot conflate them.
-- [ ] Test: a review that settles with a failing lint gate does not commit.
+- [x] Test: a review that settles with a failing lint gate does not commit.
 
 ## Harness note
 
@@ -62,4 +62,17 @@ The loop run was invoked as `pnpm loop ... | tee log`, which masked the
 non-zero exit (no pipefail). Document `set -o pipefail` (or direct invocation)
 in `tools/loop/README.md`.
 
-- [ ] README note.
+- [x] README note.
+
+## Implementation notes (2026-07-29)
+
+Audit results: `DimensionScore.reasoning` (eval/Judge path) had the identical
+live bug — its JSON schema marks `reasoning` optional while decode required
+it — fixed with a decoding default. `Task.completed` gained a defensive
+decoding default. `PrSummary` is consistent (both fields required on both
+sides). The `settled-with-issues` signal was resolved without an API change:
+`ReviewResult.isClean` already carries it; the committing loops now consult
+the configured gate after settling. `implementPlanFlow` and the loop harness
+also switched review diffs from `git diff` to `git diffAll` — untracked new
+files were previously invisible to reviewers, which caused run 1's spurious
+"diff does not add the described test" findings.
