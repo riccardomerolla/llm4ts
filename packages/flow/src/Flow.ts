@@ -91,12 +91,32 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
         yield* coder.ask(plan.taskPrompt(task))
         const produced = yield* context.git.diffAll
         if (produced.trim().length === 0) {
-          yield* context.events.publish(
-            Info.make({
-              message: `task "${task.title}" produced no changes (already satisfied); skipping review and commit`
-            })
+          // An empty diff is ambiguous: the task may be genuinely satisfied
+          // already, or the coder may simply have produced nothing. Ask
+          // explicitly instead of inferring from absence; a task that
+          // produces no changes and no confirmation fails rather than being
+          // silently marked complete.
+          const confirmation = yield* coder.ask(
+            [
+              "Your previous turn produced no file changes.",
+              `If the task "${task.title}" is already fully satisfied by the current state of the repository, reply with exactly TASK_ALREADY_SATISFIED and nothing else.`,
+              "Otherwise, implement the task now."
+            ].join("\n")
           )
-          return
+          const afterConfirmation = yield* context.git.diffAll
+          if (afterConfirmation.trim().length === 0) {
+            if (confirmation.includes("TASK_ALREADY_SATISFIED")) {
+              yield* context.events.publish(
+                Info.make({
+                  message: `task "${task.title}" confirmed already satisfied; skipping review and commit`
+                })
+              )
+              return
+            }
+            return yield* FlowAborted.make({
+              message: `task "${task.title}" produced no changes and did not confirm TASK_ALREADY_SATISFIED; failing instead of marking it complete`
+            })
+          }
         }
         yield* reviewAndFixLoop({
           reviewers: options.reviewers ?? minimalReviewers,

@@ -24,7 +24,8 @@ documentation lives elsewhere and always takes precedence:
 - Specs describe **what** and **why**, cite the relevant contracts
   (`docs/csp/*`, `docs/parity.md`) and seams to extend, and leave **how** to
   the implementer within the CLAUDE.md rules.
-- Agents update task status inside a pending spec but never move a spec to
-  `completed/` — only the user decides a spec is done.
+- Specs are read-only for agents (ADR 0004): checkbox state is written only
+  by deterministic harness code, design decisions land in `docs/adr/`, and
+  only the user amends spec text or moves a spec to `completed/`.
 - Run `./ralph-auto.sh "<focus>"` to work a spec autonomously; the script owns
   git commits and enforces the verification chain.

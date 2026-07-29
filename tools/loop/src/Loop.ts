@@ -219,6 +219,18 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
               ["sh", "-lc", gateCommand],
               workDir
             )
+            // Specs are read-only for the coder: revert any modification and
+            // remove any new file under specs/ after every coder turn, before
+            // diffs are inspected. Divergence rationale belongs in docs/adr/.
+            const revertSpecEdits: Effect.Effect<void> = Effect.ignore(
+              nodeProcessExecutor
+                .run(["git", "checkout", "--", "specs"], workDir, {})
+                .pipe(
+                  Effect.andThen(
+                    nodeProcessExecutor.run(["git", "clean", "-fd", "--", "specs"], workDir, {})
+                  )
+                )
+            )
             // The CSP "formatter step": best-effort, never fails the flow. The
             // headless coder cannot run commands itself, so deterministic
             // formatting must happen here, not by asking the model to imitate
@@ -232,16 +244,38 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
               Effect.gen(function* () {
                 const checkpoint = yield* context.git.checkpoint
                 const attempt = Effect.gen(function* () {
-                  const chat = yield* makeChat(context.coder)
+                  const chat = yield* makeChat(context.coder, {
+                    system: [
+                      "Files under specs/ are read-only: never create or edit them.",
+                      "If a task cannot be done or requires diverging from its spec, say so in your reply and record a durable justification as an ADR under docs/adr/ instead."
+                    ].join(" ")
+                  })
                   yield* chat.ask(plan.taskPrompt(task))
+                  yield* revertSpecEdits
                   const produced = yield* context.git.diffAll
                   if (produced.trim().length === 0) {
-                    yield* context.events.publish(
-                      Info.make({
-                        message: `task "${task.title}" produced no changes (already satisfied); skipping review and commit`
-                      })
+                    const confirmation = yield* chat.ask(
+                      [
+                        "Your previous turn produced no file changes.",
+                        `If the task "${task.title}" is already fully satisfied by the current state of the repository, reply with exactly TASK_ALREADY_SATISFIED and nothing else.`,
+                        "Otherwise, implement the task now."
+                      ].join("\n")
                     )
-                    return
+                    yield* revertSpecEdits
+                    const afterConfirmation = yield* context.git.diffAll
+                    if (afterConfirmation.trim().length === 0) {
+                      if (confirmation.includes("TASK_ALREADY_SATISFIED")) {
+                        yield* context.events.publish(
+                          Info.make({
+                            message: `task "${task.title}" confirmed already satisfied; skipping review and commit`
+                          })
+                        )
+                        return
+                      }
+                      return yield* FlowAborted.make({
+                        message: `task "${task.title}" produced no changes and did not confirm TASK_ALREADY_SATISFIED; failing instead of marking it complete`
+                      })
+                    }
                   }
                   yield* reviewAndFixLoop({
                     reviewers: minimalReviewers,

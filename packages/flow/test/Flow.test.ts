@@ -53,13 +53,14 @@ const historyTrackingCoderService = (
 })
 
 const messageSnapshotCoderService = (
-  snapshots: Ref.Ref<ReadonlyArray<ReadonlyArray<Message>>>
+  snapshots: Ref.Ref<ReadonlyArray<ReadonlyArray<Message>>>,
+  reply = "done"
 ): LlmServiceShape => ({
   executeStream: (_prompt) => Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })),
   executeStreamWithHistory: (messages) =>
     Stream.unwrap(
       Ref.update(snapshots, (current) => [...current, messages]).pipe(
-        Effect.as(Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })))
+        Effect.as(Stream.make(LlmChunk.make({ delta: reply, finishReason: "stop" })))
       )
     ),
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
@@ -139,7 +140,7 @@ const makeFakeGitSkippingFirstDiff = (
 ): GitToolShape => ({
   ...makeFakeGit(log),
   diffAll: Ref.getAndUpdate(calls, (current) => current + 1).pipe(
-    Effect.map((seen) => (seen === 0 ? "" : "diff --git a/file b/file\n+new content"))
+    Effect.map((seen) => (seen <= 1 ? "" : "diff --git a/file b/file\n+new content"))
   )
 })
 
@@ -453,7 +454,7 @@ describe("Flow", () => {
         })
         const context: FlowContextShape = {
           reasoning: cleanReviewer,
-          coder: messageSnapshotCoderService(snapshots),
+          coder: messageSnapshotCoderService(snapshots, "TASK_ALREADY_SATISFIED"),
           git: makeFakeGitSkippingFirstDiff(gitLog, diffCalls),
           hosting: failingHosting,
           events,
@@ -479,9 +480,10 @@ describe("Flow", () => {
         // skipped — yet its fresh Chat's system prompt must show task one as
         // already complete, proving the skip branch advances `progress` too.
         assert.deepStrictEqual(log.commits, ["epic-chat-skip-progress: second task"])
-        assert.strictEqual(seen.length, 2)
+        assert.strictEqual(seen.length, 3)
+        assert.match(seen[1]?.at(-1)?.content ?? "", /TASK_ALREADY_SATISFIED/)
         assert.strictEqual(
-          seen[1]?.[0]?.content,
+          seen[2]?.[0]?.content,
           [gitOwnershipInstruction, plan.complete("already done").render].join("\n\n")
         )
       })
@@ -660,7 +662,7 @@ describe("Flow gate and diff safety", () => {
     })
   )
 
-  it.effect("skips review and commit for tasks that produce no changes", () =>
+  it.effect("skips no-change tasks only when the coder confirms them satisfied", () =>
     Effect.gen(function* () {
       const events = yield* makeFlowEventHub()
       const asked = yield* Ref.make<ReadonlyArray<string>>([])
@@ -671,9 +673,22 @@ describe("Flow gate and diff safety", () => {
         epicId: "epic-noop",
         tasks: [Task.make({ title: "already done", description: "nothing to change" })]
       })
+      const confirmingCoder: LlmServiceShape = {
+        ...coderService(asked),
+        executeStreamWithHistory: (messages) =>
+          Stream.unwrap(
+            Ref.update(asked, (current) => [...current, messages.at(-1)?.content ?? ""]).pipe(
+              Effect.as(
+                Stream.make(
+                  LlmChunk.make({ delta: "TASK_ALREADY_SATISFIED", finishReason: "stop" })
+                )
+              )
+            )
+          )
+      }
       const context: FlowContextShape = {
         reasoning: cleanReviewer,
-        coder: coderService(asked),
+        coder: confirmingCoder,
         git: { ...makeFakeGit(gitLog), diffAll: Effect.succeed("") },
         hosting: failingHosting,
         events,
@@ -690,9 +705,53 @@ describe("Flow gate and diff safety", () => {
         plan: Effect.succeed(plan)
       })
       const log = yield* Ref.get(gitLog)
+      const prompts = yield* Ref.get(asked)
 
       assert.isTrue(completed.tasks.every((task) => task.completed))
       assert.deepStrictEqual(log.commits, [])
+      assert.strictEqual(prompts.length, 2)
+      assert.match(prompts[1] ?? "", /TASK_ALREADY_SATISFIED/)
+    })
+  )
+
+  it.effect("fails a no-change task whose coder does not confirm it satisfied", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const asked = yield* Ref.make<ReadonlyArray<string>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      const plan = Plan.make({
+        epicId: "epic-silent",
+        tasks: [Task.make({ title: "unimplemented task", description: "needs real work" })]
+      })
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: coderService(asked),
+        git: { ...makeFakeGit(gitLog), diffAll: Effect.succeed("") },
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+
+      const error = yield* Effect.flip(
+        implementPlanFlow(context, {
+          store,
+          planPath: ".llm4ts/plan-silent.md",
+          plan: Effect.succeed(plan)
+        })
+      )
+      const log = yield* Ref.get(gitLog)
+      const persisted = yield* store.load(".llm4ts/plan-silent.md")
+
+      assert.strictEqual(error._tag, "Aborted")
+      assert.match(error.message, /did not confirm TASK_ALREADY_SATISFIED/)
+      assert.deepStrictEqual(log.commits, [])
+      assert.isFalse(persisted?.tasks.some((task) => task.completed))
     })
   )
 })

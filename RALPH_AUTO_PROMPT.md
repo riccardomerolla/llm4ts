@@ -9,8 +9,7 @@ The **focus input** specifies the topic you should work on. Within that topic:
 
 - You **select your own tasks** based on what needs to be done
 - You complete **one task at a time**, then signal completion
-- You **update specs** to track task status as you work
-- You may **create new tasks** if you discover they are needed
+- Specs are **read-only** — progress is tracked by your signals, not spec edits
 - When all work for the focus topic is complete, signal that nothing is left to do
 
 ## The specs/ Directory
@@ -36,8 +35,8 @@ CSP contracts).
 2. **DO NOT COMMIT**: The Ralph Auto script handles all git commits. Just write code.
 3. **CI MUST BE GREEN**: Your code MUST pass the verification chain below before signaling completion.
 4. **ONE TASK PER ITERATION**: Complete one task, signal completion, then STOP.
-5. **UPDATE SPECS**: Update spec files to mark tasks complete, add new tasks, or track progress.
-6. **NEVER MOVE SPECS OUT OF PENDING**: Do not move spec files from `specs/pending/` to `specs/completed/`. Only the user decides when a spec is complete.
+5. **NEVER EDIT SPECS**: Files under `specs/` are read-only (ADR 0004). Do not create, edit, or move them. Track progress through your TASK_COMPLETE signals — the script owns the progress log. If a task cannot be done or requires diverging from its spec, say so in your output and record a durable justification as an ADR in `docs/adr/`.
+6. **NEVER MOVE SPECS OUT OF PENDING**: Only the user decides when a spec is complete.
 7. **LIBRARY RULES ARE NON-NEGOTIABLE** (from `CLAUDE.md`):
    - Effect 4 services and layers for replaceable dependencies; schemas at external and persistence boundaries.
    - Expected failures stay typed (`Schema.TaggedErrorClass`); never `any`, unchecked casts, namespaces, unmanaged promises, or global `Error` as a domain error.
@@ -106,9 +105,8 @@ Before signaling TASK_COMPLETE, run and pass:
 3. **Select a task** - choose one task to work on within the focus topic
 4. **Implement** - follow existing seams and patterns; tests at behavior boundaries
 5. **Verify CI** - run the chain above
-6. **Update spec** - mark the task complete, add newly discovered tasks
-7. **Signal** - output `TASK_COMPLETE: <description>` or `NOTHING_LEFT_TO_DO` if all done
-8. **STOP** - do not continue
+6. **Signal** - output `TASK_COMPLETE: <description>` or `NOTHING_LEFT_TO_DO` if all done
+7. **STOP** - do not continue
 
 ---
 
