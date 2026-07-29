@@ -3,19 +3,16 @@ import { basename, join, resolve } from "node:path"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
-import { makeChat } from "@llm4ts/flow/Chat"
 import { checkCostBudget, CostBudget, makeCostRecord } from "@llm4ts/flow/CostLedger"
 import { makeCostTracker } from "@llm4ts/flow/CostTracker"
-import { flowReviewer } from "@llm4ts/flow/Flow"
+import { implementPlanFlow } from "@llm4ts/flow/Flow"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
-import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
+import type { FlowError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
-import { implementTaskLoop } from "@llm4ts/flow/PlanExecution"
-import type { Plan } from "@llm4ts/flow/Plan"
 import { stableHash } from "@llm4ts/flow/Plan"
 import { planFrom } from "@llm4ts/flow/Planner"
-import { lintCommand, minimalReviewers, reviewAndFixLoop } from "@llm4ts/flow/Review"
+import { lintCommand } from "@llm4ts/flow/Review"
 import { coderFromEnv, withTurnLimit } from "@llm4ts/runner/Connectors"
 import {
   makeFlowRunnerContext,
@@ -240,83 +237,41 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
                 ? Effect.void
                 : Effect.ignore(nodeProcessExecutor.run(["sh", "-lc", formatCommand], workDir, {}))
 
-            const perTask = (task: Plan["tasks"][number]): Effect.Effect<void, FlowError> =>
-              Effect.gen(function* () {
-                const checkpoint = yield* context.git.checkpoint
-                const attempt = Effect.gen(function* () {
-                  const chat = yield* makeChat(context.coder, {
-                    system: [
-                      "Files under specs/ are read-only: never create or edit them.",
-                      "If a task cannot be done or requires diverging from its spec, say so in your reply and record a durable justification as an ADR under docs/adr/ instead."
-                    ].join(" ")
-                  })
-                  yield* chat.ask(plan.taskPrompt(task))
-                  yield* revertSpecEdits
-                  const produced = yield* context.git.diffAll
-                  if (produced.trim().length === 0) {
-                    const confirmation = yield* chat.ask(
-                      [
-                        "Your previous turn produced no file changes.",
-                        `If the task "${task.title}" is already fully satisfied by the current state of the repository, reply with exactly TASK_ALREADY_SATISFIED and nothing else.`,
-                        "Otherwise, implement the task now."
-                      ].join("\n")
-                    )
-                    yield* revertSpecEdits
-                    const afterConfirmation = yield* context.git.diffAll
-                    if (afterConfirmation.trim().length === 0) {
-                      if (confirmation.includes("TASK_ALREADY_SATISFIED")) {
-                        yield* context.events.publish(
-                          Info.make({
-                            message: `task "${task.title}" confirmed already satisfied; skipping review and commit`
-                          })
-                        )
-                        return
-                      }
-                      return yield* FlowAborted.make({
-                        message: `task "${task.title}" produced no changes and did not confirm TASK_ALREADY_SATISFIED; failing instead of marking it complete`
-                      })
-                    }
-                  }
-                  yield* reviewAndFixLoop({
-                    reviewers: minimalReviewers,
-                    reviewerService: flowReviewer(context),
-                    coder: chat,
-                    taskTitle: task.title,
-                    currentDiff: context.git.diffAll,
-                    events: context.events,
-                    maxRounds,
-                    lint: ciGate,
-                    format: formatStep
-                  })
-                  const gate = yield* ciGate
-                  if (!gate.isClean) {
-                    return yield* FlowAborted.make({
-                      message: [
-                        `task "${task.title}": the CI gate is still failing after review settled; refusing to commit`,
-                        ...gate.issues.map((issue) => {
-                          const detail =
-                            issue.description.length === 0
-                              ? ""
-                              : `\n${issue.description.slice(-2000)}`
-                          return `- [${issue.severity}] ${issue.title}${detail}`
-                        })
-                      ].join("\n")
-                    })
-                  }
-                  yield* context.git.commitAll(`${plan.epicId}: ${task.title}`)
-                  yield* tracker.awaitDrained(bundle.events)
-                  const cells = yield* tracker.cells
-                  yield* checkCostBudget(
-                    makeCostRecord({ runId, at, repo: workDir, prompt, cells }),
-                    budget
-                  )
-                })
-                yield* attempt.pipe(
-                  Effect.onError(() => Effect.ignore(context.git.rollback(checkpoint)))
-                )
-              })
-
-            yield* implementTaskLoop(store, context.events, planPath, plan, perTask)
+            // The per-task machinery — fresh chat with progress note, no-op
+            // confirmation, review-and-fix with gate and formatter, the
+            // settled-red commit refusal, and the commit itself — lives in
+            // implementPlanFlow since 0.1.4 (chatPerTask, ADR 0003).
+            // Completed tasks are punctuated by commits, so discarding
+            // uncommitted state on failure (rollback to HEAD) is equivalent
+            // to the old per-task checkpoint. Residual gap: the cost budget
+            // is now checked after the flow rather than after each task, and
+            // a spec-only coder turn is reverted at review time rather than
+            // before the no-op check.
+            const budgetCheck = Effect.gen(function* () {
+              yield* tracker.awaitDrained(bundle.events)
+              const cells = yield* tracker.cells
+              yield* checkCostBudget(
+                makeCostRecord({ runId, at, repo: workDir, prompt, cells }),
+                budget
+              )
+            })
+            yield* implementPlanFlow(context, {
+              store,
+              planPath,
+              plan: Effect.succeed(plan),
+              chatPerTask: true,
+              checkoutBranch: false,
+              system: [
+                "Files under specs/ are read-only: never create or edit them.",
+                "If a task cannot be done or requires diverging from its spec, say so in your reply and record a durable justification as an ADR under docs/adr/ instead."
+              ].join(" "),
+              maxRounds,
+              lint: ciGate,
+              format: revertSpecEdits.pipe(Effect.andThen(formatStep))
+            }).pipe(
+              Effect.onError(() => Effect.ignore(context.git.rollback("HEAD"))),
+              Effect.andThen(budgetCheck)
+            )
           })
 
         const syncSpec = Effect.gen(function* () {

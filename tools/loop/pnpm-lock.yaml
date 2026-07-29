@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@llm4ts/core':
-        specifier: 0.1.3
-        version: 0.1.3(effect@4.0.0-beta.102)
+        specifier: 0.1.4
+        version: 0.1.4(effect@4.0.0-beta.102)
       '@llm4ts/flow':
-        specifier: 0.1.3
-        version: 0.1.3(effect@4.0.0-beta.102)
+        specifier: 0.1.4
+        version: 0.1.4(effect@4.0.0-beta.102)
       '@llm4ts/runner':
-        specifier: 0.1.3
-        version: 0.1.3(effect@4.0.0-beta.102)
+        specifier: 0.1.4
+        version: 0.1.4(effect@4.0.0-beta.102)
       effect:
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
@@ -189,20 +189,20 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@llm4ts/core@0.1.3':
-    resolution: {integrity: sha512-cHD0lx+fNG6Sm5dADaCsAumKsl6GV/qKVLTfsNXYGENXjK0tpHgrH67rzGIjW239/e0X4sUqaWNrE6A+QMsm6g==}
+  '@llm4ts/core@0.1.4':
+    resolution: {integrity: sha512-jJcWa8cchKYJTEbcyNiOLVVVm8pLwu2CFx3sJnZ+b1JY/OVIAtmWkkefDcKORuEbn7E2j5JsKeJ7JGbwvN+UrQ==}
     engines: {node: '>=22'}
     peerDependencies:
       effect: ^4.0.0-beta.102
 
-  '@llm4ts/flow@0.1.3':
-    resolution: {integrity: sha512-BadU9np4zAalVjSmBuJDsmhB0HgNKQJ3NdljxFjLDGynSnmfmIcZQUWjbJZ36CFWsPvOKMo6e0/woi2zR5XXhQ==}
+  '@llm4ts/flow@0.1.4':
+    resolution: {integrity: sha512-/GEaeaq62JaBgo6aq7nI24DrwzSa5Z7EmcHOsgiZYEtLli3Q4c6Qty3cM2KhhDoatyWKNfITzgx5EJYaJVhFrw==}
     engines: {node: '>=22'}
     peerDependencies:
       effect: ^4.0.0-beta.102
 
-  '@llm4ts/runner@0.1.3':
-    resolution: {integrity: sha512-x4aQTiN9xFMxL2rsGLUas64cdCDmQxXRUgChsEh7SSfu5nPwlsDknn+afuRLfWEO0yDr0VN1vnkjgXyujiDEdg==}
+  '@llm4ts/runner@0.1.4':
+    resolution: {integrity: sha512-Nei1axbj1nzwfgiGW/4tehWIhEJSO0IZ4VwerTb4pQoHNIvDik8UyFbo60erg8pzD3W0x/MaY/CsxhJDWoN7ew==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -398,19 +398,19 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@llm4ts/core@0.1.3(effect@4.0.0-beta.102)':
+  '@llm4ts/core@0.1.4(effect@4.0.0-beta.102)':
     dependencies:
       effect: 4.0.0-beta.102
 
-  '@llm4ts/flow@0.1.3(effect@4.0.0-beta.102)':
+  '@llm4ts/flow@0.1.4(effect@4.0.0-beta.102)':
     dependencies:
-      '@llm4ts/core': 0.1.3(effect@4.0.0-beta.102)
+      '@llm4ts/core': 0.1.4(effect@4.0.0-beta.102)
       effect: 4.0.0-beta.102
 
-  '@llm4ts/runner@0.1.3(effect@4.0.0-beta.102)':
+  '@llm4ts/runner@0.1.4(effect@4.0.0-beta.102)':
     dependencies:
-      '@llm4ts/core': 0.1.3(effect@4.0.0-beta.102)
-      '@llm4ts/flow': 0.1.3(effect@4.0.0-beta.102)
+      '@llm4ts/core': 0.1.4(effect@4.0.0-beta.102)
+      '@llm4ts/flow': 0.1.4(effect@4.0.0-beta.102)
       effect: 4.0.0-beta.102
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':

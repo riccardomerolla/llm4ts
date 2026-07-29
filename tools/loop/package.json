@@ -14,9 +14,9 @@
     "test": "node --import tsx --test src/CheckboxSync.test.ts"
   },
   "dependencies": {
-    "@llm4ts/core": "0.1.3",
-    "@llm4ts/flow": "0.1.3",
-    "@llm4ts/runner": "0.1.3",
+    "@llm4ts/core": "0.1.4",
+    "@llm4ts/flow": "0.1.4",
+    "@llm4ts/runner": "0.1.4",
     "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
