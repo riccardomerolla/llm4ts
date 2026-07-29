@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.3
+
+- Review-loop robustness at the structured-output boundary: decoding-side
+  defaults for reviewer/judge/plan schemas (a model omitting an optional
+  field no longer hard-fails the flow), one bounded reviewer retry on parse
+  errors, review diffs switched to `git diffAll` so untracked new files are
+  visible to reviewers, empty-diff tasks skip review and commit, and
+  `implementPlanFlow` refuses to commit while a configured lint gate is
+  still failing after review settles.
+- Ralph-grade terminal observability: run header with seats and trace path,
+  per-stage durations, `LLM4TS_TIMESTAMPS=1` line timestamps, honest cost
+  summary (no empty sections; explicit note when a backend reports no token
+  counts), and a closing line with total duration and stage counts.
+
 ## 0.1.2
 
 - No library changes. Added `pnpm version:set` for lockstep version bumps,
