@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- No library changes. Added `pnpm version:set` for lockstep version bumps,
+  the Ralph autonomous-loop tooling (`ralph-auto.sh`, `RALPH_AUTO_PROMPT.md`,
+  `specs/`), and engineering-guide updates.
+
 ## 0.1.1
 
 - No functional changes. Releases now publish through npm trusted publishing

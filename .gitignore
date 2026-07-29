@@ -15,3 +15,4 @@ coverage/
 *.log
 .repos/
 repos/
+.ralph-auto/

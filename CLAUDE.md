@@ -33,6 +33,23 @@ core → flow → runner → js
 - Add deterministic tests with `@effect/vitest`; default CI must not need network
   access, provider credentials, or installed provider CLIs.
 
+## Deep Modules Over Parallel Code
+
+Extend the existing seams instead of writing one-off variants:
+
+- API providers: `makeApiConnector` (`packages/core/src/Connector.ts`)
+- CLI coding agents: `makeCliConnector` + `versionProbe` (same module)
+- Connector identity: the id/provider/baseUrl table in
+  `packages/core/src/Models.ts`
+- Flow spine: `implementPlanFlow` (`packages/flow/src/Flow.ts`)
+- Node composition: `runNode` in `packages/runner/src/FlowRunner.ts` — the
+  runner stays thin; policy belongs in core/flow
+- Tests use the in-src fakes (core: process/HTTP/temp-file fakes; flow:
+  `makeMemoryPlainFileStore`, `makeMemoryWorkspace`)
+
+Behavior divergences from pinned `llm4zio` v4.2.0 require an ADR
+(`docs/adr/`) or a `docs/parity.md` note.
+
 ## Verification
 
 Run:
@@ -43,3 +60,27 @@ pnpm lint
 pnpm format:check
 pnpm test
 ```
+
+`pnpm build && node scripts/pack-smoke.mjs` additionally verifies the
+published artifacts resolve for an external consumer.
+
+## Releases
+
+Publishing is tag-driven via npm trusted publishing (OIDC) — no tokens:
+
+```bash
+pnpm version:set X.Y.Z   # bumps all five packages in lockstep
+# update CHANGELOG.md, commit, then:
+git tag vX.Y.Z && git push origin main vX.Y.Z
+```
+
+The release workflow refuses to publish when the tag does not match every
+package version.
+
+## Autonomous Loop (Ralph)
+
+`./ralph-auto.sh "<focus prompt>"` runs an autonomous agent loop against the
+work queue in `specs/` (see `specs/README.md`). The script owns git commits
+and enforces the verification chain; the agent prompt template is
+`RALPH_AUTO_PROMPT.md`. Specs in `specs/pending/` are only moved to
+`specs/completed/` by the user.
