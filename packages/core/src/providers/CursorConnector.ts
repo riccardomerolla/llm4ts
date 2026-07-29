@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ConnectorIds, LlmChunk } from "../Models.ts"
+import { ConnectorCapabilities, ConnectorIds, LlmChunk } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   failClassifiedCliError,
@@ -111,6 +111,9 @@ export const makeCursorConnector = (
   return makeCliConnector({
     id: ConnectorIds.Cursor,
     interactionSupport: "ContinuationOnly",
+    // This CLI does not surface token usage, so TokensUsed events (and
+    // therefore cost summaries and budgets) cannot include it.
+    capabilities: ConnectorCapabilities.make({ usageReporting: false }),
     buildArgv: (prompt, _context) => buildArgv(prompt),
     buildInteractiveArgv: (_context) => ["cursor-agent", ...extraArgs],
     complete,

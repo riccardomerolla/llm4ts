@@ -4,10 +4,11 @@ import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
 import { ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { makeConnectorRegistry } from "@llm4ts/core/ConnectorRegistry"
-import { ConnectorIds, LlmConfig } from "@llm4ts/core/Models"
+import { ConnectorIds, LlmConfig, TokenUsage } from "@llm4ts/core/Models"
 import { makeFakeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import { makeMockProvider } from "@llm4ts/core/providers/MockProvider"
-import { Info, StageCompleted, StageStarted } from "@llm4ts/flow/FlowEvents"
+import { Info, StageCompleted, StageStarted, TokensUsed } from "@llm4ts/flow/FlowEvents"
+import { CostBudget } from "@llm4ts/flow/CostLedger"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { makeFlowRunnerContext, runWithBundle } from "@llm4ts/runner/FlowRunner"
 import { plainTerminalPalette, type TerminalSurface } from "@llm4ts/runner/Terminal"
@@ -141,5 +142,63 @@ describe("embedded runner", () => {
           )
         })
       )
+  )
+})
+
+describe("runner cost budget", () => {
+  it.effect("exposes the tracker on the bundle and enforces the configured budget", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+        const registry = makeConnectorRegistry([
+          {
+            connectorId: ConnectorIds.Mock,
+            kind: "Api",
+            create: (_configuration) => Effect.succeed(mock)
+          }
+        ])
+        const surface: TerminalSurface = {
+          palette: plainTerminalPalette,
+          log: (_line) => Effect.void,
+          setStatus: (_label) => Effect.void,
+          suspend: (effect) => effect
+        }
+        const dependencies = {
+          registry,
+          process: process.executor,
+          files: files(state)
+        }
+        const options = {
+          workDir: "/repo",
+          workspace: "/repo",
+          userPrompt: "do it",
+          coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+          surface,
+          budget: CostBudget.make({ maximumTokens: 10 })
+        }
+
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        const error = yield* Effect.flip(
+          runWithBundle(
+            bundle,
+            options,
+            (context) =>
+              context.events.publish(
+                TokensUsed.make({
+                  agent: "coder",
+                  usage: TokenUsage.make({ prompt: 100, completion: 40, total: 140 })
+                })
+              ),
+            dependencies
+          )
+        )
+        const cells = yield* bundle.tracker.cells
+
+        assert.strictEqual(error._tag, "BudgetExceeded")
+        assert.isAbove(cells.length, 0)
+      })
+    )
   )
 })

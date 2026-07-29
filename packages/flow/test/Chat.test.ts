@@ -6,8 +6,9 @@ import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import { InvalidRequestError, ProviderError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
-import { LlmChunk, type Message } from "@llm4ts/core/Models"
+import { LlmChunk, TokenUsage, type Message } from "@llm4ts/core/Models"
 import { makeChat } from "@llm4ts/flow/Chat"
+import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -101,6 +102,59 @@ describe("Chat", () => {
 
       const sizes = (yield* Ref.get(calls)).map((messages) => messages.length)
       assert.deepStrictEqual(sizes, [1, 3])
+    })
+  )
+})
+
+describe("Chat usage events", () => {
+  const usageService = (withUsage: boolean): LlmServiceShape => ({
+    executeStream: (_prompt) => Stream.empty,
+    executeStreamWithHistory: (_messages) =>
+      Stream.make(
+        LlmChunk.make({
+          delta: "reply",
+          finishReason: "stop",
+          metadata: { model: "claude-sonnet-4-5" },
+          ...(withUsage
+            ? { usage: TokenUsage.make({ prompt: 100, completion: 40, total: 140 }) }
+            : {})
+        })
+      ),
+    executeWithTools: (_prompt, _tools) => Effect.fail(unused),
+    executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+    executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+    isAvailable: Effect.succeed(true)
+  })
+
+  it.effect("publishes TokensUsed with agent and model when the reply carries usage", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const chat = yield* makeChat(usageService(true), { events, agent: "coder" })
+      yield* chat.ask("do work")
+      const recorded = yield* events.recorded
+      const usage = recorded.filter((event) => event._tag === "TokensUsed")
+
+      assert.strictEqual(usage.length, 1)
+      assert.strictEqual(usage[0]?._tag === "TokensUsed" ? usage[0].agent : "", "coder")
+      assert.strictEqual(
+        usage[0]?._tag === "TokensUsed" ? usage[0].model : undefined,
+        "claude-sonnet-4-5"
+      )
+      assert.strictEqual(usage[0]?._tag === "TokensUsed" ? usage[0].usage.total : 0, 140)
+    })
+  )
+
+  it.effect("publishes nothing when the reply has no usage or no events sink", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const withoutUsage = yield* makeChat(usageService(false), { events })
+      yield* withoutUsage.ask("no usage")
+      const recorded = yield* events.recorded
+      assert.isTrue(recorded.every((event) => event._tag !== "TokensUsed"))
+
+      const withoutSink = yield* makeChat(usageService(true))
+      const reply = yield* withoutSink.ask("no sink")
+      assert.strictEqual(reply, "reply")
     })
   )
 })

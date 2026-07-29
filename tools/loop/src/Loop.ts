@@ -10,7 +10,7 @@ import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import type { FlowError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
-import { stableHash } from "@llm4ts/flow/Plan"
+import { Plan, Task, stableHash } from "@llm4ts/flow/Plan"
 import { planFrom } from "@llm4ts/flow/Planner"
 import { lintCommand } from "@llm4ts/flow/Review"
 import { coderFromEnv, withTurnLimit } from "@llm4ts/runner/Connectors"
@@ -23,7 +23,7 @@ import { ScriptUsage } from "@llm4ts/runner/FlowArgs"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 import { parseVerbosity } from "@llm4ts/runner/Terminal"
-import { syncCheckboxes } from "./CheckboxSync.ts"
+import { parseChecklist, syncCheckboxes } from "./CheckboxSync.ts"
 
 export const LoopUsage =
   "usage: loop <spec-path> [--repo <path>] [--dry-run]\n" +
@@ -200,7 +200,31 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
 
         const body = (context: FlowContextShape): Effect.Effect<void, FlowError> =>
           Effect.gen(function* () {
-            const plan = yield* store.recoverOrCreate(planPath, planFrom(context.reasoning, prompt))
+            // When the spec carries its own checklist, plan one task per
+            // item deterministically: plan tasks and spec checkboxes then
+            // share exact 1:1 identity, making checkbox sync bookkeeping
+            // instead of a heuristic (and skipping an LLM planning call).
+            // Specs without a checklist fall back to LLM planning, where
+            // partial sync stays disabled by the count guard.
+            const checklist = parseChecklist(prompt)
+            const epicId = basename(specPath).replace(/\.md$/, "")
+            const createPlan =
+              checklist.length > 0
+                ? Effect.succeed(
+                    Plan.make({
+                      epicId,
+                      brief: prompt,
+                      tasks: checklist.map((item) =>
+                        Task.make({
+                          title: (item.text.split("\n")[0] ?? "task").slice(0, 120),
+                          description: item.text,
+                          completed: item.checked
+                        })
+                      )
+                    })
+                  )
+                : planFrom(context.reasoning, prompt)
+            const plan = yield* store.recoverOrCreate(planPath, createPlan)
 
             if (args.dryRun) {
               yield* context.events.publish(

@@ -3,7 +3,7 @@ import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { ProviderError } from "../Errors.ts"
-import { ConnectorIds, HealthStatus, LlmChunk } from "../Models.ts"
+import { ConnectorCapabilities, ConnectorIds, HealthStatus, LlmChunk } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { optionalModelArgs, sortedFlagArgs } from "./CliSupport.ts"
 
@@ -68,6 +68,9 @@ export const makeAntigravityConnector = (
   return makeCliConnector({
     id: ConnectorIds.AntigravityCli,
     interactionSupport: "InteractiveStdin",
+    // This CLI does not surface token usage, so TokensUsed events (and
+    // therefore cost summaries and budgets) cannot include it.
+    capabilities: ConnectorCapabilities.make({ interactiveSessions: true, usageReporting: false }),
     buildArgv: (prompt, _context) => buildAntigravityArgv(config, prompt),
     buildInteractiveArgv: (_context) => ["agy", ...antigravityExtraArgs(config)],
     complete,

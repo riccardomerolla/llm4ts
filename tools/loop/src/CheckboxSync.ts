@@ -59,3 +59,46 @@ export const syncCheckboxes = (
 
   return { markdown: updated.join("\n"), flipped, total }
 }
+
+export interface ChecklistItem {
+  /** Full item text: the checkbox line plus its indented continuation lines. */
+  readonly text: string
+  readonly checked: boolean
+}
+
+/**
+ * Extracts the spec's checklist: each `- [ ]`/`- [x]` line together with the
+ * indented continuation lines that belong to it. When a spec carries a
+ * checklist, the loop plans one task per item, so plan tasks and spec
+ * checkboxes share an exact 1:1 identity and checkbox sync is bookkeeping
+ * rather than heuristics.
+ */
+export const parseChecklist = (markdown: string): ReadonlyArray<ChecklistItem> => {
+  const lines = markdown.split("\n")
+  const items: Array<{ text: string; checked: boolean }> = []
+  let current: { parts: Array<string>; checked: boolean } | undefined
+  const flush = (): void => {
+    if (current !== undefined) {
+      items.push({ text: current.parts.join("\n").trimEnd(), checked: current.checked })
+      current = undefined
+    }
+  }
+  for (const line of lines) {
+    const match = checkboxPattern.exec(line)
+    if (match !== null) {
+      flush()
+      const content = line.replace(/^\s*[-*] \[[ xX]\]\s?/, "")
+      current = { parts: [content], checked: /\[[xX]\]/.test(line) }
+    } else if (current !== undefined && (/^\s+\S/.test(line) || line.trim().length === 0)) {
+      if (line.trim().length === 0 && current.parts.at(-1)?.trim().length === 0) {
+        flush()
+      } else {
+        current.parts.push(line.trim().length === 0 ? "" : line.trim())
+      }
+    } else {
+      flush()
+    }
+  }
+  flush()
+  return items.map((item) => ({ text: item.text, checked: item.checked }))
+}

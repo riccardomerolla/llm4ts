@@ -4,7 +4,7 @@ import { collect } from "@llm4ts/core/Streaming"
 import { makeChat, type Chat } from "./Chat.ts"
 import type { FlowContextShape } from "./FlowContext.ts"
 import { FlowAborted, FlowLlmError, type FlowError } from "./FlowError.ts"
-import { AssistantMessage, Info, type FlowEventsShape } from "./FlowEvents.ts"
+import { AssistantMessage, Info, TokensUsed, type FlowEventsShape } from "./FlowEvents.ts"
 import type { Plan, Task } from "./Plan.ts"
 import type { PlanStoreShape } from "./Persistence.ts"
 import { implementTaskLoop, stage } from "./PlanExecution.ts"
@@ -22,6 +22,15 @@ export const completeAndPublish = Effect.fn("@llm4ts/flow/Flow.completeAndPublis
   const response = yield* collect(service.executeStream(prompt)).pipe(
     Effect.mapError(FlowLlmError.from)
   )
+  if (response.usage !== undefined) {
+    yield* events.publish(
+      TokensUsed.make({
+        agent: "assistant",
+        usage: response.usage,
+        ...(response.metadata.model === undefined ? {} : { model: response.metadata.model })
+      })
+    )
+  }
   yield* events.publish(AssistantMessage.make({ text: response.content }))
   return response.content
 })
@@ -62,6 +71,8 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
   let sharedCoder: Chat | undefined
   if (options.chatPerTask !== true) {
     sharedCoder = yield* makeChat(context.coder, {
+      events: context.events,
+      agent: "coder",
       ...(options.system === undefined ? {} : { system: options.system })
     })
   }
@@ -81,6 +92,8 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           coder = sharedCoder
         } else {
           coder = yield* makeChat(context.coder, {
+            events: context.events,
+            agent: "coder",
             system: composeSystem(options.system, planSoFar.render)
           })
         }

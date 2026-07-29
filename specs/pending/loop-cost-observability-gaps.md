@@ -8,7 +8,7 @@ here per the dogfood-loop's "record every gap as a spec" task.
 
 ## Gaps
 
-- [ ] **CLI connectors emit no `TokensUsed` events.** The default coder
+- [x] **CLI connectors emit no `TokensUsed` events.** The default coder
       (`claude`) and the other CLI connectors do not publish token usage, so
       `CostTracker` records nothing and `checkCostBudget` can never trip for a
       CLI-driven run. The per-run USD ceiling is therefore only enforceable for
@@ -17,7 +17,7 @@ here per the dogfood-loop's "record every gap as a spec" task.
       to a wall-clock / turn-count ceiling for CLI seats — and document the
       limitation either way. Extend the `makeCliConnector` seam, not a one-off.
 
-- [ ] **The runner hides its `CostTracker`.** `runWithBundle`
+- [x] **The runner hides its `CostTracker`.** `runWithBundle`
       (`packages/runner/src/FlowRunner.ts`) creates a `CostTracker`, consumes
       the hub, and prints a summary, but does not expose the tracker or accept a
       budget. The loop had to attach a _second_ tracker to `bundle.events` just
@@ -25,7 +25,7 @@ here per the dogfood-loop's "record every gap as a spec" task.
       exposing the tracker on `FlowRunnerBundle`) so consumers can enforce a
       ceiling without duplicating subscription plumbing.
 
-- [ ] **No stable identity links a spec's checklist to plan tasks.** Checkbox
+- [x] **No stable identity links a spec's checklist to plan tasks.** Checkbox
       sync (`tools/loop/src/CheckboxSync.ts`) can only map plan completion to
       spec checkboxes positionally, because `planFrom` invents fresh task titles
       unrelated to the spec's `- [ ]` items. A run with different task
@@ -49,8 +49,21 @@ makeCliConnector…") when plan task 2 (an unrelated, skipped task) completed.
 The tick was reverted by hand. Until identities exist, the sync must be
 conservative:
 
-- [ ] Only sync checkboxes when the plan was generated 1:1 from the spec's
+- [x] Only sync checkboxes when the plan was generated 1:1 from the spec's
       checklist (same count and order), otherwise leave the spec untouched
       and report progress in the run output instead.
-- [ ] Longer term: carry a stable identity (e.g. the checkbox text) into
+- [x] Longer term: carry a stable identity (e.g. the checkbox text) into
       generated plan tasks so sync can match by identity, not position.
+
+## Completion note (2026-07-29)
+
+The root cause was one level deeper than filed: no code anywhere published
+`TokensUsed`, so the cost pipeline was dead for every seat, not just CLI.
+Resolution and rationale in ADR 0005 (`docs/adr/0005-cost-events-at-the-chat-
+seam.md`): usage events are produced at the Chat seam (and
+`completeAndPublish`), connectors without usage now declare
+`usageReporting: false` (capability matrix updated), the runner exposes its
+tracker on `FlowRunnerBundle` and accepts `FlowRunnerOptions.budget`, and the
+loop plans one task per spec-checklist item so checkbox sync is exact 1:1
+identity by construction. The harness consumes the runner-side pieces on its
+next pin bump (>= 0.1.5).

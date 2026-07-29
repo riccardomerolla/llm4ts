@@ -9,7 +9,8 @@ import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { TemporaryFilesShape } from "@llm4ts/core/TemporaryFiles"
 import type { GeminiCliExecutorShape } from "@llm4ts/core/providers/GeminiCliProvider"
 import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactories"
-import { makeCostTracker } from "@llm4ts/flow/CostTracker"
+import { makeCostTracker, type CostTracker } from "@llm4ts/flow/CostTracker"
+import { checkCostBudget, makeCostRecord, type CostBudget } from "@llm4ts/flow/CostLedger"
 import { FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
 import { makeFlowEventHub, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type FlowContextShape } from "@llm4ts/flow/FlowContext"
@@ -73,18 +74,30 @@ export interface FlowRunnerOptions {
   readonly verbosity?: Verbosity
   readonly surface?: TerminalSurface
   readonly environment?: Readonly<Record<string, string | undefined>>
+  /**
+   * Optional cost ceiling. Checked after the flow body completes, from the
+   * usage the run's CostTracker accrued: exceeding it fails the run with a
+   * typed BudgetExceeded. Note that enforcement is only as good as the
+   * usage events published — backends without usage reporting accrue
+   * nothing (see the connector capability matrix).
+   */
+  readonly budget?: CostBudget
 }
 
 export interface FlowRunnerBundle {
   readonly context: FlowContextShape
   readonly events: FlowEventHub
+  /** The run's cost tracker, already subscribed to `events`. */
+  readonly tracker: CostTracker
 }
 
 export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeContext")(function* (
   options: FlowRunnerOptions,
   dependencies: FlowRunnerDependencies
-): Effect.fn.Return<FlowRunnerBundle, FlowError> {
+): Effect.fn.Return<FlowRunnerBundle, FlowError, Scope.Scope> {
   const events = yield* makeFlowEventHub()
+  const tracker = yield* makeCostTracker()
+  yield* tracker.consume(events)
   const coderConfig = prepareConnector(
     options.coder,
     options.workDir,
@@ -109,6 +122,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   )
   return {
     events,
+    tracker,
     context: FlowContext.of({
       reasoning: reasoningService,
       coder,
@@ -137,7 +151,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   const startedAt = yield* Clock.currentTimeMillis
   const environment = options.environment ?? process.env
   const verbosity = options.verbosity ?? "Normal"
-  const tracker = yield* makeCostTracker()
+  const tracker = bundle.tracker
   const surface = options.surface ?? (yield* makeTerminalSurface(environment))
   const palette = surface.palette
   const terminal = yield* consumeTerminalEvents(bundle.events, surface, verbosity, {
@@ -159,7 +173,6 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
       )
     }
   }
-  yield* tracker.consume(bundle.events)
   const recorder =
     options.tracePath === undefined
       ? undefined
@@ -172,8 +185,28 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     yield* recorder.consume(bundle.events)
   }
   yield* surface.setStatus("preparing flow")
+  const budget = options.budget
+  const enforceBudget =
+    budget === undefined
+      ? Effect.void
+      : Effect.gen(function* () {
+          yield* tracker.awaitDrained(bundle.events)
+          const cells = yield* tracker.cells
+          const at = new Date(yield* Clock.currentTimeMillis).toISOString()
+          yield* checkCostBudget(
+            makeCostRecord({
+              runId: options.runId ?? "run",
+              at,
+              repo: options.workDir,
+              prompt: options.userPrompt,
+              cells
+            }),
+            budget
+          )
+        })
   return yield* body(bundle.context).pipe(
     Effect.provideService(FlowContext, bundle.context),
+    Effect.andThen((value) => Effect.as(enforceBudget, value)),
     Effect.ensuring(
       Effect.all(
         [

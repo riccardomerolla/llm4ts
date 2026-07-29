@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { syncCheckboxes } from "./CheckboxSync.ts"
+import { parseChecklist, syncCheckboxes } from "./CheckboxSync.ts"
 
 const spec = ["# Spec", "", "- [ ] one", "- [ ] two", "- [ ] three", ""].join("\n")
 
@@ -49,4 +49,29 @@ test("still checks every box on full completion despite a count mismatch", () =>
   const result = syncCheckboxes(spec, 10, true, 10)
   assert.equal(result.flipped, 3)
   assert.doesNotMatch(result.markdown, /- \[ \]/)
+})
+
+test("parses checklist items with continuation lines and checked state", () => {
+  const doc = [
+    "# Spec",
+    "",
+    "- [ ] first task title",
+    "      with a continuation line",
+    "- [x] second, already done",
+    "",
+    "Some prose that is not a checklist item.",
+    "",
+    "- [ ] third"
+  ].join("\n")
+  const items = parseChecklist(doc)
+  assert.equal(items.length, 3)
+  assert.equal(items[0]?.text, "first task title\nwith a continuation line")
+  assert.equal(items[0]?.checked, false)
+  assert.equal(items[1]?.text, "second, already done")
+  assert.equal(items[1]?.checked, true)
+  assert.equal(items[2]?.text, "third")
+})
+
+test("returns an empty checklist for documents without checkboxes", () => {
+  assert.equal(parseChecklist("# just prose\n\nnothing here").length, 0)
 })
