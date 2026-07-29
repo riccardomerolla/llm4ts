@@ -329,3 +329,144 @@ things are new:
 
 `examples/issue-pr.ts` and `examples/sdd.ts` climb further from here — see
 the [examples ladder](../examples/README.md).
+
+## Rung 3: a custom spine from primitives
+
+`implementPlanFlow` covers the common case, but some flows need policy it
+deliberately does not model: per-task gate switching, hard invariants like
+"the first task must produce a red test", or a different diff source per
+review. For those, compose the same primitives the Flow module itself is
+built from: `stage`, `implementTaskLoop`, `reviewAndFixLoop`, `lintCommand`,
+and `makeChat`. `examples/sdd.ts` is the canonical custom spine — a
+specification-driven flow whose first task must encode the spec as failing
+tests before any production code is written.
+
+### Per-task gates
+
+Gates are plain `Effect`s produced by `lintCommand`; build as many as you
+need and choose between them per task:
+
+<!-- prettier-ignore -->
+```ts
+const coderChat = yield* makeChat(context.coder, {
+  system:
+    "Implement one task at a time. The committed specification is the contract; do not weaken its tests."
+})
+const testGate = lintCommand(
+  nodeProcessExecutor,
+  context.events,
+  ["mvn", "-q", "test"],
+  input.workDir
+)
+const compileGate = lintCommand(
+  nodeProcessExecutor,
+  context.events,
+  ["mvn", "-q", "test-compile"],
+  input.workDir
+)
+const firstTitle = planWithSpec.tasks[0]?.title
+```
+
+### The task loop
+
+The loop itself is `implementTaskLoop` with your own per-task body: ask the
+coder, review with the gate that fits the task, enforce your invariants,
+then let runtime-owned Git commit:
+
+<!-- prettier-ignore -->
+```ts
+yield* implementTaskLoop(store, context.events, planPath, planWithSpec, (task) =>
+  Effect.gen(function* () {
+    const testsTask = task.title === firstTitle
+    yield* coderChat.ask(planWithSpec.taskPrompt(task))
+    yield* reviewAndFixLoop({
+      reviewers: minimalReviewers,
+      reviewerService: context.reviewers[0] ?? context.reasoning,
+      coder: coderChat,
+      taskTitle: task.title,
+      currentDiff: context.git.diffAll,
+      events: context.events,
+      lint: testsTask ? compileGate : testGate,
+      parallelism: 1
+    })
+    if (testsTask) {
+      const red = yield* testGate
+      if (red.isClean) {
+        return yield* FlowAborted.make({
+          message:
+            "the new tests pass before implementation; the specification is not encoded by a red test"
+        })
+      }
+    }
+    yield* context.git.commitAll(`${planWithSpec.epicId}: ${task.title}`)
+  })
+)
+```
+
+Details worth copying:
+
+- **`currentDiff: context.git.diffAll`** — reviewers must see untracked new
+  files, and plain `git diff` does not show them. Use `diffAll` in review
+  loops.
+- **Gate switching** (`lint: testsTask ? compileGate : testGate`) — the
+  red-test task can only be expected to compile; every later task must pass
+  the full test suite.
+- **Invariants after review.** The `red.isClean` check runs after the review
+  loop settles: bounded review and commit-worthiness are separate judgments.
+  `FlowAborted` fails the task rather than committing a violation.
+- **The formatter step.** When a gate includes a format check, wire
+  `reviewAndFixLoop`'s `format` option to your formatter (best-effort, never
+  fails the flow). A headless coding agent can edit files but usually cannot
+  run your formatter — deterministic tools should do deterministic work.
+
+## Testing a flow
+
+Flows are functions over `FlowContextShape`, so they test without any LLM,
+network, git binary, or filesystem: fake services in, assertions on what the
+flow did out. `@llm4ts/flow` ships the persistence fakes
+(`makeMemoryPlainFileStore`, `makeMemoryWorkspace`); a fake `GitToolShape`
+records branches and commits; a mock `LlmServiceShape` scripts the coder and
+reviewer seats. From `packages/flow/test/Flow.test.ts`:
+
+<!-- prettier-ignore -->
+```ts
+const store = makePlanStore(memory.store)
+const plan = Plan.make({
+  epicId: "epic-1",
+  tasks: [
+    Task.make({ title: "first task", description: "do the first thing" }),
+    Task.make({ title: "second task", description: "do the second thing" })
+  ]
+})
+const context: FlowContextShape = {
+  reasoning: cleanReviewer,
+  coder: coderService(asked),
+  git: makeFakeGit(gitLog),
+  hosting: failingHosting,
+  events,
+  reviewers: [cleanReviewer],
+  coderCapabilities: ConnectorCapabilities.make({}),
+  userPrompt: "implement the plan",
+  workDir: "/repo",
+  workspace: "/repo"
+}
+
+const completed = yield* implementPlanFlow(context, {
+  store,
+  planPath: ".llm4ts/plan.md",
+  plan: Effect.succeed(plan)
+})
+```
+
+Assert on observable behavior: the branches and commit messages the fake git
+recorded, the prompts the mock coder received, the persisted plan's completed
+flags, and published events. The same file shows the negative cases worth
+copying — a red gate must not commit, and an empty diff must skip review.
+
+## Where to go next
+
+- [`examples/README.md`](../examples/README.md) — the runnable ladder these
+  rungs came from.
+- [`docs/api.md`](api.md) — the full module reference.
+- [`docs/provider-capabilities.md`](provider-capabilities.md) — which
+  connectors support which features.

@@ -118,6 +118,7 @@ tarballs, and publishes with provenance.
 
 ## Documentation
 
+- [Flow authoring guide](docs/flow-authoring.md)
 - [API guide](docs/api.md)
 - [Architecture](docs/architecture.md)
 - [Configuration](docs/configuration.md)

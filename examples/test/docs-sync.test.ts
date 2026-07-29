@@ -28,6 +28,14 @@ const repoFileExists = (relativePath: string): boolean => {
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 /**
+ * Excerpt comparison ignores ALL whitespace: doc excerpts are dedented for
+ * readability and sit inside prettier-ignored fences, while the sources are
+ * prettier-formatted at their own indentation. Content, not layout, is the
+ * contract.
+ */
+const stripWhitespace = (text: string): string => text.replace(/\s+/g, "")
+
+/**
  * Scopes the search to the section between `heading` and the next heading of
  * any level, so a renamed heading, reordered blocks, or an earlier ```ts
  * fence elsewhere in the doc fails loudly instead of silently matching the
@@ -176,6 +184,28 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
       )
     }
     assert.isFunction(callsWithDocumentedShape)
+  })
+
+  it("Rung 3 code excerpts stay consistent with examples/sdd.ts", () => {
+    const source = stripWhitespace(readRepoFile("examples/sdd.ts"))
+    for (const heading of ["### Per-task gates", "### The task loop"]) {
+      const block = extractTsCodeBlockUnderHeading(doc, heading)
+      assert.include(
+        source,
+        stripWhitespace(block),
+        `the excerpt under "${heading}" is no longer an excerpt of examples/sdd.ts`
+      )
+    }
+  })
+
+  it("Testing-section excerpt stays consistent with packages/flow/test/Flow.test.ts", () => {
+    const source = stripWhitespace(readRepoFile("packages/flow/test/Flow.test.ts"))
+    const block = extractTsCodeBlockUnderHeading(doc, "## Testing a flow")
+    assert.include(
+      source,
+      stripWhitespace(block),
+      "the Testing-a-flow excerpt is no longer an excerpt of packages/flow/test/Flow.test.ts"
+    )
   })
 
   it("documented pnpm script exists in examples/package.json", () => {
