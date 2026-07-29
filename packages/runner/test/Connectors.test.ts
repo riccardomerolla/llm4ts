@@ -3,8 +3,10 @@ import * as Duration from "effect/Duration"
 import * as Redacted from "effect/Redacted"
 import { ApiConnectorConfig, CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { ConnectorIds } from "@llm4ts/core/Models"
+import * as Effect from "effect/Effect"
 import {
   anthropic,
+  apiConnectorFromEnvironment,
   asReadOnly,
   antigravity,
   claude,
@@ -129,4 +131,37 @@ describe("runner connector presets", () => {
     assert.strictEqual(coderFromEnv({ LLM4ZIO_CODER: "opencode" }), opencode)
     assert.strictEqual(coderFromEnv({ LLM4ZIO_CODER: "unknown" }), claude)
   })
+})
+
+describe("api connector from environment", () => {
+  it.effect("defaults to the mock connector with zero configuration", () =>
+    Effect.gen(function* () {
+      const config = yield* apiConnectorFromEnvironment({})
+      assert.strictEqual(config.connectorId.value, "mock")
+    })
+  )
+
+  it.effect("selects the provider and applies the model", () =>
+    Effect.gen(function* () {
+      const config = yield* apiConnectorFromEnvironment({
+        LLM4TS_PROVIDER: "anthropic",
+        LLM4TS_MODEL: "claude-sonnet-4-5"
+      })
+      assert.strictEqual(config.connectorId.value, "anthropic")
+      assert.strictEqual(config.model, "claude-sonnet-4-5")
+    })
+  )
+
+  it.effect("fails with guidance for unknown providers and missing models", () =>
+    Effect.gen(function* () {
+      const unknown = yield* Effect.flip(apiConnectorFromEnvironment({ LLM4TS_PROVIDER: "nope" }))
+      assert.strictEqual(unknown._tag, "ScriptUsage")
+      assert.include(unknown.message, "mock|openai|anthropic|gemini|lm-studio|ollama")
+      const missingModel = yield* Effect.flip(
+        apiConnectorFromEnvironment({ LLM4TS_PROVIDER: "openai" })
+      )
+      assert.strictEqual(missingModel._tag, "ScriptUsage")
+      assert.include(missingModel.message, "LLM4TS_MODEL is required")
+    })
+  )
 })

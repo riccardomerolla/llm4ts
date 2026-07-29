@@ -1,6 +1,6 @@
 import * as Context from "effect/Context"
-import * as Effect from "effect/Effect"
-import * as Stream from "effect/Stream"
+import type * as Effect from "effect/Effect"
+import type * as Stream from "effect/Stream"
 import type * as Schema from "effect/Schema"
 import type { LlmError } from "./Errors.ts"
 import type {
@@ -43,40 +43,3 @@ export interface LlmServiceShape {
 export class LlmService extends Context.Service<LlmService, LlmServiceShape>()(
   "@llm4ts/core/LlmService"
 ) {}
-
-export const executeStream = (prompt: string): Stream.Stream<LlmChunk, LlmError, LlmService> =>
-  Stream.unwrap(Effect.map(LlmService, (service) => service.executeStream(prompt)))
-
-export const executeStreamWithHistory = (
-  messages: ReadonlyArray<Message>
-): Stream.Stream<LlmChunk, LlmError, LlmService> =>
-  Stream.unwrap(Effect.map(LlmService, (service) => service.executeStreamWithHistory(messages)))
-
-export const executeWithTools = Effect.fn("@llm4ts/core/LlmService.executeWithTools")(function* (
-  prompt: string,
-  tools: ReadonlyArray<ToolDefinition>
-) {
-  const service = yield* LlmService
-  return yield* service.executeWithTools(prompt, tools)
-})
-
-export const executeStructured = <A, E, RD, RE>(
-  prompt: string,
-  schema: Schema.ConstraintCodec<A, E, RD, RE>,
-  jsonSchema: JsonSchema
-): Effect.Effect<A, LlmError, LlmService | RD> =>
-  Effect.flatMap(LlmService, (service) => service.executeStructured(prompt, schema, jsonSchema))
-
-export const executeStructuredWithUsage = <A, E, RD, RE>(
-  prompt: string,
-  schema: Schema.ConstraintCodec<A, E, RD, RE>,
-  jsonSchema: JsonSchema
-): Effect.Effect<StructuredResult<A>, LlmError, LlmService | RD> =>
-  Effect.flatMap(LlmService, (service) =>
-    service.executeStructuredWithUsage(prompt, schema, jsonSchema)
-  )
-
-export const isAvailable: Effect.Effect<boolean, never, LlmService> = Effect.flatMap(
-  LlmService,
-  (service) => service.isAvailable
-)

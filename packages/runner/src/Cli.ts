@@ -40,7 +40,7 @@ export const makeCliProgram = (
       },
       (context) =>
         collect(context.coder.executeStream(prompt)).pipe(
-          Effect.mapError((cause) => FlowLlmError.make({ message: cause.message, cause })),
+          Effect.mapError(FlowLlmError.from),
           Effect.tap((response) =>
             context.events.publish(AssistantMessage.make({ text: response.content }))
           ),

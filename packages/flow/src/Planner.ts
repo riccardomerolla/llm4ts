@@ -50,12 +50,6 @@ const verdictJsonSchema: JsonSchema = {
   required: ["kind"]
 }
 
-const llmFailure = (cause: Parameters<typeof FlowLlmError.make>[0]["cause"]): FlowLlmError =>
-  FlowLlmError.make({
-    message: cause?.message ?? "LLM request failed",
-    ...(cause === undefined ? {} : { cause })
-  })
-
 export const defaultPlanInstructions = [
   "You are a planning assistant. Break the user's request into an ordered list of small,",
   "independently implementable tasks. Each task must be a thin vertical slice with an observable",
@@ -71,7 +65,7 @@ export const planFrom = Effect.fn("@llm4ts/flow/Planner.from")(function* (
 ): Effect.fn.Return<Plan, FlowLlmError> {
   return yield* reasoning
     .executeStructured(`${instructions}\n\nRequest:\n${prompt}`, Plan, planJsonSchema)
-    .pipe(Effect.mapError(llmFailure))
+    .pipe(Effect.mapError(FlowLlmError.from))
 })
 
 export const reviewPlanInstructions = [
@@ -88,7 +82,7 @@ export const reviewPlan = Effect.fn("@llm4ts/flow/Planner.review")(function* (
 ): Effect.fn.Return<Plan, FlowLlmError> {
   const improved = yield* reasoning
     .executeStructured(`${instructions}\n\nDraft plan:\n${plan.render}`, Plan, planJsonSchema)
-    .pipe(Effect.mapError(llmFailure))
+    .pipe(Effect.mapError(FlowLlmError.from))
   return Plan.make({
     ...improved,
     ...(plan.brief === undefined ? {} : { brief: plan.brief })
@@ -108,7 +102,7 @@ export const writeBrief = Effect.fn("@llm4ts/flow/Planner.brief")(function* (
 ): Effect.fn.Return<string, FlowLlmError> {
   const response = yield* collect(
     reasoning.executeStream(`${instructions}\n\nChange request:\n${prompt}`)
-  ).pipe(Effect.mapError(llmFailure))
+  ).pipe(Effect.mapError(FlowLlmError.from))
   return response.content.trim()
 })
 
@@ -136,5 +130,5 @@ export const assessThenPlan = Effect.fn("@llm4ts/flow/Planner.assessThenPlan")(f
 ): Effect.fn.Return<Verdict, FlowLlmError> {
   return yield* reasoning
     .executeStructured(`${instructions}\n\nRequest:\n${prompt}`, Verdict, verdictJsonSchema)
-    .pipe(Effect.mapError(llmFailure))
+    .pipe(Effect.mapError(FlowLlmError.from))
 })

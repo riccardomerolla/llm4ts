@@ -1,17 +1,13 @@
-import * as Clock from "effect/Clock"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { apiConnectorCapabilities, type ApiConnectorShape } from "../Connector.ts"
+import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
 import { ConfigError, InvalidRequestError, ParseError, type LlmError } from "../Errors.ts"
-import { HttpClient, type HttpClientShape } from "../HttpClient.ts"
-import { LlmService, type StructuredResult } from "../LlmService.ts"
+import type { HttpClientShape } from "../HttpClient.ts"
+import type { StructuredResult } from "../LlmService.ts"
 import {
   ConnectorIds,
-  HealthStatus,
   LlmChunk,
   type JsonSchema,
   type LlmConfig,
@@ -242,20 +238,8 @@ export const makeLmStudioProvider = (
             })
           )
 
-  return {
+  return makeApiConnector({
     id: ConnectorIds.LmStudio,
-    kind: "Api",
-    capabilities: apiConnectorCapabilities(),
-    healthCheck: Effect.gen(function* () {
-      const startedAt = yield* Clock.currentTimeNanos
-      const available = yield* isAvailable
-      const completedAt = yield* Clock.currentTimeNanos
-      return HealthStatus.make({
-        availability: available ? "Healthy" : "Unhealthy",
-        authStatus: available ? "Valid" : "Invalid",
-        latency: Duration.nanos(completedAt - startedAt)
-      })
-    }),
     executeStream: (prompt) =>
       streamRequest([
         LmStudioMessage.make({
@@ -270,21 +254,7 @@ export const makeLmStudioProvider = (
           message: "LmStudio provider does not yet support tool calling in this implementation"
         })
       ),
-    executeStructured: <A, E, RD, RE>(
-      prompt: string,
-      schema: Schema.ConstraintCodec<A, E, RD, RE>,
-      jsonSchema: JsonSchema
-    ): Effect.Effect<A, LlmError, RD> =>
-      Effect.map(executeStructuredWithUsage(prompt, schema, jsonSchema), ([value]) => value),
     executeStructuredWithUsage,
     isAvailable
-  }
+  })
 }
-
-export const lmStudioProviderLayer = (
-  config: LlmConfig
-): Layer.Layer<LlmService, never, HttpClient> =>
-  Layer.effect(
-    LlmService,
-    Effect.map(HttpClient, (httpClient) => makeLmStudioProvider(config, httpClient))
-  )

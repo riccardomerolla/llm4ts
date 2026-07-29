@@ -44,7 +44,7 @@ export class Plan extends Schema.Class<Plan>("Plan")({
   }
 }
 
-export const stablePromptHash = (input: string): string => {
+export const stableHash = (input: string): string => {
   let hash = 0x811c9dc5
   for (let index = 0; index < input.length; index += 1) {
     hash ^= input.charCodeAt(index)
@@ -54,7 +54,7 @@ export const stablePromptHash = (input: string): string => {
 }
 
 export const defaultPlanPath = (prompt: string, directory = ".llm4ts"): string =>
-  `${directory}/plan-${stablePromptHash(prompt)}.md`
+  `${directory}/plan-${stableHash(prompt)}.md`
 
 const parseTask = (chunk: string): Effect.Effect<Task, PlanParseError> => {
   const lines = chunk.split("\n")

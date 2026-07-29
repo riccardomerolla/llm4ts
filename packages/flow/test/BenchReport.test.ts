@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Ref from "effect/Ref"
 import { TokenUsage } from "@llm4ts/core/Models"
 import {
   BenchCounters,
@@ -24,7 +23,7 @@ import {
   renderBenchReport
 } from "@llm4ts/flow/BenchReport"
 import { Info, StageCompleted, StageStarted, TokensUsed } from "@llm4ts/flow/FlowEvents"
-import { memoryFiles } from "./MemoryFiles.ts"
+import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 
 const record = (provider: string, totalMs: number, prompt: number): BenchRecord =>
   BenchRecord.make({
@@ -149,8 +148,7 @@ describe("benchmark report and codec", () => {
 
   it.effect("round-trips versioned benchmark JSONL records", () =>
     Effect.gen(function* () {
-      const state = yield* Ref.make<Readonly<Record<string, string>>>({})
-      const files = memoryFiles(state)
+      const files = (yield* makeMemoryPlainFileStore()).store
       yield* appendBenchRecord(files, "bench.jsonl", record("gemini", 8_000, 100))
       const loaded = yield* loadBenchRecords(files, "bench.jsonl")
 

@@ -1,17 +1,13 @@
-import * as Clock from "effect/Clock"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { apiConnectorCapabilities, type ApiConnectorShape } from "../Connector.ts"
+import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
 import { AuthenticationError, ConfigError, ParseError, type LlmError } from "../Errors.ts"
-import { HttpClient, type HttpClientShape } from "../HttpClient.ts"
-import { LlmService, type StructuredResult } from "../LlmService.ts"
+import type { HttpClientShape } from "../HttpClient.ts"
+import type { StructuredResult } from "../LlmService.ts"
 import {
   ConnectorIds,
-  HealthStatus,
   LlmChunk,
   ToolCall,
   ToolCallResponse,
@@ -182,7 +178,8 @@ export const makeOpenAIProvider = (
       : config.apiKey === undefined
         ? Effect.fail(
             AuthenticationError.make({
-              message: "Missing API key for OpenAI provider"
+              message:
+                "Missing API key for OpenAI provider (set OPENAI_API_KEY or pass apiKey in the connector config)"
             })
           )
         : Effect.succeed({
@@ -270,13 +267,6 @@ export const makeOpenAIProvider = (
       return result
     })
 
-  const executeStructured = <A, E, RD, RE>(
-    prompt: string,
-    schema: Schema.ConstraintCodec<A, E, RD, RE>,
-    jsonSchema: JsonSchema
-  ): Effect.Effect<A, LlmError, RD> =>
-    Effect.map(executeStructuredWithUsage(prompt, schema, jsonSchema), ([value]) => value)
-
   const executeWithTools = (
     prompt: string,
     tools: ReadonlyArray<ToolDefinition>
@@ -310,6 +300,8 @@ export const makeOpenAIProvider = (
       })
     })
 
+  // Parity with llm4zio v4.2.0 OpenAIProvider.isAvailable (`catchAll(_ => ZIO.succeed(true))`):
+  // a configured baseUrl counts as available even when the /models probe fails.
   const isAvailable: Effect.Effect<boolean> =
     config.baseUrl === undefined
       ? Effect.succeed(false)
@@ -322,23 +314,8 @@ export const makeOpenAIProvider = (
             })
           )
 
-  const healthCheck: Effect.Effect<HealthStatus, LlmError> = Effect.gen(function* () {
-    const startedAt = yield* Clock.currentTimeNanos
-    const available = yield* isAvailable
-    const completedAt = yield* Clock.currentTimeNanos
-
-    return HealthStatus.make({
-      availability: available ? "Healthy" : "Unhealthy",
-      authStatus: available ? "Valid" : "Invalid",
-      latency: Duration.nanos(completedAt - startedAt)
-    })
-  })
-
-  return {
+  return makeApiConnector({
     id: ConnectorIds.OpenAI,
-    kind: "Api",
-    capabilities: apiConnectorCapabilities(),
-    healthCheck,
     executeStream: (prompt) =>
       executeStreamRequest([
         OpenAIChatMessage.make({
@@ -348,16 +325,7 @@ export const makeOpenAIProvider = (
       ]),
     executeStreamWithHistory: (messages) => executeStreamRequest(openAIHistoryMessages(messages)),
     executeWithTools,
-    executeStructured,
     executeStructuredWithUsage,
     isAvailable
-  }
+  })
 }
-
-export const openAIProviderLayer = (
-  config: LlmConfig
-): Layer.Layer<LlmService, never, HttpClient> =>
-  Layer.effect(
-    LlmService,
-    Effect.map(HttpClient, (httpClient) => makeOpenAIProvider(config, httpClient))
-  )

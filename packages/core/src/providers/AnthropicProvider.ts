@@ -1,17 +1,13 @@
-import * as Clock from "effect/Clock"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { apiConnectorCapabilities, type ApiConnectorShape } from "../Connector.ts"
+import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
 import { AuthenticationError, ConfigError, ParseError, type LlmError } from "../Errors.ts"
-import { HttpClient, type HttpClientShape } from "../HttpClient.ts"
-import { LlmService, type StructuredResult } from "../LlmService.ts"
+import type { HttpClientShape } from "../HttpClient.ts"
+import type { StructuredResult } from "../LlmService.ts"
 import {
   ConnectorIds,
-  HealthStatus,
   LlmChunk,
   ToolCall,
   ToolCallResponse,
@@ -161,7 +157,8 @@ export const makeAnthropicProvider = (
       : config.apiKey === undefined
         ? Effect.fail(
             AuthenticationError.make({
-              message: "Missing API key for Anthropic provider"
+              message:
+                "Missing API key for Anthropic provider (set ANTHROPIC_API_KEY or pass apiKey in the connector config)"
             })
           )
         : Effect.succeed({
@@ -259,13 +256,6 @@ export const makeAnthropicProvider = (
       return result
     })
 
-  const executeStructured = <A, E, RD, RE>(
-    prompt: string,
-    schema: Schema.ConstraintCodec<A, E, RD, RE>,
-    jsonSchema: JsonSchema
-  ): Effect.Effect<A, LlmError, RD> =>
-    Effect.map(executeStructuredWithUsage(prompt, schema, jsonSchema), ([value]) => value)
-
   const executeWithTools = (
     prompt: string,
     tools: ReadonlyArray<ToolDefinition>
@@ -316,36 +306,15 @@ export const makeAnthropicProvider = (
     })
   )
 
-  return {
+  return makeApiConnector({
     id: ConnectorIds.Anthropic,
-    kind: "Api",
-    capabilities: apiConnectorCapabilities(),
-    healthCheck: Effect.gen(function* () {
-      const startedAt = yield* Clock.currentTimeNanos
-      const available = yield* isAvailable
-      const completedAt = yield* Clock.currentTimeNanos
-      return HealthStatus.make({
-        availability: available ? "Healthy" : "Unhealthy",
-        authStatus: available ? "Valid" : "Invalid",
-        latency: Duration.nanos(completedAt - startedAt)
-      })
-    }),
     executeStream,
     executeStreamWithHistory: (messages) => {
       const history = anthropicHistory(messages)
       return executeStreamRequest(history.messages, history.system)
     },
     executeWithTools,
-    executeStructured,
     executeStructuredWithUsage,
     isAvailable
-  }
+  })
 }
-
-export const anthropicProviderLayer = (
-  config: LlmConfig
-): Layer.Layer<LlmService, never, HttpClient> =>
-  Layer.effect(
-    LlmService,
-    Effect.map(HttpClient, (httpClient) => makeAnthropicProvider(config, httpClient))
-  )

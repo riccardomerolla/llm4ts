@@ -2,6 +2,27 @@
 
 ## 0.1.0
 
+- Added `@llm4ts/flow/Flow` with `implementPlanFlow` (the plan → branch →
+  per-task coder/review/commit spine) and `completeAndPublish`; examples now
+  compose it instead of hand-assembling the loop.
+- Added the `llm4ts` CLI `--help`, `--version`, and `doctor` (connector and
+  credential health report); errors now name the environment variable or
+  missing binary that fixes them.
+- Promoted `LLM4TS_PROVIDER`/`LLM4TS_MODEL` resolution
+  (`apiConnectorFromEnvironment`) and script helpers (`resolveFlowInput`,
+  `runFlowMain`) from the examples into `@llm4ts/runner`.
+- Introduced `makeApiConnector` and CLI `versionProbe` factory seams; the six
+  API providers and eight CLI connectors now share health, structured-output,
+  and capability derivation.
+- Consolidated connector identity (`connectorProvider`,
+  `connectorDefaultBaseUrl`) and removed a silent OpenAI base-URL fallback for
+  unknown API connector ids.
+- Shipped in-memory `PlainFileStore`/`Workspace` fakes in `@llm4ts/flow` for
+  deterministic tests; flow behavior tests moved into the flow package.
+- Removed unused `LlmService` accessor functions, per-provider layer
+  constructors, and pass-through streaming aliases (ADR 0002); `effect` is now
+  a pinned peer dependency and packages ship LICENSE, README, and source maps.
+
 - Recreated the public LLM, connector, provider, streaming, tool, evaluation,
   observability, flow, repository, replay, cost, benchmark, and equivalence
   contracts from the owned `llm4zio` v4.2.0 baseline.

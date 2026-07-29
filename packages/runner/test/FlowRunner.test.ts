@@ -9,8 +9,8 @@ import { makeFakeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import { makeMockProvider } from "@llm4ts/core/providers/MockProvider"
 import { Info, StageCompleted, StageStarted } from "@llm4ts/flow/FlowEvents"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { makeFlowRunnerContext, runEmbedded } from "@llm4ts/runner/FlowRunner"
-import type { TerminalSurface } from "@llm4ts/runner/Terminal"
+import { makeFlowRunnerContext, runWithBundle } from "@llm4ts/runner/FlowRunner"
+import { plainTerminalPalette, type TerminalSurface } from "@llm4ts/runner/Terminal"
 
 const files = (state: Ref.Ref<Readonly<Record<string, string>>>): PlainFileStoreShape => ({
   read: (path) => Ref.get(state).pipe(Effect.map((current) => current[path])),
@@ -91,6 +91,7 @@ describe("embedded runner", () => {
             connectorId: ConnectorIds.Mock
           })
           const surface: TerminalSurface = {
+            palette: plainTerminalPalette,
             log: (line) => Ref.update(output, (current) => [...current, line]),
             setStatus: (_label) => Effect.void,
             suspend: (effect) => effect
@@ -110,7 +111,8 @@ describe("embedded runner", () => {
             runId: "run-1"
           }
           const bundle = yield* makeFlowRunnerContext(options, dependencies)
-          const result = yield* runEmbedded(
+          const result = yield* runWithBundle(
+            bundle,
             options,
             (context) =>
               context.events

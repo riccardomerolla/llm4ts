@@ -1,16 +1,12 @@
-import * as Clock from "effect/Clock"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { apiConnectorCapabilities, type ApiConnectorShape } from "../Connector.ts"
+import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
 import { ConfigError, InvalidRequestError, ParseError, type LlmError } from "../Errors.ts"
-import { HttpClient, type HttpClientShape } from "../HttpClient.ts"
-import { LlmService, type StructuredResult } from "../LlmService.ts"
+import type { HttpClientShape } from "../HttpClient.ts"
+import type { StructuredResult } from "../LlmService.ts"
 import {
   ConnectorIds,
-  HealthStatus,
   LlmChunk,
   TokenUsage,
   type JsonSchema,
@@ -224,20 +220,8 @@ export const makeOllamaProvider = (
             })
           )
 
-  return {
+  return makeApiConnector({
     id: ConnectorIds.Ollama,
-    kind: "Api",
-    capabilities: apiConnectorCapabilities(),
-    healthCheck: Effect.gen(function* () {
-      const startedAt = yield* Clock.currentTimeNanos
-      const available = yield* isAvailable
-      const completedAt = yield* Clock.currentTimeNanos
-      return HealthStatus.make({
-        availability: available ? "Healthy" : "Unhealthy",
-        authStatus: available ? "Valid" : "Invalid",
-        latency: Duration.nanos(completedAt - startedAt)
-      })
-    }),
     executeStream: (prompt) => generateStream(prompt),
     executeStreamWithHistory: (messages) => chatStream(ollamaHistory(messages)),
     executeWithTools: () =>
@@ -246,21 +230,7 @@ export const makeOllamaProvider = (
           message: "Ollama provider does not support tool calling"
         })
       ),
-    executeStructured: <A, E, RD, RE>(
-      prompt: string,
-      schema: Schema.ConstraintCodec<A, E, RD, RE>,
-      jsonSchema: JsonSchema
-    ): Effect.Effect<A, LlmError, RD> =>
-      Effect.map(executeStructuredWithUsage(prompt, schema, jsonSchema), ([value]) => value),
     executeStructuredWithUsage,
     isAvailable
-  }
+  })
 }
-
-export const ollamaProviderLayer = (
-  config: LlmConfig
-): Layer.Layer<LlmService, never, HttpClient> =>
-  Layer.effect(
-    LlmService,
-    Effect.map(HttpClient, (httpClient) => makeOllamaProvider(config, httpClient))
-  )

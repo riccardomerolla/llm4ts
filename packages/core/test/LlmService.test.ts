@@ -4,13 +4,7 @@ import * as Layer from "effect/Layer"
 import type * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { InvalidRequestError } from "@llm4ts/core/Errors"
-import {
-  LlmService,
-  executeStream,
-  executeStreamWithHistory,
-  executeWithTools,
-  isAvailable
-} from "@llm4ts/core/LlmService"
+import { LlmService } from "@llm4ts/core/LlmService"
 import { LlmChunk, Message, ToolCallResponse, type JsonSchema } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 
@@ -64,18 +58,20 @@ describe("LlmService direct implementation", () => {
   )
 })
 
-layer(MockLlmService)("LlmService accessors", (it) => {
-  it.effect("streams through the service context", () =>
+layer(MockLlmService)("LlmService tag", (it) => {
+  it.effect("resolves the service from the context and streams", () =>
     Effect.gen(function* () {
-      const response = yield* collect(executeStream("test"))
+      const service = yield* LlmService
+      const response = yield* collect(service.executeStream("test"))
       assert.strictEqual(response.content, "Hello world")
     })
   )
 
-  it.effect("supports conversation history", () =>
+  it.effect("supports conversation history through the tag", () =>
     Effect.gen(function* () {
+      const service = yield* LlmService
       const response = yield* collect(
-        executeStreamWithHistory([
+        service.executeStreamWithHistory([
           new Message({ role: "User", content: "Hello" }),
           new Message({ role: "Assistant", content: "Hi there" })
         ])
@@ -84,10 +80,11 @@ layer(MockLlmService)("LlmService accessors", (it) => {
     })
   )
 
-  it.effect("supports tools and availability", () =>
+  it.effect("supports tools and availability through the tag", () =>
     Effect.gen(function* () {
-      const response = yield* executeWithTools("test", [])
-      const available = yield* isAvailable
+      const service = yield* LlmService
+      const response = yield* service.executeWithTools("test", [])
+      const available = yield* service.isAvailable
 
       assert.strictEqual(response.content, "No tools needed")
       assert.isTrue(available)

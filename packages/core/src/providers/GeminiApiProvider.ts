@@ -1,17 +1,13 @@
-import * as Clock from "effect/Clock"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { apiConnectorCapabilities, type ApiConnectorShape } from "../Connector.ts"
+import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
 import { AuthenticationError, ConfigError, ParseError, type LlmError } from "../Errors.ts"
-import { HttpClient, type HttpClientShape } from "../HttpClient.ts"
-import { LlmService, type StructuredResult } from "../LlmService.ts"
+import type { HttpClientShape } from "../HttpClient.ts"
+import type { StructuredResult } from "../LlmService.ts"
 import {
   ConnectorIds,
-  HealthStatus,
   LlmChunk,
   TokenUsage,
   ToolCall,
@@ -187,7 +183,8 @@ export const makeGeminiApiProvider = (
       : config.apiKey === undefined
         ? Effect.fail(
             AuthenticationError.make({
-              message: "Missing API key for Gemini API provider"
+              message:
+                "Missing API key for Gemini API provider (set GEMINI_API_KEY or GOOGLE_API_KEY, or pass apiKey in the connector config)"
             })
           )
         : Effect.succeed({
@@ -277,13 +274,6 @@ export const makeGeminiApiProvider = (
       return result
     })
 
-  const executeStructured = <A, E, RD, RE>(
-    prompt: string,
-    schema: Schema.ConstraintCodec<A, E, RD, RE>,
-    jsonSchema: JsonSchema
-  ): Effect.Effect<A, LlmError, RD> =>
-    Effect.map(executeStructuredWithUsage(prompt, schema, jsonSchema), ([value]) => value)
-
   const executeWithTools = (
     prompt: string,
     tools: ReadonlyArray<ToolDefinition>
@@ -336,33 +326,12 @@ export const makeGeminiApiProvider = (
     })
   )
 
-  return {
+  return makeApiConnector({
     id: ConnectorIds.GeminiApi,
-    kind: "Api",
-    capabilities: apiConnectorCapabilities(),
-    healthCheck: Effect.gen(function* () {
-      const startedAt = yield* Clock.currentTimeNanos
-      const available = yield* isAvailable
-      const completedAt = yield* Clock.currentTimeNanos
-      return HealthStatus.make({
-        availability: available ? "Healthy" : "Unhealthy",
-        authStatus: available ? "Valid" : "Invalid",
-        latency: Duration.nanos(completedAt - startedAt)
-      })
-    }),
     executeStream,
     executeStreamWithHistory: (messages) => executeStreamWithContents(geminiContents(messages)),
     executeWithTools,
-    executeStructured,
     executeStructuredWithUsage,
     isAvailable
-  }
+  })
 }
-
-export const geminiApiProviderLayer = (
-  config: LlmConfig
-): Layer.Layer<LlmService, never, HttpClient> =>
-  Layer.effect(
-    LlmService,
-    Effect.map(HttpClient, (httpClient) => makeGeminiApiProvider(config, httpClient))
-  )

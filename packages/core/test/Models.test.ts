@@ -11,6 +11,8 @@ import {
   LlmResponse,
   Message,
   TokenUsage,
+  connectorDefaultBaseUrl,
+  connectorProvider,
   defaultBaseUrl,
   providerConnectorId
 } from "@llm4ts/core/Models"
@@ -79,6 +81,14 @@ describe("core models", () => {
     assert.strictEqual(defaultBaseUrl("GeminiCli"), undefined)
     assert.deepStrictEqual(providerConnectorId("OpenCode"), ConnectorIds.OpenCode)
     assert.strictEqual(ConnectorIds.Cursor.value, "cursor")
+  })
+
+  it("maps connector identifiers back to providers without a silent fallback", () => {
+    assert.strictEqual(connectorProvider(ConnectorIds.OpenAI), "OpenAI")
+    assert.strictEqual(connectorProvider(ConnectorIds.Cursor), undefined)
+    assert.strictEqual(connectorDefaultBaseUrl(ConnectorIds.OpenCode), "http://localhost:4096")
+    assert.strictEqual(connectorDefaultBaseUrl(ConnectorIds.ClaudeCli), undefined)
+    assert.strictEqual(connectorDefaultBaseUrl(ConnectorIds.Mock), undefined)
   })
 
   it.effect("refuses to serialize API keys", () =>

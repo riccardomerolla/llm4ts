@@ -3,18 +3,8 @@ import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { ProviderError } from "../Errors.ts"
-import { ConnectorIds, HealthStatus, LlmChunk } from "../Models.ts"
+import { ConnectorIds, LlmChunk } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
-
-const healthy = HealthStatus.make({
-  availability: "Healthy",
-  authStatus: "Valid"
-})
-
-const unhealthy = HealthStatus.make({
-  availability: "Unhealthy",
-  authStatus: "Unknown"
-})
 
 export const buildCopilotArgv = (prompt: string): ReadonlyArray<string> => [
   "gh",
@@ -29,11 +19,6 @@ export const makeCopilotConnector = (
   config: CliConnectorConfig,
   executor: ProcessExecutorShape
 ): CliConnectorShape => {
-  const healthCheck = executor.run(["gh", "copilot", "--version"], ".", {}).pipe(
-    Effect.as(healthy),
-    Effect.catch(() => Effect.succeed(unhealthy))
-  )
-
   const complete = Effect.fn("@llm4ts/core/providers/CopilotConnector.complete")(function* (
     prompt: string
   ) {
@@ -57,7 +42,6 @@ export const makeCopilotConnector = (
       Stream.fromEffect(complete(prompt)).pipe(
         Stream.map((text) => LlmChunk.make({ delta: text }))
       ),
-    healthCheck,
-    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy")
+    versionProbe: { executor, binary: "gh", versionArgs: ["copilot", "--version"], cwd: "." }
   })
 }

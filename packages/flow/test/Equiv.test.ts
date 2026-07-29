@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Ref from "effect/Ref"
 import { ExecGrants, Grants, allGrants, restricted } from "@llm4ts/core/Capability"
 import {
   ProcessResult,
@@ -19,7 +18,7 @@ import {
 import { renderEquivReport } from "@llm4ts/flow/EquivReport"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { ComparisonPolicy } from "@llm4ts/flow/Pack"
-import { memoryFiles } from "./MemoryFiles.ts"
+import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 
 const policy = (
   ordering: "Ordered" | "Unordered" | "PerKey",
@@ -93,11 +92,11 @@ describe("equivalence diff and report", () => {
 describe("equivalence vector boundaries", () => {
   it.effect("round-trips vectors and rejects malformed lines", () =>
     Effect.gen(function* () {
-      const state = yield* Ref.make<Readonly<Record<string, string>>>({})
-      const files = memoryFiles(state)
+      const memory = yield* makeMemoryPlainFileStore()
+      const files = memory.store
       yield* writeEquivVectors(files, "vectors.jsonl", [vector])
       const loaded = yield* readEquivVectors(files, "vectors.jsonl")
-      yield* Ref.set(state, { "vectors.jsonl": "not-json\n" })
+      yield* memory.replace({ "vectors.jsonl": "not-json\n" })
       const malformed = yield* Effect.flip(readEquivVectors(files, "vectors.jsonl"))
 
       assert.deepStrictEqual(loaded, [vector])

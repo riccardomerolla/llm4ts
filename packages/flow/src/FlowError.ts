@@ -64,7 +64,13 @@ export class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("Proce
 export class FlowLlmError extends Schema.TaggedErrorClass<FlowLlmError>()("Llm", {
   message: Schema.String,
   cause: Schema.optionalKey(LlmError)
-}) {}
+}) {
+  static readonly from = (cause?: typeof LlmError.Type): FlowLlmError =>
+    FlowLlmError.make({
+      message: cause?.message ?? "LLM request failed",
+      ...(cause === undefined ? {} : { cause })
+    })
+}
 
 export class FlowCapabilityDenied extends Schema.TaggedErrorClass<FlowCapabilityDenied>()(
   "CapabilityDenied",

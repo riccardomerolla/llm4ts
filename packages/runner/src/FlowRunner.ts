@@ -1,8 +1,8 @@
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
-import type { CliConnectorConfig, ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
-import { CliConnectorConfig as CliConfig } from "@llm4ts/core/ConnectorConfig"
+import type { ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import { defaultReasoningConfig } from "@llm4ts/core/ConnectorConfig"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import type { HttpClientShape } from "@llm4ts/core/HttpClient"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
@@ -25,7 +25,7 @@ import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
 import { prepareConnector } from "./Connectors.ts"
 import {
   consumeTerminalEvents,
-  makePlainTerminalSurface,
+  makeTerminalSurface,
   type TerminalSurface,
   type Verbosity
 } from "./Terminal.ts"
@@ -73,16 +73,6 @@ export interface FlowRunnerBundle {
   readonly events: FlowEventHub
 }
 
-const reasoningConfig = (
-  coder: ConnectorConfig,
-  explicit: ConnectorConfig | undefined
-): ConnectorConfig => {
-  if (explicit !== undefined) {
-    return explicit
-  }
-  return coder instanceof CliConfig ? CliConfig.make({ ...coder, readOnly: true }) : coder
-}
-
 export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeContext")(function* (
   options: FlowRunnerOptions,
   dependencies: FlowRunnerDependencies
@@ -93,7 +83,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     options.workDir,
     options.environment ?? process.env
   )
-  const reasoning = reasoningConfig(options.coder, options.reasoning)
+  const reasoning = defaultReasoningConfig(options.coder, options.reasoning)
   const reasoningPrepared = prepareConnector(
     reasoning,
     options.workDir,
@@ -101,14 +91,14 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   )
   const coder = yield* dependencies.registry
     .resolve(coderConfig)
-    .pipe(Effect.mapError((cause) => FlowLlmError.make({ message: cause.message, cause })))
+    .pipe(Effect.mapError(FlowLlmError.from))
   const reasoningService = yield* dependencies.registry
     .resolve(reasoningPrepared)
-    .pipe(Effect.mapError((cause) => FlowLlmError.make({ message: cause.message, cause })))
+    .pipe(Effect.mapError(FlowLlmError.from))
   const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
     dependencies.registry
       .resolve(prepareConnector(configuration, options.workDir, options.environment ?? process.env))
-      .pipe(Effect.mapError((cause) => FlowLlmError.make({ message: cause.message, cause })))
+      .pipe(Effect.mapError(FlowLlmError.from))
   )
   return {
     events,
@@ -127,14 +117,20 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   }
 })
 
-export const runEmbedded = Effect.fn("@llm4ts/runner/FlowRunner.runEmbedded")(function* <A, E, R>(
+export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle")(function* <
+  A,
+  E,
+  R
+>(
+  bundle: FlowRunnerBundle,
   options: FlowRunnerOptions,
   body: (context: FlowContextShape) => Effect.Effect<A, E, R>,
   dependencies: FlowRunnerDependencies = nodeFlowRunnerDependencies()
 ): Effect.fn.Return<A, E | FlowError, R | Scope.Scope> {
-  const bundle = yield* makeFlowRunnerContext(options, dependencies)
   const tracker = yield* makeCostTracker()
-  const surface = options.surface ?? makePlainTerminalSurface()
+  const surface =
+    options.surface ?? (yield* makeTerminalSurface(options.environment ?? process.env))
+  const palette = surface.palette
   const terminal = yield* consumeTerminalEvents(
     bundle.events,
     surface,
@@ -152,11 +148,9 @@ export const runEmbedded = Effect.fn("@llm4ts/runner/FlowRunner.runEmbedded")(fu
   if (recorder !== undefined) {
     yield* recorder.consume(bundle.events)
   }
+  yield* surface.setStatus("preparing flow")
   return yield* body(bundle.context).pipe(
     Effect.provideService(FlowContext, bundle.context),
-    Effect.tapError((error) =>
-      surface.log(`\n✖ flow failed: ${error instanceof Error ? error.message : String(error)}`)
-    ),
     Effect.ensuring(
       Effect.all(
         [
@@ -166,11 +160,39 @@ export const runEmbedded = Effect.fn("@llm4ts/runner/FlowRunner.runEmbedded")(fu
         ],
         { concurrency: "unbounded" }
       ).pipe(
+        Effect.andThen(surface.setStatus(undefined)),
         Effect.andThen(tracker.summary),
         Effect.flatMap((summary) => surface.log(`\n${summary}`))
       )
+    ),
+    Effect.tapError((error) =>
+      surface
+        .setStatus(undefined)
+        .pipe(
+          Effect.andThen(
+            surface.log(
+              `\n${palette.fail(
+                `flow failed: ${error instanceof Error ? error.message : String(error)}`
+              )}`
+            )
+          )
+        )
+    ),
+    Effect.tap(() =>
+      surface
+        .setStatus(undefined)
+        .pipe(Effect.andThen(surface.log(`\n${palette.stageDone("flow completed")}`)))
     )
   )
+})
+
+export const runEmbedded = Effect.fn("@llm4ts/runner/FlowRunner.runEmbedded")(function* <A, E, R>(
+  options: FlowRunnerOptions,
+  body: (context: FlowContextShape) => Effect.Effect<A, E, R>,
+  dependencies: FlowRunnerDependencies = nodeFlowRunnerDependencies()
+): Effect.fn.Return<A, E | FlowError, R | Scope.Scope> {
+  const bundle = yield* makeFlowRunnerContext(options, dependencies)
+  return yield* runWithBundle(bundle, options, body, dependencies)
 })
 
 export const runNode = <A, E, R>(
@@ -178,4 +200,21 @@ export const runNode = <A, E, R>(
   body: (context: FlowContextShape) => Effect.Effect<A, E, R>
 ): Effect.Effect<A, E | FlowError, R> => Effect.scoped(runEmbedded(options, body))
 
-export const cliCoderConfig = (configuration: CliConnectorConfig): ConnectorConfig => configuration
+const mainErrorMessage = (error: unknown): string =>
+  error instanceof Error && error.message.length > 0 ? error.message : String(error)
+
+export const runFlowMain = <E>(program: Effect.Effect<void, E>): void => {
+  Effect.runFork(
+    program.pipe(
+      Effect.match({
+        onFailure: (error) =>
+          Effect.sync(() => {
+            process.stderr.write(`${mainErrorMessage(error)}\n`)
+            process.exitCode = 1
+          }),
+        onSuccess: () => Effect.void
+      }),
+      Effect.flatten
+    )
+  )
+}

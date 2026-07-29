@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ConnectorIds, HealthStatus, LlmChunk, TokenUsage } from "../Models.ts"
+import { ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   failClassifiedCliError,
@@ -15,12 +15,6 @@ import {
   toolEventChunk,
   usageEventChunk
 } from "./CliSupport.ts"
-
-const healthy = HealthStatus.make({ availability: "Healthy", authStatus: "Valid" })
-const unhealthy = HealthStatus.make({
-  availability: "Unhealthy",
-  authStatus: "Unknown"
-})
 
 export const openCodeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => [
   ...optionalModelArgs(config.model),
@@ -96,10 +90,6 @@ export const makeOpenCodeCliConnector = (
     ...extraArgs,
     prompt
   ]
-  const healthCheck = executor.run(["opencode", "--version"], cwd, {}).pipe(
-    Effect.as(healthy),
-    Effect.catch(() => Effect.succeed(unhealthy))
-  )
 
   const complete = Effect.fn("@llm4ts/core/providers/OpenCodeCliConnector.complete")(function* (
     prompt: string
@@ -140,7 +130,6 @@ export const makeOpenCodeCliConnector = (
     buildInteractiveArgv: (_context) => ["opencode"],
     complete,
     completeStream,
-    healthCheck,
-    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy")
+    versionProbe: { executor, binary: "opencode", cwd }
   })
 }

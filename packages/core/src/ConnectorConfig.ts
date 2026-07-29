@@ -132,3 +132,15 @@ export const defaultCliConnectorConfigs = Object.freeze({
   Claude: new CliConnectorConfig({ connectorId: ConnectorIds.ClaudeCli }),
   Codex: new CliConnectorConfig({ connectorId: ConnectorIds.Codex })
 })
+
+export const defaultReasoningConfig = (
+  coder: ConnectorConfig,
+  explicit?: ConnectorConfig
+): ConnectorConfig => {
+  if (explicit !== undefined) {
+    return explicit
+  }
+  return coder instanceof CliConnectorConfig
+    ? CliConnectorConfig.make({ ...coder, readOnly: true })
+    : coder
+}

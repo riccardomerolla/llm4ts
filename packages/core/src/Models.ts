@@ -82,6 +82,25 @@ export const defaultBaseUrl = (provider: LlmProvider): string | undefined => {
   }
 }
 
+const connectorProviderTable: Readonly<Record<string, LlmProvider>> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  "gemini-api": "GeminiApi",
+  "lm-studio": "LmStudio",
+  ollama: "Ollama",
+  opencode: "OpenCode",
+  "gemini-cli": "GeminiCli",
+  mock: "Mock"
+}
+
+export const connectorProvider = (id: ConnectorId): LlmProvider | undefined =>
+  connectorProviderTable[id.value]
+
+export const connectorDefaultBaseUrl = (id: ConnectorId): string | undefined => {
+  const provider = connectorProvider(id)
+  return provider === undefined ? undefined : defaultBaseUrl(provider)
+}
+
 export const providerConnectorId = (provider: LlmProvider): ConnectorId => {
   switch (provider) {
     case "GeminiCli":

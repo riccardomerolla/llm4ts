@@ -25,7 +25,10 @@ const invalidArgv = (): InvalidRequestError => InvalidRequestError.make({ messag
 
 const processFailure = (argv: ReadonlyArray<string>, detail: string): ProviderError =>
   ProviderError.make({
-    message: `${commandName(argv)} failed: ${detail}`
+    message: detail.includes("ENOENT")
+      ? `${commandName(argv)} failed: command not found. Install '${commandName(argv)}' and make sure it is on your PATH` +
+        ` (coding-agent CLIs can be switched with LLM4TS_CODER)`
+      : `${commandName(argv)} failed: ${detail}`
   })
 
 const spawnChild = (

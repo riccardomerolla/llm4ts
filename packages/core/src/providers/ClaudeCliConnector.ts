@@ -9,7 +9,6 @@ import type { StructuredResult } from "../LlmService.ts"
 import {
   ConnectorCapabilities,
   ConnectorIds,
-  HealthStatus,
   LlmChunk,
   TokenUsage,
   type JsonSchema
@@ -29,12 +28,6 @@ import {
   toolEventChunk,
   usageEventChunk
 } from "./CliSupport.ts"
-
-const healthy = HealthStatus.make({ availability: "Healthy", authStatus: "Valid" })
-const unhealthy = HealthStatus.make({
-  availability: "Unhealthy",
-  authStatus: "Unknown"
-})
 
 export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => {
   const effectiveFlags = config.readOnly
@@ -109,10 +102,6 @@ export const makeClaudeCliConnector = (
 ): CliConnectorShape => {
   const cwd = config.workingDir ?? "."
   const extraArgs = claudeCliExtraArgs(config)
-  const healthCheck = executor.run(["claude", "--version"], cwd, {}).pipe(
-    Effect.as(healthy),
-    Effect.catch(() => Effect.succeed(unhealthy))
-  )
 
   const complete = Effect.fn("@llm4ts/core/providers/ClaudeCliConnector.complete")(function* (
     prompt: string
@@ -184,8 +173,7 @@ export const makeClaudeCliConnector = (
     buildInteractiveArgv: (_context) => ["claude", ...extraArgs],
     complete,
     completeStream,
-    healthCheck,
-    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy")
+    versionProbe: { executor, binary: "claude", cwd }
   })
 
   const executeStructuredWithUsage = <A, E, RD, RE>(

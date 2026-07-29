@@ -19,6 +19,10 @@ export list; the following modules are the main entry points.
 
 ## Flow
 
+- `@llm4ts/flow/Flow`: the flow spine — `implementPlanFlow` recovers or creates
+  a plan, checks out the epic branch, and runs the per-task coder + review +
+  commit loop; `completeAndPublish` streams one prompt and publishes the
+  response as an assistant message.
 - `@llm4ts/flow/FlowContext` and `FlowEvents`: workflow dependencies and event
   protocol.
 - `@llm4ts/flow/Chat`: atomic, serialized conversation history for coding

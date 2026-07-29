@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Ref from "effect/Ref"
 import { TokenUsage } from "@llm4ts/core/Models"
 import {
   CostBudget,
@@ -13,8 +12,8 @@ import {
 } from "@llm4ts/flow/CostLedger"
 import { makeCostTracker } from "@llm4ts/flow/CostTracker"
 import { Info, StageCompleted, StageStarted, TokensUsed } from "@llm4ts/flow/FlowEvents"
+import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import { estimateCostUsd } from "@llm4ts/flow/PriceList"
-import { memoryFiles } from "./MemoryFiles.ts"
 
 describe("pricing and cost tracking", () => {
   it("matches pinned prefix rates including cached input", () => {
@@ -94,8 +93,7 @@ describe("cost ledger and budgets", () => {
 
   it.effect("round-trips append-only records and merges cells deterministically", () =>
     Effect.gen(function* () {
-      const state = yield* Ref.make<Readonly<Record<string, string>>>({})
-      const files = memoryFiles(state)
+      const files = (yield* makeMemoryPlainFileStore()).store
       yield* appendCostRecord(files, "costs.jsonl", record)
       yield* appendCostRecord(
         files,

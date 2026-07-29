@@ -280,14 +280,7 @@ const reviewWith = (
       ReviewResult,
       reviewJsonSchema
     )
-    .pipe(
-      Effect.mapError((cause) =>
-        FlowLlmError.make({
-          message: cause.message,
-          cause
-        })
-      )
-    )
+    .pipe(Effect.mapError(FlowLlmError.from))
 
 export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop")(function* (
   options: ReviewAndFixOptions

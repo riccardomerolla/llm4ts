@@ -3,7 +3,7 @@ import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { ProviderError } from "../Errors.ts"
-import { ConnectorIds, HealthStatus, LlmChunk, TokenUsage } from "../Models.ts"
+import { ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   jsonBooleanField,
@@ -16,12 +16,6 @@ import {
   toolEventChunk,
   usageEventChunk
 } from "./CliSupport.ts"
-
-const healthy = HealthStatus.make({ availability: "Healthy", authStatus: "Valid" })
-const unhealthy = HealthStatus.make({
-  availability: "Unhealthy",
-  authStatus: "Unknown"
-})
 
 export const piExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => [
   ...optionalModelArgs(config.model),
@@ -96,10 +90,6 @@ export const makePiConnector = (
 ): CliConnectorShape => {
   const cwd = config.workingDir ?? "."
   const extraArgs = piExtraArgs(config)
-  const healthCheck = executor.run(["pi", "--version"], cwd, {}).pipe(
-    Effect.as(healthy),
-    Effect.catch(() => Effect.succeed(unhealthy))
-  )
 
   const complete = Effect.fn("@llm4ts/core/providers/PiConnector.complete")(function* (
     prompt: string
@@ -147,7 +137,6 @@ export const makePiConnector = (
     buildInteractiveArgv: (_context) => ["pi", ...extraArgs],
     complete,
     completeStream,
-    healthCheck,
-    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy")
+    versionProbe: { executor, binary: "pi", cwd }
   })
 }

@@ -31,12 +31,7 @@ export const summarisePr = Effect.fn("@llm4ts/flow/PrSummary.summarise")(functio
     "Diff:",
     diff
   ].join("\n")
-  return yield* reasoning.executeStructured(prompt, PrSummary, prSummaryJsonSchema).pipe(
-    Effect.mapError((cause) =>
-      FlowLlmError.make({
-        message: cause.message,
-        cause
-      })
-    )
-  )
+  return yield* reasoning
+    .executeStructured(prompt, PrSummary, prSummaryJsonSchema)
+    .pipe(Effect.mapError(FlowLlmError.from))
 })

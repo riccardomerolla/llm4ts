@@ -34,6 +34,21 @@ describe("flow CLI arguments", () => {
     assert.isFalse(parseFlowArgs(["--repo"]).ok)
   })
 
+  it("recognizes help and version flags", () => {
+    assert.deepStrictEqual(parseFlowArgs(["--help"]), {
+      ok: true,
+      value: { help: true }
+    })
+    assert.deepStrictEqual(parseFlowArgs(["-h"]), {
+      ok: true,
+      value: { help: true }
+    })
+    assert.deepStrictEqual(parseFlowArgs(["--version"]), {
+      ok: true,
+      value: { version: true }
+    })
+  })
+
   it.effect("gives prompt files precedence and validates repositories", () =>
     Effect.scoped(
       Effect.gen(function* () {

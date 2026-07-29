@@ -1,13 +1,13 @@
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import { makeChat } from "@llm4ts/flow/Chat"
+import { implementPlanFlow } from "@llm4ts/flow/Flow"
 import { FlowAborted } from "@llm4ts/flow/FlowError"
 import { parseIssueRef } from "@llm4ts/flow/GitHubTool"
-import { implementTaskLoop, stage } from "@llm4ts/flow/PlanExecution"
+import { stage } from "@llm4ts/flow/PlanExecution"
 import { assessThenPlan } from "@llm4ts/flow/Planner"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { summarisePr } from "@llm4ts/flow/PrSummary"
-import { allReviewers, reviewAndFixLoop } from "@llm4ts/flow/Review"
+import { allReviewers } from "@llm4ts/flow/Review"
 import { ScriptUsage } from "@llm4ts/runner/FlowArgs"
 import { coderFromEnv } from "@llm4ts/runner/Connectors"
 import { runNode } from "@llm4ts/runner/FlowRunner"
@@ -66,25 +66,14 @@ const program = Effect.gen(function* () {
           return
         }
 
-        yield* stage(context.events, "branch", context.git.checkoutOrCreate(plan.epicId))
-        const coder = yield* makeChat(context.coder, {
-          system: "Implement one issue task at a time in the current repository."
+        const completed = yield* implementPlanFlow(context, {
+          store,
+          planPath,
+          plan: Effect.succeed(plan),
+          system: "Implement one issue task at a time in the current repository.",
+          reviewers: allReviewers
         })
-        yield* implementTaskLoop(store, context.events, planPath, plan, (task) =>
-          Effect.gen(function* () {
-            yield* coder.ask(plan.taskPrompt(task))
-            yield* reviewAndFixLoop({
-              reviewers: allReviewers,
-              reviewerService: context.reviewers[0] ?? context.reasoning,
-              coder,
-              taskTitle: task.title,
-              currentDiff: context.git.diff,
-              events: context.events
-            })
-            yield* context.git.commitAll(`${plan.epicId}: ${task.title}`)
-          })
-        )
-        yield* stage(context.events, "push branch", context.git.push("origin", plan.epicId))
+        yield* stage(context.events, "push branch", context.git.push("origin", completed.epicId))
         const base = yield* context.git.defaultBase
         const diff = yield* context.git.diffVsBase(base)
         if (diff.trim().length === 0) {

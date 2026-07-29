@@ -72,7 +72,6 @@ export const makeAntigravityConnector = (
     buildInteractiveArgv: (_context) => ["agy", ...antigravityExtraArgs(config)],
     complete,
     completeStream,
-    healthCheck,
-    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy")
+    healthCheck
   })
 }

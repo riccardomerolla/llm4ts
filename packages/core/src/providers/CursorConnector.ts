@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ConnectorIds, HealthStatus, LlmChunk } from "../Models.ts"
+import { ConnectorIds, LlmChunk } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   failClassifiedCliError,
@@ -17,12 +17,6 @@ import {
   toolEventChunk,
   type JsonValue
 } from "./CliSupport.ts"
-
-const healthy = HealthStatus.make({ availability: "Healthy", authStatus: "Valid" })
-const unhealthy = HealthStatus.make({
-  availability: "Unhealthy",
-  authStatus: "Unknown"
-})
 
 export const cursorExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => [
   ...optionalModelArgs(config.model),
@@ -82,11 +76,6 @@ export const makeCursorConnector = (
     "-p",
     prompt
   ]
-  const healthCheck = executor.run(["cursor-agent", "--version"], cwd, {}).pipe(
-    Effect.as(healthy),
-    Effect.catch(() => Effect.succeed(unhealthy))
-  )
-
   const complete = Effect.fn("@llm4ts/core/providers/CursorConnector.complete")(function* (
     prompt: string
   ) {
@@ -126,7 +115,6 @@ export const makeCursorConnector = (
     buildInteractiveArgv: (_context) => ["cursor-agent", ...extraArgs],
     complete,
     completeStream,
-    healthCheck,
-    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy")
+    versionProbe: { executor, binary: "cursor-agent", cwd }
   })
 }

@@ -1,8 +1,9 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
-import { PlanParseError, UnsupportedSchemaVersion, type FlowError } from "./FlowError.ts"
-import type { PersistenceError } from "./FlowError.ts"
+import { PersistenceError, PlanParseError, UnsupportedSchemaVersion } from "./FlowError.ts"
+import type { FlowError } from "./FlowError.ts"
 import { parsePlan } from "./Plan.ts"
 import type { Plan } from "./Plan.ts"
 
@@ -17,6 +18,70 @@ export interface PlainFileStoreShape {
 export class PlainFileStore extends Context.Service<PlainFileStore, PlainFileStoreShape>()(
   "@llm4ts/flow/PlainFileStore"
 ) {}
+
+const hexDigest = (buffer: ArrayBuffer): string =>
+  Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+
+const sha256Hex = (path: string, contents: string): Effect.Effect<string, PersistenceError> =>
+  Effect.tryPromise({
+    try: async () =>
+      hexDigest(
+        await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(contents))
+      ),
+    catch: (error) =>
+      PersistenceError.make({
+        message: `failed to hash ${path}: ${error instanceof Error ? error.message : String(error)}`,
+        cause: error
+      })
+  })
+
+export interface MemoryPlainFileStore {
+  readonly store: PlainFileStoreShape
+  readonly files: Effect.Effect<Readonly<Record<string, string>>>
+  readonly replace: (files: Readonly<Record<string, string>>) => Effect.Effect<void>
+}
+
+export const makeMemoryPlainFileStore = (
+  initial: Readonly<Record<string, string>> = {}
+): Effect.Effect<MemoryPlainFileStore> =>
+  Ref.make(initial).pipe(
+    Effect.map((state) => {
+      const store: PlainFileStoreShape = {
+        read: (path) => Ref.get(state).pipe(Effect.map((files) => files[path])),
+        writeAtomic: (path, contents) =>
+          Ref.update(state, (files) => ({ ...files, [path]: contents })),
+        append: (path, contents) =>
+          Ref.update(state, (files) => ({
+            ...files,
+            [path]: `${files[path] ?? ""}${contents}`
+          })),
+        remove: (path) =>
+          Ref.update(state, (files) =>
+            Object.fromEntries(Object.entries(files).filter(([candidate]) => candidate !== path))
+          ),
+        hashSha256: (path) =>
+          Ref.get(state).pipe(
+            Effect.flatMap((files) => {
+              const contents = files[path]
+              return contents === undefined
+                ? Effect.fail(
+                    PersistenceError.make({
+                      message: `failed to hash ${path}: file does not exist`
+                    })
+                  )
+                : sha256Hex(path, contents)
+            })
+          )
+      }
+      return {
+        store,
+        files: Ref.get(state),
+        replace: (files: Readonly<Record<string, string>>) => Ref.set(state, files)
+      }
+    })
+  )
 
 export interface PlanStoreShape {
   readonly save: (path: string, plan: Plan) => Effect.Effect<void, PersistenceError>

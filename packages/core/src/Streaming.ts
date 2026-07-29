@@ -2,10 +2,9 @@ import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { ConfigError, ParseError, TimeoutError, type LlmError } from "./Errors.ts"
+import { ParseError, TimeoutError, type LlmError } from "./Errors.ts"
 import { LlmChunk, LlmResponse, StreamProgress } from "./Models.ts"
 
 const appendChunk = (response: LlmResponse, chunk: LlmChunk): LlmResponse => {
@@ -79,31 +78,6 @@ export const parsePartialJson = <A, E, RD, RE, R>(
     )
   )
 
-export const retryStream = <A, E, R, X, E2, R2>(
-  stream: Stream.Stream<A, E, R>,
-  policy: Schedule.Schedule<X, E, E2, R2>
-): Stream.Stream<A, E | E2, R | R2> => Stream.retry(stream, policy)
-
-export const buffered = <A, E, R>(
-  stream: Stream.Stream<A, E, R>,
-  capacity: number
-): Stream.Stream<A, E, R> =>
-  Stream.buffer(stream, {
-    capacity,
-    strategy: "suspend"
-  })
-
-export interface BatchOptions {
-  readonly maxSize?: number
-  readonly maxDuration?: Duration.Input
-}
-
-export const batch = <R>(
-  stream: Stream.Stream<LlmChunk, LlmError, R>,
-  options: BatchOptions = {}
-): Stream.Stream<Array<LlmChunk>, LlmError, R> =>
-  Stream.groupedWithin(stream, options.maxSize ?? 10, options.maxDuration ?? "100 millis")
-
 const timeoutError = (duration: Duration.Input): TimeoutError =>
   TimeoutError.make({ duration: Duration.fromInputUnsafe(duration) })
 
@@ -114,13 +88,6 @@ export const withTimeout = <R>(
   Stream.timeoutOrElse(stream, {
     duration,
     orElse: () => Stream.fail(timeoutError(duration))
-  })
-
-export const mergeAll = <R>(
-  streams: Iterable<Stream.Stream<LlmChunk, LlmError, R>>
-): Stream.Stream<LlmChunk, LlmError, R> =>
-  Stream.mergeAll(streams, {
-    concurrency: "unbounded"
   })
 
 export const cancellable = <R>(
@@ -141,26 +108,6 @@ export const withSnapshots = <R>(
     Stream.scan("", (content, chunk) => content + chunk.delta),
     Stream.debounce(snapshotInterval)
   )
-
-export const withFallback = <R, R2>(
-  stream: Stream.Stream<LlmChunk, LlmError, R>,
-  fallback: () => Stream.Stream<LlmChunk, LlmError, R2>
-): Stream.Stream<LlmChunk, LlmError, R | R2> => Stream.catchIf(stream, () => true, fallback)
-
-export const rateLimit = <R>(
-  stream: Stream.Stream<LlmChunk, LlmError, R>,
-  maxPerSecond: number
-): Stream.Stream<LlmChunk, LlmError, R> => {
-  if (!Number.isInteger(maxPerSecond) || maxPerSecond <= 0) {
-    return Stream.fail(
-      ConfigError.make({
-        message: `maxPerSecond must be a positive integer; received ${maxPerSecond}`
-      })
-    )
-  }
-
-  return Stream.schedule(stream, Schedule.fixed(1_000 / maxPerSecond))
-}
 
 const chunkJson = Schema.fromJsonString(Schema.toCodecJson(LlmChunk))
 

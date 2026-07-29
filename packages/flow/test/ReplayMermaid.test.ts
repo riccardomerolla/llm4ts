@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
 import {
@@ -23,13 +22,12 @@ import {
   replayFromTrace,
   segmentReplayTurns
 } from "@llm4ts/flow/Replay"
-import { memoryFiles } from "./MemoryFiles.ts"
+import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 
 describe("trace replay", () => {
   it.effect("replays recorder output offline in deterministic sequence order", () =>
     Effect.gen(function* () {
-      const contents = yield* Ref.make<Readonly<Record<string, string>>>({})
-      const files = memoryFiles(contents)
+      const files = (yield* makeMemoryPlainFileStore()).store
       const recorder = yield* makeFlowRecorder(files, "trace.jsonl", "run-1")
       yield* recorder.record(
         TokensUsed.make({
@@ -53,8 +51,7 @@ describe("trace replay", () => {
 
   it.effect("replays a recorded failure followed by success without provider access", () =>
     Effect.gen(function* () {
-      const contents = yield* Ref.make<Readonly<Record<string, string>>>({})
-      const files = memoryFiles(contents)
+      const files = (yield* makeMemoryPlainFileStore()).store
       const recorder = yield* makeFlowRecorder(files, "trace.jsonl", "run-2")
       yield* recorder.streamError("gemini-cli", undefined, "empty response")
       yield* recorder.record(AssistantMessage.make({ text: "recovered" }))
@@ -70,10 +67,10 @@ describe("trace replay", () => {
 
   it.effect("fails explicitly on corrupt and unsupported recordings", () =>
     Effect.gen(function* () {
-      const corruptRef = yield* Ref.make<Readonly<Record<string, string>>>({
+      const corruptFiles = (yield* makeMemoryPlainFileStore({
         "trace.jsonl": "{broken}\n"
-      })
-      const unsupportedRef = yield* Ref.make<Readonly<Record<string, string>>>({
+      })).store
+      const unsupportedFiles = (yield* makeMemoryPlainFileStore({
         "trace.jsonl": JSON.stringify({
           schemaVersion: 99,
           seq: 0,
@@ -82,9 +79,9 @@ describe("trace replay", () => {
           kind: "Info",
           fields: {}
         })
-      })
-      const corrupt = yield* Effect.flip(readTrace(memoryFiles(corruptRef), "trace.jsonl"))
-      const unsupported = yield* Effect.flip(readTrace(memoryFiles(unsupportedRef), "trace.jsonl"))
+      })).store
+      const corrupt = yield* Effect.flip(readTrace(corruptFiles, "trace.jsonl"))
+      const unsupported = yield* Effect.flip(readTrace(unsupportedFiles, "trace.jsonl"))
 
       assert.strictEqual(corrupt._tag, "PlanParse")
       assert.strictEqual(unsupported._tag, "UnsupportedSchemaVersion")

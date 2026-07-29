@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { BudgetExceeded, PlanParseError, type FlowError } from "./FlowError.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
-import { stablePromptHash } from "./Plan.ts"
+import { stableHash } from "./Plan.ts"
 import { PricesAsOf } from "./PriceList.ts"
 
 export class CostCell extends Schema.Class<CostCell>("CostCell")({
@@ -52,7 +52,7 @@ export const makeCostRecord = (input: CostRecordInput): CostRecord => {
     repo: input.repo,
     ...(input.label === undefined ? {} : { label: input.label }),
     promptHead: input.prompt.trim().replaceAll(/\s+/gu, " ").slice(0, 120),
-    promptHash: stablePromptHash(input.prompt),
+    promptHash: stableHash(input.prompt),
     pricesAsOf: PricesAsOf,
     cells: input.cells,
     totalPrompt: input.cells.reduce((sum, cell) => sum + cell.prompt, 0),

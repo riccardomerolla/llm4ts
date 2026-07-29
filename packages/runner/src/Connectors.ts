@@ -1,11 +1,13 @@
 import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import {
   ApiConnectorConfig,
   CliConnectorConfig,
   type ConnectorConfig
 } from "@llm4ts/core/ConnectorConfig"
-import { ConnectorIds, defaultBaseUrl, type LlmProvider } from "@llm4ts/core/Models"
+import { ConnectorIds, connectorDefaultBaseUrl } from "@llm4ts/core/Models"
+import { ScriptUsage } from "./FlowArgs.ts"
 
 export const claude = CliConnectorConfig.make({
   connectorId: ConnectorIds.ClaudeCli,
@@ -115,25 +117,6 @@ export const withTimeoutSeconds = (
     timeout: Duration.seconds(seconds)
   })
 
-const providerFor = (config: ApiConnectorConfig): LlmProvider => {
-  switch (config.connectorId.value) {
-    case "openai":
-      return "OpenAI"
-    case "anthropic":
-      return "Anthropic"
-    case "gemini-api":
-      return "GeminiApi"
-    case "lm-studio":
-      return "LmStudio"
-    case "ollama":
-      return "Ollama"
-    case "mock":
-      return "Mock"
-    default:
-      return "OpenAI"
-  }
-}
-
 const environmentApiKey = (
   config: ApiConnectorConfig,
   environment: Readonly<Record<string, string | undefined>>
@@ -154,7 +137,7 @@ export const enrichApiConnector = (
   config: ApiConnectorConfig,
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): ApiConnectorConfig => {
-  const baseUrl = config.baseUrl ?? defaultBaseUrl(providerFor(config))
+  const baseUrl = config.baseUrl ?? connectorDefaultBaseUrl(config.connectorId)
   const environmentKey = environmentApiKey(config, environment)
   return ApiConnectorConfig.make({
     ...config,
@@ -175,6 +158,48 @@ export const prepareConnector = (
   config instanceof ApiConnectorConfig
     ? enrichApiConnector(config, environment)
     : CliConnectorConfig.make({ ...config, workingDir: workDir })
+
+export const apiConnectorFromEnvironment = Effect.fn(
+  "@llm4ts/runner/Connectors.apiConnectorFromEnvironment"
+)(function* (
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): Effect.fn.Return<ApiConnectorConfig, ScriptUsage> {
+  const provider = environment.LLM4TS_PROVIDER?.trim().toLowerCase() ?? "mock"
+  const preset = (() => {
+    switch (provider) {
+      case "mock":
+        return mock
+      case "openai":
+        return openAI
+      case "anthropic":
+        return anthropic
+      case "gemini":
+      case "gemini-api":
+        return geminiApi
+      case "lm-studio":
+      case "lmstudio":
+        return lmStudio
+      case "ollama":
+        return ollama
+      default:
+        return undefined
+    }
+  })()
+  if (preset === undefined) {
+    return yield* ScriptUsage.make({
+      message:
+        `unknown LLM4TS_PROVIDER '${provider}'; expected ` +
+        "mock|openai|anthropic|gemini|lm-studio|ollama"
+    })
+  }
+  const model = environment.LLM4TS_MODEL?.trim()
+  if (provider !== "mock" && (model === undefined || model.length === 0)) {
+    return yield* ScriptUsage.make({
+      message: `LLM4TS_MODEL is required for provider '${provider}' (e.g. LLM4TS_MODEL=gpt-4o-mini)`
+    })
+  }
+  return model === undefined || model.length === 0 ? preset : withModel(preset, model)
+})
 
 export const coderFromEnv = (
   env: Readonly<Record<string, string | undefined>> = process.env

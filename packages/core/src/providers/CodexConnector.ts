@@ -5,7 +5,7 @@ import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { ProviderError, type LlmError } from "../Errors.ts"
 import type { StructuredResult } from "../LlmService.ts"
-import { ConnectorIds, HealthStatus, LlmChunk, TokenUsage, type JsonSchema } from "../Models.ts"
+import { ConnectorIds, LlmChunk, TokenUsage, type JsonSchema } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { collect } from "../Streaming.ts"
 import type { TemporaryFilesShape } from "../TemporaryFiles.ts"
@@ -24,12 +24,6 @@ import {
   usageEventChunk,
   type JsonValue
 } from "./CliSupport.ts"
-
-const healthy = HealthStatus.make({ availability: "Healthy", authStatus: "Valid" })
-const unhealthy = HealthStatus.make({
-  availability: "Unhealthy",
-  authStatus: "Unknown"
-})
 
 export const codexExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => {
   const effectiveFlags = config.readOnly
@@ -146,10 +140,6 @@ export const makeCodexConnector = (
 ): CliConnectorShape => {
   const cwd = config.workingDir ?? "."
   const extraArgs = codexExtraArgs(config)
-  const healthCheck = executor.run(["codex", "--version"], cwd, {}).pipe(
-    Effect.as(healthy),
-    Effect.catch(() => Effect.succeed(unhealthy))
-  )
 
   const stampModel = (chunk: LlmChunk): LlmChunk =>
     chunk.usage === undefined || chunk.metadata.model !== undefined || config.model === undefined
@@ -207,8 +197,7 @@ export const makeCodexConnector = (
     buildInteractiveArgv: (_context) => ["codex", ...extraArgs],
     complete,
     completeStream,
-    healthCheck,
-    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy")
+    versionProbe: { executor, binary: "codex", cwd }
   })
 
   const executeStructuredWithUsage = <A, E, RD, RE>(

@@ -3,26 +3,19 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
-import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
-import { ProviderError, TimeoutError } from "@llm4ts/core/Errors"
+import { TimeoutError } from "@llm4ts/core/Errors"
 import { LlmChunk, TokenUsage, type StreamProgress } from "@llm4ts/core/Models"
 import {
-  batch,
-  buffered,
   cancellable,
   collect,
   fromSSE,
-  mergeAll,
   parallelStream,
   parsePartialJson,
-  rateLimit,
-  retryStream,
   toSSE,
   trackProgress,
-  withFallback,
   withHeartbeat,
   withSnapshots,
   withTimeout
@@ -72,67 +65,6 @@ describe("Streaming", () => {
       assert.strictEqual(result.length, 3)
       assert.strictEqual(updates.length, 3)
       assert.isTrue(updates.every((update) => update.tokensProcessed > 0))
-    })
-  )
-
-  it.effect("buffers with bounded backpressure", () =>
-    Effect.gen(function* () {
-      const chunks = Array.from({ length: 100 }, (_, index) =>
-        LlmChunk.make({ delta: `chunk-${index}` })
-      )
-      const result = yield* Stream.runCollect(buffered(Stream.fromIterable(chunks), 10))
-
-      assert.strictEqual(result.length, 100)
-    })
-  )
-
-  it.effect("groups chunks into bounded batches", () =>
-    Effect.gen(function* () {
-      const chunks = Array.from({ length: 15 }, (_, index) =>
-        LlmChunk.make({ delta: String(index) })
-      )
-      const result = yield* Stream.runCollect(
-        batch(Stream.fromIterable(chunks), {
-          maxSize: 5,
-          maxDuration: "1 second"
-        })
-      )
-
-      assert.deepStrictEqual(
-        result.map((group) => group.length),
-        [5, 5, 5]
-      )
-    })
-  )
-
-  it.effect("retries the complete stream according to a bounded schedule", () =>
-    Effect.gen(function* () {
-      const attempts = yield* Ref.make(0)
-      const source = Stream.unwrap(
-        Ref.updateAndGet(attempts, (count) => count + 1).pipe(
-          Effect.map((count) =>
-            count <= 2
-              ? Stream.fail(ProviderError.make({ message: "temporary" }))
-              : Stream.make(LlmChunk.make({ delta: "ok" }))
-          )
-        )
-      )
-
-      const result = yield* Stream.runCollect(retryStream(source, Schedule.recurs(2)))
-      const count = yield* Ref.get(attempts)
-
-      assert.strictEqual(result[0]?.delta, "ok")
-      assert.strictEqual(count, 3)
-    })
-  )
-
-  it.effect("rejects an invalid stream rate before pulling upstream", () =>
-    Effect.gen(function* () {
-      const error = yield* Effect.flip(
-        Stream.runCollect(rateLimit(Stream.make(LlmChunk.make({ delta: "unused" })), 0))
-      )
-
-      assert.strictEqual(error._tag, "ConfigError")
     })
   )
 
@@ -203,21 +135,6 @@ describe("Streaming", () => {
     })
   )
 
-  it.effect("uses fallback only after a typed stream failure", () =>
-    Effect.gen(function* () {
-      const fallback = Stream.make(LlmChunk.make({ delta: "fallback response" }))
-      const failed = yield* Stream.runCollect(
-        withFallback(Stream.fail(ProviderError.make({ message: "primary failed" })), () => fallback)
-      )
-      const succeeded = yield* Stream.runCollect(
-        withFallback(Stream.make(LlmChunk.make({ delta: "primary response" })), () => fallback)
-      )
-
-      assert.strictEqual(failed[0]?.delta, "fallback response")
-      assert.strictEqual(succeeded[0]?.delta, "primary response")
-    })
-  )
-
   it.effect("round-trips chunks through SSE and filters the done marker", () =>
     Effect.gen(function* () {
       const chunks = Stream.make(
@@ -245,24 +162,6 @@ describe("Streaming", () => {
       if (error._tag === "ParseError") {
         assert.strictEqual(error.raw, "not-json")
       }
-    })
-  )
-
-  it.effect("merges multiple streams", () =>
-    Effect.gen(function* () {
-      const result = yield* Stream.runCollect(
-        mergeAll([
-          Stream.make(LlmChunk.make({ delta: "stream1" })),
-          Stream.make(LlmChunk.make({ delta: "stream2" })),
-          Stream.make(LlmChunk.make({ delta: "stream3" }))
-        ])
-      )
-
-      assert.deepStrictEqual(result.map((chunk) => chunk.delta).sort(), [
-        "stream1",
-        "stream2",
-        "stream3"
-      ])
     })
   )
 
