@@ -5,7 +5,7 @@ import { syncCheckboxes } from "./CheckboxSync.ts"
 const spec = ["# Spec", "", "- [ ] one", "- [ ] two", "- [ ] three", ""].join("\n")
 
 test("checks the first N boxes when a run is partial", () => {
-  const result = syncCheckboxes(spec, 2, false)
+  const result = syncCheckboxes(spec, 2, false, 3)
   assert.equal(result.total, 3)
   assert.equal(result.flipped, 2)
   assert.match(result.markdown, /- \[x\] one/)
@@ -14,27 +14,39 @@ test("checks the first N boxes when a run is partial", () => {
 })
 
 test("checks every box when the plan is fully complete", () => {
-  const result = syncCheckboxes(spec, 1, true)
+  const result = syncCheckboxes(spec, 1, true, 10)
   assert.equal(result.flipped, 3)
   assert.doesNotMatch(result.markdown, /- \[ \]/)
 })
 
 test("never unchecks an already-checked box", () => {
   const partial = ["- [x] done", "- [ ] pending"].join("\n")
-  const result = syncCheckboxes(partial, 0, false)
+  const result = syncCheckboxes(partial, 0, false, 2)
   assert.equal(result.flipped, 0)
   assert.equal(result.markdown, partial)
 })
 
 test("is idempotent", () => {
-  const once = syncCheckboxes(spec, 3, true)
-  const twice = syncCheckboxes(once.markdown, 3, true)
+  const once = syncCheckboxes(spec, 3, true, 3)
+  const twice = syncCheckboxes(once.markdown, 3, true, 3)
   assert.equal(twice.flipped, 0)
   assert.equal(twice.markdown, once.markdown)
 })
 
 test("preserves indentation and documents with no checkboxes", () => {
-  assert.equal(syncCheckboxes("# nothing here", 5, true).total, 0)
+  assert.equal(syncCheckboxes("# nothing here", 5, true, 5).total, 0)
   const nested = "  - [ ] indented"
-  assert.equal(syncCheckboxes(nested, 1, false).markdown, "  - [x] indented")
+  assert.equal(syncCheckboxes(nested, 1, false, 1).markdown, "  - [x] indented")
+})
+
+test("refuses partial sync when plan tasks and spec checkboxes disagree", () => {
+  const result = syncCheckboxes(spec, 2, false, 10)
+  assert.equal(result.flipped, 0)
+  assert.equal(result.markdown, spec)
+})
+
+test("still checks every box on full completion despite a count mismatch", () => {
+  const result = syncCheckboxes(spec, 10, true, 10)
+  assert.equal(result.flipped, 3)
+  assert.doesNotMatch(result.markdown, /- \[ \]/)
 })

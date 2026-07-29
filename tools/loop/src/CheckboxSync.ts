@@ -18,17 +18,27 @@ export interface CheckboxSyncResult {
 
 /**
  * Check the first `min(completed, total)` checkboxes — or every checkbox when
- * `allComplete` is set. Completion is prefix-monotonic (tasks finish in order),
- * so index order is the least-surprising mapping between plan tasks and the
- * spec's ordered checklist. Already-checked boxes are left untouched.
+ * `allComplete` is set. Already-checked boxes are left untouched.
+ *
+ * Positional mapping is only trustworthy when the plan was derived 1:1 from
+ * the spec's checklist. When the plan has a different number of tasks than
+ * the spec has checkboxes, a partial sync would tick boxes describing work
+ * that never happened (observed in dogfood run 2), so partial progress is NOT
+ * written unless `planTasks` matches `total`. A fully completed plan still
+ * checks every box: the spec's work is done regardless of how the plan
+ * sliced it.
  */
 export const syncCheckboxes = (
   markdown: string,
   completed: number,
-  allComplete: boolean
+  allComplete: boolean,
+  planTasks: number
 ): CheckboxSyncResult => {
   const lines = markdown.split("\n")
   const total = lines.filter((line) => checkboxPattern.test(line)).length
+  if (!allComplete && planTasks !== total) {
+    return { markdown, flipped: 0, total }
+  }
   const target = allComplete ? total : Math.min(Math.max(completed, 0), total)
 
   let seen = 0

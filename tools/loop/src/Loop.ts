@@ -279,7 +279,7 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
           }
           const completed = persisted.tasks.filter((task) => task.completed).length
           const allComplete = persisted.tasks.length > 0 && persisted.nextIncomplete === undefined
-          const result = syncCheckboxes(content, completed, allComplete)
+          const result = syncCheckboxes(content, completed, allComplete, persisted.tasks.length)
           if (result.markdown !== content) {
             yield* nodePlainFileStore.writeAtomic(specPath, result.markdown)
           }
