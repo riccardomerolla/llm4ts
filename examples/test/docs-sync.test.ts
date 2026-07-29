@@ -3,7 +3,13 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
-import { completeAndPublish } from "@llm4ts/flow/Flow"
+import { completeAndPublish, implementPlanFlow } from "@llm4ts/flow/Flow"
+import { defaultPlanPath } from "@llm4ts/flow/Plan"
+import { makePlanStore } from "@llm4ts/flow/Persistence"
+import { planFrom } from "@llm4ts/flow/Planner"
+import { coderFromEnv } from "@llm4ts/runner/Connectors"
+import { runNode } from "@llm4ts/runner/FlowRunner"
+import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
 
@@ -54,6 +60,12 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
     assert.strictEqual(snippet, source.trimEnd())
   })
 
+  it("Rung 2 code block matches examples/implement.ts verbatim", () => {
+    const snippet = extractTsCodeBlockUnderHeading(doc, "## Rung 2: a persisted-plan flow")
+    const source = readRepoFile("examples/implement.ts")
+    assert.strictEqual(snippet, source.trimEnd())
+  })
+
   it("completeAndPublish snippet keeps the documented call shape", () => {
     const snippet = extractTsCodeBlockUnderHeading(
       doc,
@@ -81,6 +93,9 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
       "docs/provider-capabilities.md",
       "examples/README.md",
       "examples/api-provider.ts",
+      "examples/implement.ts",
+      "examples/issue-pr.ts",
+      "examples/sdd.ts",
       "examples/support.ts"
     ]
     for (const relativePath of referencedFiles) {
@@ -111,5 +126,64 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
         `examples/support.ts no longer exports "${exportName}", referenced by docs/flow-authoring.md`
       )
     }
+  })
+
+  it("references only exports that exist in the Rung 2 package modules", () => {
+    const referencedExports = [
+      { modulePath: "packages/flow/src/Plan.ts", exportName: "defaultPlanPath" },
+      { modulePath: "packages/flow/src/Planner.ts", exportName: "planFrom" },
+      { modulePath: "packages/flow/src/Persistence.ts", exportName: "makePlanStore" },
+      { modulePath: "packages/runner/src/Connectors.ts", exportName: "coderFromEnv" },
+      { modulePath: "packages/flow/src/Flow.ts", exportName: "implementPlanFlow" },
+      { modulePath: "packages/runner/src/FlowRunner.ts", exportName: "runNode" },
+      { modulePath: "packages/runner/src/NodePlainFileStore.ts", exportName: "nodePlainFileStore" }
+    ]
+    for (const { modulePath, exportName } of referencedExports) {
+      const moduleSource = readRepoFile(modulePath)
+      assert.match(
+        moduleSource,
+        new RegExp(`export const ${exportName}\\b`),
+        `${modulePath} no longer exports "${exportName}", referenced by docs/flow-authoring.md`
+      )
+    }
+
+    // Compile-time half of this check: if any of these exports' arity,
+    // argument order, or parameter types change, `pnpm typecheck` fails
+    // right here, not just the regex assertions above.
+    const callsWithDocumentedShape = (input: {
+      readonly workDir: string
+      readonly workspace: string
+      readonly prompt: string
+    }) => {
+      const planPath = join(input.workDir, defaultPlanPath(input.prompt))
+      const store = makePlanStore(nodePlainFileStore)
+
+      return runNode(
+        {
+          workDir: input.workDir,
+          workspace: input.workspace,
+          userPrompt: input.prompt,
+          coder: coderFromEnv(process.env),
+          environment: process.env
+        },
+        (context) =>
+          implementPlanFlow(context, {
+            store,
+            planPath,
+            plan: planFrom(context.reasoning, input.prompt),
+            system: "Implement one task at a time in the current repository."
+          })
+      )
+    }
+    assert.isFunction(callsWithDocumentedShape)
+  })
+
+  it("documented pnpm script exists in examples/package.json", () => {
+    const packageJsonSource = readRepoFile("examples/package.json")
+    assert.match(
+      packageJsonSource,
+      /"implement":\s*"node --experimental-strip-types implement\.ts"/,
+      'examples/package.json no longer defines the "implement" script (or its command changed), referenced by docs/flow-authoring.md'
+    )
   })
 })
