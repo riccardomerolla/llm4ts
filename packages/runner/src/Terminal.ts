@@ -1,3 +1,4 @@
+import * as Clock from "effect/Clock"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
@@ -94,6 +95,7 @@ export interface TerminalPalette {
   readonly stageDone: (label: string) => string
   readonly fail: (label: string) => string
   readonly info: (label: string) => string
+  readonly dim: (text: string) => string
   readonly assistant: (text: string) => string
   readonly toolCall: (tool: string, args: string) => string
   readonly status: (frame: string, label: string) => string
@@ -108,6 +110,7 @@ export const makeTerminalPalette = (enabled: boolean): TerminalPalette => {
     stageDone: (label) => `${paint(Ansi.green, "✔ ")}${label}`,
     fail: (label) => `${paint(Ansi.red, "✖ ")}${label}`,
     info: (label) => paint(Ansi.darkGray, `· ${label}`),
+    dim: (text) => paint(Ansi.darkGray, text),
     assistant: (text) => `${paint(Ansi.boldMagenta, "● ")}${text}`,
     toolCall: (tool, args) => {
       const head = paint(Ansi.yellowBold, `● ${tool}`)
@@ -115,6 +118,19 @@ export const makeTerminalPalette = (enabled: boolean): TerminalPalette => {
     },
     status: (frame, label) => `${paint(Ansi.boldMagenta, frame)} ${label}`
   }
+}
+
+export const formatDurationMs = (milliseconds: number): string => {
+  if (milliseconds < 1_000) {
+    return `${Math.max(0, Math.round(milliseconds))}ms`
+  }
+  const seconds = milliseconds / 1_000
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`
+  }
+  const minutes = Math.floor(seconds / 60)
+  const rest = Math.round(seconds % 60)
+  return `${minutes}m${rest.toString().padStart(2, "0")}s`
 }
 
 export const plainTerminalPalette = makeTerminalPalette(false)
@@ -275,38 +291,84 @@ export const makeTerminalSurface = (
     : Effect.succeed(makePlainTerminalSurface((line) => write(`${line}\n`)))
 }
 
+export interface TerminalRunStats {
+  readonly stagesCompleted: number
+  readonly stagesFailed: number
+}
+
 export interface TerminalConsumer {
   readonly consumed: Ref.Ref<number>
+  readonly stats: Effect.Effect<TerminalRunStats>
   readonly awaitDrained: (timeout?: Duration.Input) => Effect.Effect<void>
+}
+
+export interface TerminalConsumerOptions {
+  readonly timestamps?: boolean
+}
+
+interface OpenStage {
+  readonly name: string
+  readonly startedAt: number
 }
 
 export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume")(function* (
   events: FlowEventHub,
   surface: TerminalSurface,
-  verbosity: Verbosity = "Normal"
+  verbosity: Verbosity = "Normal",
+  options: TerminalConsumerOptions = {}
 ): Effect.fn.Return<TerminalConsumer, never, Scope.Scope> {
   const depth = yield* Ref.make(0)
-  const stages = yield* Ref.make<ReadonlyArray<string>>([])
+  const stages = yield* Ref.make<ReadonlyArray<OpenStage>>([])
   const consumed = yield* Ref.make(0)
+  const statsRef = yield* Ref.make<TerminalRunStats>({ stagesCompleted: 0, stagesFailed: 0 })
   const subscription = yield* events.subscribe
   const palette = surface.palette
+  const timestampPrefix =
+    options.timestamps === true
+      ? Clock.currentTimeMillis.pipe(
+          Effect.map((now) => `${palette.dim(new Date(now).toISOString().slice(11, 19))} `)
+        )
+      : Effect.succeed("")
   yield* Stream.fromSubscription(subscription).pipe(
     Stream.runForEach((event) =>
       Effect.gen(function* () {
         const currentDepth = closesChild(event)
           ? yield* Ref.updateAndGet(depth, (value) => Math.max(0, value - 1))
           : yield* Ref.get(depth)
+        let closedStage: OpenStage | undefined
         if (event._tag === "StageStarted") {
           yield* Ref.update(depth, (value) => value + 1)
           const active = terminalSafe(event.stage)
-          yield* Ref.update(stages, (current) => [...current, active])
+          const startedAt = yield* Clock.currentTimeMillis
+          yield* Ref.update(stages, (current) => [...current, { name: active, startedAt }])
           yield* surface.setStatus(active)
         } else if (closesChild(event)) {
+          closedStage = (yield* Ref.get(stages)).at(-1)
           const remaining = yield* Ref.updateAndGet(stages, (current) => current.slice(0, -1))
-          yield* surface.setStatus(remaining.at(-1))
+          yield* surface.setStatus(remaining.at(-1)?.name)
+          if (event._tag === "StageCompleted") {
+            yield* Ref.update(statsRef, (current) => ({
+              ...current,
+              stagesCompleted: current.stagesCompleted + 1
+            }))
+          } else if (event._tag === "StageFailed") {
+            yield* Ref.update(statsRef, (current) => ({
+              ...current,
+              stagesFailed: current.stagesFailed + 1
+            }))
+          }
         }
         if (rendersEvent(verbosity, event)) {
-          yield* surface.log(indentBlock(currentDepth, terminalLine(event, palette)))
+          let line = terminalLine(event, palette)
+          if (
+            closedStage !== undefined &&
+            (event._tag === "StageCompleted" || event._tag === "StageFailed")
+          ) {
+            const now = yield* Clock.currentTimeMillis
+            line = `${line} ${palette.dim(`(${formatDurationMs(now - closedStage.startedAt)})`)}`
+          }
+          const prefix = yield* timestampPrefix
+          yield* surface.log(`${prefix}${indentBlock(currentDepth, line)}`)
         }
         yield* Ref.update(consumed, (count) => count + 1)
       })
@@ -325,5 +387,5 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
       )
       yield* Effect.timeoutOption(drain, timeout)
     })
-  return { consumed, awaitDrained }
+  return { consumed, stats: Ref.get(statsRef), awaitDrained }
 })

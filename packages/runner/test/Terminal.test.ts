@@ -10,8 +10,10 @@ import {
   TokensUsed,
   makeFlowEventHub
 } from "@llm4ts/flow/FlowEvents"
+import { TestClock } from "effect/testing"
 import {
   consumeTerminalEvents,
+  formatDurationMs,
   indentBlock,
   indentDepths,
   makeLiveTerminalSurface,
@@ -134,6 +136,46 @@ describe("terminal rendering", () => {
         yield* consumer.awaitDrained()
 
         assert.deepStrictEqual(yield* Ref.get(statuses), ["outer", "inner", "outer", undefined])
+      })
+    )
+  )
+
+  it("formats durations for humans", () => {
+    assert.strictEqual(formatDurationMs(0), "0ms")
+    assert.strictEqual(formatDurationMs(830), "830ms")
+    assert.strictEqual(formatDurationMs(12_400), "12.4s")
+    assert.strictEqual(formatDurationMs(272_000), "4m32s")
+  })
+
+  it.effect("renders stage durations, timestamps, and run stats", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const lines = yield* Ref.make<ReadonlyArray<string>>([])
+        const surface: TerminalSurface = {
+          palette: plainTerminalPalette,
+          log: (line) => Ref.update(lines, (current) => [...current, line]),
+          setStatus: (_label) => Effect.void,
+          suspend: (effect) => effect
+        }
+        const hub = yield* makeFlowEventHub()
+        const consumer = yield* consumeTerminalEvents(hub, surface, "Normal", {
+          timestamps: true
+        })
+        yield* hub.publish(StageStarted.make({ stage: "build" }))
+        yield* TestClock.adjust("1500 millis")
+        yield* hub.publish(StageCompleted.make({ stage: "build" }))
+        yield* hub.publish(StageStarted.make({ stage: "verify" }))
+        yield* TestClock.adjust("250 millis")
+        yield* hub.publish(StageFailed.make({ stage: "verify", message: "boom" }))
+        yield* consumer.awaitDrained()
+
+        const rendered = yield* Ref.get(lines)
+        const stats = yield* consumer.stats
+
+        assert.isTrue(rendered.some((line) => line.includes("\u2714 build (1.5s)")))
+        assert.isTrue(rendered.some((line) => line.includes("\u2716 verify \u2014 boom (250ms)")))
+        assert.isTrue(rendered.every((line) => /^\d{2}:\d{2}:\d{2} /.test(line)))
+        assert.deepStrictEqual(stats, { stagesCompleted: 1, stagesFailed: 1 })
       })
     )
   )

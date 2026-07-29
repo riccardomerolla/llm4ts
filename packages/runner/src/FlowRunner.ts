@@ -2,7 +2,7 @@ import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
 import type { ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
-import { defaultReasoningConfig } from "@llm4ts/core/ConnectorConfig"
+import { CliConnectorConfig, defaultReasoningConfig } from "@llm4ts/core/ConnectorConfig"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import type { HttpClientShape } from "@llm4ts/core/HttpClient"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
@@ -25,10 +25,17 @@ import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
 import { prepareConnector } from "./Connectors.ts"
 import {
   consumeTerminalEvents,
+  formatDurationMs,
   makeTerminalSurface,
   type TerminalSurface,
   type Verbosity
 } from "./Terminal.ts"
+
+const describeSeat = (config: ConnectorConfig): string => {
+  const model = config.model === undefined ? "" : ` (${config.model})`
+  const readOnly = config instanceof CliConnectorConfig && config.readOnly ? " read-only" : ""
+  return `${config.connectorId.value}${model}${readOnly}`
+}
 
 export interface FlowRunnerDependencies {
   readonly registry: ConnectorRegistryShape
@@ -127,15 +134,31 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   body: (context: FlowContextShape) => Effect.Effect<A, E, R>,
   dependencies: FlowRunnerDependencies = nodeFlowRunnerDependencies()
 ): Effect.fn.Return<A, E | FlowError, R | Scope.Scope> {
+  const startedAt = yield* Clock.currentTimeMillis
+  const environment = options.environment ?? process.env
+  const verbosity = options.verbosity ?? "Normal"
   const tracker = yield* makeCostTracker()
-  const surface =
-    options.surface ?? (yield* makeTerminalSurface(options.environment ?? process.env))
+  const surface = options.surface ?? (yield* makeTerminalSurface(environment))
   const palette = surface.palette
-  const terminal = yield* consumeTerminalEvents(
-    bundle.events,
-    surface,
-    options.verbosity ?? "Normal"
-  )
+  const terminal = yield* consumeTerminalEvents(bundle.events, surface, verbosity, {
+    timestamps: environment.LLM4TS_TIMESTAMPS === "1" || environment.LLM4TS_TIMESTAMPS === "true"
+  })
+  if (verbosity !== "Quiet") {
+    const reviewers = options.reviewers ?? []
+    const seats = [
+      `coder ${describeSeat(options.coder)}`,
+      `reasoning ${describeSeat(defaultReasoningConfig(options.coder, options.reasoning))}`,
+      ...(reviewers.length === 0 ? [] : [`reviewers ${reviewers.map(describeSeat).join(", ")}`])
+    ].join(" · ")
+    yield* surface.log(palette.info(`${seats} · ${options.workDir}`))
+    if (options.tracePath !== undefined) {
+      yield* surface.log(
+        palette.info(
+          `trace ${options.tracePath}${options.runId === undefined ? "" : ` · run ${options.runId}`}`
+        )
+      )
+    }
+  }
   yield* tracker.consume(bundle.events)
   const recorder =
     options.tracePath === undefined
@@ -166,22 +189,38 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
       )
     ),
     Effect.tapError((error) =>
-      surface
-        .setStatus(undefined)
-        .pipe(
-          Effect.andThen(
-            surface.log(
-              `\n${palette.fail(
-                `flow failed: ${error instanceof Error ? error.message : String(error)}`
-              )}`
-            )
-          )
+      Effect.gen(function* () {
+        const finishedAt = yield* Clock.currentTimeMillis
+        yield* surface.setStatus(undefined)
+        yield* surface.log(
+          `\n${palette.fail(
+            `flow failed after ${formatDurationMs(finishedAt - startedAt)}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )}`
         )
+        if (options.tracePath !== undefined) {
+          yield* surface.log(palette.info(`trace ${options.tracePath}`))
+        }
+      })
     ),
     Effect.tap(() =>
-      surface
-        .setStatus(undefined)
-        .pipe(Effect.andThen(surface.log(`\n${palette.stageDone("flow completed")}`)))
+      Effect.gen(function* () {
+        const finishedAt = yield* Clock.currentTimeMillis
+        const stats = yield* terminal.stats
+        const stages =
+          stats.stagesCompleted + stats.stagesFailed === 0
+            ? ""
+            : ` · ${stats.stagesCompleted} stage${stats.stagesCompleted === 1 ? "" : "s"}${
+                stats.stagesFailed === 0 ? "" : ` (${stats.stagesFailed} failed)`
+              }`
+        yield* surface.setStatus(undefined)
+        yield* surface.log(
+          `\n${palette.stageDone(
+            `flow completed in ${formatDurationMs(finishedAt - startedAt)}${stages}`
+          )}`
+        )
+      })
     )
   )
 })

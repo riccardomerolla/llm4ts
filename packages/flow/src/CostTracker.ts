@@ -93,14 +93,23 @@ const renderSummary = (state: CostState): string => {
       const cost = model === "(unknown)" ? undefined : estimateCostUsd(model, usage)
       return { line: tokenLine(model, usage, cost), cost }
     })
+  if (agents.length === 0 && models.length === 0) {
+    return "cost: no usage reported (the selected backend emits no token counts)"
+  }
   const total = models.reduce((sum, entry) => sum + (entry.cost ?? 0), 0)
   const footnote =
     total <= 0
       ? ""
       : `\n\n* estimated from the pricing table (rates as of ${PricesAsOf} — may be stale)`
-  return `By agent:\n${agents.join("\n")}\n\nBy model:\n${models
-    .map(({ line }) => line)
-    .join("\n")}\n\nTotal: ${total <= 0 ? "$0.00" : `$${total.toFixed(4)}`}${footnote}`
+  const sections: Array<string> = []
+  if (agents.length > 0) {
+    sections.push(`By agent:\n${agents.join("\n")}`)
+  }
+  if (models.length > 0) {
+    sections.push(`By model:\n${models.map(({ line }) => line).join("\n")}`)
+  }
+  sections.push(`Total: ${total <= 0 ? "$0.00" : `$${total.toFixed(4)}`}${footnote}`)
+  return sections.join("\n\n")
 }
 
 export const makeCostTracker = Effect.fn("@llm4ts/flow/CostTracker.make")(
