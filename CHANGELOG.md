@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.4
+
+- `implementPlanFlow` gains `chatPerTask`: each task can run in a fresh
+  `Chat` seeded with the configured system prompt plus the plan's current
+  completion state, with review-fix rounds sharing that task's chat
+  (ADR 0003). `implementTaskLoop` threads the progressing plan into its
+  per-task callback.
+- No-change tasks are no longer inferred complete: the coder is asked to
+  confirm with a literal `TASK_ALREADY_SATISFIED`, and a silent no-op fails
+  the task instead of marking it done. Commit-refusal messages now carry
+  the tail of the failing gate's output.
+- New `docs/flow-authoring.md` — the rung-by-rung guide from one-shot
+  prompts to custom spines — pinned to real sources by sync tests.
+- Specs are read-only for autonomous agents (ADR 0004).
+
 ## 0.1.3
 
 - Review-loop robustness at the structured-output boundary: decoding-side
