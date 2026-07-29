@@ -24,6 +24,17 @@ export list; the following modules are the main entry points.
   commit loop; `completeAndPublish` streams one prompt and publishes the
   response as an assistant message. See the
   [flow authoring guide](flow-authoring.md) for the rung-by-rung walkthrough.
+  `ImplementPlanOptions.chatPerTask` opts into per-task chat isolation:
+  - What it does: when `true`, each task gets a fresh `Chat` seeded with the
+    system prompt plus the plan's current render (showing prior tasks'
+    completion status), instead of one `Chat` shared across the whole plan.
+  - Review-fix rounds: a task's review-fix rounds always share that task's
+    `Chat` — isolation is between tasks, not within a task's fix loop.
+  - Default: `false`/omitted, which preserves the original single-shared-
+    `Chat` behavior.
+  - When to use: long-running, dogfood-style plans where an ever-growing
+    shared transcript would otherwise degrade context quality across many
+    tasks.
 - `@llm4ts/flow/FlowContext` and `FlowEvents`: workflow dependencies and event
   protocol.
 - `@llm4ts/flow/Chat`: atomic, serialized conversation history for coding
