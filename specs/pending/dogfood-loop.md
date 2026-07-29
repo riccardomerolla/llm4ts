@@ -23,22 +23,22 @@ end-to-end unattended.
 
 ## Tasks
 
-- [ ] Scaffold `tools/loop/` (own package.json + lockfile, depends on published
+- [x] Scaffold `tools/loop/` (own package.json + lockfile, depends on published
       `@llm4ts/runner`/`@llm4ts/flow`/`@llm4ts/core` at the latest release; not
       part of the pnpm workspace).
-- [ ] Implement the harness: spec path argument → `resolveFlowInput`-style
+- [x] Implement the harness: spec path argument → `resolveFlowInput`-style
       parsing → `runNode` with `coderFromEnv` → plan via `planFrom` +
       `makePlanStore.recoverOrCreate` → per-task: checkpoint, fresh
       `makeChat`, `coder.ask(taskPrompt)`, `reviewAndFixLoop` with the CI
       lint gate, `commitAll`, rollback on failure.
-- [ ] Deterministic checkbox sync: after the run, update `- [ ]`/`- [x]` in
+- [x] Deterministic checkbox sync: after the run, update `- [ ]`/`- [x]` in
       the focus spec from plan state (plain code, no LLM).
-- [ ] Cost budget and turn-limit wiring; trace always written under
+- [x] Cost budget and turn-limit wiring; trace always written under
       `.llm4ts/`; cost summary printed on exit.
-- [ ] A `--dry-run` mode that plans and prints tasks without executing.
-- [ ] README in `tools/loop/` documenting usage and the trust bar.
-- [ ] Record every library gap discovered during implementation as a new spec
-      in `specs/pending/`.
+- [x] A `--dry-run` mode that plans and prints tasks without executing.
+- [x] README in `tools/loop/` documenting usage and the trust bar.
+- [x] Record every library gap discovered during implementation as a new spec
+      in `specs/pending/` (see `loop-cost-observability-gaps.md`).
 
 ## Non-goals (v1)
 

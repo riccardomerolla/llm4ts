@@ -1,0 +1,27 @@
+{
+  "name": "@llm4ts/loop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dogfood loop: llm4ts develops llm4ts, pinned to the latest published @llm4ts/* release",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "loop": "tsx src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/CheckboxSync.test.ts"
+  },
+  "dependencies": {
+    "@llm4ts/core": "0.1.2",
+    "@llm4ts/flow": "0.1.2",
+    "@llm4ts/runner": "0.1.2",
+    "effect": "4.0.0-beta.102"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
+  }
+}
