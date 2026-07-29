@@ -35,6 +35,22 @@ const coderService = (asked: Ref.Ref<ReadonlyArray<string>>): LlmServiceShape =>
   isAvailable: Effect.succeed(true)
 })
 
+const historyTrackingCoderService = (
+  historyLengths: Ref.Ref<ReadonlyArray<number>>
+): LlmServiceShape => ({
+  executeStream: (_prompt) => Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })),
+  executeStreamWithHistory: (messages) =>
+    Stream.unwrap(
+      Ref.update(historyLengths, (current) => [...current, messages.length]).pipe(
+        Effect.as(Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })))
+      )
+    ),
+  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
+  executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  isAvailable: Effect.succeed(true)
+})
+
 const cleanReviewer: LlmServiceShape = {
   executeStream: (_prompt) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
@@ -161,6 +177,61 @@ describe("Flow", () => {
       const content = yield* completeAndPublish(coderService(asked), events, "say hi")
       assert.strictEqual(content, "done")
     })
+  )
+
+  it.effect(
+    "chatPerTask is accepted but unwired: shared-Chat behavior is identical whether it is omitted or true",
+    () =>
+      Effect.gen(function* () {
+        const runPlan = (chatPerTask?: boolean) =>
+          Effect.gen(function* () {
+            const events = yield* makeFlowEventHub()
+            const historyLengths = yield* Ref.make<ReadonlyArray<number>>([])
+            const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+            const memory = yield* makeMemoryPlainFileStore()
+            const store = makePlanStore(memory.store)
+            const plan = Plan.make({
+              epicId: "epic-chat-per-task",
+              tasks: [
+                Task.make({ title: "first task", description: "do the first thing" }),
+                Task.make({ title: "second task", description: "do the second thing" })
+              ]
+            })
+            const context: FlowContextShape = {
+              reasoning: cleanReviewer,
+              coder: historyTrackingCoderService(historyLengths),
+              git: makeFakeGit(gitLog),
+              hosting: failingHosting,
+              events,
+              reviewers: [cleanReviewer],
+              coderCapabilities: ConnectorCapabilities.make({}),
+              userPrompt: "implement the plan",
+              workDir: "/repo",
+              workspace: "/repo"
+            }
+
+            yield* implementPlanFlow(context, {
+              store,
+              planPath: ".llm4ts/plan-chat-per-task.md",
+              plan: Effect.succeed(plan),
+              ...(chatPerTask === undefined ? {} : { chatPerTask })
+            })
+
+            return yield* Ref.get(historyLengths)
+          })
+
+        const withoutOption = yield* runPlan(undefined)
+        const withTrue = yield* runPlan(true)
+        const withFalse = yield* runPlan(false)
+
+        // Each history includes the leading git-ownership system message, so the
+        // first call already sees length 2 (system + user), not 1. Second task's
+        // history is longer than the first's: the Chat is shared across tasks,
+        // growing with each round trip, regardless of chatPerTask.
+        assert.deepStrictEqual(withoutOption, [2, 4])
+        assert.deepStrictEqual(withTrue, withoutOption)
+        assert.deepStrictEqual(withFalse, withoutOption)
+      })
   )
 })
 

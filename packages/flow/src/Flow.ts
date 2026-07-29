@@ -31,6 +31,8 @@ export interface ImplementPlanOptions {
   readonly planPath: string
   readonly plan: Effect.Effect<Plan, FlowError>
   readonly system?: string
+  /** Currently unwired — implementPlanFlow always shares one Chat across the plan regardless of this value. */
+  readonly chatPerTask?: boolean
   readonly reviewers?: ReadonlyArray<Reviewer>
   readonly commitMessage?: (plan: Plan, task: Task) => string
   readonly checkoutBranch?: boolean
