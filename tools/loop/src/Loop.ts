@@ -40,6 +40,7 @@ export const LoopUsage =
   "  LLM4TS_LOOP_BUDGET_USD    per-run cost ceiling (default: 5)\n" +
   "  LLM4TS_LOOP_TURN_LIMIT    per-task turn limit for the coder\n" +
   "  LLM4TS_LOOP_GATE          CI gate command (default: the four-command chain)\n" +
+  "  LLM4TS_LOOP_FORMAT        best-effort formatter before review rounds (default: pnpm format)\n" +
   "  LLM4TS_LOOP_MAX_ROUNDS    review-and-fix rounds before giving up (default: 3)\n" +
   "  LLM4TS_VERBOSITY          terminal verbosity: quiet|normal|verbose"
 
@@ -168,6 +169,7 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
       maximumCostUsd: readNumberEnv(environment, "LLM4TS_LOOP_BUDGET_USD", defaultBudgetUsd)
     })
     const gateCommand = environment.LLM4TS_LOOP_GATE?.trim() ?? defaultGateCommand
+    const formatCommand = environment.LLM4TS_LOOP_FORMAT?.trim() ?? "pnpm format"
     const maxRounds = readNumberEnv(environment, "LLM4TS_LOOP_MAX_ROUNDS", 3)
 
     const startedAtMs = yield* Clock.currentTimeMillis
@@ -217,6 +219,14 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
               ["sh", "-lc", gateCommand],
               workDir
             )
+            // The CSP "formatter step": best-effort, never fails the flow. The
+            // headless coder cannot run commands itself, so deterministic
+            // formatting must happen here, not by asking the model to imitate
+            // prettier (dogfood run 3 died exactly that way).
+            const formatStep: Effect.Effect<void, FlowError> =
+              formatCommand.length === 0
+                ? Effect.void
+                : Effect.ignore(nodeProcessExecutor.run(["sh", "-lc", formatCommand], workDir, {}))
 
             const perTask = (task: Plan["tasks"][number]): Effect.Effect<void, FlowError> =>
               Effect.gen(function* () {
@@ -241,7 +251,8 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
                     currentDiff: context.git.diffAll,
                     events: context.events,
                     maxRounds,
-                    lint: ciGate
+                    lint: ciGate,
+                    format: formatStep
                   })
                   const gate = yield* ciGate
                   if (!gate.isClean) {
