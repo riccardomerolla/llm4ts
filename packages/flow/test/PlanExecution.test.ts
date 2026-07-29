@@ -57,6 +57,39 @@ describe("implementTaskLoop", () => {
     })
   )
 
+  it.effect(
+    "threads the accumulated plan-so-far into each task, reflecting prior completions",
+    () =>
+      Effect.gen(function* () {
+        const files = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const events = yield* makeCollectingFlowEvents
+        const seen = yield* Ref.make<ReadonlyArray<ReadonlyArray<boolean>>>([])
+        const plan = Plan.make({
+          epicId: "epic",
+          tasks: [
+            Task.make({ title: "a", description: "" }),
+            Task.make({ title: "b", description: "" }),
+            Task.make({ title: "c", description: "" })
+          ]
+        })
+        const store = makePlanStore(memoryFiles(files))
+        yield* implementTaskLoop(store, events, "plan.md", plan, (_task, planSoFar) =>
+          Ref.update(seen, (current) => [...current, planSoFar.tasks.map((task) => task.completed)])
+        )
+
+        // Task "a" runs against a plan where nothing is completed yet; task "b"
+        // runs after "a" has been marked complete but before "b" itself has;
+        // task "c" sees both "a" and "b" done but not itself — proving
+        // `planSoFar` reflects prior-task completion, not the current task's,
+        // and advances in the same order the loop processes tasks.
+        assert.deepStrictEqual(yield* Ref.get(seen), [
+          [false, false, false],
+          [true, false, false],
+          [true, true, false]
+        ])
+      })
+  )
+
   it.effect("stops on failure and leaves completed progress resumable", () =>
     Effect.gen(function* () {
       const files = yield* Ref.make<Readonly<Record<string, string>>>({})

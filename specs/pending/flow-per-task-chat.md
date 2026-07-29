@@ -25,24 +25,27 @@ Blast radius: one flow module + tests; additive, default unchanged.
       across all tasks regardless of its value. Wiring the fresh-chat
       behavior is the next task below.
 
-- [ ] With the policy on: each task gets a fresh `Chat` whose system prompt
+- [x] With the policy on: each task gets a fresh `Chat` whose system prompt
       includes the configured `system` plus a compact progress note (plan
       state so far); the task's review-fix rounds share that task's chat.
-      Must land together with the tests below in the same change — this task
-      introduces real behavior, so it is not done until the coverage bar is
-      met. Also: remove or rewrite the `/** Currently unwired ... */` doc
-      comment on `chatPerTask` (`packages/flow/src/Flow.ts`) to describe the
-      real behavior, and replace (not merely add alongside) the interim
-      "chatPerTask is accepted but unwired" test in `Flow.test.ts` — once
-      wiring lands, that test's asserted invariant (identical shared-Chat
-      growth regardless of `chatPerTask`) is no longer true for
-      `chatPerTask: true`.
-- [ ] Tests in `packages/flow/test/Flow.test.ts`: with `chatPerTask: true`,
+      Wired in `implementPlanFlow` (`packages/flow/src/Flow.ts`): a
+      `Ref<Plan>` tracks progress, and `chatPerTask: true` builds a fresh
+      `Chat` per task (system = configured `system` + `plan.render` of the
+      progress so far) that is reused for the task's initial ask and
+      its `reviewAndFixLoop` fix rounds. The doc comment on `chatPerTask` was
+      rewritten to describe this, and the interim "accepted but unwired" test
+      was replaced (see below).
+- [x] Tests in `packages/flow/test/Flow.test.ts`: with `chatPerTask: true`,
       assert each task gets a fresh `Chat` (e.g. the history/message count
       seen by the LLM resets per task instead of growing across tasks); with
       `chatPerTask: false` or omitted, assert the existing single-shared-Chat
       behavior is unchanged; assert review-fix rounds within one task still
-      share that task's chat.
+      share that task's chat. Two tests now cover this: "chatPerTask false or
+      omitted: one Chat is shared across every task" and "chatPerTask true:
+      each task gets a fresh Chat, but its review-fix rounds share it" (the
+      latter uses a reviewer that reports one issue only on its first call, to
+      force exactly one fix round, and asserts the history-length sequence
+      `[2, 4, 2]`).
 - [ ] Update `docs/api.md` (Flow section) and, once shipped in a release,
       simplify `tools/loop/` to use it.
 

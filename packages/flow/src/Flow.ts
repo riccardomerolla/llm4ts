@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { collect } from "@llm4ts/core/Streaming"
-import { makeChat } from "./Chat.ts"
+import { makeChat, type Chat } from "./Chat.ts"
 import type { FlowContextShape } from "./FlowContext.ts"
 import { FlowAborted, FlowLlmError, type FlowError } from "./FlowError.ts"
 import { AssistantMessage, Info, type FlowEventsShape } from "./FlowEvents.ts"
@@ -31,7 +31,12 @@ export interface ImplementPlanOptions {
   readonly planPath: string
   readonly plan: Effect.Effect<Plan, FlowError>
   readonly system?: string
-  /** Currently unwired — implementPlanFlow always shares one Chat across the plan regardless of this value. */
+  /**
+   * When true, each task gets a fresh Chat (system prompt plus the plan's
+   * current render, showing prior tasks' completion status); that task's
+   * review-fix rounds share the same Chat. When false or omitted (default),
+   * one Chat is shared across every task in the plan.
+   */
   readonly chatPerTask?: boolean
   readonly reviewers?: ReadonlyArray<Reviewer>
   readonly commitMessage?: (plan: Plan, task: Task) => string
@@ -43,6 +48,9 @@ export interface ImplementPlanOptions {
 
 const defaultCommitMessage = (plan: Plan, task: Task): string => `${plan.epicId}: ${task.title}`
 
+const composeSystem = (base: string | undefined, note: string): string =>
+  [base, note].filter((part): part is string => part !== undefined && part.length > 0).join("\n\n")
+
 export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(function* (
   context: FlowContextShape,
   options: ImplementPlanOptions
@@ -51,48 +59,72 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
   if (options.checkoutBranch !== false) {
     yield* stage(context.events, "branch", context.git.checkoutOrCreate(plan.epicId))
   }
-  const coder = yield* makeChat(context.coder, {
-    ...(options.system === undefined ? {} : { system: options.system })
-  })
-  return yield* implementTaskLoop(options.store, context.events, options.planPath, plan, (task) =>
-    Effect.gen(function* () {
-      yield* coder.ask(plan.taskPrompt(task))
-      const produced = yield* context.git.diffAll
-      if (produced.trim().length === 0) {
-        yield* context.events.publish(
-          Info.make({
-            message: `task "${task.title}" produced no changes (already satisfied); skipping review and commit`
-          })
-        )
-        return
-      }
-      yield* reviewAndFixLoop({
-        reviewers: options.reviewers ?? minimalReviewers,
-        reviewerService: flowReviewer(context),
-        coder,
-        taskTitle: task.title,
-        currentDiff: context.git.diffAll,
-        events: context.events,
-        ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
-        ...(options.lint === undefined ? {} : { lint: options.lint }),
-        ...(options.format === undefined ? {} : { format: options.format })
-      })
-      if (options.lint !== undefined) {
-        const gate = yield* options.lint
-        if (!gate.isClean) {
-          return yield* FlowAborted.make({
-            message: [
-              `task "${task.title}": the lint gate is still failing after review settled; refusing to commit`,
-              ...gate.issues.map((issue) => {
-                const detail =
-                  issue.description.length === 0 ? "" : `\n${issue.description.slice(-2000)}`
-                return `- [${issue.severity}] ${issue.title}${detail}`
-              })
-            ].join("\n")
+  let sharedCoder: Chat | undefined
+  if (options.chatPerTask !== true) {
+    sharedCoder = yield* makeChat(context.coder, {
+      ...(options.system === undefined ? {} : { system: options.system })
+    })
+  }
+
+  return yield* implementTaskLoop(
+    options.store,
+    context.events,
+    options.planPath,
+    plan,
+    (task, planSoFar) =>
+      Effect.gen(function* () {
+        // `sharedCoder`'s definedness mirrors `options.chatPerTask !== true`
+        // above: when it's set, every task reuses it; when it's undefined,
+        // chatPerTask is active and each task builds its own fresh Chat.
+        let coder: Chat
+        if (sharedCoder !== undefined) {
+          coder = sharedCoder
+        } else {
+          coder = yield* makeChat(context.coder, {
+            system: composeSystem(options.system, planSoFar.render)
           })
         }
-      }
-      yield* context.git.commitAll((options.commitMessage ?? defaultCommitMessage)(plan, task))
-    })
+        // `plan.taskPrompt` deliberately reads the frozen `plan` captured at
+        // the top of this function: a task prompt only needs that task's own
+        // details. `planSoFar`, threaded through by implementTaskLoop, is the
+        // single source of truth for completion progress instead.
+        yield* coder.ask(plan.taskPrompt(task))
+        const produced = yield* context.git.diffAll
+        if (produced.trim().length === 0) {
+          yield* context.events.publish(
+            Info.make({
+              message: `task "${task.title}" produced no changes (already satisfied); skipping review and commit`
+            })
+          )
+          return
+        }
+        yield* reviewAndFixLoop({
+          reviewers: options.reviewers ?? minimalReviewers,
+          reviewerService: flowReviewer(context),
+          coder,
+          taskTitle: task.title,
+          currentDiff: context.git.diffAll,
+          events: context.events,
+          ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
+          ...(options.lint === undefined ? {} : { lint: options.lint }),
+          ...(options.format === undefined ? {} : { format: options.format })
+        })
+        if (options.lint !== undefined) {
+          const gate = yield* options.lint
+          if (!gate.isClean) {
+            return yield* FlowAborted.make({
+              message: [
+                `task "${task.title}": the lint gate is still failing after review settled; refusing to commit`,
+                ...gate.issues.map((issue) => {
+                  const detail =
+                    issue.description.length === 0 ? "" : `\n${issue.description.slice(-2000)}`
+                  return `- [${issue.severity}] ${issue.title}${detail}`
+                })
+              ].join("\n")
+            })
+          }
+        }
+        yield* context.git.commitAll((options.commitMessage ?? defaultCommitMessage)(plan, task))
+      })
   )
 })

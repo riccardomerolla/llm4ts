@@ -31,12 +31,12 @@ export const implementTaskLoop = Effect.fn("@llm4ts/flow/PlanExecution.implement
     events: FlowEventsShape,
     planPath: string,
     plan: Plan,
-    perTask: (task: Task) => Effect.Effect<void, E, R>
+    perTask: (task: Task, planSoFar: Plan) => Effect.Effect<void, E, R>
   ): Effect.fn.Return<Plan, E | FlowError, R> {
     let current = plan
     for (const task of plan.tasks) {
       if (!task.completed) {
-        yield* stage(events, task.title, perTask(task))
+        yield* stage(events, task.title, perTask(task, current))
         current = current.complete(task.title)
         yield* store.save(planPath, current)
       }
