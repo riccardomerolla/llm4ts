@@ -39,3 +39,18 @@ here per the dogfood-loop's "record every gap as a spec" task.
 These are observations, not regressions from pinned `llm4zio` v4.2.0; no ADR or
 `docs/parity.md` change is implied yet. If a chosen fix diverges from the pinned
 source's cost model, record it there at that time.
+
+## Escalation (run 2, 2026-07-29): positional checkbox sync produces false ticks
+
+Run 2 proved the missing checkbox↔task identity is a correctness bug, not
+cosmetics: the plan holds ~10 granular tasks while the spec holds 3 coarse
+checkboxes, and the positional sync ticked spec box 2 ("Cover
+makeCliConnector…") when plan task 2 (an unrelated, skipped task) completed.
+The tick was reverted by hand. Until identities exist, the sync must be
+conservative:
+
+- [ ] Only sync checkboxes when the plan was generated 1:1 from the spec's
+      checklist (same count and order), otherwise leave the spec untouched
+      and report progress in the run output instead.
+- [ ] Longer term: carry a stable identity (e.g. the checkbox text) into
+      generated plan tasks so sync can match by identity, not position.
