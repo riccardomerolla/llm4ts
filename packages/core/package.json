@@ -5,8 +5,12 @@
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "exports": {
     "./AgentSession": "./dist/AgentSession.js",
@@ -64,7 +68,8 @@
     "./tools/Tool": "./dist/tools/Tool.js",
     "./tools/ToolCallingExecutor": "./dist/tools/ToolCallingExecutor.js",
     "./tools/ToolRegistry": "./dist/tools/ToolRegistry.js",
-    "./UsageLimits": "./dist/UsageLimits.js"
+    "./UsageLimits": "./dist/UsageLimits.js",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "clean": "tsc -b tsconfig.json --clean",
@@ -79,7 +84,22 @@
     "url": "git+https://github.com/riccardomerolla/llm4ts.git",
     "directory": "packages/core"
   },
-  "dependencies": {
-    "effect": "beta"
+  "homepage": "https://github.com/riccardomerolla/llm4ts#readme",
+  "bugs": {
+    "url": "https://github.com/riccardomerolla/llm4ts/issues"
+  },
+  "keywords": [
+    "llm",
+    "effect",
+    "ai",
+    "agents",
+    "workflow",
+    "typescript"
+  ],
+  "peerDependencies": {
+    "effect": "^4.0.0-beta.102"
+  },
+  "devDependencies": {
+    "effect": "^4.0.0-beta.102"
   }
 }

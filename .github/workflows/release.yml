@@ -25,11 +25,24 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package versions
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for pkg in packages/*/package.json; do
+            version="$(node -p "require('./$pkg').version")"
+            if [ "$version" != "$tag" ]; then
+              echo "::error::$pkg is $version but tag is $tag"
+              exit 1
+            fi
+          done
+
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm --recursive --filter "./packages/**" publish --access public --no-git-checks --provenance
+      - run: node scripts/pack-smoke.mjs
+      - run: pnpm --recursive --filter "./packages/**" publish --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

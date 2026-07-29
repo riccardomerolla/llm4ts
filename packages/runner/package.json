@@ -5,8 +5,12 @@
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "bin": {
     "llm4ts": "./dist/cli-main.js"
@@ -15,9 +19,9 @@
     "./Cli": "./dist/Cli.js",
     "./CoderPolicy": "./dist/CoderPolicy.js",
     "./Connectors": "./dist/Connectors.js",
+    "./Doctor": "./dist/Doctor.js",
     "./FlowArgs": "./dist/FlowArgs.js",
     "./FlowRunner": "./dist/FlowRunner.js",
-    "./ExampleFlow": "./dist/ExampleFlow.js",
     "./McpStdio": "./dist/McpStdio.js",
     "./NodeHttpClient": "./dist/NodeHttpClient.js",
     "./NodeGeminiCliExecutor": "./dist/NodeGeminiCliExecutor.js",
@@ -29,7 +33,8 @@
     "./ReviewFingerprint": "./dist/ReviewFingerprint.js",
     "./Terminal": "./dist/Terminal.js",
     "./TerminalInteraction": "./dist/TerminalInteraction.js",
-    "./Package": "./dist/Package.js"
+    "./Package": "./dist/Package.js",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "clean": "tsc -b tsconfig.json --clean",
@@ -44,10 +49,26 @@
     "url": "git+https://github.com/riccardomerolla/llm4ts.git",
     "directory": "packages/runner"
   },
+  "homepage": "https://github.com/riccardomerolla/llm4ts#readme",
+  "bugs": {
+    "url": "https://github.com/riccardomerolla/llm4ts/issues"
+  },
+  "keywords": [
+    "llm",
+    "effect",
+    "ai",
+    "agents",
+    "workflow",
+    "typescript"
+  ],
   "dependencies": {
-    "@effect/platform-node": "beta",
     "@llm4ts/core": "workspace:*",
-    "@llm4ts/flow": "workspace:*",
-    "effect": "beta"
+    "@llm4ts/flow": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0-beta.102"
+  },
+  "devDependencies": {
+    "effect": "^4.0.0-beta.102"
   }
 }

@@ -31,3 +31,9 @@ jobs:
           pnpm lint
           pnpm format:check
           pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Pack smoke test
+        run: node scripts/pack-smoke.mjs

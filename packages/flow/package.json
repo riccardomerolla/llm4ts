@@ -5,44 +5,50 @@
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "exports": {
-    "./Classified": "./dist/Classified.js",
-    "./FlowError": "./dist/FlowError.js",
-    "./FlowContext": "./dist/FlowContext.js",
-    "./FlowEvents": "./dist/FlowEvents.js",
-    "./FlowRecorder": "./dist/FlowRecorder.js",
+    "./package.json": "./package.json",
+    "./AzureDevOpsTool": "./dist/AzureDevOpsTool.js",
+    "./Bench": "./dist/Bench.js",
+    "./BenchReport": "./dist/BenchReport.js",
     "./CapabilityGuard": "./dist/CapabilityGuard.js",
+    "./Chat": "./dist/Chat.js",
+    "./Classified": "./dist/Classified.js",
     "./CostLedger": "./dist/CostLedger.js",
     "./CostTracker": "./dist/CostTracker.js",
     "./Equiv": "./dist/Equiv.js",
     "./EquivReport": "./dist/EquivReport.js",
-    "./AzureDevOpsTool": "./dist/AzureDevOpsTool.js",
-    "./Bench": "./dist/Bench.js",
-    "./BenchReport": "./dist/BenchReport.js",
-    "./Chat": "./dist/Chat.js",
-    "./GitTool": "./dist/GitTool.js",
+    "./Flow": "./dist/Flow.js",
+    "./FlowContext": "./dist/FlowContext.js",
+    "./FlowError": "./dist/FlowError.js",
+    "./FlowEvents": "./dist/FlowEvents.js",
+    "./FlowRecorder": "./dist/FlowRecorder.js",
     "./GitHubTool": "./dist/GitHubTool.js",
+    "./GitTool": "./dist/GitTool.js",
     "./Interaction": "./dist/Interaction.js",
-    "./Mermaid": "./dist/Mermaid.js",
     "./McpServer": "./dist/McpServer.js",
+    "./Mermaid": "./dist/Mermaid.js",
+    "./Pack": "./dist/Pack.js",
+    "./Package": "./dist/Package.js",
+    "./Persistence": "./dist/Persistence.js",
     "./Plan": "./dist/Plan.js",
     "./PlanExecution": "./dist/PlanExecution.js",
     "./Planner": "./dist/Planner.js",
-    "./PriceList": "./dist/PriceList.js",
-    "./Persistence": "./dist/Persistence.js",
-    "./Pack": "./dist/Pack.js",
-    "./Provenance": "./dist/Provenance.js",
-    "./Review": "./dist/Review.js",
-    "./Reviewer": "./dist/Reviewer.js",
-    "./ReviewCache": "./dist/ReviewCache.js",
     "./PrSummary": "./dist/PrSummary.js",
+    "./PriceList": "./dist/PriceList.js",
+    "./Provenance": "./dist/Provenance.js",
     "./Replay": "./dist/Replay.js",
+    "./Review": "./dist/Review.js",
+    "./ReviewCache": "./dist/ReviewCache.js",
+    "./Reviewer": "./dist/Reviewer.js",
     "./SpecChecks": "./dist/SpecChecks.js",
     "./Survey": "./dist/Survey.js",
-    "./Package": "./dist/Package.js",
     "./TransientRetry": "./dist/TransientRetry.js",
     "./Workspace": "./dist/Workspace.js",
     "./WorkspaceLayout": "./dist/WorkspaceLayout.js",
@@ -61,8 +67,25 @@
     "url": "git+https://github.com/riccardomerolla/llm4ts.git",
     "directory": "packages/flow"
   },
+  "homepage": "https://github.com/riccardomerolla/llm4ts#readme",
+  "bugs": {
+    "url": "https://github.com/riccardomerolla/llm4ts/issues"
+  },
+  "keywords": [
+    "llm",
+    "effect",
+    "ai",
+    "agents",
+    "workflow",
+    "typescript"
+  ],
   "dependencies": {
-    "@llm4ts/core": "workspace:*",
-    "effect": "beta"
+    "@llm4ts/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0-beta.102"
+  },
+  "devDependencies": {
+    "effect": "^4.0.0-beta.102"
   }
 }
