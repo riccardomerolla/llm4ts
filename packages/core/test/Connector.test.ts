@@ -2,7 +2,12 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { makeApiConnector, type ApiConnectorPrimitives } from "@llm4ts/core/Connector"
+import {
+  apiConnectorCapabilities,
+  makeApiConnector,
+  type ApiConnectorPrimitives
+} from "@llm4ts/core/Connector"
+import type { LlmError } from "@llm4ts/core/Errors"
 import type { StructuredResult } from "@llm4ts/core/LlmService"
 import {
   ConnectorCapabilities,
@@ -32,11 +37,15 @@ const primitives: ApiConnectorPrimitives = {
   executeStream: () => Stream.empty,
   executeStreamWithHistory: () => Stream.empty,
   executeWithTools: () => Effect.succeed(ToolCallResponse.make({ finishReason: "stop" })),
-  executeStructuredWithUsage: (_prompt, schema, jsonSchema) =>
-    Effect.map(
-      parseFromText(JSON.stringify({ answer: 42 }), schema, jsonSchema),
-      (value): StructuredResult<typeof value> => [value, undefined, undefined]
-    ),
+  executeStructuredWithUsage: <A, E, RD, RE>(
+    _prompt: string,
+    schema: Schema.ConstraintCodec<A, E, RD, RE>,
+    jsonSchema: JsonSchema
+  ): Effect.Effect<StructuredResult<A>, LlmError, RD> =>
+    Effect.map(parseFromText(JSON.stringify({ answer: 42 }), schema, jsonSchema), (value) => {
+      const result: StructuredResult<A> = [value, undefined, undefined]
+      return result
+    }),
   isAvailable: Effect.succeed(true)
 }
 
@@ -50,15 +59,7 @@ describe("makeApiConnector", () => {
   it("falls back to the default ConnectorCapabilities when primitives omit capabilities", () => {
     const connector = makeApiConnector(primitives)
 
-    assert.deepStrictEqual(connector.capabilities, {
-      streaming: true,
-      resumableSessions: false,
-      interactiveSessions: false,
-      askUser: false,
-      approval: false,
-      structuredOutput: true,
-      usageReporting: true
-    })
+    assert.deepStrictEqual(connector.capabilities, apiConnectorCapabilities())
   })
 
   it("passes through primitives-supplied capabilities unchanged", () => {
@@ -93,11 +94,15 @@ describe("makeApiConnector", () => {
       const usage = TokenUsage.make({ prompt: 10, completion: 5, total: 15 })
       const connector = makeApiConnector({
         ...primitives,
-        executeStructuredWithUsage: (_prompt, schema, jsonSchema) =>
-          Effect.map(
-            parseFromText(JSON.stringify({ answer: 7 }), schema, jsonSchema),
-            (value): StructuredResult<typeof value> => [value, usage, "mock-model"]
-          )
+        executeStructuredWithUsage: <A, E, RD, RE>(
+          _prompt: string,
+          schema: Schema.ConstraintCodec<A, E, RD, RE>,
+          jsonSchema: JsonSchema
+        ): Effect.Effect<StructuredResult<A>, LlmError, RD> =>
+          Effect.map(parseFromText(JSON.stringify({ answer: 7 }), schema, jsonSchema), (value) => {
+            const result: StructuredResult<A> = [value, usage, "mock-model"]
+            return result
+          })
       })
 
       const result = yield* connector.executeStructured("answer", answerSchema, answerJsonSchema)

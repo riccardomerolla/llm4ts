@@ -39,6 +39,23 @@ Info event) instead of asking reviewers to review nothing.
 
 - [ ] Empty-diff short-circuit in the per-task loop, with a test.
 
+## Critical finding: settling with open issues must not auto-commit
+
+Task 1 of the same run exposed the sharpest gap: `reviewAndFixLoop`
+deliberately settles at `maxRounds` even with open issues (bounded review is
+correct), but the per-task loop then ran `commitAll` unconditionally — and
+the open issue _was the failing CI gate_. The loop committed a task that
+failed typecheck and tests, turning main red. Bounded review and
+commit-worthiness are different judgments:
+
+- [ ] After review settles, the committing loop (`implementPlanFlow` and the
+      dogfood harness) must re-check the gate (or `result.isClean` when a
+      lint gate is configured) and treat a still-red gate as task failure
+      (rollback + fail fast), never as commit-worthy.
+- [ ] Consider a `settled-with-issues` signal in the `reviewAndFixLoop`
+      return value (distinct from clean) so callers cannot conflate them.
+- [ ] Test: a review that settles with a failing lint gate does not commit.
+
 ## Harness note
 
 The loop run was invoked as `pnpm loop ... | tee log`, which masked the
