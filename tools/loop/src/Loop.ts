@@ -259,7 +259,13 @@ export const runLoop = (config: LoopConfig): Effect.Effect<void, FlowError | Scr
                     return yield* FlowAborted.make({
                       message: [
                         `task "${task.title}": the CI gate is still failing after review settled; refusing to commit`,
-                        ...gate.issues.map((issue) => `- [${issue.severity}] ${issue.title}`)
+                        ...gate.issues.map((issue) => {
+                          const detail =
+                            issue.description.length === 0
+                              ? ""
+                              : `\n${issue.description.slice(-2000)}`
+                          return `- [${issue.severity}] ${issue.title}${detail}`
+                        })
                       ].join("\n")
                     })
                   }

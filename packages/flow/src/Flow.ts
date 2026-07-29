@@ -81,7 +81,11 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           return yield* FlowAborted.make({
             message: [
               `task "${task.title}": the lint gate is still failing after review settled; refusing to commit`,
-              ...gate.issues.map((issue) => `- [${issue.severity}] ${issue.title}`)
+              ...gate.issues.map((issue) => {
+                const detail =
+                  issue.description.length === 0 ? "" : `\n${issue.description.slice(-2000)}`
+                return `- [${issue.severity}] ${issue.title}${detail}`
+              })
             ].join("\n")
           })
         }
