@@ -20,7 +20,7 @@ Blast radius: one flow module + tests; additive, default unchanged.
       omitted, assert the existing single-shared-Chat behavior is unchanged;
       assert review-fix rounds within one task still share that task's chat.
 - [x] Update `docs/api.md` (Flow section).
-- [ ] Once shipped in a release, simplify `tools/loop/` to use it.
+- [x] Once shipped in a release, simplify `tools/loop/` to use it.
 
 ## References
 
