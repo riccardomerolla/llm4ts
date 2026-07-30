@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 - New modernization flows, porting `llm4zio`'s legacy-rooted phases:
   `flows/modernize-survey.ts` (deterministic dependency graph, LLM
