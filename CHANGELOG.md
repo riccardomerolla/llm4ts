@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Legacy modernization reaches full parity with the pinned source's example
   suite. The four target-side phases ship as flows —
