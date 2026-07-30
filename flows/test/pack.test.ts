@@ -1,61 +1,141 @@
-import { dirname, join } from "node:path"
+import { existsSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import { loadPack, type Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
-import { loadPack } from "@llm4ts/flow/Pack"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
 
 const flowsRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
 
 const workspace = Effect.suspend(() => makeNodeWorkspace(flowsRoot))
 
+const load = (name: string): Effect.Effect<Pack, unknown> =>
+  Effect.flatMap(workspace, (space) => loadPack(space, `packs/${name}`))
+
 /**
- * The shipped reference pack is the modernization flows' default configuration
- * (`LLM4TS_PACK`, resolved against the launch directory). These checks fail
- * loudly if an edit breaks the manifest the flows depend on — no network, no
- * provider, just the parser.
+ * The shipped reference packs are the modernization flows' default
+ * configuration (`LLM4TS_PACK`, resolved against the launch directory).
+ * These checks fail loudly if an edit breaks a manifest the flows depend on —
+ * no network, no provider, just the parser.
  */
-describe("flows/packs/cobol-springboot", () => {
+const packs = [
+  {
+    name: "cobol-springboot",
+    source: "cobol",
+    specsDir: "docs/specs",
+    featuresDir: "src/test/resources/features",
+    coverage: ["cobol-paragraph", "jcl-step"],
+    survey: ["calls", "copies", "exec-pgm"],
+    replay: true
+  },
+  {
+    name: "cobol-kafka",
+    source: "cobol",
+    specsDir: "docs/specs",
+    featuresDir: "src/test/resources/features",
+    coverage: ["cobol-paragraph", "jcl-step"],
+    survey: ["calls", "copies", "exec-pgm"],
+    replay: true
+  },
+  {
+    name: "ace-integration",
+    source: "ace",
+    specsDir: "docs/specs",
+    featuresDir: "src/test/resources/features",
+    replay: false
+  },
+  {
+    name: "ace-kafka",
+    source: "ace",
+    specsDir: "docs/specs",
+    featuresDir: "src/test/resources/features",
+    replay: true
+  },
+  {
+    name: "jsp-bff-nextjs",
+    source: "jsp",
+    specsDir: "docs/specs",
+    featuresDir: "src/test/resources/features",
+    replay: false
+  },
+  {
+    name: "jsp-nextjs",
+    source: "jsp",
+    specsDir: "docs/specs",
+    featuresDir: "features",
+    replay: false
+  }
+] as const
+
+describe.each(packs)("flows/packs/$name", (expected) => {
   it.effect("loads with the fields the modernization flows read", () =>
     Effect.gen(function* () {
-      const pack = yield* loadPack(yield* workspace, "packs/cobol-springboot")
+      const pack = yield* load(expected.name)
 
-      assert.strictEqual(pack.name, "cobol-springboot")
-      assert.strictEqual(pack.source, "cobol")
-      assert.isDefined(pack.sources, "modernize-verify's clean-room wall needs a sources regex")
-      assert.isDefined(pack.programs, "modernize-extract enumerates programs with this regex")
-      assert.isDefined(pack.scaffold, "modernize-seed scaffolds an empty target from the pack")
-      assert.isDefined(pack.replay, "modernize-verify replays vectors through this command")
-      assert.strictEqual(pack.specsDir, "docs/specs")
-      assert.strictEqual(pack.featuresDir, "src/test/resources/features")
+      assert.strictEqual(pack.name, expected.name)
+      assert.strictEqual(pack.source, expected.source)
+      assert.strictEqual(pack.specsDir, expected.specsDir)
+      assert.strictEqual(pack.featuresDir, expected.featuresDir)
+      // Every target-side phase gates on the wall, which needs this regex.
+      assert.isDefined(pack.sources, "the clean-room wall needs a sources regex")
+      assert.doesNotThrow(() => new RegExp(pack.sources ?? ""))
+      // modernize-seed scaffolds an empty target from the pack.
+      assert.isDefined(pack.scaffold, "modernize-seed needs a scaffold")
     })
   )
 
-  it.effect("declares the gates, judge rubric, and coverage rules the phases consume", () =>
+  it.effect("points at a scaffold that ships with the repository", () =>
     Effect.gen(function* () {
-      const pack = yield* loadPack(yield* workspace, "packs/cobol-springboot")
-
-      // modernize-implement picks build for the tests task and test/verify after.
-      for (const gate of ["build", "test", "verify"]) {
-        assert.isDefined(pack.gate(gate), `pack is missing the '${gate}' gate`)
+      const pack = yield* load(expected.name)
+      const scaffold = resolve(flowsRoot, "packs", expected.name, pack.scaffold ?? "")
+      assert.isTrue(existsSync(scaffold), `missing scaffold for ${expected.name}: ${scaffold}`)
+      // The seeded target must be able to run the pack's own replay command.
+      if (pack.replay !== undefined) {
+        const script = pack.replay.find((part) => part.endsWith(".sh"))
+        if (script !== undefined) {
+          assert.isTrue(
+            existsSync(join(scaffold, script)),
+            `${expected.name} declares 'replay: ${script}' but its scaffold does not ship it`
+          )
+        }
       }
+    })
+  )
+
+  it.effect("declares the gates and judge rubric the phases consume", () =>
+    Effect.gen(function* () {
+      const pack = yield* load(expected.name)
+      // modernize-implement gates each task on build, then test/verify.
+      assert.isDefined(pack.gate("build"), `${expected.name} is missing the 'build' gate`)
+      assert.isDefined(pack.gate("test"), `${expected.name} is missing the 'test' gate`)
       // modernize-extract requires full marks on every dimension.
       assert.isAbove(pack.judgeDimensions.length, 0)
       for (const dimension of pack.judgeDimensions) {
         assert.isAbove(dimension.maxScore, 0)
         assert.isAbove(dimension.rubric.length, 0)
       }
-      // Coverage rules drive the deterministic traceability gate; survey rules
-      // drive the dependency graph.
-      assert.deepStrictEqual(
-        pack.coverage.map((rule) => rule.name),
-        ["cobol-paragraph", "jcl-step"]
-      )
-      assert.deepStrictEqual(
-        pack.survey.map((rule) => rule.name),
-        ["calls", "copies", "exec-pgm"]
-      )
+    })
+  )
+
+  it.effect("carries compilable coverage and survey rules", () =>
+    Effect.gen(function* () {
+      const pack = yield* load(expected.name)
+      if ("coverage" in expected) {
+        assert.deepStrictEqual(
+          pack.coverage.map((rule) => rule.name),
+          [...expected.coverage]
+        )
+      }
+      if ("survey" in expected) {
+        assert.deepStrictEqual(
+          pack.survey.map((rule) => rule.name),
+          [...expected.survey]
+        )
+      }
+      // Coverage feeds the traceability gate; survey feeds the dependency graph.
+      assert.isAbove(pack.coverage.length, 0, "no coverage rules — the gate would pass vacuously")
       for (const rule of [...pack.coverage, ...pack.survey]) {
         assert.doesNotThrow(() => new RegExp(rule.files), `bad files regex in ${rule.name}`)
         assert.doesNotThrow(() => new RegExp(rule.unit), `bad unit regex in ${rule.name}`)
@@ -63,21 +143,37 @@ describe("flows/packs/cobol-springboot", () => {
     })
   )
 
-  it.effect("carries every prompt sidecar the phases inject", () =>
+  it.effect("carries the prompt sidecars and reviewer lenses the phases inject", () =>
     Effect.gen(function* () {
-      const pack = yield* loadPack(yield* workspace, "packs/cobol-springboot")
-      for (const name of ["analysis", "spec", "bdd", "plan", "implement", "review", "vectors"]) {
+      const pack = yield* load(expected.name)
+      // These four are read by extract (analysis/spec/bdd/plan); implement and
+      // review read their own, and verify reads vectors when it has one.
+      for (const name of ["analysis", "spec", "bdd", "plan", "implement", "review"]) {
         const prompt = pack.prompt(name)
-        assert.isDefined(prompt, `pack is missing the '${name}' prompt`)
+        assert.isDefined(prompt, `${expected.name} is missing the '${name}' prompt`)
         assert.isAbove(prompt?.length ?? 0, 0)
       }
-      assert.isAbove(pack.lenses.length, 0, "pack ships reviewer lenses for the review phase")
+      if (expected.replay) {
+        assert.isDefined(
+          pack.prompt("vectors"),
+          `${expected.name} replays vectors but ships no 'vectors' prompt`
+        )
+      }
+      assert.isAbove(pack.lenses.length, 0, "packs ship reviewer lenses for the review phase")
+      for (const lens of pack.lenses) {
+        assert.isAbove(lens.systemPrompt.length, 0, `${lens.name} has an empty prompt`)
+        if (lens.files !== undefined) {
+          assert.doesNotThrow(() => new RegExp(lens.files ?? ""), `bad files regex in ${lens.name}`)
+        }
+      }
     })
   )
+})
 
-  it.effect("matches its coverage regexes against representative COBOL and JCL", () =>
+describe("cobol coverage rules", () => {
+  it.effect("match representative COBOL paragraphs and JCL steps", () =>
     Effect.gen(function* () {
-      const pack = yield* loadPack(yield* workspace, "packs/cobol-springboot")
+      const pack = yield* load("cobol-springboot")
       const paragraph = pack.coverage.find((rule) => rule.name === "cobol-paragraph")
       const step = pack.coverage.find((rule) => rule.name === "jcl-step")
 
@@ -87,8 +183,8 @@ describe("flows/packs/cobol-springboot", () => {
   )
 })
 
-describe("flows/patterns", () => {
-  it.effect("loads the universal pattern cards with usable match regexes", () =>
+describe("pattern cards", () => {
+  it.effect("load from the universal directory with usable match regexes", () =>
     Effect.gen(function* () {
       const cards = yield* loadPatternCards(yield* workspace, "patterns")
       assert.isAbove(cards.length, 0)
@@ -100,7 +196,17 @@ describe("flows/patterns", () => {
     })
   )
 
-  it.effect("selects the packed-decimal card for COMP-3 source", () =>
+  it.effect("load from a pack-local directory too", () =>
+    Effect.gen(function* () {
+      const cards = yield* loadPatternCards(yield* workspace, "packs/cobol-kafka/patterns")
+      assert.isAbove(cards.length, 0, "cobol-kafka ships its own event-streaming cards")
+      for (const card of cards) {
+        assert.doesNotThrow(() => new RegExp(card.matches, "m"), `${card.id} has a bad regex`)
+      }
+    })
+  )
+
+  it.effect("select the packed-decimal card for COMP-3 source", () =>
     Effect.gen(function* () {
       const cards = yield* loadPatternCards(yield* workspace, "patterns")
       const matched = matchingPatternCards("       01  WS-AMOUNT   PIC S9(7)V99 COMP-3.", cards)

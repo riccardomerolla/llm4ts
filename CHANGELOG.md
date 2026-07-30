@@ -20,10 +20,16 @@
   response retries at half then quarter context, traceability fragments are
   tagged with the pattern cards their source matches, and a turn-limit trip
   after the artifact landed keeps the work.
-- The reference `cobol-springboot` pack, 25 universal COBOL pattern cards, and
-  a Spring Boot scaffold ship under `flows/`, validated by
-  `flows/test/pack.test.ts`. `@llm4ts/flow/Package` now exposes
-  `packageVersion` for provenance manifests.
+- All six reference packs ship under `flows/packs/` — `cobol-springboot`,
+  `cobol-kafka`, `ace-integration`, `ace-kafka`, `jsp-bff-nextjs`, and
+  `jsp-nextjs` — with the four target scaffolds they seed
+  (`spring-boot-service`, `kafka-streams-service`, `spring-bff`, `nextjs-spa`),
+  25 universal COBOL pattern cards, and `cobol-kafka`'s pack-local
+  event-streaming cards. `flows/test/pack.test.ts` validates every pack:
+  manifest fields, gates, judge rubric, compilable coverage/survey regexes,
+  prompt sidecars, reviewer lenses, and that each declared scaffold and replay
+  script actually ships. `@llm4ts/flow/Package` now exposes `packageVersion`
+  for provenance manifests.
 
 ## 0.2.2
 

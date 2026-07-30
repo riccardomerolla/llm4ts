@@ -169,10 +169,33 @@ survey → [human approves waves] → extract → [human approves the pack]
 Every phase reads a modernization **pack** (`@llm4ts/flow/Pack`): a directory
 with a `pack.md` manifest (sources/programs regexes, gates, judge rubric,
 `## Coverage:` unit rules, `## Survey:` edge rules, equivalence policy) plus
-`prompts/` and `reviewers/` sidecars. `LLM4TS_PACK` selects it, resolved
-against the launch directory; the shipped reference pack is
-[`packs/cobol-springboot`](packs/cobol-springboot/pack.md), with universal
-translation [pattern cards](patterns/) alongside it.
+`prompts/` and `reviewers/` sidecars. `LLM4TS_PACK` selects one, resolved
+against the launch directory (default `packs/cobol-springboot`).
+
+Six reference packs ship, each pairing a legacy source technology with a
+target stack, plus the [scaffold](fixtures/scaffolds/) that seeds an empty
+target repository:
+
+| Pack                                                 | Legacy → target                   | Scaffold                | Replay |
+| ---------------------------------------------------- | --------------------------------- | ----------------------- | ------ |
+| [`cobol-springboot`](packs/cobol-springboot/pack.md) | COBOL/JCL → Spring Boot service   | `spring-boot-service`   | yes    |
+| [`cobol-kafka`](packs/cobol-kafka/pack.md)           | COBOL/JCL → Kafka Streams service | `kafka-streams-service` | yes    |
+| [`ace-integration`](packs/ace-integration/pack.md)   | ACE msgflow/ESQL → Spring Boot    | `spring-boot-service`   | no     |
+| [`ace-kafka`](packs/ace-kafka/pack.md)               | ACE msgflow/ESQL → Kafka Streams  | `kafka-streams-service` | yes    |
+| [`jsp-bff-nextjs`](packs/jsp-bff-nextjs/pack.md)     | JSP/Java → Spring BFF + Next.js   | `spring-bff`            | no     |
+| [`jsp-nextjs`](packs/jsp-nextjs/pack.md)             | JSP/Java → Next.js SPA            | `nextjs-spa`            | no     |
+
+Packs without a `replay:` command run phases 0–3 and 5; phase 4 needs a
+replay harness in the target repository to drive equivalence vectors.
+
+Universal translation [pattern cards](patterns/) sit beside the packs and
+apply to every run; a pack may add its own under `<pack>/patterns/` (as
+`cobol-kafka` does for event-streaming idioms). Extraction tags each
+program's traceability fragment with the cards its source matches, and
+implementation injects exactly those cards.
+
+Copy a pack and edit it for your estate — the manifest is the whole contract,
+and `flows/test/pack.test.ts` shows what the flows require of it.
 
 ### Phase 0 — survey
 

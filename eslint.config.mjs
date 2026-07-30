@@ -66,7 +66,14 @@ export default [
       "**/node_modules/**",
       "**/.repos/**",
       "**/repos/**",
-      "**/*.gen.ts"
+      "**/*.gen.ts",
+      // Ported modernization data: pack manifests, pattern cards, and the
+      // target-project scaffolds a seeded repository receives. None of it is
+      // llm4ts source, and the scaffolds carry other stacks' syntax (JSX).
+      "flows/packs/**",
+      "flows/patterns/**",
+      "flows/fixtures/**",
+      "packages/shell/flows/**"
     ]
   },
   js.configs.recommended,

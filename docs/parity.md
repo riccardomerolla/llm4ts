@@ -91,7 +91,8 @@ reference release.
 | `examples/implement.sc`, `local.sc`                   | live connector integration behavior                             | `flows/implement.ts`, `flows/local.ts`                 | typed build + opt-in execution           | real coding-agent examples           |
 | `examples/issue-pr.sc`, `sdd.sc`                      | issue delivery and executable SDD gates                         | `flows/issue-pr.ts`, `flows/sdd.ts`                    | typed build; live execution is opt-in    | persistent delivery examples         |
 | `examples/modernize-*.sc` (7 scripts)                 | six-phase legacy modernization pipeline and its benchmark       | `flows/modernize-*.ts` (7 flows)                       | typed build; `flows/test/pack.test.ts`   | full modernization pipeline          |
-| `examples/packs/*`, `examples/patterns/*`             | pack manifest, prompts, lenses, translation pattern cards       | `flows/packs/cobol-springboot`, `flows/patterns`       | `flows/test/pack.test.ts`                | shipped reference pack               |
+| `examples/packs/*` (6), `examples/patterns/*`         | pack manifests, prompts, lenses, translation pattern cards      | `flows/packs/*` (6), `flows/patterns`                  | `flows/test/pack.test.ts`                | shipped reference packs              |
+| `examples/fixtures/scaffolds/*` (4)                   | target-repository scaffolds seeded into an empty target         | `flows/fixtures/scaffolds/*` (4)                       | `flows/test/pack.test.ts`                | seeding a fresh target               |
 | `llm4zio-flow/Wall.scala`, `Patterns.scala`           | clean-room wall enforcement, pattern-card selection             | `@llm4ts/flow/Wall`, `@llm4ts/flow/Patterns`           | `Wall.test.ts`, `Patterns.test.ts`       | target-phase safety and playbooks    |
 | `examples/seed.sh`, `examples/starters/*`             | disposable runnable example repositories                        | `examples/seed.sh`, `examples/starters/*`              | Rust, Maven, and sbt starter builds      | example harness isolation            |
 | `examples/judge-suite.sc`                             | repeated LLM-as-a-Judge example                                 | `flows/judge-suite.ts`                                 | typed build; live execution is opt-in    | evaluation example                   |
@@ -275,10 +276,13 @@ reference release.
   fixtures need no external services.
 - All seven of the source's `modernize-*.sc` example scripts ship as runnable
   flows: `survey`, `extract`, `seed`, `implement`, `verify`, `review`, and
-  `bench`, with the reference `cobol-springboot` pack, its universal pattern
-  cards, and the Spring Boot scaffold under `flows/`. The clean-room `Wall`
-  and `Patterns` modules the target-side phases depend on are ported into
-  `@llm4ts/flow` with their own deterministic tests. Remaining divergences:
+  `bench`. All six reference packs (`cobol-springboot`, `cobol-kafka`,
+  `ace-integration`, `ace-kafka`, `jsp-bff-nextjs`, `jsp-nextjs`), all four
+  scaffolds, the universal pattern cards, and `cobol-kafka`'s pack-local cards
+  ship under `flows/`, validated per-pack by `flows/test/pack.test.ts`. The
+  clean-room `Wall` and `Patterns` modules the target-side phases depend on
+  are ported into `@llm4ts/flow` with their own deterministic tests.
+  Remaining divergences:
   - Extraction artifacts come from one structured analyst call per program
     (`extractProgramsResumably`) rather than a free-roaming agent writing
     files itself. Resume, per-program commits, verdict caching, the
