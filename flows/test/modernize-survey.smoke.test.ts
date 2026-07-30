@@ -1,0 +1,238 @@
+import { execFileSync, spawnSync } from "node:child_process"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { assert, describe, it } from "@effect/vitest"
+import * as Schema from "effect/Schema"
+import { SurveyGraph } from "@llm4ts/flow/Survey"
+
+const flowsRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
+
+/**
+ * End-to-end smoke for the modernization pipeline with the MODEL mocked and
+ * nothing else. The flow, runner, pack loader, workspace, and git are all
+ * real; only the `claude` binary on PATH is replaced by a stub that speaks
+ * the CLI's `--output-format stream-json` protocol and answers from a canned
+ * script. That keeps the test hermetic — no network, no credentials, no
+ * installed coding agent — while still exercising the wiring a live run uses.
+ *
+ * This is the pre-release check that a modernization flow starts, reads its
+ * pack, drives its stages in order, writes its artifacts, and commits.
+ */
+const stubClaude = `#!/usr/bin/env node
+const chunks = []
+process.stdin.on("data", (chunk) => chunks.push(chunk))
+process.stdin.on("end", () => {
+  const prompt = Buffer.concat(chunks).toString("utf8")
+  // The survey makes exactly two structured calls; both are answered from the
+  // prompt's own vocabulary so the stub never has to guess an order.
+  const reply = prompt.includes("refining the dependency graph")
+    ? {
+        edges: [
+          {
+            from: "RUNJOB",
+            to: "ACCTXFR",
+            kind: "dynamic-call",
+            evidence: "RUNJOB.JCL:2 //STEP1 EXEC PGM=&PGM  (PGM set to ACCTXFR)"
+          }
+        ],
+        notes: ["CEE3ABD is a system service, not an estate unit"]
+      }
+    : {
+        triage: [
+          { name: "ACCTXFR", disposition: "rewrite", rationale: "Live transfer logic, 2 callers." },
+          { name: "FEECALC", disposition: "rewrite", rationale: "Fee rules used by ACCTXFR." },
+          { name: "RUNJOB", disposition: "wrap", rationale: "Scheduler entry point; keep for now." }
+        ],
+        waves: [
+          {
+            name: "wave-1",
+            programs: ["FEECALC"],
+            rationale: "Leaf unit with no outgoing estate dependencies."
+          },
+          {
+            name: "wave-2",
+            programs: ["ACCTXFR"],
+            rationale: "Depends on FEECALC, which wave-1 migrates."
+          }
+        ],
+        notes: []
+      }
+  const emit = (value) => process.stdout.write(JSON.stringify(value) + "\\n")
+  emit({ type: "system", subtype: "init", model: "stub-claude-1" })
+  emit({ type: "assistant", message: { content: [{ type: "text", text: JSON.stringify(reply) }] } })
+  emit({ type: "result", usage: { input_tokens: 120, output_tokens: 45 } })
+})
+`
+
+const cobolAcctxfr = [
+  "       IDENTIFICATION DIVISION.",
+  "       PROGRAM-ID. ACCTXFR.",
+  "       PROCEDURE DIVISION.",
+  "       0100-VALIDATE-INPUT.",
+  "           CALL 'FEECALC'.",
+  "       0200-POST-LEDGER.",
+  "           EXIT."
+].join("\n")
+
+const cobolFeecalc = [
+  "       IDENTIFICATION DIVISION.",
+  "       PROGRAM-ID. FEECALC.",
+  "       DATA DIVISION.",
+  "       01  WS-AMOUNT   PIC S9(7)V99 COMP-3.",
+  "       PROCEDURE DIVISION.",
+  "       0100-COMPUTE-FEE.",
+  "           EXIT."
+].join("\n")
+
+/**
+ * The step names its program through a symbolic parameter, so the pack's
+ * `EXEC +PGM=([A-Z0-9]+)` rule cannot see it — precisely the blind spot the
+ * graph-refine pass exists to close.
+ */
+const jclRunjob = [
+  "//RUNJOB   JOB",
+  "//         SET PGM=ACCTXFR",
+  "//STEP1    EXEC PGM=&PGM",
+  "//SYSIN    DD *"
+].join("\n")
+
+interface Estate {
+  readonly root: string
+  readonly binDir: string
+}
+
+const makeEstate = (): Estate => {
+  const root = mkdtempSync(join(tmpdir(), "llm4ts-survey-smoke-"))
+  const estate = join(root, "estate")
+  const binDir = join(root, "bin")
+  mkdirSync(join(estate, "cobol"), { recursive: true })
+  mkdirSync(join(estate, "jcl"), { recursive: true })
+  mkdirSync(binDir, { recursive: true })
+
+  writeFileSync(join(estate, "cobol", "ACCTXFR.cbl"), `${cobolAcctxfr}\n`)
+  writeFileSync(join(estate, "cobol", "FEECALC.cbl"), `${cobolFeecalc}\n`)
+  writeFileSync(join(estate, "jcl", "RUNJOB.JCL"), `${jclRunjob}\n`)
+
+  const stubPath = join(binDir, "claude")
+  writeFileSync(stubPath, stubClaude)
+  chmodSync(stubPath, 0o755)
+
+  const git = (...args: ReadonlyArray<string>): void => {
+    execFileSync("git", [...args], { cwd: estate, stdio: "ignore" })
+  }
+  git("init", "-q", "-b", "main")
+  git("config", "user.email", "smoke@llm4ts.test")
+  git("config", "user.name", "llm4ts smoke")
+  git("add", "-A")
+  git("commit", "-qm", "estate baseline")
+
+  return { root, binDir }
+}
+
+const runSurvey = (estate: Estate) =>
+  spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      join(flowsRoot, "modernize-survey.ts"),
+      "--repo",
+      join(estate.root, "estate")
+    ],
+    {
+      cwd: flowsRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${estate.binDir}:${process.env.PATH ?? ""}`,
+        LLM4TS_PACK: "packs/cobol-springboot",
+        // The stub answers as `claude`, which is also coderFromEnv's default;
+        // set it explicitly so the test does not depend on that default.
+        LLM4TS_CODER: "claude",
+        LLM4TS_VERBOSITY: "quiet"
+      }
+    }
+  )
+
+describe("modernize-survey end to end (model stubbed)", () => {
+  it("surveys an estate, refines its graph, and writes an unapproved wave plan", () => {
+    const estate = makeEstate()
+    try {
+      const result = runSurvey(estate)
+      assert.strictEqual(
+        result.status,
+        0,
+        `survey exited ${result.status}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`
+      )
+
+      const modDir = join(estate.root, "estate", "docs", "modernization")
+      const read = (name: string): string => readFileSync(join(modDir, name), "utf8")
+
+      // 1. The deterministic graph found every unit and the regex-derived
+      //    edges. Decoding with the real schema also proves the flow wrote a
+      //    graph.json a later phase can read back.
+      const graph = Schema.decodeUnknownSync(SurveyGraph)(JSON.parse(read("graph.json")))
+      assert.deepStrictEqual(graph.nodes.map((node) => node.name).sort(), [
+        "ACCTXFR",
+        "FEECALC",
+        "RUNJOB"
+      ])
+      // CALL 'FEECALC' in ACCTXFR.cbl is a regex-derived edge.
+      assert.deepStrictEqual(
+        graph.edges
+          .filter((edge) => edge.kind === "calls")
+          .map((edge) => `${edge.from}->${edge.to}`),
+        ["ACCTXFR->FEECALC"]
+      )
+
+      // 2. The LLM refinement was merged and tagged so it stays distinguishable
+      //    from the regex-derived edges.
+      assert.deepStrictEqual(
+        graph.edges
+          .filter((edge) => edge.kind.startsWith("llm-"))
+          .map((edge) => `${edge.from}->${edge.to} (${edge.kind})`),
+        ["RUNJOB->ACCTXFR (llm-dynamic-call)"]
+      )
+      const refine = read("graph-refine.md")
+      assert.include(refine, "1 of 1 proposed edge(s) merged")
+      assert.include(
+        refine,
+        "EXEC PGM=&PGM",
+        "the evidence citation should survive into the audit trail"
+      )
+      assert.include(refine, "CEE3ABD", "unresolved references belong in the notes section")
+
+      // 3. The inventory is human-readable and lists the estate.
+      const inventory = read("inventory.md")
+      assert.include(inventory, "ACCTXFR")
+      assert.include(inventory, "FEECALC")
+
+      // 4. The wave plan carries the triage, the waves, and — critically — an
+      //    UNCHECKED approval marker: extraction must not be able to start.
+      const plan = read("wave-plan.md")
+      assert.include(plan, "## Wave: wave-1")
+      assert.include(plan, "## Wave: wave-2")
+      assert.include(plan, "| FEECALC | rewrite |")
+      assert.include(plan, "| RUNJOB | wrap |")
+      assert.include(plan, "- [ ] Approved")
+      assert.notInclude(plan, "- [x] Approved")
+      // No bench records exist here, so the plan ships without a projection.
+      assert.notInclude(plan, "## Cost projection")
+
+      // 5. The artifacts were committed, not just written.
+      const log = execFileSync("git", ["log", "--oneline", "-1"], {
+        cwd: join(estate.root, "estate"),
+        encoding: "utf8"
+      })
+      assert.include(log, "modernize(cobol-springboot): survey")
+      const status = execFileSync("git", ["status", "--porcelain"], {
+        cwd: join(estate.root, "estate"),
+        encoding: "utf8"
+      })
+      assert.strictEqual(status.trim(), "", "the survey should leave a clean tree")
+    } finally {
+      rmSync(estate.root, { recursive: true, force: true })
+    }
+  })
+})

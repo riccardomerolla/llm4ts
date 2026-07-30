@@ -71,7 +71,7 @@ const gatherSpecs = Effect.fn("modernize-implement.gatherSpecs")(function* (
   target: WorkspaceShape,
   specsDir: string
 ) {
-  const paths = yield* target.discover(`${specsDir}/**/*`).pipe(Effect.orElseSucceed(() => []))
+  const paths = yield* target.discover(`${specsDir}/**`).pipe(Effect.orElseSucceed(() => []))
   const parts: Array<string> = []
   for (const path of [...paths].sort()) {
     const text = yield* target.read(path).pipe(Effect.orElseSucceed(() => ""))

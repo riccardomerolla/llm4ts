@@ -51,7 +51,7 @@ const copyTree = Effect.fn("modernize-seed.copyTree")(function* (
   from: string,
   into: string
 ) {
-  const paths = yield* source.discover(`${from}/**/*`).pipe(Effect.orElseSucceed(() => []))
+  const paths = yield* source.discover(`${from}/**`).pipe(Effect.orElseSucceed(() => []))
   let copied = 0
   for (const path of paths) {
     if (isLitter(path)) {
@@ -154,6 +154,16 @@ const program = Effect.gen(function* () {
           "seed",
           Effect.gen(function* () {
             const specs = yield* copyTree(legacy, target, `${ModDir}/specs`, pack.specsDir)
+            // A spec pack that contributes no specs means the wrong legacy repo,
+            // or an extraction that never wrote any. Seeding an empty target and
+            // reporting success would push that discovery minutes downstream.
+            if (specs === 0) {
+              return yield* FlowAborted.make({
+                message:
+                  `no specs found under ${legacyRepo}/${ModDir}/specs — ` +
+                  "check LLM4TS_LEGACY_REPO and that extraction wrote its spec pack"
+              })
+            }
             const features = yield* copyTree(legacy, target, `${ModDir}/features`, pack.featuresDir)
             for (const index of ["traceability.md", "mapping.md", "rules.txt"]) {
               yield* copyFile(legacy, target, `${ModDir}/${index}`, join(pack.specsDir, index))

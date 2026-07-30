@@ -102,7 +102,7 @@ const gatherDir = Effect.fn("modernize-review.gatherDir")(function* (
   workspace: WorkspaceShape,
   directory: string
 ) {
-  const paths = yield* workspace.discover(`${directory}/**/*`).pipe(Effect.orElseSucceed(() => []))
+  const paths = yield* workspace.discover(`${directory}/**`).pipe(Effect.orElseSucceed(() => []))
   const parts: Array<string> = []
   for (const path of [...paths].sort()) {
     const text = yield* workspace.read(path).pipe(Effect.orElseSucceed(() => ""))
