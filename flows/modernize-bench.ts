@@ -22,7 +22,9 @@ import { arch, cpus, hostname, totalmem, type as osType } from "node:os"
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { Sample } from "@llm4ts/core/eval/Eval"
+import type { TokenUsage } from "@llm4ts/core/Models"
 import { judge } from "@llm4ts/core/eval/Judge"
+import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import {
   BenchJudge,
   BenchMachine,
@@ -36,7 +38,7 @@ import {
 } from "@llm4ts/flow/Bench"
 import { loadBenchRecords, appendBenchRecord, renderBenchReport } from "@llm4ts/flow/BenchReport"
 import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
-import { Info } from "@llm4ts/flow/FlowEvents"
+import { Info, TokensUsed } from "@llm4ts/flow/FlowEvents"
 import { packageVersion } from "@llm4ts/flow/Package"
 import { loadPack } from "@llm4ts/flow/Pack"
 import { stage } from "@llm4ts/flow/PlanExecution"
@@ -148,6 +150,21 @@ const program = Effect.gen(function* () {
             .filter((part) => part !== undefined)
             .join("\n\n")
 
+          /**
+           * Structured calls report usage only to their caller; the Chat seam
+           * is what normally publishes `TokensUsed` (ADR 0005). A benchmark
+           * that skipped this would measure wall-clock and nothing else, so
+           * every measured call republishes its own usage for the tap.
+           */
+          const publishUsage = (agent: string, usage: TokenUsage, model: string | undefined) =>
+            context.events.publish(
+              TokensUsed.make({
+                agent,
+                usage,
+                ...(model === undefined ? {} : { model })
+              })
+            )
+
           yield* measured(
             "extract",
             extractProgramsResumably(
@@ -155,7 +172,7 @@ const program = Effect.gen(function* () {
               units,
               (unit) =>
                 context.coder
-                  .executeStructured(
+                  .executeStructuredWithUsage(
                     [
                       system,
                       "",
@@ -167,7 +184,13 @@ const program = Effect.gen(function* () {
                     ProgramArtifacts,
                     { type: "object" }
                   )
-                  .pipe(Effect.mapError(FlowLlmError.from)),
+                  .pipe(
+                    Effect.mapError(FlowLlmError.from),
+                    Effect.tap(([, usage, model]) =>
+                      usage === undefined ? Effect.void : publishUsage("coder", usage, model)
+                    ),
+                    Effect.map(([artifacts]) => artifacts)
+                  ),
               modDirAbs
             )
           )
@@ -191,10 +214,26 @@ const program = Effect.gen(function* () {
             })
           )
 
+          /**
+           * The evaluator has no usage-reporting variant, so the seat it runs
+           * on is wrapped instead: every structured call it makes reports its
+           * usage to the tap before returning the value.
+           */
+          const metered: LlmServiceShape = {
+            ...context.reasoning,
+            executeStructured: (prompt, schema, jsonSchema) =>
+              context.reasoning.executeStructuredWithUsage(prompt, schema, jsonSchema).pipe(
+                Effect.tap(([, usage, model]) =>
+                  usage === undefined ? Effect.void : publishUsage("reasoning", usage, model)
+                ),
+                Effect.map(([value]) => value)
+              )
+          }
+
           const judged = yield* measured(
             "judge",
             Effect.gen(function* () {
-              const packJudge = judge(context.reasoning, pack.judgeDimensions)
+              const packJudge = judge(metered, pack.judgeDimensions)
               const scores: Array<BenchScore> = []
               let findings = 0
               for (const unit of units) {

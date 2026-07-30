@@ -31,6 +31,21 @@
   script actually ships. `@llm4ts/flow/Package` now exposes `packageVersion`
   for provenance manifests.
 
+- Every modernization phase is covered by an offline end-to-end smoke: the
+  flows, runner, pack loader, gates, replay harness, and git all run for real
+  with only the coding-agent binary stubbed. Three bugs surfaced and were
+  fixed: `${dir}/**/*` never matched files directly under a directory, so
+  `modernize-seed` silently copied zero specs and still reported success (the
+  same glob was gathering spec text in `-implement` and `-review`);
+  `modernize-verify` built its provenance update as a plain object, which the
+  schema encoder rejected at the end of an otherwise successful run; and
+  `modernize-implement` left the final task's plan update uncommitted.
+- `modernize-bench` now measures tokens, not just wall-clock: structured calls
+  report their usage through the event tap, and the evaluator's seat is
+  wrapped so judge tokens are attributed too.
+- `modernize-seed` aborts when a spec pack contributes no specs instead of
+  seeding an empty target.
+
 ## 0.2.2
 
 - New modernization flows, porting `llm4zio`'s legacy-rooted phases:

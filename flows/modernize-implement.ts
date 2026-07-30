@@ -223,6 +223,11 @@ const program = Effect.gen(function* () {
           })
         )
 
+        // The task loop marks each task complete AFTER its per-task commit, so
+        // the final task's plan update would otherwise be left uncommitted.
+        // A no-op when the loop already committed everything.
+        yield* context.git.commitAll(`${plan.epicId}: plan state`).pipe(Effect.asVoid)
+
         if (verifyGate !== undefined) {
           yield* stage(
             context.events,

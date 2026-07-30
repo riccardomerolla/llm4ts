@@ -38,7 +38,7 @@ import { loadPack, type Pack } from "@llm4ts/flow/Pack"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { Plan, Task } from "@llm4ts/flow/Plan"
-import { makeProvenanceStore } from "@llm4ts/flow/Provenance"
+import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
 import { matchingFiles } from "@llm4ts/flow/SpecChecks"
 import { checkWall, wallBreachMessage } from "@llm4ts/flow/Wall"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
@@ -569,8 +569,12 @@ const program = Effect.gen(function* () {
             const provenance = makeProvenanceStore(files)
             const hashes = yield* provenance.hashFiles(input.workDir, [`${ModDir}/equivalence.md`])
             const report = Object.values(hashes)[0]
+            // Spreading into a plain object would not satisfy the schema's
+            // encoder — the manifest must stay a Provenance instance.
             yield* provenance.extend(manifest, (current) =>
-              report === undefined ? current : { ...current, equivalenceReport: report }
+              report === undefined
+                ? current
+                : Provenance.make({ ...current, equivalenceReport: report })
             )
           })
         )
