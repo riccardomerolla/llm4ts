@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Republish: `@llm4ts/shell@0.2.0` reached npm with unrewritten
+  `workspace:*` dependency ranges (published with `npm publish` instead of
+  `pnpm publish`) and was uninstallable. 0.2.1 is identical in content
+  across all packages and published via the release workflow.
+
 ## 0.2.0
 
 - **Breaking:** the `llm4ts` bin moves from `@llm4ts/runner` to the new
