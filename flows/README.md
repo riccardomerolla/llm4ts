@@ -6,13 +6,15 @@ a single self-contained script: it imports only `@llm4ts/*`, `effect`, and
 one-line description. These scripts double as the built-in flows of the
 `llm4ts` shell.
 
-| Flow             | What it does                                                | Requirements          |
-| ---------------- | ----------------------------------------------------------- | --------------------- |
-| `implement.ts`   | Persistent plan, branch, task review/fix, and commits       | selected CLI + Git    |
-| `issue-pr.ts`    | GitHub issue assessment through pushed pull request         | selected CLI + GitHub |
-| `sdd.ts`         | Spec → red tests → implementation → green verification      | selected CLI + Maven  |
-| `local.ts`       | LM Studio reasoning followed by a local pi coding agent     | LM Studio + pi        |
-| `judge-suite.ts` | Three-run LLM-as-a-Judge evaluation with variance reporting | selected CLI          |
+| Flow                   | What it does                                                | Requirements              |
+| ---------------------- | ----------------------------------------------------------- | ------------------------- |
+| `implement.ts`         | Persistent plan, branch, task review/fix, and commits       | selected CLI + Git        |
+| `issue-pr.ts`          | GitHub issue assessment through pushed pull request         | selected CLI + GitHub     |
+| `sdd.ts`               | Spec → red tests → implementation → green verification      | selected CLI + Maven      |
+| `local.ts`             | LM Studio reasoning followed by a local pi coding agent     | LM Studio + pi            |
+| `judge-suite.ts`       | Three-run LLM-as-a-Judge evaluation with variance reporting | selected CLI              |
+| `modernize-survey.ts`  | Legacy estate inventory, dependency graph, triage, waves    | selected CLI + Git + pack |
+| `modernize-extract.ts` | Legacy estate → judged, human-approved behavioural specs    | selected CLI + Git + pack |
 
 These flows deliberately invoke real providers or installed coding CLIs and
 are not part of the default test suite. Build the packages once before
@@ -146,6 +148,34 @@ pnpm --filter @llm4ts/flows local -- \
 
 This mirrors the two-seat shape of `llm4zio`'s `local.sc`: the reasoning call
 produces repository-aware guidance and the pi agent performs the edits.
+
+## Legacy modernization
+
+The modernization pipeline mirrors `llm4zio`'s `modernize-*.sc` scripts. Two
+phases are ported as flows so far — survey and extract, both rooted at the
+legacy repository — with the target-side phases (seed, implement, verify,
+review, bench) tracked in `specs/pending/modernize-flow-suite.md`.
+
+Both flows need a modernization **pack** (`@llm4ts/flow/Pack`): a directory
+with a `pack.md` manifest (sources/programs regexes, `## Survey:` edge rules,
+`## Coverage:` unit rules, judge dimensions) plus `prompts/` sidecars,
+resolved against the launch directory via `LLM4TS_PACK` (default
+`packs/cobol-springboot`).
+
+```sh
+LLM4TS_PACK=packs/cobol-springboot \
+pnpm --filter @llm4ts/flows modernize-survey -- --repo /path/to/legacy-estate
+```
+
+Survey writes `docs/modernization/{inventory.md,graph.json,wave-plan.md}` and
+commits. A human reviews the wave plan, flips its `- [x] Approved` marker,
+then extraction runs — per program and resumable, ending in a judged spec
+pack that itself awaits approval in `docs/modernization/README.md`:
+
+```sh
+LLM4TS_PACK=packs/cobol-springboot LLM4TS_WAVE=wave-1 \
+pnpm --filter @llm4ts/flows modernize-extract -- --repo /path/to/legacy-estate
+```
 
 ## Judge suite
 

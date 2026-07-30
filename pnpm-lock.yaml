@@ -71,6 +71,9 @@ importers:
       '@llm4ts/flow':
         specifier: workspace:*
         version: link:../packages/flow
+      '@llm4ts/modernize':
+        specifier: workspace:*
+        version: link:../packages/modernize
       '@llm4ts/runner':
         specifier: workspace:*
         version: link:../packages/runner

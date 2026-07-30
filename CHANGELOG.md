@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- New modernization flows, porting `llm4zio`'s legacy-rooted phases:
+  `flows/modernize-survey.ts` (deterministic dependency graph, LLM
+  graph-refine with evidence, triage, human-approved wave plan) and
+  `flows/modernize-extract.ts` (per-program resumable spec extraction,
+  layered SpecChecks + LLM-judge gate, bounded fix rounds, approval-gated
+  spec pack). Both ship as shell built-ins; the target-side phases are
+  queued in `specs/pending/modernize-flow-suite.md`, with divergences
+  recorded in `docs/parity.md`.
+
 ## 0.2.1
 
 - Republish: `@llm4ts/shell@0.2.0` reached npm with unrewritten

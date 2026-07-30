@@ -270,6 +270,17 @@ reference release.
   README. Modernization phase bodies are injected Effects, so provider,
   repository, and forge choices stay in public composition code and offline
   fixtures need no external services.
+- Of the source's seven `modernize-*.sc` example scripts, the two
+  legacy-rooted phases ship as runnable flows (`flows/modernize-survey.ts`,
+  `flows/modernize-extract.ts`); the target-side phases are queued in
+  `specs/pending/modernize-flow-suite.md`. Divergences in the ported pair:
+  extraction artifacts come from one structured analyst call per program
+  (via `extractProgramsResumably`) instead of a free-roaming agent writing
+  files; the extraction gate re-judges every program each round (no
+  `ReviewCache` verdict cache), has no shrinking-context retry ladder, no
+  pattern-card tagging, and no turn-limit recovery; the survey ships no
+  bench-derived cost projection (no bench flow yet). Each simplification is
+  listed for restoration in the pending spec.
 - The JavaScript facade is asynchronous rather than a literal port of the
   source Java facade's blocking bridge. It is the single Promise/exception
   boundary, supports `AbortSignal`, delegates to the public connector registry,
