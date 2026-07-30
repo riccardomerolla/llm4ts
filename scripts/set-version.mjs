@@ -14,7 +14,7 @@ if (version === undefined || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version))
 }
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-for (const name of ["core", "flow", "runner", "modernize", "js"]) {
+for (const name of ["core", "flow", "runner", "modernize", "js", "shell"]) {
   const manifestPath = path.join(repoRoot, "packages", name, "package.json")
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
   manifest.version = version

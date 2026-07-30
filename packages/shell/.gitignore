@@ -1,0 +1,3 @@
+# Built-in flow copies are synced from the repository's top-level flows/
+# directory by scripts/sync-shell-flows.mjs (run as part of `pnpm build`).
+/flows/

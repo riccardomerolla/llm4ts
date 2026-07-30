@@ -71,7 +71,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ["packages/**/*.ts", "examples/**/*.ts"],
+    files: ["packages/**/*.ts", "examples/**/*.ts", "flows/**/*.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {

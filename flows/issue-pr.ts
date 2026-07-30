@@ -1,3 +1,4 @@
+// GitHub issue to pull request: assess the issue, plan, implement, push, and open a PR.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { implementPlanFlow } from "@llm4ts/flow/Flow"
@@ -8,18 +9,17 @@ import { assessThenPlan } from "@llm4ts/flow/Planner"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { summarisePr } from "@llm4ts/flow/PrSummary"
 import { allReviewers } from "@llm4ts/flow/Review"
-import { ScriptUsage } from "@llm4ts/runner/FlowArgs"
+import { ScriptUsage, resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { coderFromEnv } from "@llm4ts/runner/Connectors"
-import { runNode } from "@llm4ts/runner/FlowRunner"
+import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
-import { resolveExampleInput, runExampleMain } from "./support.ts"
 
 const program = Effect.gen(function* () {
-  const input = yield* resolveExampleInput()
+  const input = yield* resolveFlowInput()
   const issueRef = parseIssueRef(input.prompt)
   if (issueRef === undefined) {
     return yield* ScriptUsage.make({
-      message: 'usage: pnpm --filter @llm4ts/examples issue-pr -- "owner/repo#number"'
+      message: 'usage: the issue-pr flow expects an issue reference like "owner/repository#42"'
     })
   }
   const store = makePlanStore(nodePlainFileStore)
@@ -105,4 +105,4 @@ const program = Effect.gen(function* () {
   )
 })
 
-runExampleMain(program)
+runFlowMain(program)

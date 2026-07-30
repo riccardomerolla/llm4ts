@@ -12,9 +12,6 @@
     "dist",
     "src"
   ],
-  "bin": {
-    "llm4ts": "./dist/cli-main.js"
-  },
   "exports": {
     "./Cli": "./dist/Cli.js",
     "./CoderPolicy": "./dist/CoderPolicy.js",

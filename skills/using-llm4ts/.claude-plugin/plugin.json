@@ -1,0 +1,8 @@
+{
+  "name": "using-llm4ts",
+  "description": "Delegate a well-defined implementation task to llm4ts's autonomous plan-code-review flow.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Riccardo Merolla"
+  }
+}

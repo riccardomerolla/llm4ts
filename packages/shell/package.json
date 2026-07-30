@@ -1,0 +1,66 @@
+{
+  "name": "@llm4ts/shell",
+  "version": "0.1.4",
+  "description": "Interactive shell and CLI for llm4ts: flow discovery, run-a-flow, and view",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "llm4ts": "./dist/cli-main.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "flows"
+  ],
+  "exports": {
+    "./Cli": "./dist/Cli.js",
+    "./CoderChoice": "./dist/CoderChoice.js",
+    "./FlowCatalog": "./dist/FlowCatalog.js",
+    "./FlowLaunch": "./dist/FlowLaunch.js",
+    "./Menu": "./dist/Menu.js",
+    "./Package": "./dist/Package.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "clean": "tsc -b tsconfig.json --clean",
+    "test": "vitest run test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/riccardomerolla/llm4ts.git",
+    "directory": "packages/shell"
+  },
+  "homepage": "https://github.com/riccardomerolla/llm4ts#readme",
+  "bugs": {
+    "url": "https://github.com/riccardomerolla/llm4ts/issues"
+  },
+  "keywords": [
+    "llm",
+    "effect",
+    "ai",
+    "agents",
+    "workflow",
+    "cli",
+    "typescript"
+  ],
+  "dependencies": {
+    "@effect/platform-node": "^4.0.0-beta.102",
+    "@llm4ts/core": "workspace:*",
+    "@llm4ts/flow": "workspace:*",
+    "@llm4ts/runner": "workspace:*"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0-beta.102"
+  },
+  "devDependencies": {
+    "effect": "^4.0.0-beta.102"
+  }
+}

@@ -7,7 +7,8 @@
       "@llm4ts/flow/*": ["./packages/flow/src/*"],
       "@llm4ts/runner/*": ["./packages/runner/src/*"],
       "@llm4ts/modernize/*": ["./packages/modernize/src/*"],
-      "@llm4ts/js/*": ["./packages/js/src/*"]
+      "@llm4ts/js/*": ["./packages/js/src/*"],
+      "@llm4ts/shell/*": ["./packages/shell/src/*"]
     }
   },
   "include": [],
@@ -17,6 +18,8 @@
     { "path": "./packages/runner" },
     { "path": "./packages/modernize" },
     { "path": "./packages/js" },
-    { "path": "./examples" }
+    { "path": "./packages/shell" },
+    { "path": "./examples" },
+    { "path": "./flows" }
   ]
 }

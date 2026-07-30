@@ -15,10 +15,13 @@
 
 ```text
 core → flow → runner → js
-                 └────→ modernize
+                 ├────→ modernize
+                 └────→ shell
 ```
 
-`modernize` may also depend directly on `core` and `flow`.
+`modernize` may also depend directly on `core` and `flow`. `shell` is the
+interactive terminal entry point and `llm4ts` CLI (ADR 0006); the runner
+keeps zero knowledge of it.
 
 ## Non-Negotiable Rules
 

@@ -11,7 +11,7 @@ import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-const packages = ["core", "flow", "runner", "modernize", "js"]
+const packages = ["core", "flow", "runner", "modernize", "js", "shell"]
 
 const run = (command, args, options = {}) =>
   execFileSync(command, args, {
@@ -61,9 +61,11 @@ import { AssistantMessage } from "@llm4ts/flow/FlowEvents"
 import { runNode } from "@llm4ts/runner/FlowRunner"
 import { makeModernize } from "@llm4ts/modernize/Modernize"
 import { createClient } from "@llm4ts/js"
+import { parseFlowDescription } from "@llm4ts/shell/FlowCatalog"
 
 assert.equal(typeof runNode, "function")
 assert.equal(typeof makeModernize, "function")
+assert.equal(parseFlowDescription("// a demo flow\\n"), "a demo flow")
 assert.equal(typeof collect, "function")
 assert.ok(ConnectorIds.Mock)
 assert.ok(Message)
@@ -85,6 +87,17 @@ console.log("pack smoke: all imports resolved, mock completion succeeded")
   run("npm", ["install", "--no-audit", "--no-fund", "--loglevel", "error"], { cwd: workDir })
   const result = run("node", ["smoke.mjs"], { cwd: workDir })
   process.stdout.write(result)
+
+  // The published shell bin must resolve and its built-in flow tier must ship.
+  const listOutput = run(path.join(workDir, "node_modules", ".bin", "llm4ts"), ["list", "--json"], {
+    cwd: workDir,
+    env: { ...process.env, XDG_CONFIG_HOME: path.join(workDir, "xdg-config") }
+  })
+  const flows = JSON.parse(listOutput)
+  if (!Array.isArray(flows) || !flows.some((flow) => flow.name === "implement")) {
+    throw new Error(`llm4ts list --json did not include the built-in flows: ${listOutput}`)
+  }
+  console.log(`pack smoke: llm4ts bin listed ${flows.length} built-in flow(s)`)
 } finally {
   rmSync(workDir, { recursive: true, force: true })
 }

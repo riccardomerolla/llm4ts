@@ -1,0 +1,14 @@
+{
+  "name": "llm4ts-skills",
+  "owner": {
+    "name": "Riccardo Merolla",
+    "url": "https://github.com/riccardomerolla/llm4ts"
+  },
+  "plugins": [
+    {
+      "name": "using-llm4ts",
+      "source": "./skills/using-llm4ts",
+      "description": "Delegate a well-defined implementation task to llm4ts's autonomous plan-code-review flow."
+    }
+  ]
+}

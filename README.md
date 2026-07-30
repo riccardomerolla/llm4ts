@@ -26,20 +26,27 @@ messages.
 
 ## Run a flow from the terminal
 
-`@llm4ts/runner` ships a `llm4ts` CLI that streams a prompt to your coding
-agent (Claude Code, Codex, Gemini CLI, and friends) and records a trace under
-`.llm4ts/`:
+`@llm4ts/shell` ships the `llm4ts` CLI. With no arguments it opens an
+interactive menu; with arguments it is a subcommand CLI over the flows it
+discovers across three tiers — your project's `.llm4ts/flows/`, your global
+`~/.config/llm4ts/flows/`, and the built-ins shipped with the shell:
 
 ```bash
-npx llm4ts "explain this repository"
+npx -y @llm4ts/shell list
 ```
 
 ```bash
-LLM4TS_CODER=codex npx llm4ts "add a health endpoint" --repo path/to/repo
+LLM4TS_CODER=codex npx -y @llm4ts/shell run implement "add a health endpoint"
 ```
 
-`llm4ts doctor` reports which connectors and credentials are available on your
-machine. `llm4ts --help` shows all options.
+`llm4ts view <flow>` prints a flow's source, `llm4ts ask "<prompt>"` streams
+a one-shot prompt to your coding agent (Claude Code, Codex, Gemini CLI, and
+friends), and `llm4ts doctor` reports which connectors and credentials are
+available on your machine. `llm4ts --help` shows all options.
+
+Your coding agent can delegate work to llm4ts too: the
+[using-llm4ts skill](skills/using-llm4ts/README.md) teaches Claude Code, Pi,
+OpenCode, and Codex when and how to hand a task to `llm4ts run`.
 
 ## Author a flow in TypeScript
 
@@ -63,9 +70,10 @@ const program = runNode(
 )
 ```
 
-From there the [examples](examples/README.md) form a ladder: mock completion →
-HTTP provider → CLI coding agent → persistent resumable plan → issue-to-PR →
-spec-driven development. `examples/seed.sh implement` seeds a disposable
+From there the [examples](examples/README.md) and [flows](flows/README.md)
+form a ladder: mock completion → HTTP provider → CLI coding agent →
+persistent resumable plan → issue-to-PR → spec-driven development.
+`examples/seed.sh implement` seeds a disposable
 repository so you can watch a full plan/implement/review flow safely:
 
 ```sh
@@ -78,7 +86,8 @@ LLM4TS_CODER=codex examples/seed.sh implement --run
 | Package             | Purpose                                                       |
 | ------------------- | ------------------------------------------------------------- |
 | `@llm4ts/js`        | Promise-based client — the fastest way to try llm4ts          |
-| `@llm4ts/runner`    | Node runner, `llm4ts` CLI, terminal rendering, MCP stdio      |
+| `@llm4ts/shell`     | `llm4ts` CLI and interactive menu over discovered flows       |
+| `@llm4ts/runner`    | Node runner, terminal rendering, MCP stdio                    |
 | `@llm4ts/flow`      | Plans, events, persistence, repositories, review, replay      |
 | `@llm4ts/core`      | Models, connectors, providers, tools, eval, observability     |
 | `@llm4ts/modernize` | Resumable survey/extract/seed/implement/verify/review product |

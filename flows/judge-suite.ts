@@ -1,10 +1,11 @@
+// LLM-as-a-Judge evaluation: three scored runs across rubric dimensions with variance reporting.
 import * as Effect from "effect/Effect"
 import { Dimension, Sample, repeat } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { coderFromEnv } from "@llm4ts/runner/Connectors"
-import { runNode } from "@llm4ts/runner/FlowRunner"
-import { resolveExampleInput, runExampleMain } from "./support.ts"
+import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
+import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 
 const dimensions = [
   Dimension.make({
@@ -22,7 +23,7 @@ const dimensions = [
 ]
 
 const program = Effect.gen(function* () {
-  const input = yield* resolveExampleInput(
+  const input = yield* resolveFlowInput(
     "You can return an unopened item within 30 days with its receipt."
   )
   const selected = coderFromEnv(process.env)
@@ -59,4 +60,4 @@ const program = Effect.gen(function* () {
   )
 })
 
-runExampleMain(program)
+runFlowMain(program)

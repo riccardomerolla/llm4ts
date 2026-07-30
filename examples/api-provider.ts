@@ -1,14 +1,11 @@
 import * as Effect from "effect/Effect"
-import { runNode } from "@llm4ts/runner/FlowRunner"
-import {
-  apiConnectorFromEnvironment,
-  completeAndPublish,
-  resolveExampleInput,
-  runExampleMain
-} from "./support.ts"
+import { completeAndPublish } from "@llm4ts/flow/Flow"
+import { apiConnectorFromEnvironment } from "@llm4ts/runner/Connectors"
+import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
+import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 
 const program = Effect.gen(function* () {
-  const input = yield* resolveExampleInput("Explain the architecture of this repository.")
+  const input = yield* resolveFlowInput("Explain the architecture of this repository.")
   const connector = yield* apiConnectorFromEnvironment()
   yield* runNode(
     {
@@ -22,4 +19,4 @@ const program = Effect.gen(function* () {
   )
 })
 
-runExampleMain(program)
+runFlowMain(program)

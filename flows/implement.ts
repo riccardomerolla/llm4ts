@@ -1,3 +1,4 @@
+// Persistent plan: plan the task, then implement, review, and commit one task at a time.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { implementPlanFlow } from "@llm4ts/flow/Flow"
@@ -5,12 +6,12 @@ import { defaultPlanPath } from "@llm4ts/flow/Plan"
 import { planFrom } from "@llm4ts/flow/Planner"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { coderFromEnv } from "@llm4ts/runner/Connectors"
-import { runNode } from "@llm4ts/runner/FlowRunner"
+import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
+import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
-import { resolveExampleInput, runExampleMain } from "./support.ts"
 
 const program = Effect.gen(function* () {
-  const input = yield* resolveExampleInput(
+  const input = yield* resolveFlowInput(
     "Add a multiply function to the calculator, including focused tests."
   )
   const planPath = join(input.workDir, defaultPlanPath(input.prompt))
@@ -34,4 +35,4 @@ const program = Effect.gen(function* () {
   )
 })
 
-runExampleMain(program)
+runFlowMain(program)

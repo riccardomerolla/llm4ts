@@ -56,14 +56,15 @@ current source library:
       │
       ▼
 @llm4ts/runner
-   ┌──┴──────────┐
-   ▼             ▼
-@llm4ts/modernize  @llm4ts/js
+   ┌──┴──────────┬─────────────┐
+   ▼             ▼             ▼
+@llm4ts/modernize  @llm4ts/js  @llm4ts/shell
 ```
 
 `modernize` may also consume `flow` and `core` directly. `js` is a thin
 Promise/exception facade analogous to the source Java facade and must not become
-a second implementation.
+a second implementation. `shell` is the interactive terminal entry point and
+subcommand CLI (ADR 0006); the runner keeps zero knowledge of it.
 
 ### `@llm4ts/core`
 

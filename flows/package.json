@@ -1,0 +1,19 @@
+{
+  "name": "@llm4ts/flows",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "implement": "node --experimental-strip-types implement.ts",
+    "issue-pr": "node --experimental-strip-types issue-pr.ts",
+    "judge-suite": "node --experimental-strip-types judge-suite.ts",
+    "local": "node --experimental-strip-types local.ts",
+    "sdd": "node --experimental-strip-types sdd.ts"
+  },
+  "dependencies": {
+    "@llm4ts/core": "workspace:*",
+    "@llm4ts/flow": "workspace:*",
+    "@llm4ts/runner": "workspace:*",
+    "effect": "beta"
+  }
+}

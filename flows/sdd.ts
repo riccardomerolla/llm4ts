@@ -1,3 +1,4 @@
+// Spec-driven development: write a specification, encode it as red tests, implement to green.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { makeChat } from "@llm4ts/flow/Chat"
@@ -13,10 +14,10 @@ import {
   type ReviewResult
 } from "@llm4ts/flow/Review"
 import { asReadOnly, coderFromEnv, gemini, withModel } from "@llm4ts/runner/Connectors"
-import { runNode } from "@llm4ts/runner/FlowRunner"
+import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
+import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
-import { resolveExampleInput, runExampleMain } from "./support.ts"
 
 const proModel = process.env.LLM4TS_REASONING_MODEL ?? "gemini-3-pro-preview"
 const flashModel = process.env.LLM4TS_CODER_MODEL ?? "gemini-2.5-flash"
@@ -44,7 +45,7 @@ const verificationFailure = (result: ReviewResult): FlowAborted =>
   })
 
 const program = Effect.gen(function* () {
-  const input = yield* resolveExampleInput(
+  const input = yield* resolveFlowInput(
     "Add due dates, mark overdue items in list output, and show items due today."
   )
   const explicitCoder = process.env.LLM4TS_CODER?.trim()
@@ -177,4 +178,4 @@ const program = Effect.gen(function* () {
   )
 })
 
-runExampleMain(program)
+runFlowMain(program)

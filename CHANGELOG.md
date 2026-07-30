@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking:** the `llm4ts` bin moves from `@llm4ts/runner` to the new
+  `@llm4ts/shell` package (ADR 0006). The old bin's behavior survives as
+  explicit verbs: `llm4ts ask "<prompt>" [--repo <path>]` (one-shot
+  streaming) and `llm4ts doctor`. `@llm4ts/runner` keeps `Cli` and `Doctor`
+  as library exports.
+- New `@llm4ts/shell`: three-tier flow discovery
+  (`.llm4ts/flows/` > `~/.config/llm4ts/flows/` > built-ins), `run` /
+  `list --json` / `view` verbs, an interactive menu with a per-run coder
+  override, and child-process flow execution with project-wins module
+  resolution. Try it with `npx -y @llm4ts/shell`.
+- The runnable agent flows moved from `examples/` to a top-level `flows/`
+  directory and now double as the shell's built-in flows; each flow's first
+  line is a `//` description the shell lists. `examples/support.ts` is gone —
+  flows import the published `@llm4ts/runner` subpaths directly.
+
 ## 0.1.4
 
 - `implementPlanFlow` gains `chatPerTask`: each task can run in a fresh

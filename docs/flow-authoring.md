@@ -14,12 +14,12 @@ This is example-driven, not a reference. For the full list of exports per
 package, see the [API guide](api.md); for how the packages depend on each
 other, see [Architecture](architecture.md). Everything here composes only
 public subpath exports, the same constraint the [`examples/`](../examples/README.md)
-scripts follow.
+and [`flows/`](../flows/README.md) scripts follow.
 
 ## The ladder
 
-`examples/` climbs from a mock completion to HTTP providers, CLI coding
-agents, persistent resumable plans, and full issue-to-PR automation. This
+`examples/` and `flows/` climb from a mock completion to HTTP providers, CLI
+coding agents, persistent resumable plans, and full issue-to-PR automation. This
 guide climbs the same ladder in prose, one rung per section. This first rung
 covers the simplest flow there is: send one prompt, get one response,
 publish it as an event.
@@ -155,23 +155,25 @@ job is "ask once, publish the answer."
 
 `examples/api-provider.ts` builds on this same `completeAndPublish` call but
 swaps the mock connector for a real one: it resolves the prompt and
-workspace via `resolveExampleInput`, picks a real provider connector via
-`apiConnectorFromEnvironment`, passes `environment: process.env` to
+workspace via `resolveFlowInput` (from `@llm4ts/runner/FlowArgs`), picks a
+real provider connector via `apiConnectorFromEnvironment` (from
+`@llm4ts/runner/Connectors`), passes `environment: process.env` to
 `runNode` so the connector can read provider credentials, and drives the
-whole program through the `runExampleMain` helper (all three from
-`examples/support.ts`) instead of a bare `Effect.runFork`. See
+whole program through the `runFlowMain` helper (from
+`@llm4ts/runner/FlowRunner`) instead of a bare `Effect.runFork`. See
 `examples/api-provider.ts` and the [examples ladder](../examples/README.md)
 for that extension. Rung 2 below climbs in a different direction: from one
 prompt-and-response to a persisted, multi-task plan.
 
 ## Rung 2: a persisted-plan flow
 
-This is `examples/implement.ts` verbatim. Unlike rung 1, it needs a real
+This is `flows/implement.ts` verbatim. Unlike rung 1, it needs a real
 coding-agent CLI (`claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`,
 or `opencode`) authenticated on your machine, and it writes to Git — it
 creates a branch, runs the agent, and commits:
 
 ```ts
+// Persistent plan: plan the task, then implement, review, and commit one task at a time.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { implementPlanFlow } from "@llm4ts/flow/Flow"
@@ -179,12 +181,12 @@ import { defaultPlanPath } from "@llm4ts/flow/Plan"
 import { planFrom } from "@llm4ts/flow/Planner"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { coderFromEnv } from "@llm4ts/runner/Connectors"
-import { runNode } from "@llm4ts/runner/FlowRunner"
+import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
+import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
-import { resolveExampleInput, runExampleMain } from "./support.ts"
 
 const program = Effect.gen(function* () {
-  const input = yield* resolveExampleInput(
+  const input = yield* resolveFlowInput(
     "Add a multiply function to the calculator, including focused tests."
   )
   const planPath = join(input.workDir, defaultPlanPath(input.prompt))
@@ -208,14 +210,18 @@ const program = Effect.gen(function* () {
   )
 })
 
-runExampleMain(program)
+runFlowMain(program)
 ```
+
+The first line is a `//` comment on purpose: a flow's opening comment line is
+its one-line description, which the `llm4ts` shell shows when listing
+discovered flows.
 
 Run it against a scratch repository with:
 
 ```sh
 LLM4TS_CODER=codex \
-pnpm --filter @llm4ts/examples implement -- \
+pnpm --filter @llm4ts/flows implement -- \
   --repo /path/to/repository \
   "Add a multiply function with tests"
 ```
@@ -327,8 +333,8 @@ things are new:
   filesystem, Git repository, and coding-agent CLI instead of the
   credential-free mock connector.
 
-`examples/issue-pr.ts` and `examples/sdd.ts` climb further from here — see
-the [examples ladder](../examples/README.md).
+`flows/issue-pr.ts` and `flows/sdd.ts` climb further from here — see
+the [flows catalogue](../flows/README.md).
 
 ## Rung 3: a custom spine from primitives
 
@@ -337,7 +343,7 @@ deliberately does not model: per-task gate switching, hard invariants like
 "the first task must produce a red test", or a different diff source per
 review. For those, compose the same primitives the Flow module itself is
 built from: `stage`, `implementTaskLoop`, `reviewAndFixLoop`, `lintCommand`,
-and `makeChat`. `examples/sdd.ts` is the canonical custom spine — a
+and `makeChat`. `flows/sdd.ts` is the canonical custom spine — a
 specification-driven flow whose first task must encode the spec as failing
 tests before any production code is written.
 
@@ -465,8 +471,9 @@ copying — a red gate must not commit, and an empty diff must skip review.
 
 ## Where to go next
 
-- [`examples/README.md`](../examples/README.md) — the runnable ladder these
-  rungs came from.
+- [`examples/README.md`](../examples/README.md) and
+  [`flows/README.md`](../flows/README.md) — the runnable ladder these rungs
+  came from.
 - [`docs/api.md`](api.md) — the full module reference.
 - [`docs/provider-capabilities.md`](provider-capabilities.md) — which
   connectors support which features.

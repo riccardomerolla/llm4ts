@@ -62,7 +62,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$EXAMPLE" in
-  implement | cli-implement)
+  implement)
     STARTER="calculator-rs"
     SCRIPT="implement"
     DEFAULT_PROMPT="Add a multiply function to the calculator crate, including focused tests."
@@ -135,14 +135,14 @@ if [ "$RUN" -eq 1 ]; then
   fi
   echo "Running the flow from the llm4ts workspace..."
   cd "$REPO_ROOT"
-  exec pnpm --filter @llm4ts/examples "$SCRIPT" -- --repo "$DEST" "$PROMPT"
+  exec pnpm --filter @llm4ts/flows "$SCRIPT" -- --repo "$DEST" "$PROMPT"
 fi
 
 if [ -z "$PROMPT" ]; then
   PROMPT="owner/repository#42"
 fi
 
-printf 'Run:\n  cd %q\n  pnpm --dir %q --filter @llm4ts/examples %q -- --repo %q %q\n' \
+printf 'Run:\n  cd %q\n  pnpm --dir %q --filter @llm4ts/flows %q -- --repo %q %q\n' \
   "$DEST" "$REPO_ROOT" "$SCRIPT" "$DEST" "$PROMPT"
 echo
 echo "Requirements: $TOOLCHAIN; Git and an authenticated coding CLI."

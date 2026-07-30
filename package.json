@@ -8,13 +8,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.json",
+    "build": "node scripts/sync-shell-flows.mjs && tsc -b tsconfig.json",
     "clean": "tsc -b tsconfig.json --clean",
     "effect:patch": "effect-language-service patch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint packages examples --ext .ts",
-    "lint:fix": "eslint packages examples --ext .ts --fix",
+    "lint": "eslint packages examples flows --ext .ts",
+    "lint:fix": "eslint packages examples flows --ext .ts --fix",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:verbose": "vitest run --reporter verbose",

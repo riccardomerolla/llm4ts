@@ -68,9 +68,9 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
     assert.strictEqual(snippet, source.trimEnd())
   })
 
-  it("Rung 2 code block matches examples/implement.ts verbatim", () => {
+  it("Rung 2 code block matches flows/implement.ts verbatim", () => {
     const snippet = extractTsCodeBlockUnderHeading(doc, "## Rung 2: a persisted-plan flow")
-    const source = readRepoFile("examples/implement.ts")
+    const source = readRepoFile("flows/implement.ts")
     assert.strictEqual(snippet, source.trimEnd())
   })
 
@@ -101,10 +101,10 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
       "docs/provider-capabilities.md",
       "examples/README.md",
       "examples/api-provider.ts",
-      "examples/implement.ts",
-      "examples/issue-pr.ts",
-      "examples/sdd.ts",
-      "examples/support.ts"
+      "flows/README.md",
+      "flows/implement.ts",
+      "flows/issue-pr.ts",
+      "flows/sdd.ts"
     ]
     for (const relativePath of referencedFiles) {
       assert.isTrue(
@@ -120,18 +120,20 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
     )
   })
 
-  it("references only exports that exist in examples/support.ts", () => {
-    const supportSource = readRepoFile("examples/support.ts")
+  it("references only exports that exist in the Rung 1 extension modules", () => {
     const referencedExports = [
-      "resolveExampleInput",
-      "apiConnectorFromEnvironment",
-      "runExampleMain"
+      { modulePath: "packages/runner/src/FlowArgs.ts", exportName: "resolveFlowInput" },
+      {
+        modulePath: "packages/runner/src/Connectors.ts",
+        exportName: "apiConnectorFromEnvironment"
+      },
+      { modulePath: "packages/runner/src/FlowRunner.ts", exportName: "runFlowMain" }
     ]
-    for (const exportName of referencedExports) {
-      assert.include(
-        supportSource,
-        exportName,
-        `examples/support.ts no longer exports "${exportName}", referenced by docs/flow-authoring.md`
+    for (const { modulePath, exportName } of referencedExports) {
+      assert.match(
+        readRepoFile(modulePath),
+        new RegExp(`export const ${exportName}\\b`),
+        `${modulePath} no longer exports "${exportName}", referenced by docs/flow-authoring.md`
       )
     }
   })
@@ -186,14 +188,14 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
     assert.isFunction(callsWithDocumentedShape)
   })
 
-  it("Rung 3 code excerpts stay consistent with examples/sdd.ts", () => {
-    const source = stripWhitespace(readRepoFile("examples/sdd.ts"))
+  it("Rung 3 code excerpts stay consistent with flows/sdd.ts", () => {
+    const source = stripWhitespace(readRepoFile("flows/sdd.ts"))
     for (const heading of ["### Per-task gates", "### The task loop"]) {
       const block = extractTsCodeBlockUnderHeading(doc, heading)
       assert.include(
         source,
         stripWhitespace(block),
-        `the excerpt under "${heading}" is no longer an excerpt of examples/sdd.ts`
+        `the excerpt under "${heading}" is no longer an excerpt of flows/sdd.ts`
       )
     }
   })
@@ -208,12 +210,12 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
     )
   })
 
-  it("documented pnpm script exists in examples/package.json", () => {
-    const packageJsonSource = readRepoFile("examples/package.json")
+  it("documented pnpm script exists in flows/package.json", () => {
+    const packageJsonSource = readRepoFile("flows/package.json")
     assert.match(
       packageJsonSource,
       /"implement":\s*"node --experimental-strip-types implement\.ts"/,
-      'examples/package.json no longer defines the "implement" script (or its command changed), referenced by docs/flow-authoring.md'
+      'flows/package.json no longer defines the "implement" script (or its command changed), referenced by docs/flow-authoring.md'
     )
   })
 })

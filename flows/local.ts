@@ -1,14 +1,16 @@
+// Local-first flow: an LM Studio reasoner drafts the plan, a local pi agent implements it.
 import * as Effect from "effect/Effect"
+import { completeAndPublish } from "@llm4ts/flow/Flow"
 import { AssistantMessage, Info } from "@llm4ts/flow/FlowEvents"
 import { lmStudio, pi, withModel, withTimeoutSeconds } from "@llm4ts/runner/Connectors"
-import { runNode } from "@llm4ts/runner/FlowRunner"
-import { completeAndPublish, resolveExampleInput, runExampleMain } from "./support.ts"
+import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
+import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 
 const reasoningModel = process.env.LLM4TS_REASONING_MODEL ?? "qwen/qwen3-coder-30b"
 const coderModel = process.env.LLM4TS_CODER_MODEL ?? reasoningModel
 
 const program = Effect.gen(function* () {
-  const input = yield* resolveExampleInput(
+  const input = yield* resolveFlowInput(
     "Add a multiply function to the calculator, including focused tests."
   )
   yield* runNode(
@@ -54,4 +56,4 @@ const program = Effect.gen(function* () {
   )
 })
 
-runExampleMain(program)
+runFlowMain(program)
