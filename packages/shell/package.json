@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/shell",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Interactive shell and CLI for llm4ts: flow discovery, run-a-flow, and view",
   "license": "MIT",
   "type": "module",

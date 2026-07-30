@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - **Breaking:** the `llm4ts` bin moves from `@llm4ts/runner` to the new
   `@llm4ts/shell` package (ADR 0006). The old bin's behavior survives as
