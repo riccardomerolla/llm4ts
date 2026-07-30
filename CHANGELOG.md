@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- Legacy modernization reaches full parity with the pinned source's example
+  suite. The four target-side phases ship as flows —
+  `modernize-seed` (deterministic clean-room seeding with a provenance
+  manifest), `modernize-implement` (per-task implementation behind the pack's
+  gates, plus a branch-level spec-compliance judge), `modernize-verify`
+  (generated equivalence vectors, replay, rule coverage, failure triage into
+  plan tasks), and `modernize-review` (lens review distilled into fixes,
+  improvements, and pack lessons) — alongside `modernize-bench`, which
+  measures an extraction run and feeds the survey's per-wave cost projection.
+- New `@llm4ts/flow/Wall` enforces the clean-room boundary every target-side
+  phase checks, and `@llm4ts/flow/Patterns` loads the translation pattern
+  cards extraction tags and implementation injects. Both are covered by
+  deterministic tests.
+- `modernize-extract` closes its remaining fidelity gaps: per-program judge
+  verdicts are cached and fingerprinted (`gate/<NAME>.json`), an empty judge
+  response retries at half then quarter context, traceability fragments are
+  tagged with the pattern cards their source matches, and a turn-limit trip
+  after the artifact landed keeps the work.
+- The reference `cobol-springboot` pack, 25 universal COBOL pattern cards, and
+  a Spring Boot scaffold ship under `flows/`, validated by
+  `flows/test/pack.test.ts`. `@llm4ts/flow/Package` now exposes
+  `packageVersion` for provenance manifests.
+
 ## 0.2.2
 
 - New modernization flows, porting `llm4zio`'s legacy-rooted phases:

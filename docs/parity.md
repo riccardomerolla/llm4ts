@@ -88,10 +88,13 @@ reference release.
 | `llm4zio/runner/Terminal*.scala`, `FlowArgs.scala`    | terminal, verbosity, and argument specs                         | `@llm4ts/runner/Terminal`, `FlowArgs`                  | `Terminal.test.ts`, `FlowArgs.test.ts`   | safe interactive CLI                 |
 | `llm4zio/flow/McpServer.scala`, runner MCP transport  | MCP protocol and transport specs                                | `@llm4ts/flow/McpServer`, `@llm4ts/runner/McpStdio`    | `McpServer.test.ts`, `McpStdio.test.ts`  | JSON-RPC stdio bridge                |
 | `llm4zio/runner/ExampleFlow.scala`, source examples   | example integration specifications                              | `@llm4ts/flow/Flow`, `@llm4ts/examples`                | executable mock smoke example            | public API composition               |
-| `examples/implement.sc`, `local.sc`                   | live connector integration behavior                             | `examples/implement.ts`, `local.ts`                    | typed build + opt-in execution           | real coding-agent examples           |
-| `examples/issue-pr.sc`, `sdd.sc`                      | issue delivery and executable SDD gates                         | `examples/issue-pr.ts`, `sdd.ts`                       | typed build; live execution is opt-in    | persistent delivery examples         |
+| `examples/implement.sc`, `local.sc`                   | live connector integration behavior                             | `flows/implement.ts`, `flows/local.ts`                 | typed build + opt-in execution           | real coding-agent examples           |
+| `examples/issue-pr.sc`, `sdd.sc`                      | issue delivery and executable SDD gates                         | `flows/issue-pr.ts`, `flows/sdd.ts`                    | typed build; live execution is opt-in    | persistent delivery examples         |
+| `examples/modernize-*.sc` (7 scripts)                 | six-phase legacy modernization pipeline and its benchmark       | `flows/modernize-*.ts` (7 flows)                       | typed build; `flows/test/pack.test.ts`   | full modernization pipeline          |
+| `examples/packs/*`, `examples/patterns/*`             | pack manifest, prompts, lenses, translation pattern cards       | `flows/packs/cobol-springboot`, `flows/patterns`       | `flows/test/pack.test.ts`                | shipped reference pack               |
+| `llm4zio-flow/Wall.scala`, `Patterns.scala`           | clean-room wall enforcement, pattern-card selection             | `@llm4ts/flow/Wall`, `@llm4ts/flow/Patterns`           | `Wall.test.ts`, `Patterns.test.ts`       | target-phase safety and playbooks    |
 | `examples/seed.sh`, `examples/starters/*`             | disposable runnable example repositories                        | `examples/seed.sh`, `examples/starters/*`              | Rust, Maven, and sbt starter builds      | example harness isolation            |
-| `examples/judge-suite.sc`                             | repeated LLM-as-a-Judge example                                 | `examples/judge-suite.ts`                              | typed build; live execution is opt-in    | evaluation example                   |
+| `examples/judge-suite.sc`                             | repeated LLM-as-a-Judge example                                 | `flows/judge-suite.ts`                                 | typed build; live execution is opt-in    | evaluation example                   |
 | `llm4zio-modernize/modernize/*.scala`                 | phase and artifact-resume behavior                              | `@llm4ts/modernize/Modernize`, `Approval`, `Artifacts` | `Modernize.test.ts`, `Artifacts.test.ts` | six-phase modernization product      |
 | `llm4zio-java/javaapi/*.scala`                        | `JavaApiSpec.scala`, facade mock-flow behavior                  | `@llm4ts/js`, `@llm4ts/js/Client`                      | `Client.test.ts`, typed docs example     | language-friendly facade             |
 
@@ -270,17 +273,28 @@ reference release.
   README. Modernization phase bodies are injected Effects, so provider,
   repository, and forge choices stay in public composition code and offline
   fixtures need no external services.
-- Of the source's seven `modernize-*.sc` example scripts, the two
-  legacy-rooted phases ship as runnable flows (`flows/modernize-survey.ts`,
-  `flows/modernize-extract.ts`); the target-side phases are queued in
-  `specs/pending/modernize-flow-suite.md`. Divergences in the ported pair:
-  extraction artifacts come from one structured analyst call per program
-  (via `extractProgramsResumably`) instead of a free-roaming agent writing
-  files; the extraction gate re-judges every program each round (no
-  `ReviewCache` verdict cache), has no shrinking-context retry ladder, no
-  pattern-card tagging, and no turn-limit recovery; the survey ships no
-  bench-derived cost projection (no bench flow yet). Each simplification is
-  listed for restoration in the pending spec.
+- All seven of the source's `modernize-*.sc` example scripts ship as runnable
+  flows: `survey`, `extract`, `seed`, `implement`, `verify`, `review`, and
+  `bench`, with the reference `cobol-springboot` pack, its universal pattern
+  cards, and the Spring Boot scaffold under `flows/`. The clean-room `Wall`
+  and `Patterns` modules the target-side phases depend on are ported into
+  `@llm4ts/flow` with their own deterministic tests. Remaining divergences:
+  - Extraction artifacts come from one structured analyst call per program
+    (`extractProgramsResumably`) rather than a free-roaming agent writing
+    files itself. Resume, per-program commits, verdict caching, the
+    shrinking-context judge ladder, pattern tagging, and turn-limit recovery
+    all match the source.
+  - Azure DevOps work-item creation (the source's optional "Boards" step in
+    seed and review) is absent: `@llm4ts/flow/AzureDevOpsTool` reads and
+    updates work items and opens pull requests, but has no create-work-item
+    request. Both phases simply omit the step.
+  - `modernize-bench` measures the extraction pipeline — the dominant cost of
+    a wave, and what the survey's projection consumes — rather than also
+    re-running implementation inside the harness as the source's 767-line
+    script does. Its report and projection output are the same.
+  - The source's per-phase model presets (a Gemini Pro/Flash split by seat)
+    are replaced by the repository's own `LLM4TS_CODER` connector selection
+    with a read-only derived reasoning seat, matching every other llm4ts flow.
 - The JavaScript facade is asynchronous rather than a literal port of the
   source Java facade's blocking bridge. It is the single Promise/exception
   boundary, supports `AbortSignal`, delegates to the public connector registry,

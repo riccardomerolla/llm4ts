@@ -23,16 +23,18 @@
 // plan. Judge context is bounded by LLM4TS_JUDGE_SOURCES_LIMIT (chars).
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import { Sample } from "@llm4ts/core/eval/Eval"
+import { Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import type { JsonSchema } from "@llm4ts/core/Models"
 import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { makeChat } from "@llm4ts/flow/Chat"
 import { loadPack, type Pack } from "@llm4ts/flow/Pack"
+import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { defaultPlanInstructions, planFrom } from "@llm4ts/flow/Planner"
 import { ReviewIssue, ReviewResult, mergeReviewResults } from "@llm4ts/flow/Review"
+import { cachedReview } from "@llm4ts/flow/ReviewCache"
 import { coverage, coverageUnits, features, matchingFiles } from "@llm4ts/flow/SpecChecks"
 import { withDraftApproval, requireApproval } from "@llm4ts/modernize/Approval"
 import {
@@ -43,6 +45,7 @@ import {
 import { asReadOnly, coderFromEnv } from "@llm4ts/runner/Connectors"
 import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
+import { reviewFingerprint } from "@llm4ts/runner/ReviewFingerprint"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
 
@@ -267,6 +270,13 @@ const program = Effect.gen(function* () {
           ProgramUnit.make({ name: programName(rel), sourcePath: rel })
         )
 
+        // Pattern cards are selected deterministically from the SOURCE, never by
+        // the model: implementation later injects exactly the cards cited here.
+        const cards = [
+          ...(yield* loadPatternCards(launchWorkspace, `${packDir}/patterns`)),
+          ...(yield* loadPatternCards(launchWorkspace, "patterns"))
+        ]
+
         // One structured analyst call per program, resumable per program: a rerun
         // skips every program whose spec exists, and each program gets its own commit.
         yield* stage(
@@ -290,11 +300,51 @@ const program = Effect.gen(function* () {
                         ProgramArtifacts,
                         programArtifactsJsonSchema
                       )
-                      .pipe(Effect.mapError(FlowLlmError.from))
+                      .pipe(
+                        Effect.mapError(FlowLlmError.from),
+                        // A turn-limit trip is the wedged-agent tail, not a
+                        // failure: keep whatever the analyst already produced.
+                        Effect.catchIf(
+                          (error) => error.cause?._tag === "TurnLimitError",
+                          (error) =>
+                            Effect.gen(function* () {
+                              const existing = yield* files.read(
+                                join(modDirAbs, "specs", `${target.name}.md`)
+                              )
+                              if (existing === undefined) {
+                                return yield* Effect.fail(error)
+                              }
+                              yield* context.events.publish(
+                                Info.make({
+                                  message: `turn limit hit on ${target.sourcePath} after its spec was written — keeping the work`
+                                })
+                              )
+                              return ProgramArtifacts.make({
+                                spec: existing,
+                                feature: "",
+                                traceability: "",
+                                mapping: ""
+                              })
+                            })
+                        )
+                      )
                   }),
                 modDirAbs
               )
               if (summary.created.length > 0) {
+                // Tag the traceability fragment with the cards this program's
+                // source matches — regex-decided, so implementation's playbook
+                // is reproducible.
+                const source = yield* files.read(join(input.workDir, unit.sourcePath))
+                const matched = source === undefined ? [] : matchingPatternCards(source, cards)
+                if (matched.length > 0) {
+                  const fragmentPath = join(modDirAbs, "traceability", `${unit.name}.md`)
+                  const fragment = (yield* files.read(fragmentPath)) ?? ""
+                  yield* files.writeAtomic(
+                    fragmentPath,
+                    `${fragment.trimEnd()}\n\nPatterns: ${matched.map((card) => card.id).join(", ")}\n`
+                  )
+                }
                 yield* context.git
                   .commitAll(`modernize(${pack.name}): spec ${unit.name}`)
                   .pipe(Effect.asVoid)
@@ -355,6 +405,50 @@ const program = Effect.gen(function* () {
         const packJudge = judge(context.reasoning, pack.judgeDimensions)
         const limit = judgeSourcesLimit()
 
+        /**
+         * An empty structured response that survives the in-run retries is
+         * usually DETERMINISTIC (context overflow), so repeating the same
+         * prompt cannot succeed — retry at half, then quarter context instead.
+         */
+        const judgeWithShrink = (spec: string, feature: string, source: string) => {
+          const attempt = (
+            cap: number,
+            rest: ReadonlyArray<number>
+          ): Effect.Effect<EvalResult, FlowLlmError> =>
+            packJudge
+              .evaluate(
+                Sample.make({
+                  response: capText(`${spec}\n\n${feature}`, cap),
+                  context: capText(source, cap),
+                  query: input.prompt
+                })
+              )
+              .pipe(
+                Effect.mapError(FlowLlmError.from),
+                Effect.catchIf(
+                  (error) => rest.length > 0 && error.message.includes("empty response"),
+                  (error) => {
+                    const [next, ...remaining] = rest
+                    return context.events
+                      .publish(
+                        Info.make({
+                          message: `judge returned empty at cap ${cap} chars — shrinking to ${next ?? cap}: ${error.message}`
+                        })
+                      )
+                      .pipe(Effect.andThen(attempt(next ?? cap, remaining)))
+                  }
+                )
+              )
+          return attempt(limit, [Math.floor(limit / 2), Math.floor(limit / 4)])
+        }
+
+        /**
+         * Judging is resumable per program: the verdict persists under
+         * `gate/<NAME>.json`, fingerprinted over the source, spec, feature, and
+         * rubric it judged. Unchanged content reuses the stored verdict with NO
+         * model call, so a crash or quota death re-judges only what changed.
+         * Delete `gate/` to force a full re-judge.
+         */
         const judgeProgram = (unit: ProgramUnit) =>
           Effect.gen(function* () {
             const spec = (yield* files.read(join(modDirAbs, "specs", `${unit.name}.md`))) ?? ""
@@ -363,17 +457,20 @@ const program = Effect.gen(function* () {
                 join(modDirAbs, "features", `${unit.name.toLowerCase()}.feature`)
               )) ?? ""
             const source = (yield* files.read(join(input.workDir, unit.sourcePath))) ?? ""
-            yield* context.events.publish(Info.make({ message: `judging ${unit.name}` }))
-            const scored = yield* packJudge
-              .evaluate(
-                Sample.make({
-                  response: capText(`${spec}\n\n${feature}`, limit),
-                  context: capText(source, limit),
-                  query: input.prompt
-                })
+            const rubric = pack.judgeDimensions
+              .map(
+                (dimension) => `${dimension.name} (0..${dimension.maxScore}): ${dimension.rubric}`
               )
-              .pipe(Effect.mapError(FlowLlmError.from))
-            return judgeIssues(pack, scored, unit.name)
+              .join("\n")
+            return yield* cachedReview(
+              files,
+              join(modDirAbs, "gate", `${unit.name}.json`),
+              reviewFingerprint(source, spec, feature, rubric),
+              context.events.publish(Info.make({ message: `judging ${unit.name}` })).pipe(
+                Effect.andThen(judgeWithShrink(spec, feature, source)),
+                Effect.map((scored) => judgeIssues(pack, scored, unit.name))
+              )
+            )
           })
 
         const gateEvaluate = Effect.gen(function* () {
@@ -432,7 +529,21 @@ const program = Effect.gen(function* () {
             const turn = (ask: string, commitMessage: string) =>
               Effect.gen(function* () {
                 const chat = yield* makeChat(context.coder, { system })
-                yield* chat.ask(ask)
+                yield* chat.ask(ask).pipe(
+                  Effect.asVoid,
+                  // A wedged agent that trips its turn limit mid-fix still wrote
+                  // something; re-evaluate what landed instead of failing.
+                  Effect.catchIf(
+                    (error) => error._tag === "Llm" && error.cause?._tag === "TurnLimitError",
+                    () =>
+                      context.events.publish(
+                        Info.make({
+                          message:
+                            "turn limit hit during a fix turn — re-evaluating what was written"
+                        })
+                      )
+                  )
+                )
                 yield* context.git.commitAll(commitMessage).pipe(Effect.asVoid)
               })
             for (const [name, issues] of [...scoped.entries()].sort()) {

@@ -6,3 +6,11 @@ repos
 pnpm-lock.yaml
 docs/csp
 docs/CSP_STATUS.md
+
+# Ported modernization data: pack manifests carry regexes whose exact text is
+# load-bearing, pattern cards embed COBOL fragments, and the scaffold is a
+# target-project template — none of it is llm4ts source to restyle.
+flows/packs
+flows/patterns
+flows/fixtures
+packages/shell/flows

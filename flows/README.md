@@ -6,15 +6,20 @@ a single self-contained script: it imports only `@llm4ts/*`, `effect`, and
 one-line description. These scripts double as the built-in flows of the
 `llm4ts` shell.
 
-| Flow                   | What it does                                                | Requirements              |
-| ---------------------- | ----------------------------------------------------------- | ------------------------- |
-| `implement.ts`         | Persistent plan, branch, task review/fix, and commits       | selected CLI + Git        |
-| `issue-pr.ts`          | GitHub issue assessment through pushed pull request         | selected CLI + GitHub     |
-| `sdd.ts`               | Spec → red tests → implementation → green verification      | selected CLI + Maven      |
-| `local.ts`             | LM Studio reasoning followed by a local pi coding agent     | LM Studio + pi            |
-| `judge-suite.ts`       | Three-run LLM-as-a-Judge evaluation with variance reporting | selected CLI              |
-| `modernize-survey.ts`  | Legacy estate inventory, dependency graph, triage, waves    | selected CLI + Git + pack |
-| `modernize-extract.ts` | Legacy estate → judged, human-approved behavioural specs    | selected CLI + Git + pack |
+| Flow                     | What it does                                                | Requirements               |
+| ------------------------ | ----------------------------------------------------------- | -------------------------- |
+| `implement.ts`           | Persistent plan, branch, task review/fix, and commits       | selected CLI + Git         |
+| `issue-pr.ts`            | GitHub issue assessment through pushed pull request         | selected CLI + GitHub      |
+| `sdd.ts`                 | Spec → red tests → implementation → green verification      | selected CLI + Maven       |
+| `local.ts`               | LM Studio reasoning followed by a local pi coding agent     | LM Studio + pi             |
+| `judge-suite.ts`         | Three-run LLM-as-a-Judge evaluation with variance reporting | selected CLI               |
+| `modernize-survey.ts`    | Phase 0 — inventory, dependency graph, triage, wave plan    | selected CLI + Git + pack  |
+| `modernize-extract.ts`   | Phase 1 — legacy estate → judged, approved spec pack        | selected CLI + Git + pack  |
+| `modernize-seed.ts`      | Phase 2 — seed the target from the approved pack (no LLM)   | Git + pack + legacy repo   |
+| `modernize-implement.ts` | Phase 3 — implement the plan behind the pack's gates        | selected CLI + Git + build |
+| `modernize-verify.ts`    | Phase 4 — equivalence vectors, replay, rule coverage        | selected CLI + replay cmd  |
+| `modernize-review.ts`    | Phase 5 — lens review, fix specs, distilled pack lessons    | selected CLI + Git + pack  |
+| `modernize-bench.ts`     | Measure an extraction run; report and project wave cost     | selected CLI + pack        |
 
 These flows deliberately invoke real providers or installed coding CLIs and
 are not part of the default test suite. Build the packages once before
@@ -151,31 +156,105 @@ produces repository-aware guidance and the pi agent performs the edits.
 
 ## Legacy modernization
 
-The modernization pipeline mirrors `llm4zio`'s `modernize-*.sc` scripts. Two
-phases are ported as flows so far — survey and extract, both rooted at the
-legacy repository — with the target-side phases (seed, implement, verify,
-review, bench) tracked in `specs/pending/modernize-flow-suite.md`.
+Six phases take a legacy estate to a spec-driven, equivalence-proven
+replacement. Phases 0–1 run rooted at the **legacy** repository; phases 2–5
+run rooted at the **target** repository, behind an enforced clean-room wall
+that refuses to start if any legacy source is reachable there.
 
-Both flows need a modernization **pack** (`@llm4ts/flow/Pack`): a directory
-with a `pack.md` manifest (sources/programs regexes, `## Survey:` edge rules,
-`## Coverage:` unit rules, judge dimensions) plus `prompts/` sidecars,
-resolved against the launch directory via `LLM4TS_PACK` (default
-`packs/cobol-springboot`).
+```text
+survey → [human approves waves] → extract → [human approves the pack]
+       → seed → implement → verify → review ⤴ (fix tasks re-enter implement)
+```
+
+Every phase reads a modernization **pack** (`@llm4ts/flow/Pack`): a directory
+with a `pack.md` manifest (sources/programs regexes, gates, judge rubric,
+`## Coverage:` unit rules, `## Survey:` edge rules, equivalence policy) plus
+`prompts/` and `reviewers/` sidecars. `LLM4TS_PACK` selects it, resolved
+against the launch directory; the shipped reference pack is
+[`packs/cobol-springboot`](packs/cobol-springboot/pack.md), with universal
+translation [pattern cards](patterns/) alongside it.
+
+### Phase 0 — survey
 
 ```sh
-LLM4TS_PACK=packs/cobol-springboot \
 pnpm --filter @llm4ts/flows modernize-survey -- --repo /path/to/legacy-estate
 ```
 
-Survey writes `docs/modernization/{inventory.md,graph.json,wave-plan.md}` and
-commits. A human reviews the wave plan, flips its `- [x] Approved` marker,
-then extraction runs — per program and resumable, ending in a judged spec
-pack that itself awaits approval in `docs/modernization/README.md`:
+Writes `docs/modernization/{inventory.md,graph.json,wave-plan.md}` and
+commits. The graph is regex-derived first, then an evidence-gated LLM pass
+adds the edges regexes miss (`LLM4TS_GRAPH_REFINE=off` skips it). When
+`bench-results.jsonl` exists next to the launch directory, the plan carries a
+measured cost projection. A human reviews the plan and flips `- [x] Approved`.
+
+### Phase 1 — extract
 
 ```sh
-LLM4TS_PACK=packs/cobol-springboot LLM4TS_WAVE=wave-1 \
+LLM4TS_WAVE=wave-1 \
 pnpm --filter @llm4ts/flows modernize-extract -- --repo /path/to/legacy-estate
 ```
+
+Per program and resumable: one structured analyst call writes the spec,
+feature, traceability, and mapping fragments, then a layered gate
+(deterministic `SpecChecks` + a per-program LLM judge, verdicts cached under
+`gate/` and re-judged only when content changes) must clear before the pack
+gets its unchecked approval marker.
+
+### Phase 2 — seed (deterministic, no model calls)
+
+```sh
+LLM4TS_LEGACY_REPO=/path/to/legacy-estate \
+pnpm --filter @llm4ts/flows modernize-seed -- --repo /path/to/target
+```
+
+Refuses to run until the spec pack is approved. Scaffolds an empty target from
+the pack, copies specs/features/indexes across the wall — never legacy source
+— re-parses the plan as a hard validation, and writes the provenance manifest
+(`LLM4TS_APPROVER` records who approved).
+
+### Phase 3 — implement
+
+```sh
+pnpm --filter @llm4ts/flows modernize-implement -- --repo /path/to/target
+```
+
+Implements each plan task behind the pack's `build`/`test` gates with the
+pack's reviewer lenses, committing per task. The first task must leave the
+acceptance tests red. Pattern cards cited by the specs are injected as an
+advisory playbook. A spec-compliance judge then scores the branch
+(`LLM4TS_JUDGE_ROUNDS`, default 2) before an optional push and PR.
+
+### Phase 4 — verify
+
+```sh
+pnpm --filter @llm4ts/flows modernize-verify -- --repo /path/to/target
+```
+
+Generates equivalence vectors per program from the specs (resumable), replays
+them through the pack's `replay:` command, diffs observations under the pack's
+comparison policy, and reports rule-by-rule coverage against the frozen
+`rules.txt`. Failures are triaged into fix specs plus plan tasks and the phase
+exits non-zero until every vector is green.
+
+### Phase 5 — review
+
+```sh
+pnpm --filter @llm4ts/flows modernize-review -- --repo /path/to/target
+```
+
+Runs the full reviewer roster plus the pack's lenses over the branch diff,
+scores it, and distils the findings into fixes (which become plan tasks),
+improvements, and generalizable lessons appended to the pack's `lessons.md`.
+
+### Benchmarking
+
+```sh
+pnpm --filter @llm4ts/flows modernize-bench -- --repo /path/to/fixture-copy
+```
+
+Measures an extraction run over a disposable fixture and appends a
+`BenchRecord` to `bench-results.jsonl`. `LLM4TS_BENCH_MODE=report` (with
+optional `LLM4TS_BENCH_PROJECT=<programs>`) renders the comparison report and
+the per-wave projection the survey embeds.
 
 ## Judge suite
 

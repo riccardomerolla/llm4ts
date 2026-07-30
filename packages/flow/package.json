@@ -36,6 +36,7 @@
     "./Mermaid": "./dist/Mermaid.js",
     "./Pack": "./dist/Pack.js",
     "./Package": "./dist/Package.js",
+    "./Patterns": "./dist/Patterns.js",
     "./Persistence": "./dist/Persistence.js",
     "./Plan": "./dist/Plan.js",
     "./PlanExecution": "./dist/PlanExecution.js",
@@ -50,6 +51,7 @@
     "./SpecChecks": "./dist/SpecChecks.js",
     "./Survey": "./dist/Survey.js",
     "./TransientRetry": "./dist/TransientRetry.js",
+    "./Wall": "./dist/Wall.js",
     "./Workspace": "./dist/Workspace.js",
     "./WorkspaceLayout": "./dist/WorkspaceLayout.js",
     "./WorkspaceTools": "./dist/WorkspaceTools.js"
