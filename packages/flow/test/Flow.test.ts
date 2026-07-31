@@ -5,12 +5,17 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { InvalidRequestError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
-import { ConnectorCapabilities, LlmChunk, type Message } from "@llm4ts/core/Models"
+import { ConnectorCapabilities, LlmChunk, TokenUsage, type Message } from "@llm4ts/core/Models"
 import { gitOwnershipInstruction } from "@llm4ts/flow/Chat"
-import { implementPlanFlow, flowReviewer, completeAndPublish } from "@llm4ts/flow/Flow"
+import {
+  implementPlanFlow,
+  flowReviewer,
+  completeAndPublish,
+  structuredAndPublish
+} from "@llm4ts/flow/Flow"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
-import { makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
+import { makeFlowEventHub, type FlowEvent } from "@llm4ts/flow/FlowEvents"
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { Plan, Task } from "@llm4ts/flow/Plan"
@@ -33,6 +38,25 @@ const coderService = (asked: Ref.Ref<ReadonlyArray<string>>): LlmServiceShape =>
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  isAvailable: Effect.succeed(true)
+})
+
+const structuredService = (
+  value: unknown,
+  usage: TokenUsage | undefined,
+  model: string | undefined
+): LlmServiceShape => ({
+  executeStream: (_prompt) => Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })),
+  executeStreamWithHistory: (_messages) =>
+    Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })),
+  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
+  executeStructured: (_prompt, schema, _jsonSchema) =>
+    Schema.decodeUnknownEffect(schema)(value).pipe(Effect.orDie),
+  executeStructuredWithUsage: (_prompt, schema, _jsonSchema) =>
+    Schema.decodeUnknownEffect(schema)(value).pipe(
+      Effect.orDie,
+      Effect.map((decoded) => [decoded, usage, model] as const)
+    ),
   isAvailable: Effect.succeed(true)
 })
 
@@ -75,17 +99,19 @@ const cleanReviewer: LlmServiceShape = {
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, schema, _jsonSchema) =>
     Schema.decodeUnknownEffect(schema)({ issues: [], summary: "clean" }).pipe(Effect.orDie),
-  executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  // The review path asks for usage; this backend reports none.
+  executeStructuredWithUsage: (_prompt, schema, _jsonSchema) =>
+    Schema.decodeUnknownEffect(schema)({ issues: [], summary: "clean" }).pipe(
+      Effect.orDie,
+      Effect.map((value) => [value, undefined, undefined] as const)
+    ),
   isAvailable: Effect.succeed(true)
 }
 
 // Reports one issue the first time it is asked, then clean forever after —
 // enough to force exactly one review-fix round.
-const dirtyOnceReviewer = (spent: Ref.Ref<boolean>): LlmServiceShape => ({
-  executeStream: (_prompt) => Stream.empty,
-  executeStreamWithHistory: (_messages) => Stream.empty,
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
-  executeStructured: (_prompt, schema, _jsonSchema) =>
+const dirtyOnceReviewer = (spent: Ref.Ref<boolean>): LlmServiceShape => {
+  const next = <A, E, RD, RE>(schema: Schema.ConstraintCodec<A, E, RD, RE>) =>
     Ref.getAndSet(spent, true).pipe(
       Effect.flatMap((wasSpent) =>
         Schema.decodeUnknownEffect(schema)(
@@ -94,10 +120,17 @@ const dirtyOnceReviewer = (spent: Ref.Ref<boolean>): LlmServiceShape => ({
             : { issues: [{ severity: "Warning", title: "nit", description: "" }], summary: "dirty" }
         ).pipe(Effect.orDie)
       )
-    ),
-  executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
-  isAvailable: Effect.succeed(true)
-})
+    )
+  return {
+    executeStream: (_prompt) => Stream.empty,
+    executeStreamWithHistory: (_messages) => Stream.empty,
+    executeWithTools: (_prompt, _tools) => Effect.fail(unused),
+    executeStructured: (_prompt, schema, _jsonSchema) => next(schema),
+    executeStructuredWithUsage: (_prompt, schema, _jsonSchema) =>
+      next(schema).pipe(Effect.map((value) => [value, undefined, undefined] as const)),
+    isAvailable: Effect.succeed(true)
+  }
+}
 
 interface GitLog {
   readonly branches: ReadonlyArray<string>
@@ -232,6 +265,76 @@ describe("Flow", () => {
       const asked = yield* Ref.make<ReadonlyArray<string>>([])
       const content = yield* completeAndPublish(coderService(asked), events, "say hi")
       assert.strictEqual(content, "done")
+    })
+  )
+
+  // Structured calls are the whole spine of the modernization phases; when
+  // their usage went unpublished every such run summarised as "no usage
+  // reported" no matter how many tokens the backend counted.
+  it.effect("structuredAndPublish publishes the usage its provider reported", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const seen: Array<FlowEvent> = []
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* events.subscribe
+          yield* Stream.fromSubscription(subscription).pipe(
+            Stream.runForEach((event) => Effect.sync(() => seen.push(event))),
+            Effect.forkScoped
+          )
+          const value = yield* structuredAndPublish(
+            structuredService(
+              { summary: "ok" },
+              TokenUsage.make({ prompt: 900, completion: 500, total: 1500, cached: 100 }),
+              "gemini-2.5-pro"
+            ),
+            events,
+            "summarise",
+            Schema.Struct({ summary: Schema.String }),
+            {}
+          )
+          assert.deepStrictEqual(value, { summary: "ok" })
+          yield* Effect.yieldNow
+        })
+      )
+
+      const tokens = seen.filter((event) => event._tag === "TokensUsed")
+      assert.strictEqual(tokens.length, 1)
+      assert.strictEqual(
+        tokens[0]?._tag === "TokensUsed" ? tokens[0].model : undefined,
+        "gemini-2.5-pro"
+      )
+      assert.strictEqual(tokens[0]?._tag === "TokensUsed" ? tokens[0].usage.prompt : undefined, 900)
+      assert.strictEqual(
+        tokens[0]?._tag === "TokensUsed" ? tokens[0].agent : undefined,
+        "reasoning"
+      )
+    })
+  )
+
+  it.effect("structuredAndPublish stays silent when the provider reports no usage", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const seen: Array<FlowEvent> = []
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* events.subscribe
+          yield* Stream.fromSubscription(subscription).pipe(
+            Stream.runForEach((event) => Effect.sync(() => seen.push(event))),
+            Effect.forkScoped
+          )
+          yield* structuredAndPublish(
+            structuredService({ summary: "ok" }, undefined, undefined),
+            events,
+            "summarise",
+            Schema.Struct({ summary: Schema.String }),
+            {}
+          )
+          yield* Effect.yieldNow
+        })
+      )
+
+      assert.isTrue(seen.every((event) => event._tag !== "TokensUsed"))
     })
   )
 

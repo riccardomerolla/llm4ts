@@ -28,6 +28,7 @@ import { Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import type { JsonSchema } from "@llm4ts/core/Models"
 import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
+import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { makeChat } from "@llm4ts/flow/Chat"
 import type { Pack } from "@llm4ts/flow/Pack"
@@ -307,40 +308,40 @@ const program = Effect.gen(function* () {
                         message: `extracting ${target.sourcePath} (${index + 1}/${units.length})`
                       })
                     )
-                    return yield* context.coder
-                      .executeStructured(
-                        `${system}\n\n${programAsk(pack, target.sourcePath)}`,
-                        ProgramArtifacts,
-                        programArtifactsJsonSchema
-                      )
-                      .pipe(
-                        Effect.mapError(FlowLlmError.from),
-                        // A turn-limit trip is the wedged-agent tail, not a
-                        // failure: keep whatever the analyst already produced.
-                        Effect.catchIf(
-                          (error) => error.cause?._tag === "TurnLimitError",
-                          (error) =>
-                            Effect.gen(function* () {
-                              const existing = yield* files.read(
-                                join(modDirAbs, "specs", `${target.name}.md`)
-                              )
-                              if (existing === undefined) {
-                                return yield* Effect.fail(error)
-                              }
-                              yield* context.events.publish(
-                                Info.make({
-                                  message: `turn limit hit on ${target.sourcePath} after its spec was written — keeping the work`
-                                })
-                              )
-                              return ProgramArtifacts.make({
-                                spec: existing,
-                                feature: "",
-                                traceability: "",
-                                mapping: ""
+                    return yield* structuredAndPublish(
+                      context.coder,
+                      context.events,
+                      `${system}\n\n${programAsk(pack, target.sourcePath)}`,
+                      ProgramArtifacts,
+                      programArtifactsJsonSchema,
+                      "coder"
+                    ).pipe(
+                      // A turn-limit trip is the wedged-agent tail, not a
+                      // failure: keep whatever the analyst already produced.
+                      Effect.catchIf(
+                        (error) => error.cause?._tag === "TurnLimitError",
+                        (error) =>
+                          Effect.gen(function* () {
+                            const existing = yield* files.read(
+                              join(modDirAbs, "specs", `${target.name}.md`)
+                            )
+                            if (existing === undefined) {
+                              return yield* Effect.fail(error)
+                            }
+                            yield* context.events.publish(
+                              Info.make({
+                                message: `turn limit hit on ${target.sourcePath} after its spec was written — keeping the work`
                               })
+                            )
+                            return ProgramArtifacts.make({
+                              spec: existing,
+                              feature: "",
+                              traceability: "",
+                              mapping: ""
                             })
-                        )
+                          })
                       )
+                    )
                   }),
                 modDirAbs
               )

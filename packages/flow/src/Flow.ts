@@ -11,6 +11,8 @@ import { implementTaskLoop, stage } from "./PlanExecution.ts"
 import { minimalReviewers, reviewAndFixLoop, type ReviewResult } from "./Review.ts"
 import type { Reviewer } from "./Reviewer.ts"
 
+export { publishUsage, structuredAndPublish } from "./Usage.ts"
+
 export const flowReviewer = (context: FlowContextShape): LlmServiceShape =>
   context.reviewers[0] ?? context.reasoning
 

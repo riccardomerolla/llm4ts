@@ -29,9 +29,11 @@ import {
   failClassifiedCliError,
   jsonField,
   jsonIntField,
+  jsonObjectEntries,
   jsonStringField,
   jsonText,
-  parseJsonLine
+  parseJsonLine,
+  type JsonValue
 } from "./CliSupport.ts"
 
 export class GeminiCliLogLine extends Schema.TaggedClass<GeminiCliLogLine>()("LogLine", {
@@ -433,6 +435,70 @@ export const extractGeminiCliResponse = (output: string): GeminiResponseExtracti
       }
 }
 
+/**
+ * Token counts from a `result` event's `stats`.
+ *
+ * The Gemini CLI reports per-model session metrics, not flat totals:
+ * `stats.models["<model>"].tokens` carries `prompt`, `input` (prompt minus
+ * cached), `candidates` (the answer), `thoughts` (thinking, billed as
+ * output), `cached`, and `total`. Counts are summed across every model a run
+ * touched, because one run can span models (a quota fallback from pro to
+ * flash reports both). `prompt` maps to the UNCACHED input so it lines up
+ * with the pricing table, which bills `cached` separately at its own rate.
+ *
+ * A flat `{total_tokens, input_tokens, output_tokens, cached}` shape is still
+ * accepted: it is the contract this parser shipped with, and dropping it
+ * would silently stop reporting usage for anything already emitting it.
+ */
+export const parseGeminiStreamStats = (
+  stats: JsonValue | undefined
+): GeminiStreamStats | undefined => {
+  if (stats === undefined) {
+    return undefined
+  }
+
+  let prompt = 0
+  let completion = 0
+  let total = 0
+  let cached = 0
+  let sawModelTokens = false
+  for (const [, metrics] of jsonObjectEntries(jsonField(stats, "models"))) {
+    const tokens = jsonField(metrics, "tokens")
+    if (tokens === undefined) {
+      continue
+    }
+    sawModelTokens = true
+    const modelCached = jsonIntField(tokens, "cached") ?? 0
+    const modelPrompt = jsonIntField(tokens, "prompt") ?? 0
+    prompt += jsonIntField(tokens, "input") ?? Math.max(modelPrompt - modelCached, 0)
+    completion +=
+      (jsonIntField(tokens, "candidates") ?? 0) + (jsonIntField(tokens, "thoughts") ?? 0)
+    total += jsonIntField(tokens, "total") ?? 0
+    cached += modelCached
+  }
+  if (sawModelTokens) {
+    return GeminiStreamStats.make({
+      inputTokens: prompt,
+      outputTokens: completion,
+      totalTokens: total > 0 ? total : prompt + completion + cached,
+      ...(cached === 0 ? {} : { cached })
+    })
+  }
+
+  const flat = {
+    totalTokens: jsonIntField(stats, "total_tokens"),
+    inputTokens: jsonIntField(stats, "input_tokens"),
+    outputTokens: jsonIntField(stats, "output_tokens"),
+    cached: jsonIntField(stats, "cached")
+  }
+  return GeminiStreamStats.make({
+    ...(flat.totalTokens === undefined ? {} : { totalTokens: flat.totalTokens }),
+    ...(flat.inputTokens === undefined ? {} : { inputTokens: flat.inputTokens }),
+    ...(flat.outputTokens === undefined ? {} : { outputTokens: flat.outputTokens }),
+    ...(flat.cached === undefined ? {} : { cached: flat.cached })
+  })
+}
+
 export const parseGeminiCliStreamEvent = (line: string): GeminiCliStreamEvent => {
   const trimmed = line.trim()
   const json = parseJsonLine(trimmed)
@@ -502,24 +568,7 @@ export const parseGeminiCliStreamEvent = (line: string): GeminiCliStreamEvent =>
       })
     }
     case "result": {
-      const stats = jsonField(json, "stats")
-      const decodedStats =
-        stats === undefined
-          ? undefined
-          : GeminiStreamStats.make({
-              ...(jsonIntField(stats, "total_tokens") === undefined
-                ? {}
-                : { totalTokens: jsonIntField(stats, "total_tokens") ?? 0 }),
-              ...(jsonIntField(stats, "input_tokens") === undefined
-                ? {}
-                : { inputTokens: jsonIntField(stats, "input_tokens") ?? 0 }),
-              ...(jsonIntField(stats, "output_tokens") === undefined
-                ? {}
-                : { outputTokens: jsonIntField(stats, "output_tokens") ?? 0 }),
-              ...(jsonIntField(stats, "cached") === undefined
-                ? {}
-                : { cached: jsonIntField(stats, "cached") ?? 0 })
-            })
+      const decodedStats = parseGeminiStreamStats(jsonField(json, "stats"))
       return GeminiCliResult.make({
         ...(jsonStringField(json, "status") === undefined
           ? {}
@@ -537,17 +586,26 @@ export const parseGeminiCliStreamEvent = (line: string): GeminiCliStreamEvent =>
   }
 }
 
-const geminiUsage = (stats: GeminiStreamStats | undefined): TokenUsage | undefined =>
-  stats?.inputTokens === undefined ||
-  stats.outputTokens === undefined ||
-  stats.totalTokens === undefined
-    ? undefined
-    : TokenUsage.make({
-        prompt: stats.inputTokens,
-        completion: stats.outputTokens,
-        total: stats.totalTokens,
-        ...(stats.cached === undefined ? {} : { cached: stats.cached })
-      })
+// Any reported count is worth surfacing: dropping partial stats is what
+// leaves a run reporting "no usage reported" despite the CLI counting tokens.
+const geminiUsage = (stats: GeminiStreamStats | undefined): TokenUsage | undefined => {
+  if (
+    stats === undefined ||
+    (stats.inputTokens === undefined &&
+      stats.outputTokens === undefined &&
+      stats.totalTokens === undefined)
+  ) {
+    return undefined
+  }
+  const prompt = stats.inputTokens ?? 0
+  const completion = stats.outputTokens ?? 0
+  return TokenUsage.make({
+    prompt,
+    completion,
+    total: stats.totalTokens ?? prompt + completion + (stats.cached ?? 0),
+    ...(stats.cached === undefined ? {} : { cached: stats.cached })
+  })
+}
 
 const formatGeminiHistory = (
   messages: ReadonlyArray<Message>
