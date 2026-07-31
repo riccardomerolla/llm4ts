@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.6.3
+
+- Runs report their token usage and cost again (issue #4). Two independent
+  faults produced the same "cost: no usage reported (the selected backend
+  emits no token counts)" line:
+  - The Gemini CLI reports **per-model session metrics** —
+    `stats.models["<model>"].tokens` with `prompt`, `input`, `candidates`,
+    `thoughts`, `cached`, and `total` — but the stream parser only understood
+    a flat `{total_tokens, input_tokens, output_tokens}` shape, so every
+    gemini run discarded its counts. `parseGeminiStreamStats` now sums the
+    per-model metrics across every model a run touched (a quota fallback
+    reports both), maps `prompt` to the uncached input the pricing table
+    expects, counts thinking tokens as output, and still accepts the flat
+    shape. Partial counts are no longer dropped wholesale.
+  - `executeStructured` discards the usage its provider reported, and the
+    modernization phases and reviewer lenses are built almost entirely from
+    structured calls — so no `TokensUsed` event was published on those paths
+    regardless of backend. The new `@llm4ts/flow/Usage` seam
+    (`structuredAndPublish`, `publishUsage`, both re-exported from
+    `@llm4ts/flow/Flow`) publishes usage alongside the decoded value, and
+    survey, extract, verify, review, and the review-and-fix loop now use it.
+    A schema retry publishes its own usage, because it costs its own tokens.
+
+  Not yet covered: the structured calls in `Planner` and `PrSummary`, which
+  take no event sink today; their usage remains unreported.
+
 ## 0.6.2
 
 - The estate-reading modernization phases (survey, extract, bench) open the

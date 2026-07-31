@@ -25,6 +25,7 @@ import {
   isKnownGeminiStderrNoise,
   makeGeminiCliProvider,
   parseGeminiCliStreamEvent,
+  parseGeminiStreamStats,
   validateGeminiExitCode,
   validateGeminiStreamExit,
   withGeminiStderrDiagnostic,
@@ -95,6 +96,109 @@ describe("Gemini CLI configuration", () => {
   })
 })
 
+describe("Gemini CLI session stats", () => {
+  // The real CLI reports per-model session metrics rather than flat totals;
+  // parsing only the flat shape is what left every gemini run reporting
+  // "cost: no usage reported" despite the CLI counting tokens.
+  const realResult = JSON.stringify({
+    type: "result",
+    status: "success",
+    stats: {
+      models: {
+        "gemini-2.5-pro": {
+          api: { totalRequests: 2, totalErrors: 0, totalLatencyMs: 4200 },
+          tokens: {
+            input: 900,
+            prompt: 1000,
+            candidates: 300,
+            thoughts: 200,
+            tool: 0,
+            cached: 100,
+            total: 1500
+          }
+        }
+      },
+      tools: { totalCalls: 1 },
+      files: { totalLinesAdded: 0, totalLinesRemoved: 0 }
+    }
+  })
+
+  it("decodes per-model token metrics", () => {
+    const event = parseGeminiCliStreamEvent(realResult)
+    assert.deepStrictEqual(
+      event._tag === "Result" ? event.stats : undefined,
+      // prompt is the UNCACHED input (the pricing table bills cached
+      // separately) and thinking tokens bill as output.
+      GeminiStreamStats.make({
+        inputTokens: 900,
+        outputTokens: 500,
+        totalTokens: 1500,
+        cached: 100
+      })
+    )
+  })
+
+  it("sums every model a run touched and derives a missing input count", () => {
+    assert.deepStrictEqual(
+      parseGeminiStreamStats({
+        models: {
+          "gemini-2.5-pro": { tokens: { prompt: 500, cached: 100, candidates: 40, total: 540 } },
+          "gemini-2.5-flash": { tokens: { input: 200, candidates: 10, total: 210 } }
+        }
+      }),
+      GeminiStreamStats.make({
+        inputTokens: 600,
+        outputTokens: 50,
+        totalTokens: 750,
+        cached: 100
+      })
+    )
+  })
+
+  it("reports no counts when neither shape carries token metrics", () => {
+    assert.isUndefined(parseGeminiStreamStats(undefined))
+    assert.deepStrictEqual(
+      parseGeminiStreamStats({ tools: { totalCalls: 1 } }),
+      GeminiStreamStats.make({})
+    )
+  })
+
+  it.effect("keeps a countless run free of invented usage", () =>
+    Effect.gen(function* () {
+      const provider = makeGeminiCliProvider(
+        config,
+        executor([
+          GeminiCliMessage.make({ role: "assistant", content: "done", delta: true }),
+          parseGeminiCliStreamEvent('{"type":"result","status":"success","stats":{"tools":{}}}')
+        ])
+      )
+      const response = yield* collect(provider.executeStream("hello"))
+
+      assert.isUndefined(response.usage)
+    })
+  )
+
+  it.effect("surfaces per-model usage through the streaming provider", () =>
+    Effect.gen(function* () {
+      const event = parseGeminiCliStreamEvent(realResult)
+      const provider = makeGeminiCliProvider(
+        config,
+        executor([
+          GeminiCliInit.make({ model: "gemini-2.5-pro" }),
+          GeminiCliMessage.make({ role: "assistant", content: "done", delta: true }),
+          event
+        ])
+      )
+      const response = yield* collect(provider.executeStream("hello"))
+
+      assert.strictEqual(response.usage?.prompt, 900)
+      assert.strictEqual(response.usage?.completion, 500)
+      assert.strictEqual(response.usage?.total, 1500)
+      assert.strictEqual(response.usage?.cached, 100)
+    })
+  )
+})
+
 describe("Gemini CLI parsing", () => {
   it("extracts headless envelopes, errors, pretty JSON, and plain fallback text", () => {
     assert.deepStrictEqual(extractGeminiCliResponse('{"response":"final"}'), {
@@ -153,6 +257,11 @@ describe("Gemini CLI parsing", () => {
       "file body"
     )
     assert.strictEqual(events[4]?._tag, "Result")
+    assert.deepStrictEqual(
+      events[4]?._tag === "Result" ? events[4].stats : undefined,
+      GeminiStreamStats.make({ totalTokens: 15, inputTokens: 10, outputTokens: 5 }),
+      "the flat stats shape this parser shipped with must keep decoding"
+    )
     const error = parseGeminiCliStreamEvent('{"type":"error","detail":"unmodelled"}')
     assert.strictEqual(error._tag, "Error")
     assert.strictEqual(

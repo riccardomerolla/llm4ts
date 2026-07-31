@@ -153,6 +153,34 @@ inspect the response before publishing, publish a different event, or chain
 more work off the result; reach for `completeAndPublish` when a node's whole
 job is "ask once, publish the answer."
 
+### Structured calls: `structuredAndPublish`
+
+`executeStructured` returns only the decoded value — it discards the token
+usage its provider reported, so a node calling it directly contributes
+nothing to the run's cost summary and the flow ends with "cost: no usage
+reported" however many tokens it actually spent. Use
+`structuredAndPublish(service, events, prompt, schema, jsonSchema, agent?)`
+(from `@llm4ts/flow/Usage`, re-exported by `@llm4ts/flow/Flow`) instead: it
+asks for the usage-bearing result, publishes a `TokensUsed` event when the
+backend reported counts, and returns the same decoded value.
+
+```ts
+Effect.gen(function* () {
+  const outcome = yield* structuredAndPublish(
+    context.reasoning,
+    context.events,
+    triagePrompt(inventory),
+    SurveyOutcome,
+    surveyOutcomeJsonSchema
+  )
+  return outcome
+})
+```
+
+When a node needs the raw effect — a retry loop that must keep the provider's
+typed error, say — call `executeStructuredWithUsage` and hand the usage to
+`publishUsage(events, usage, model, agent)` yourself, once per attempt.
+
 `examples/api-provider.ts` builds on this same `completeAndPublish` call but
 swaps the mock connector for a real one: it resolves the prompt and
 workspace via `resolveFlowInput` (from `@llm4ts/runner/FlowArgs`), picks a

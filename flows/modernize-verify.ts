@@ -32,7 +32,8 @@ import {
   type EquivObservation
 } from "@llm4ts/flow/Equiv"
 import { renderEquivReport, VectorVerdict } from "@llm4ts/flow/EquivReport"
-import { FlowAborted, FlowLlmError, PlanParseError } from "@llm4ts/flow/FlowError"
+import { FlowAborted, PlanParseError } from "@llm4ts/flow/FlowError"
+import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import type { Pack } from "@llm4ts/flow/Pack"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
@@ -381,13 +382,13 @@ const program = Effect.gen(function* () {
                     featurePath === undefined
                       ? ""
                       : yield* target.read(featurePath).pipe(Effect.orElseSucceed(() => ""))
-                  const generated = yield* context.reasoning
-                    .executeStructured(
-                      generatePrompt(pack, name, spec, feature, universe),
-                      GeneratedVectors,
-                      generatedVectorsJsonSchema
-                    )
-                    .pipe(Effect.mapError(FlowLlmError.from))
+                  const generated = yield* structuredAndPublish(
+                    context.reasoning,
+                    context.events,
+                    generatePrompt(pack, name, spec, feature, universe),
+                    GeneratedVectors,
+                    generatedVectorsJsonSchema
+                  )
                   if (generated.vectors.length === 0) {
                     return yield* FlowAborted.make({
                       message: `generator produced no vectors for ${name}`
@@ -516,13 +517,13 @@ const program = Effect.gen(function* () {
                   (yield* files.read(join(input.workDir, pack.specsDir, `${name}.md`))) ?? ""
                 )
               }
-              const outcome = yield* context.reasoning
-                .executeStructured(
-                  triagePrompt(pack, failing, specTexts.join("\n\n")),
-                  VerifyOutcome,
-                  verifyOutcomeJsonSchema
-                )
-                .pipe(Effect.mapError(FlowLlmError.from))
+              const outcome = yield* structuredAndPublish(
+                context.reasoning,
+                context.events,
+                triagePrompt(pack, failing, specTexts.join("\n\n")),
+                VerifyOutcome,
+                verifyOutcomeJsonSchema
+              )
               for (const fix of outcome.fixes) {
                 yield* files.writeAtomic(
                   join(input.workDir, pack.specsDir, "fixes", `fix-${slug(fix.title)}.md`),

@@ -10,6 +10,7 @@ import type { Chat } from "./Chat.ts"
 import { FlowLlmError, ProcessError, type FlowError } from "./FlowError.ts"
 import { Info, type FlowEventsShape } from "./FlowEvents.ts"
 import { Reviewer } from "./Reviewer.ts"
+import { publishUsage } from "./Usage.ts"
 
 export const Severity = Schema.Literals(["Critical", "Warning", "Info"])
 export type Severity = typeof Severity.Type
@@ -280,13 +281,18 @@ export interface ReviewAndFixOptions {
 
 const reviewWith = (
   service: LlmServiceShape,
+  events: FlowEventsShape,
   lens: Reviewer,
   taskTitle: string,
   diff: string
 ): Effect.Effect<ReviewResult, FlowLlmError> => {
   const prompt = `${lens.systemPrompt}\n\n${reviewPrompt(taskTitle, diff)}`
+  // Usage is published per attempt — a schema retry costs real tokens too.
   const attempt = (text: string): Effect.Effect<ReviewResult, LlmError> =>
-    service.executeStructured(text, ReviewResult, reviewJsonSchema)
+    service.executeStructuredWithUsage(text, ReviewResult, reviewJsonSchema).pipe(
+      Effect.tap(([, usage, model]) => publishUsage(events, usage, model, "reviewer")),
+      Effect.map(([result]) => result)
+    )
   return attempt(prompt).pipe(
     Effect.catch((error) =>
       error._tag === "ParseError"
@@ -321,7 +327,7 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       const files = yield* changedFiles
       const chosen = yield* selector.select(options.reviewers, files, round, previous)
       const run = (lens: Reviewer) =>
-        reviewWith(options.reviewerService, lens, options.taskTitle, diff)
+        reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
       const parallelism = options.parallelism ?? 0
       const results =
         parallelism > 0

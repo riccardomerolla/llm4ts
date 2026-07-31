@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/flow",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Effect-native LLM workflow, persistence, review, and repository automation",
   "license": "MIT",
   "type": "module",
@@ -51,6 +51,7 @@
     "./SpecChecks": "./dist/SpecChecks.js",
     "./Survey": "./dist/Survey.js",
     "./TransientRetry": "./dist/TransientRetry.js",
+    "./Usage": "./dist/Usage.js",
     "./Wall": "./dist/Wall.js",
     "./Workspace": "./dist/Workspace.js",
     "./WorkspaceLayout": "./dist/WorkspaceLayout.js",

@@ -21,6 +21,7 @@ import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import type { JsonSchema } from "@llm4ts/core/Models"
 import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
+import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { appendPackLesson, type Pack } from "@llm4ts/flow/Pack"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
@@ -226,9 +227,14 @@ const program = Effect.gen(function* () {
                 diff
               )}`
               results.push(
-                yield* reviewService
-                  .executeStructured(prompt, ReviewResult, reviewJsonSchema)
-                  .pipe(Effect.mapError(FlowLlmError.from))
+                yield* structuredAndPublish(
+                  reviewService,
+                  context.events,
+                  prompt,
+                  ReviewResult,
+                  reviewJsonSchema,
+                  "reviewer"
+                )
               )
             }
             return mergeReviewResults(results)
@@ -246,13 +252,13 @@ const program = Effect.gen(function* () {
         const outcome = yield* stage(
           context.events,
           "distill",
-          context.reasoning
-            .executeStructured(
-              distillPrompt(pack, findings, scored, diff),
-              ReviewOutcome,
-              reviewOutcomeJsonSchema
-            )
-            .pipe(Effect.mapError(FlowLlmError.from))
+          structuredAndPublish(
+            context.reasoning,
+            context.events,
+            distillPrompt(pack, findings, scored, diff),
+            ReviewOutcome,
+            reviewOutcomeJsonSchema
+          )
         )
 
         yield* stage(
