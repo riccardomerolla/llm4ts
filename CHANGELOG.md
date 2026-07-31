@@ -26,6 +26,10 @@
   llm4ts checkout prints pnpm's `No projects found in "<dir>"` and exits 0
   without running anything — a message easily mistaken for the Gemini
   "No project found" credential error that `llm4ts doctor` explains.
+- The Release workflow gains a `workflow_dispatch` trigger: run it manually
+  against `main` after a version bump and it verifies the lockstep versions,
+  runs the full verification chain, publishes, and pushes the matching
+  `vX.Y.Z` tag itself. Tag-driven releases behave exactly as before.
 
 ## 0.5.0
 
