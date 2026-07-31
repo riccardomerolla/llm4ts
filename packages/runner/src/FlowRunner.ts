@@ -12,7 +12,7 @@ import type { GeminiCliExecutorShape } from "@llm4ts/core/providers/GeminiCliPro
 import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactories"
 import { makeCostTracker, type CostTracker } from "@llm4ts/flow/CostTracker"
 import { checkCostBudget, makeCostRecord, type CostBudget } from "@llm4ts/flow/CostLedger"
-import { FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
+import { FlowLlmError, describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
 import { FlowEvents, makeFlowEventHub, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
@@ -240,9 +240,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
         yield* surface.setStatus(undefined)
         yield* surface.log(
           `\n${palette.fail(
-            `flow failed after ${formatDurationMs(finishedAt - startedAt)}: ${
-              error instanceof Error ? error.message : String(error)
-            }`
+            `flow failed after ${formatDurationMs(finishedAt - startedAt)}: ${describeFlowError(error)}`
           )}`
         )
         if (options.tracePath !== undefined) {

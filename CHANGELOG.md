@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.1
+
+- A finished task is no longer lost to a base-ref lookup (issue #8). A
+  36-minute implement stage died on `git diff --name-only main...HEAD`, with
+  the failure reported as nothing but that command. Three fixes:
+  - `defaultBase` returned the literal string `"main"` when it could not find
+    a remote HEAD, without checking that any such ref existed. In a repository
+    with no remote and a differently named default branch — exactly what
+    `modernize-seed` produces — the next diff failed with "unknown revision".
+    Every answer is now verified with `rev-parse --verify` (`origin/HEAD`,
+    `origin/main`, `origin/master`, `main`, `master`), falling back to the
+    branch's root commit so a diff still describes the work.
+  - Changed files only narrow which reviewers run, so `reviewAndFixLoop` no
+    longer fails when that lookup fails: it publishes an explanatory notice
+    and runs every reviewer, which is what an empty list already meant.
+  - `ProcessError.message` is only the command that failed. The new
+    `describeFlowError` appends the process output that explains it, so stage
+    failures and the final "flow failed" line read
+    `git diff --name-only main...HEAD: fatal: ambiguous argument …` instead of
+    just the command.
+
 ## 0.7.0
 
 - Runs show what the agent is doing while it does it (issue #6). A stage

@@ -1,11 +1,10 @@
 import * as Effect from "effect/Effect"
 import { StageCompleted, StageFailed, StageStarted, type FlowEventsShape } from "./FlowEvents.ts"
-import type { FlowError } from "./FlowError.ts"
+import { describeFlowError, type FlowError } from "./FlowError.ts"
 import type { Plan, Task } from "./Plan.ts"
 import type { PlanStoreShape } from "./Persistence.ts"
 
-const errorMessage = (error: unknown): string =>
-  error instanceof Error && error.message.length > 0 ? error.message : String(error)
+const errorMessage = describeFlowError
 
 export const stage = <A, E, R>(
   events: FlowEventsShape,

@@ -7,6 +7,7 @@ import { InvalidRequestError, ParseError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import { makeChat } from "@llm4ts/flow/Chat"
+import { ProcessError } from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { Reviewer } from "@llm4ts/flow/Pack"
 import { ReviewIssue, ReviewResult, llmDriven, reviewAndFixLoop } from "@llm4ts/flow/Review"
@@ -87,6 +88,50 @@ describe("reviewAndFixLoop", () => {
       assert.strictEqual(tokens.length, 1)
       assert.strictEqual(tokens[0]?._tag === "TokensUsed" ? tokens[0].agent : undefined, "reviewer")
       assert.strictEqual(tokens[0]?._tag === "TokensUsed" ? tokens[0].usage.total : undefined, 460)
+    })
+  )
+
+  // Changed files only narrow reviewer selection. A repository that cannot
+  // answer (no such base ref, unrelated histories) must not cost a task that
+  // already took half an hour — issue #8.
+  it.effect("keeps reviewing when the changed-file lookup fails", () =>
+    Effect.gen(function* () {
+      const values = yield* Ref.make<ReadonlyArray<unknown>>([{ issues: [], summary: "clean" }])
+      const calls = yield* Ref.make(0)
+      const asks = yield* Ref.make(0)
+      const events = yield* makeCollectingFlowEvents
+      const coder = yield* makeChat(coderService(asks))
+      const result = yield* reviewAndFixLoop({
+        // A file-scoped reviewer still runs: an empty list means "unknown",
+        // so every reviewer is asked rather than silently skipped.
+        reviewers: [lens(".*\\.md$")],
+        reviewerService: reviewerService(values, calls),
+        coder,
+        taskTitle: "task",
+        currentDiff: Effect.succeed("diff"),
+        changedFiles: Effect.fail(
+          ProcessError.make({
+            message: "git diff --name-only main...HEAD",
+            detail: "fatal: ambiguous argument 'main...HEAD': unknown revision"
+          })
+        ),
+        events,
+        maxRounds: 1
+      })
+
+      assert.isTrue(result.isClean)
+      assert.strictEqual(yield* Ref.get(calls), 1)
+      const notices = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Info" ? [event.message] : []
+      )
+      assert.isTrue(
+        notices.some(
+          (message) =>
+            message.includes("could not determine the changed files") &&
+            message.includes("unknown revision")
+        ),
+        `expected an explanatory notice, saw: ${JSON.stringify(notices)}`
+      )
     })
   )
 
