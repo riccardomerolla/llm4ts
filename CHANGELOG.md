@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.1
+
+- The built-in flow tier ships transpiled JavaScript instead of TypeScript.
+  Node refuses to strip types from `.ts` files under `node_modules`
+  (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`), so an installed
+  `@llm4ts/shell` (npx, `npm install -g`) crashed on `llm4ts run <flow>` —
+  0.6.0's from-anywhere pack discovery only worked from a repo checkout.
+  `sync-shell-flows` now transpiles each flow with the TypeScript compiler,
+  flow discovery accepts `.js` alongside user-authored `.ts` flows (project
+  and global tiers are unchanged), and the pack smoke test now launches a
+  built-in flow from the installed `node_modules` layout — the check that
+  would have caught this before publish.
+
 ## 0.6.0
 
 - Modernization pack discovery no longer requires launching from a directory
