@@ -126,6 +126,37 @@ describe("Chat usage events", () => {
     isAvailable: Effect.succeed(true)
   })
 
+  // A coding agent works for minutes per turn; without these events the run
+  // shows a spinner and nothing else until the turn ends.
+  it.effect("publishes the agent's tool calls as they stream", () =>
+    Effect.gen(function* () {
+      const toolingService: LlmServiceShape = {
+        ...usageService(false),
+        executeStreamWithHistory: (_messages) =>
+          Stream.make(
+            LlmChunk.make({
+              delta: "",
+              metadata: {
+                event: "tool_use",
+                tool_name: "run_shell_command",
+                tool_input: '{"command":"mvn -q test"}'
+              }
+            }),
+            LlmChunk.make({ delta: "done", finishReason: "stop" })
+          )
+      }
+      const events = yield* makeCollectingFlowEvents
+      const chat = yield* makeChat(toolingService, { events, agent: "coder" })
+      const reply = yield* chat.ask("run the tests")
+
+      assert.strictEqual(reply, "done")
+      const tools = (yield* events.recorded).filter((event) => event._tag === "ToolUse")
+      assert.strictEqual(tools.length, 1)
+      assert.strictEqual(tools[0]?._tag === "ToolUse" ? tools[0].tool : "", "run_shell_command")
+      assert.strictEqual(tools[0]?._tag === "ToolUse" ? tools[0].args : "", "mvn -q test")
+    })
+  )
+
   it.effect("publishes TokensUsed with agent and model when the reply carries usage", () =>
     Effect.gen(function* () {
       const events = yield* makeCollectingFlowEvents

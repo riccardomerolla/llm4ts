@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.0
+
+- Runs show what the agent is doing while it does it (issue #6). A stage
+  driving a coding agent rendered as a bare spinner for minutes; two gaps
+  caused that:
+  - CLI connectors emit a zero-delta chunk per tool call, but `collect` folds
+    a stream into its final response and dropped them, so no `ToolUse` event
+    was ever published — the terminal already knew how to draw one. The new
+    `@llm4ts/flow/Activity` seam (`withToolActivity`, `toolUseFrom`,
+    `summariseToolArgs`) republishes them, and `Chat` (with an `events` sink)
+    and `completeAndPublish` wrap their streams with it. Arguments are
+    summarised to their salient value on one bounded line, so a call renders
+    as `● run_shell_command (ls -R docs/modernization)` rather than a JSON
+    blob or a whole file body.
+  - `makeTransientRetry` — which already published
+    `⟳ flaky stream (fresh retry) — retry 1/6: …` notices — was never wired
+    to anything. Every seat the runner resolves (coder, reasoning, reviewers)
+    is now wrapped, so a flaky CLI stream (empty response, malformed tool
+    call) retries visibly instead of failing the whole stage silently. The
+    connector's other members, `capabilities` included, are preserved.
+
 ## 0.6.3
 
 - Runs report their token usage and cost again (issue #4). Two independent

@@ -114,7 +114,7 @@ export const makeTerminalPalette = (enabled: boolean): TerminalPalette => {
     assistant: (text) => `${paint(Ansi.boldMagenta, "● ")}${text}`,
     toolCall: (tool, args) => {
       const head = paint(Ansi.yellowBold, `● ${tool}`)
-      return args.length === 0 ? head : `${head} ${paint(Ansi.darkGray, args)}`
+      return args.length === 0 ? head : `${head} ${paint(Ansi.darkGray, `(${args})`)}`
     },
     status: (frame, label) => `${paint(Ansi.boldMagenta, frame)} ${label}`
   }

@@ -153,6 +153,19 @@ inspect the response before publishing, publish a different event, or chain
 more work off the result; reach for `completeAndPublish` when a node's whole
 job is "ask once, publish the answer."
 
+### Live agent activity
+
+`completeAndPublish` and `Chat` (with an `events` sink) also republish the
+tool calls the connector streams: each one becomes a `ToolUse` event, drawn as
+`● run_shell_command (ls -R docs/modernization)` while the agent works. A
+coding agent can occupy a stage for minutes, and without those lines the run
+renders as a bare spinner.
+
+If a node consumes a connector stream itself, wrap it with
+`withToolActivity(events, stream)` (from `@llm4ts/flow/Activity`) before
+`collect` — `collect` folds the stream into its final response and drops the
+zero-delta tool chunks that carry this information.
+
 ### Structured calls: `structuredAndPublish`
 
 `executeStructured` returns only the decoded value — it discards the token

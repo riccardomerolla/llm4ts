@@ -5,6 +5,7 @@ import type { ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { CliConnectorConfig, defaultReasoningConfig } from "@llm4ts/core/ConnectorConfig"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import type { HttpClientShape } from "@llm4ts/core/HttpClient"
+import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { TemporaryFilesShape } from "@llm4ts/core/TemporaryFiles"
 import type { GeminiCliExecutorShape } from "@llm4ts/core/providers/GeminiCliProvider"
@@ -12,12 +13,13 @@ import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactori
 import { makeCostTracker, type CostTracker } from "@llm4ts/flow/CostTracker"
 import { checkCostBudget, makeCostRecord, type CostBudget } from "@llm4ts/flow/CostLedger"
 import { FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
-import { makeFlowEventHub, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
+import { FlowEvents, makeFlowEventHub, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
 import { makeGitTool } from "@llm4ts/flow/GitTool"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { makeTransientRetry } from "@llm4ts/flow/TransientRetry"
 import { nodeHttpClient } from "./NodeHttpClient.ts"
 import { nodeGeminiCliExecutor } from "./NodeGeminiCliExecutor.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
@@ -109,16 +111,27 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     options.workDir,
     options.environment ?? process.env
   )
-  const coder = yield* dependencies.registry
-    .resolve(coderConfig)
-    .pipe(Effect.mapError(FlowLlmError.from))
-  const reasoningService = yield* dependencies.registry
-    .resolve(reasoningPrepared)
-    .pipe(Effect.mapError(FlowLlmError.from))
+  // Every seat retries transient provider failures and flaky streams (an
+  // empty response or malformed tool call), announcing each attempt on the
+  // run's events. Without the wrapper one hiccup from a CLI agent failed the
+  // whole stage, silently.
+  const resilient = (service: LlmServiceShape): Effect.Effect<LlmServiceShape> =>
+    makeTransientRetry(service).pipe(Effect.provideService(FlowEvents, events))
+  // The spread keeps everything the connector carries beyond the service
+  // methods — notably `capabilities`, which the flow context exposes.
+  const resolveSeat = (configuration: ConnectorConfig) =>
+    dependencies.registry.resolve(configuration).pipe(
+      Effect.mapError(FlowLlmError.from),
+      Effect.flatMap((connector) =>
+        Effect.map(resilient(connector), (retrying) => ({ ...connector, ...retrying }))
+      )
+    )
+  const coder = yield* resolveSeat(coderConfig)
+  const reasoningService = yield* resolveSeat(reasoningPrepared)
   const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
-    dependencies.registry
-      .resolve(prepareConnector(configuration, options.workDir, options.environment ?? process.env))
-      .pipe(Effect.mapError(FlowLlmError.from))
+    resolveSeat(
+      prepareConnector(configuration, options.workDir, options.environment ?? process.env)
+    )
   )
   return {
     events,

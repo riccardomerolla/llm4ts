@@ -1,10 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
+import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
+import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 import { ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { makeConnectorRegistry } from "@llm4ts/core/ConnectorRegistry"
-import { ConnectorIds, LlmConfig, TokenUsage } from "@llm4ts/core/Models"
+import { ProviderError } from "@llm4ts/core/Errors"
+import { ConnectorIds, LlmChunk, LlmConfig, TokenUsage } from "@llm4ts/core/Models"
+import { collect } from "@llm4ts/core/Streaming"
 import { makeFakeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import { makeMockProvider } from "@llm4ts/core/providers/MockProvider"
 import { Info, StageCompleted, StageStarted, TokensUsed } from "@llm4ts/flow/FlowEvents"
@@ -26,6 +31,76 @@ const files = (state: Ref.Ref<Readonly<Record<string, string>>>): PlainFileStore
 })
 
 describe("embedded runner", () => {
+  // A flaky CLI stream (empty response / malformed tool call) used to fail the
+  // whole stage: the retry wrapper existed but nothing wired it to a seat.
+  it.effect("retries a flaky seat stream and announces every attempt", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const attempts = yield* Ref.make(0)
+        const flaky = {
+          ...makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" })),
+          executeStream: (_prompt: string) =>
+            Stream.unwrap(
+              Ref.updateAndGet(attempts, (count) => count + 1).pipe(
+                Effect.map((count) =>
+                  count === 1
+                    ? Stream.fail(
+                        ProviderError.make({
+                          message: "Invalid stream: The model returned an empty response"
+                        })
+                      )
+                    : Stream.make(LlmChunk.make({ delta: "recovered", finishReason: "stop" }))
+                )
+              )
+            )
+        }
+        const registry = makeConnectorRegistry([
+          { connectorId: ConnectorIds.OpenAI, kind: "Api", create: (_c) => Effect.succeed(flaky) }
+        ])
+
+        const bundle = yield* makeFlowRunnerContext(
+          {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "do it",
+            coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.OpenAI })
+          },
+          { registry, process: process.executor, files: files(state) }
+        )
+        const recorded: Array<string> = []
+        const subscription = yield* bundle.events.subscribe
+        yield* Stream.fromSubscription(subscription).pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              if (event._tag === "Info") {
+                recorded.push(event.message)
+              }
+            })
+          ),
+          Effect.forkScoped
+        )
+
+        // The wrapper waits before its fresh retry; advance past that delay.
+        const running = yield* Effect.forkChild(collect(bundle.context.coder.executeStream("go")))
+        yield* TestClock.adjust("5 seconds")
+        const response = yield* Fiber.join(running)
+        yield* Effect.yieldNow
+
+        assert.strictEqual(response.content, "recovered")
+        assert.strictEqual(yield* Ref.get(attempts), 2)
+        assert.isTrue(
+          recorded.some((message) => message.includes("⟳ flaky stream (fresh retry) — retry 1/6")),
+          `expected a retry notice, saw: ${JSON.stringify(recorded)}`
+        )
+        // The wrapper must not shadow what the connector carries beyond the
+        // service methods — the flow context exposes its capabilities.
+        assert.isDefined(bundle.context.coderCapabilities)
+      })
+    )
+  )
+
   it.effect("prepares API defaults and redacted environment credentials before resolution", () =>
     Effect.gen(function* () {
       const process = yield* makeFakeProcessExecutor()

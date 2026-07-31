@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { collect } from "@llm4ts/core/Streaming"
+import { withToolActivity } from "./Activity.ts"
 import { makeChat, type Chat } from "./Chat.ts"
 import type { FlowContextShape } from "./FlowContext.ts"
 import { FlowAborted, FlowLlmError, type FlowError } from "./FlowError.ts"
@@ -21,7 +22,7 @@ export const completeAndPublish = Effect.fn("@llm4ts/flow/Flow.completeAndPublis
   events: FlowEventsShape,
   prompt: string
 ): Effect.fn.Return<string, FlowLlmError> {
-  const response = yield* collect(service.executeStream(prompt)).pipe(
+  const response = yield* collect(withToolActivity(events, service.executeStream(prompt))).pipe(
     Effect.mapError(FlowLlmError.from)
   )
   if (response.usage !== undefined) {
