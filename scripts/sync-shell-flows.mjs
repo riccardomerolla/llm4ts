@@ -1,14 +1,26 @@
 /**
- * Copies the repository's top-level flows/ scripts into packages/shell/flows,
- * the built-in tier shipped inside the @llm4ts/shell npm package, together
- * with the resources the modernize flows locate relative to their own
- * directory: packs/, patterns/, and fixtures/ (scaffolds the packs point at).
- * Run as part of `pnpm build` so the copies can never drift from the source
- * of truth.
+ * Transpiles the repository's top-level flows/ scripts into
+ * packages/shell/flows as plain .js, the built-in tier shipped inside the
+ * @llm4ts/shell npm package, together with the resources the modernize flows
+ * locate relative to their own directory: packs/, patterns/, and fixtures/
+ * (scaffolds the packs point at). The flows must ship as JavaScript: Node
+ * refuses to strip types from .ts files under node_modules
+ * (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so an installed shell could
+ * never launch a .ts built-in. Run as part of `pnpm build` so the copies can
+ * never drift from the source of truth.
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs"
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
+import ts from "typescript"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const sourceDir = path.join(repoRoot, "flows")
@@ -23,7 +35,16 @@ for (const entry of readdirSync(sourceDir)) {
   if (!entry.endsWith(".ts")) {
     continue
   }
-  cpSync(path.join(sourceDir, entry), path.join(targetDir, entry))
+  const source = readFileSync(path.join(sourceDir, entry), "utf8")
+  const transpiled = ts.transpileModule(source, {
+    fileName: entry,
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+      removeComments: false
+    }
+  })
+  writeFileSync(path.join(targetDir, entry.replace(/\.ts$/, ".js")), transpiled.outputText)
   copied += 1
 }
 for (const name of resourceDirs) {

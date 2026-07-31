@@ -62,6 +62,11 @@ export const defaultTierPaths = (options: {
 
 const tierOrder: ReadonlyArray<FlowTier> = ["project", "global", "builtin"]
 
+// User-authored flows are .ts (launched with type stripping); the built-in
+// tier ships .js because Node refuses to strip types under node_modules.
+const flowExtension = (entry: string): string | undefined =>
+  entry.endsWith(".ts") ? ".ts" : entry.endsWith(".js") ? ".js" : undefined
+
 const listTier = Effect.fn("@llm4ts/shell/FlowCatalog.listTier")(function* (
   tier: FlowTier,
   directory: string
@@ -70,14 +75,15 @@ const listTier = Effect.fn("@llm4ts/shell/FlowCatalog.listTier")(function* (
   const entries = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed(() => []))
   const flows: Array<Omit<DiscoveredFlow, "shadows">> = []
   for (const entry of [...entries].sort()) {
-    if (!entry.endsWith(".ts")) {
+    const extension = flowExtension(entry)
+    if (extension === undefined) {
       continue
     }
     const path = join(directory, entry)
     const source = yield* fs.readFileString(path).pipe(Effect.orElseSucceed(() => ""))
     const description = parseFlowDescription(source)
     flows.push({
-      name: entry.slice(0, -".ts".length),
+      name: entry.slice(0, -extension.length),
       path,
       tier,
       ...(description === undefined ? {} : { description })

@@ -76,14 +76,14 @@ export const renderFlowList = (
 
 /**
  * Resolves a flow argument to a runnable script path: an explicit path (a
- * value containing a separator or ending in `.ts`) is used as-is, anything
- * else is looked up by name in the discovery listing.
+ * value containing a separator or ending in `.ts`/`.js`) is used as-is,
+ * anything else is looked up by name in the discovery listing.
  */
 export const resolveFlow = Effect.fn("@llm4ts/shell/Cli.resolveFlow")(function* (
   reference: string,
   tiers: FlowTierPaths
 ) {
-  if (reference.includes("/") || reference.endsWith(".ts")) {
+  if (reference.includes("/") || reference.endsWith(".ts") || reference.endsWith(".js")) {
     const fs = yield* FileSystem
     const exists = yield* fs.exists(reference).pipe(Effect.orElseSucceed(() => false))
     if (!exists) {

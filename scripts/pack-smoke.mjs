@@ -98,6 +98,29 @@ console.log("pack smoke: all imports resolved, mock completion succeeded")
     throw new Error(`llm4ts list --json did not include the built-in flows: ${listOutput}`)
   }
   console.log(`pack smoke: llm4ts bin listed ${flows.length} built-in flow(s)`)
+
+  // Launching a built-in flow from the installed layout must load the script
+  // and its @llm4ts imports from node_modules — Node refuses to strip types
+  // there, so this catches a .ts flow ever sneaking back into the tier. The
+  // flow is expected to start and fail on its own argument validation.
+  let launch
+  try {
+    launch = run(
+      path.join(workDir, "node_modules", ".bin", "llm4ts"),
+      ["run", "modernize-survey", "--repo", path.join(workDir, "missing-repo")],
+      {
+        cwd: workDir,
+        env: { ...process.env, XDG_CONFIG_HOME: path.join(workDir, "xdg-config") },
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    )
+  } catch (error) {
+    launch = `${error.stdout ?? ""}${error.stderr ?? ""}`
+  }
+  if (!String(launch).includes("--repo is not a directory")) {
+    throw new Error(`installed built-in flow did not launch: ${launch}`)
+  }
+  console.log("pack smoke: installed built-in flow launched from node_modules")
 } finally {
   rmSync(workDir, { recursive: true, force: true })
 }

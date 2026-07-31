@@ -101,7 +101,7 @@ describe("discoverFlows", () => {
       assert.isUndefined(flows[0]?.description)
     }))
 
-  it("ignores files that are not .ts scripts", () =>
+  it("ignores files that are not flow scripts", () =>
     withTempDir(async (dir) => {
       writeFileSync(join(dir, "README.md"), "# not a flow\n")
       writeFileSync(join(dir, "flow.ts"), "// a flow\n")
@@ -110,6 +110,24 @@ describe("discoverFlows", () => {
       assert.deepStrictEqual(
         flows.map((flow) => flow.name),
         ["flow"]
+      )
+    }))
+
+  // The shipped built-in tier is transpiled JavaScript: Node refuses to strip
+  // types under node_modules, so an installed shell can only launch .js flows.
+  it("discovers .js flows, as the built-in tier ships them", () =>
+    withTempDir(async (dir) => {
+      const builtin = join(dir, "builtin")
+      mkdirSync(builtin, { recursive: true })
+      writeFileSync(join(builtin, "modernize-survey.js"), "// survey the estate\n")
+      const project = join(dir, "project")
+      mkdirSync(project, { recursive: true })
+      writeFileSync(join(project, "modernize-survey.ts"), "// project survey override\n")
+
+      const flows = await runDiscovery({ project, builtin })
+      assert.deepStrictEqual(
+        flows.map((flow) => [flow.name, flow.tier, flow.description, [...flow.shadows]]),
+        [["modernize-survey", "project", "project survey override", ["builtin"]]]
       )
     }))
 })
