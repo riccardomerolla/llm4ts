@@ -9,9 +9,9 @@ cross-project lessons-learned store.
 
 ## Decisions (ADR 0007, agreed 2026-07-31)
 
-| Decision   | Choice                                                                                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Tool       | `query_memory` exposed to the in-flow agent where the connector supports tools; injection digest from slice 1 remains the baseline everywhere.               |
+| Decision   | Choice                                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool       | `query_memory` exposed to the in-flow agent where the connector supports tools; injection digest from slice 1 remains the baseline everywhere.                |
 | Tool shape | Read-only: text query + optional kind/tag/scope filters → ranked entries. No write tool — writes stay distillation-only (ADR 0007 poisoning rationale).       |
 | Promotion  | Explicit user-invoked operation copying selected project-scope entries to the global root (provenance recorded in `source`). Agents never write global scope. |
 | Idiom      | Follow the existing flow tool seam (`WorkspaceTools`/`GitTool` pattern in `packages/flow/src/`); capability-gated like other tools.                           |
