@@ -63,6 +63,23 @@ export class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("Proce
   detail: Schema.String
 }) {}
 
+/**
+ * A failure rendered for a human. `ProcessError.message` is only the command
+ * that failed — reporting it alone (`git diff --name-only main...HEAD`) says
+ * nothing about why, so the process output that explains it is appended.
+ */
+export const describeFlowError = (error: unknown): string => {
+  const base = error instanceof Error && error.message.length > 0 ? error.message : String(error)
+  const detail =
+    typeof error === "object" &&
+    error !== null &&
+    "detail" in error &&
+    typeof error.detail === "string"
+      ? error.detail.trim()
+      : ""
+  return detail.length === 0 || base.includes(detail) ? base : `${base}: ${detail}`
+}
+
 export class FlowLlmError extends Schema.TaggedErrorClass<FlowLlmError>()("Llm", {
   message: Schema.String,
   cause: Schema.optionalKey(LlmError)

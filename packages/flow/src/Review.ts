@@ -7,7 +7,7 @@ import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import { Capabilities } from "@llm4ts/core/Capability"
 import { guarded } from "./CapabilityGuard.ts"
 import type { Chat } from "./Chat.ts"
-import { FlowLlmError, ProcessError, type FlowError } from "./FlowError.ts"
+import { FlowLlmError, ProcessError, describeFlowError, type FlowError } from "./FlowError.ts"
 import { Info, type FlowEventsShape } from "./FlowEvents.ts"
 import { Reviewer } from "./Reviewer.ts"
 import { publishUsage } from "./Usage.ts"
@@ -311,7 +311,21 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
 ): Effect.fn.Return<ReviewResult, FlowError> {
   const maxRounds = Math.max(1, options.maxRounds ?? 3)
   const selector = options.selector ?? allEveryRound
-  const changedFiles = options.changedFiles ?? Effect.succeed([])
+  // Changed files only narrow which reviewers run, so a repository that
+  // cannot answer the question (no such base ref, unrelated histories, a
+  // shallow clone) must not cost the caller a finished task: every reviewer
+  // runs instead, which is what an empty list already means to a selector.
+  const changedFiles = (options.changedFiles ?? Effect.succeed([])).pipe(
+    Effect.catch((error) =>
+      options.events
+        .publish(
+          Info.make({
+            message: `could not determine the changed files (${describeFlowError(error)}) — running every reviewer`
+          })
+        )
+        .pipe(Effect.as<ReadonlyArray<string>>([]))
+    )
+  )
   const format = options.format ?? Effect.void
 
   const reviewOnce = (

@@ -51,6 +51,59 @@ describe("GitTool", () => {
     )
   )
 
+  // A locally seeded target repository has no remote, and its default branch
+  // is whatever git was configured to create. Answering "main" regardless made
+  // the next `git diff main...HEAD` fail with "unknown revision", which killed
+  // the stage that had just spent half an hour doing real work.
+  it.effect("resolves a base that exists when there is no remote and no main", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        yield* git.config("user.name", "llm4ts test")
+        yield* git.config("user.email", "llm4ts@example.invalid")
+        yield* Effect.promise(() => writeFile(join(root, "value.txt"), "one\n", "utf8"))
+        yield* git.commitAll("first")
+        // Rename away from main so neither conventional branch resolves —
+        // the shape of a repository initialised under another default.
+        yield* nodeProcessExecutor.run(["git", "branch", "-m", "main", "trunk"], root, {})
+        yield* git.createBranch("epic/work")
+        yield* Effect.promise(() => writeFile(join(root, "added.txt"), "two\n", "utf8"))
+        yield* git.commitAll("second")
+
+        const base = yield* git.defaultBase
+        assert.notStrictEqual(base, "main", "an unverified 'main' is what used to break the diff")
+        // Whatever it resolved to must actually be diffable — that is the
+        // property the flow depends on.
+        const changed = yield* git.changedFilesVsBase(base)
+        assert.include(changed, "added.txt")
+      })
+    )
+  )
+
+  it.effect("prefers a real main and keeps the diff working", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        yield* git.config("user.name", "llm4ts test")
+        yield* git.config("user.email", "llm4ts@example.invalid")
+        yield* Effect.promise(() => writeFile(join(root, "value.txt"), "one\n", "utf8"))
+        yield* git.commitAll("first")
+        yield* git.createBranch("epic/work")
+        yield* Effect.promise(() => writeFile(join(root, "added.txt"), "two\n", "utf8"))
+        yield* git.commitAll("second")
+
+        assert.strictEqual(yield* git.defaultBase, "main")
+        assert.deepStrictEqual(yield* git.changedFilesVsBase("main"), ["added.txt"])
+      })
+    )
+  )
+
   it.effect("keeps read, write, and push grants distinct and audits denials", () =>
     Effect.scoped(
       Effect.gen(function* () {

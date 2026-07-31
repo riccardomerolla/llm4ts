@@ -84,6 +84,51 @@ export const makeGitTool = (
           )
     )
 
+  /** The candidate when it resolves to a commit in this repository. */
+  const verifiedRef = (candidate: string): Effect.Effect<string | undefined, FlowError> =>
+    Effect.map(run(["rev-parse", "--verify", "--quiet", candidate]), (result) =>
+      result.exitCode === 0 ? candidate : undefined
+    )
+
+  const firstVerifiedRef = (
+    candidates: ReadonlyArray<string>
+  ): Effect.Effect<string | undefined, FlowError> =>
+    candidates.reduce<Effect.Effect<string | undefined, FlowError>>(
+      (found, candidate) =>
+        Effect.flatMap(found, (resolved) =>
+          resolved === undefined ? verifiedRef(candidate) : Effect.succeed(resolved)
+        ),
+      Effect.succeed(undefined)
+    )
+
+  /**
+   * The ref to diff a branch against. Every answer is verified to resolve in
+   * this repository: returning an unverified name (this used to fall back to
+   * the literal "main") makes the next `git diff <base>...HEAD` fail with
+   * "unknown revision", which killed whole stages in repositories whose
+   * default branch is named something else or which have no remote at all —
+   * exactly what `modernize-seed` produces. When no conventional branch
+   * exists, the current branch's root commit stands in, so a diff against it
+   * still describes the work rather than erroring.
+   */
+  const defaultBaseEffect: Effect.Effect<string, FlowError> = Effect.gen(function* () {
+    const symbolic = yield* run(["symbolic-ref", "refs/remotes/origin/HEAD"])
+    const head = text(symbolic.stdout).replace(/^refs\/remotes\//, "")
+    if (symbolic.exitCode === 0 && head.length > 0) {
+      const verified = yield* verifiedRef(head)
+      if (verified !== undefined) {
+        return verified
+      }
+    }
+    const conventional = yield* firstVerifiedRef(["origin/main", "origin/master", "main", "master"])
+    if (conventional !== undefined) {
+      return conventional
+    }
+    const root = yield* run(["rev-list", "--max-parents=0", "HEAD"])
+    const firstCommit = text(root.stdout).split(/\r?\n/)[0]?.trim() ?? ""
+    return root.exitCode === 0 && firstCommit.length > 0 ? firstCommit : "HEAD"
+  })
+
   const gate = <A>(
     capability: Capability,
     operation: string,
@@ -158,22 +203,7 @@ export const makeGitTool = (
       "git diffAll",
       runOrFail(["add", "--intent-to-add", "-A"]).pipe(Effect.andThen(runOrFail(["diff"])))
     ),
-    defaultBase: read(
-      "git defaultBase",
-      Effect.flatMap(run(["symbolic-ref", "refs/remotes/origin/HEAD"]), (symbolic) => {
-        const value = text(symbolic.stdout)
-        if (symbolic.exitCode === 0 && value.length > 0) {
-          return Effect.succeed(value.replace(/^refs\/remotes\//, ""))
-        }
-        return Effect.flatMap(run(["rev-parse", "--verify", "--quiet", "origin/main"]), (main) =>
-          main.exitCode === 0
-            ? Effect.succeed("origin/main")
-            : run(["rev-parse", "--verify", "--quiet", "origin/master"]).pipe(
-                Effect.map((master) => (master.exitCode === 0 ? "origin/master" : "main"))
-              )
-        )
-      })
-    ),
+    defaultBase: read("git defaultBase", defaultBaseEffect),
     diffVsBase: (base, threeDot = true) =>
       read("git diffVsBase", runOrFail(["diff", `${base}${threeDot ? "..." : ".."}HEAD`])),
     changedFilesVsBase: (base, threeDot = true) =>
