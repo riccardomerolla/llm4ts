@@ -188,6 +188,12 @@ against the flow script's own directory — so the built-in packs shipped with
 `@llm4ts/shell` are found even when a flow is launched from an unrelated
 directory. An absolute `LLM4TS_PACK` is used as-is.
 
+The estate-reading phases (survey, extract, bench) read legacy sources with
+an 8 MiB per-file cap — legacy estates routinely carry multi-megabyte
+programs and generated copybooks. A `read bytes exceeded limit` failure
+names the offending file; raise the cap with `LLM4TS_MAX_READ_BYTES=<bytes>`
+when an estate legitimately exceeds it.
+
 Six reference packs ship, each pairing a legacy source technology with a
 target stack, plus the [scaffold](fixtures/scaffolds/) that seeds an empty
 target repository:

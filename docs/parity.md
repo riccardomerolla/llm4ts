@@ -299,6 +299,11 @@ reference release.
   - The source's per-phase model presets (a Gemini Pro/Flash split by seat)
     are replaced by the repository's own `LLM4TS_CODER` connector selection
     with a read-only derived reasoning seat, matching every other llm4ts flow.
+  - The estate-reading phases (survey, extract, bench) open the legacy
+    repository with `legacySourceWorkspaceLimits` — an 8 MiB per-file read
+    cap instead of the 1 MiB workspace default, overridable with
+    `LLM4TS_MAX_READ_BYTES`. The source scripts read files unboundedly; the
+    Effect port keeps a cap but sizes it for real estates.
   - Pack resolution gains a fallback the source does not need:
     `LLM4TS_PACK` resolves against the launch directory first, then against
     the flow script's own directory (`@llm4ts/runner/Packs.openPack`), and an

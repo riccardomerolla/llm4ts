@@ -32,6 +32,7 @@ import { Info } from "@llm4ts/flow/FlowEvents"
 import { makeChat } from "@llm4ts/flow/Chat"
 import type { Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
+import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { defaultPlanInstructions, planFrom } from "@llm4ts/flow/Planner"
 import { ReviewIssue, ReviewResult, mergeReviewResults } from "@llm4ts/flow/Review"
@@ -219,7 +220,10 @@ const program = Effect.gen(function* () {
     },
     (context) =>
       Effect.gen(function* () {
-        const repo = yield* makeNodeWorkspace(input.workDir)
+        const repo = yield* makeNodeWorkspace(
+          input.workDir,
+          workspaceLimitsFromEnv(process.env, legacySourceWorkspaceLimits)
+        )
         const opened = yield* stage(
           context.events,
           "pack",

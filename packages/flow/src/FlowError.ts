@@ -37,11 +37,13 @@ export class WorkspaceLimitError extends Schema.TaggedErrorClass<WorkspaceLimitE
   {
     operation: Schema.String,
     limit: Schema.Int,
-    actual: Schema.Int
+    actual: Schema.Int,
+    path: Schema.optionalKey(Schema.String)
   }
 ) {
   get message(): string {
-    return `${this.operation} exceeded limit ${this.limit}; received ${this.actual}`
+    const where = this.path === undefined ? "" : ` (${this.path})`
+    return `${this.operation} exceeded limit ${this.limit}; received ${this.actual}${where}`
   }
 }
 

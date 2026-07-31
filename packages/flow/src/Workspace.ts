@@ -26,6 +26,38 @@ export const defaultWorkspaceLimits: WorkspaceLimits = Object.freeze({
   maxDepth: 32
 })
 
+/**
+ * Limits for workspaces that read raw legacy sources (survey, extract,
+ * bench). Legacy estates routinely carry multi-megabyte programs, copybooks,
+ * and generated exports, so the default 1 MiB read cap — sized for
+ * spec-and-plan repositories — would fail an inventory on its first big
+ * file. 8 MiB accommodates real estates while still refusing runaway blobs.
+ */
+export const legacySourceWorkspaceLimits: WorkspaceLimits = Object.freeze({
+  ...defaultWorkspaceLimits,
+  maxReadBytes: 8_388_608
+})
+
+/**
+ * `defaults` with the per-file read cap overridden by `LLM4TS_MAX_READ_BYTES`
+ * when it holds a positive integer; anything else leaves the defaults
+ * untouched. The escape hatch for estates whose sources exceed even the
+ * legacy-source cap.
+ */
+export const workspaceLimitsFromEnv = (
+  environment: Readonly<Record<string, string | undefined>>,
+  defaults: WorkspaceLimits = defaultWorkspaceLimits
+): WorkspaceLimits => {
+  const raw = environment.LLM4TS_MAX_READ_BYTES?.trim()
+  if (raw === undefined || raw.length === 0 || !/^\d+$/.test(raw)) {
+    return defaults
+  }
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isSafeInteger(parsed) && parsed > 0
+    ? { ...defaults, maxReadBytes: parsed }
+    : defaults
+}
+
 export interface WorkspaceShape {
   readonly root: string
   readonly resolve: (path: string) => Effect.Effect<string, WorkspaceError>
