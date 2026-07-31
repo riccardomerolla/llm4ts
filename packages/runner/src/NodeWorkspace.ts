@@ -133,7 +133,8 @@ export const makeNodeWorkspace = Effect.fn("@llm4ts/runner/NodeWorkspace.make")(
       return yield* WorkspaceLimitError.make({
         operation: "read bytes",
         limit: limits.maxReadBytes,
-        actual: info.size
+        actual: info.size,
+        path: input
       })
     }
     return yield* Effect.tryPromise({
@@ -159,7 +160,8 @@ export const makeNodeWorkspace = Effect.fn("@llm4ts/runner/NodeWorkspace.make")(
         return yield* WorkspaceLimitError.make({
           operation: `${operation} bytes`,
           limit: limits.maxWriteBytes,
-          actual: bytes
+          actual: bytes,
+          path: input
         })
       }
       const path = yield* resolveSafe(input)

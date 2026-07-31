@@ -22,7 +22,8 @@ describe("symlink-aware bounded workspace", () => {
         yield* Effect.promise(() =>
           Promise.all([
             writeFile(join(root, "many", "a"), "x"),
-            writeFile(join(root, "many", "b"), "x")
+            writeFile(join(root, "many", "b"), "x"),
+            writeFile(join(root, "many", "big"), "1234")
           ])
         )
         const workspace = yield* makeNodeWorkspace(root, {
@@ -35,11 +36,17 @@ describe("symlink-aware bounded workspace", () => {
         const traversal = yield* Effect.flip(workspace.resolve("../outside"))
         const symlinkEscape = yield* Effect.flip(workspace.read("external/secret"))
         const oversize = yield* Effect.flip(workspace.write("large", "1234"))
+        const oversizeRead = yield* Effect.flip(workspace.read("many/big"))
         const overflow = yield* Effect.flip(workspace.discover("**/*"))
 
         assert.strictEqual(traversal._tag, "WorkspacePath")
         assert.strictEqual(symlinkEscape._tag, "WorkspacePath")
         assert.strictEqual(oversize._tag, "WorkspaceLimit")
+        // The limit error names the offending file so an estate-sized read
+        // failure is actionable without re-running under a debugger.
+        assert.strictEqual(oversize._tag === "WorkspaceLimit" ? oversize.path : "", "large")
+        assert.strictEqual(oversizeRead._tag, "WorkspaceLimit")
+        assert.include(oversizeRead.message, "many/big")
         assert.strictEqual(overflow._tag, "WorkspaceLimit")
       })
     )

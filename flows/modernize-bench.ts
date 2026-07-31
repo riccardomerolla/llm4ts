@@ -43,6 +43,7 @@ import { packageVersion } from "@llm4ts/flow/Package"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { mergeReviewResults } from "@llm4ts/flow/Review"
 import { coverage, coverageUnits, features, matchingFiles } from "@llm4ts/flow/SpecChecks"
+import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import {
   ProgramArtifacts,
   ProgramUnit,
@@ -109,7 +110,10 @@ const program = Effect.gen(function* () {
     (context) =>
       Effect.scoped(
         Effect.gen(function* () {
-          const estate = yield* makeNodeWorkspace(input.workDir)
+          const estate = yield* makeNodeWorkspace(
+            input.workDir,
+            workspaceLimitsFromEnv(process.env, legacySourceWorkspaceLimits)
+          )
           const { pack } = yield* stage(
             context.events,
             "pack",

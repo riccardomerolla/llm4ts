@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.2
+
+- The estate-reading modernization phases (survey, extract, bench) open the
+  legacy repository with a new `legacySourceWorkspaceLimits`: an 8 MiB
+  per-file read cap instead of the 1 MiB workspace default, which failed an
+  entire survey on its first multi-megabyte program or generated copybook.
+  `LLM4TS_MAX_READ_BYTES=<bytes>` overrides the cap for estates that exceed
+  even that, and `WorkspaceLimitError` now names the offending file
+  (`read bytes exceeded limit 1048576; received 1659258 (path/to/file)`), so
+  a limit hit is actionable without a debugger.
+
 ## 0.6.1
 
 - The built-in flow tier ships transpiled JavaScript instead of TypeScript.

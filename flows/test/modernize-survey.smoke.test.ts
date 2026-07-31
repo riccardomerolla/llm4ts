@@ -98,6 +98,11 @@ const jclRunjob = [
   "//SYSIN    DD *"
 ].join("\n")
 
+// Legacy estates carry multi-megabyte generated copybooks; the survey reads
+// sources under legacySourceWorkspaceLimits, so a ~1.6 MB file (over the
+// 1 MiB default cap that used to fail the whole inventory) must survive.
+const cobolBigcopy = "       05  FILLER              PIC X(40).\n".repeat(38_000)
+
 interface Estate {
   readonly root: string
   readonly binDir: string
@@ -112,6 +117,7 @@ const makeEstate = (): Estate => {
   mkdirSync(binDir, { recursive: true })
 
   writeFileSync(join(estate, "cobol", "ACCTXFR.cbl"), `${cobolAcctxfr}\n`)
+  writeFileSync(join(estate, "cobol", "BIGCOPY.cpy"), cobolBigcopy)
   writeFileSync(join(estate, "cobol", "FEECALC.cbl"), `${cobolFeecalc}\n`)
   writeFileSync(join(estate, "jcl", "RUNJOB.JCL"), `${jclRunjob}\n`)
 
@@ -175,6 +181,7 @@ describe("modernize-survey end to end (model stubbed)", () => {
       const graph = Schema.decodeUnknownSync(SurveyGraph)(JSON.parse(read("graph.json")))
       assert.deepStrictEqual(graph.nodes.map((node) => node.name).sort(), [
         "ACCTXFR",
+        "BIGCOPY",
         "FEECALC",
         "RUNJOB"
       ])
