@@ -131,7 +131,7 @@ const makeEstate = (): Estate => {
   return { root, binDir }
 }
 
-const runSurvey = (estate: Estate) =>
+const runSurvey = (estate: Estate, cwd: string = flowsRoot) =>
   spawnSync(
     process.execPath,
     [
@@ -141,7 +141,7 @@ const runSurvey = (estate: Estate) =>
       join(estate.root, "estate")
     ],
     {
-      cwd: flowsRoot,
+      cwd,
       encoding: "utf8",
       env: {
         ...process.env,
@@ -231,6 +231,28 @@ describe("modernize-survey end to end (model stubbed)", () => {
         encoding: "utf8"
       })
       assert.strictEqual(status.trim(), "", "the survey should leave a clean tree")
+    } finally {
+      rmSync(estate.root, { recursive: true, force: true })
+    }
+  })
+
+  // The launch directory has no packs/ at all — the pack must come from the
+  // flow script's own directory, the layout `llm4ts run modernize-survey`
+  // launches with from an arbitrary cwd.
+  it("finds the built-in pack when launched outside the llm4ts workspace", () => {
+    const estate = makeEstate()
+    try {
+      const result = runSurvey(estate, estate.root)
+      assert.strictEqual(
+        result.status,
+        0,
+        `survey exited ${result.status}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`
+      )
+      const plan = readFileSync(
+        join(estate.root, "estate", "docs", "modernization", "wave-plan.md"),
+        "utf8"
+      )
+      assert.include(plan, "- [ ] Approved")
     } finally {
       rmSync(estate.root, { recursive: true, force: true })
     }

@@ -1,15 +1,19 @@
 /**
  * Copies the repository's top-level flows/ scripts into packages/shell/flows,
- * the built-in tier shipped inside the @llm4ts/shell npm package. Run as part
- * of `pnpm build` so the copies can never drift from the source of truth.
+ * the built-in tier shipped inside the @llm4ts/shell npm package, together
+ * with the resources the modernize flows locate relative to their own
+ * directory: packs/, patterns/, and fixtures/ (scaffolds the packs point at).
+ * Run as part of `pnpm build` so the copies can never drift from the source
+ * of truth.
  */
-import { cpSync, mkdirSync, readdirSync, rmSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const sourceDir = path.join(repoRoot, "flows")
 const targetDir = path.join(repoRoot, "packages", "shell", "flows")
+const resourceDirs = ["packs", "patterns", "fixtures"]
 
 rmSync(targetDir, { recursive: true, force: true })
 mkdirSync(targetDir, { recursive: true })
@@ -22,4 +26,12 @@ for (const entry of readdirSync(sourceDir)) {
   cpSync(path.join(sourceDir, entry), path.join(targetDir, entry))
   copied += 1
 }
-console.log(`sync-shell-flows: copied ${copied} flow(s) into packages/shell/flows`)
+for (const name of resourceDirs) {
+  const source = path.join(sourceDir, name)
+  if (existsSync(source)) {
+    cpSync(source, path.join(targetDir, name), { recursive: true })
+  }
+}
+console.log(
+  `sync-shell-flows: copied ${copied} flow(s) and ${resourceDirs.join("/")} into packages/shell/flows`
+)

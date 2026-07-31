@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.0
+
+- Modernization pack discovery no longer requires launching from a directory
+  that holds `packs/`. The new `@llm4ts/runner/Packs` seam (`openPack`,
+  `locatePack`, `loadUniversalPatternCards`) resolves `LLM4TS_PACK` (default
+  `packs/cobol-springboot`) against the launch directory first, then against
+  the flow script's own directory; an absolute `LLM4TS_PACK` is used as-is,
+  and a missing pack fails with a `PackNotFound` error naming both searched
+  roots instead of an opaque `pack.md` read error. All seven modernize flows
+  route through the seam, and pack-relative reads (prompts, pack patterns,
+  `lessons.md`, the scaffold) follow the directory the pack was actually
+  found in.
+- `@llm4ts/shell` now ships the modernization resources its built-in flows
+  need: `sync-shell-flows` copies `packs/`, `patterns/`, and `fixtures/`
+  alongside the flow scripts, and `@llm4ts/modernize` joins the shell's
+  dependencies so the built-in modernize flows resolve. Together with the
+  discovery fallback, `llm4ts run modernize-survey --repo <estate>` works
+  from any directory.
+- `llm4ts run` accepts `--repo <path>` directly and forwards it to the flow,
+  matching `llm4ts ask`; previously only the `run <flow> -- --repo <path>`
+  spelling reached the flow.
+- `flows/README.md` documents the pnpm workspace footgun the discovery
+  fallback cannot fix: `pnpm --filter @llm4ts/flows …` invoked outside the
+  llm4ts checkout prints pnpm's `No projects found in "<dir>"` and exits 0
+  without running anything — a message easily mistaken for the Gemini
+  "No project found" credential error that `llm4ts doctor` explains.
+- The Release workflow gains a `workflow_dispatch` trigger: run it manually
+  against `main` after a version bump and it verifies the lockstep versions,
+  runs the full verification chain, publishes, and pushes the matching
+  `vX.Y.Z` tag itself. Tag-driven releases behave exactly as before.
+
 ## 0.5.0
 
 - `@llm4ts/flow/GitHubTool` gains `createIssue` (title, body, labels;

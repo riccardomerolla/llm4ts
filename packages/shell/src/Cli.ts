@@ -115,6 +115,12 @@ const runCommand = Command.make(
       Argument.variadic(),
       Argument.withDescription("Task text passed to the flow")
     ),
+    repo: Flag.string("repo").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Repository to run against, forwarded to the flow as --repo (defaults to the current directory)"
+      )
+    ),
     verbose: Flag.boolean("verbose").pipe(Flag.withDescription("Stream verbose flow output"))
   },
   (config) =>
@@ -127,7 +133,10 @@ const runCommand = Command.make(
       }
       const exitCode = yield* launchFlow({
         flowPath,
-        taskArgs: config.task,
+        taskArgs: [
+          ...(config.repo._tag === "Some" ? ["--repo", config.repo.value] : []),
+          ...config.task
+        ],
         environment
       })
       yield* Effect.sync(() => {

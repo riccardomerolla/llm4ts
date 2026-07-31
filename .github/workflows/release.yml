@@ -4,9 +4,15 @@ on:
   push:
     tags:
       - "v*"
+  # Manual trigger: releases whatever version the checked-out ref's packages
+  # carry (normally main after a `pnpm version:set` commit) and pushes the
+  # matching v<version> tag once the publish has succeeded.
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  # write is needed only by the dispatch path, which pushes the release tag;
+  # job-level permissions cannot be split per trigger.
+  contents: write
   id-token: write
 
 jobs:
@@ -29,13 +35,27 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Verify tag matches package versions
+      - name: Resolve release version
+        id: version
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            version="$(node -p "require('./packages/core/package.json').version")"
+            if git ls-remote --exit-code origin "refs/tags/v$version" >/dev/null 2>&1; then
+              echo "::error::tag v$version already exists — bump with pnpm version:set first"
+              exit 1
+            fi
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify every package is at ${{ steps.version.outputs.version }}
+        run: |
+          release="${{ steps.version.outputs.version }}"
           for pkg in packages/*/package.json; do
             version="$(node -p "require('./$pkg').version")"
-            if [ "$version" != "$tag" ]; then
-              echo "::error::$pkg is $version but tag is $tag"
+            if [ "$version" != "$release" ]; then
+              echo "::error::$pkg is $version but the release version is $release"
               exit 1
             fi
           done
@@ -48,3 +68,15 @@ jobs:
       - run: node scripts/pack-smoke.mjs
       # Authenticates via npm trusted publishing (OIDC) — no token required.
       - run: pnpm --recursive --filter "./packages/**" publish --access public --no-git-checks
+
+      # After a successful dispatch publish, record the release the same way a
+      # tag-driven one starts. A GITHUB_TOKEN-pushed tag does not re-trigger
+      # this workflow, so the dispatch path never double-publishes.
+      - name: Tag the released commit
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "v$version"
+          git push origin "v$version"

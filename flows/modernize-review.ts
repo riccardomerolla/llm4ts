@@ -22,7 +22,7 @@ import { judge } from "@llm4ts/core/eval/Judge"
 import type { JsonSchema } from "@llm4ts/core/Models"
 import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
-import { appendPackLesson, loadPack, type Pack } from "@llm4ts/flow/Pack"
+import { appendPackLesson, type Pack } from "@llm4ts/flow/Pack"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { stage } from "@llm4ts/flow/PlanExecution"
@@ -40,6 +40,7 @@ import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
+import { openPack } from "@llm4ts/runner/Packs"
 
 const ModDir = "docs/modernization"
 
@@ -146,7 +147,6 @@ const distillPrompt = (
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Review the modernization increment against its spec pack")
-  const packDir = process.env.LLM4TS_PACK ?? "packs/cobol-springboot"
   const coder = coderFromEnv(process.env)
   const files = nodePlainFileStore
   const planPath = join(input.workDir, ModDir, "plan.md")
@@ -163,9 +163,17 @@ const program = Effect.gen(function* () {
     },
     (context) =>
       Effect.gen(function* () {
-        const launchWorkspace = yield* makeNodeWorkspace(input.workspace)
         const target = yield* makeNodeWorkspace(input.workDir)
-        const pack = yield* stage(context.events, "pack", loadPack(launchWorkspace, packDir))
+        const opened = yield* stage(
+          context.events,
+          "pack",
+          openPack({
+            environment: process.env,
+            launchDir: input.workspace,
+            flowDir: import.meta.dirname
+          })
+        )
+        const pack = opened.pack
         const reviewService = context.reviewers[0] ?? context.reasoning
 
         yield* stage(
@@ -307,12 +315,12 @@ const program = Effect.gen(function* () {
               )
             }
             for (const lesson of outcome.lessons) {
-              yield* appendPackLesson(launchWorkspace, packDir, lesson)
+              yield* appendPackLesson(opened.workspace, opened.dir, lesson)
             }
             yield* context.events.publish(
               Info.make({
                 message:
-                  `${outcome.lessons.length} lesson(s) appended to ${packDir}/lessons.md — ` +
+                  `${outcome.lessons.length} lesson(s) appended to ${opened.dir}/lessons.md — ` +
                   "review and commit the pack change"
               })
             )
