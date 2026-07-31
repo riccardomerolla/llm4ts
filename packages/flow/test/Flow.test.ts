@@ -152,6 +152,7 @@ const failingHosting: GitHubToolShape = {
   updatePr: (_pr, _title, _body) => unusedFlow,
   prChecks: (_pr) => unusedFlow,
   listIssues: (_repo, _filter) => unusedFlow,
+  createIssue: (_repo, _title, _body, _labels) => unusedFlow,
   editIssueLabels: (_ref, _add, _remove) => unusedFlow,
   assignIssue: (_ref, _login) => unusedFlow,
   closeIssue: (_ref, _comment) => unusedFlow

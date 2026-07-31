@@ -14,6 +14,7 @@ import {
   issueAssignArgs,
   issueCloseArgs,
   issueCommentArgs,
+  issueCreateArgs,
   issueEditLabelsArgs,
   issueListArgs,
   issueListFields,
@@ -23,6 +24,7 @@ import {
   parseIssue,
   parseIssueList,
   parseIssueRef,
+  parseIssueUrl,
   parsePullRequestUrl,
   prChecksArgs,
   prCreateArgs,
@@ -156,6 +158,23 @@ describe("GitHub tool protocol", () => {
       "acme/widgets"
     ])
     assert.deepStrictEqual(issueCloseArgs(issue, "done").slice(-2), ["--comment", "done"])
+    assert.deepStrictEqual(issueCreateArgs(repo, "T", "B", ["factory:ready"]), [
+      "issue",
+      "create",
+      "--repo",
+      "acme/widgets",
+      "--title",
+      "T",
+      "--body",
+      "B",
+      "--label",
+      "factory:ready"
+    ])
+    assert.strictEqual(
+      parseIssueUrl("https://github.com/acme/widgets/issues/12")?.shortRef,
+      "acme/widgets#12"
+    )
+    assert.isUndefined(parseIssueUrl("https://github.com/acme/widgets/pull/12"))
   })
 
   it.effect("decodes issue lists and rejects malformed payloads", () =>

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- `@llm4ts/flow/GitHubTool` gains `createIssue` (title, body, labels;
+  returns the parsed `IssueRef`), completing the work-queue surface for
+  consumer-side epic decomposition — a triage agent splitting one epic
+  issue into child work items. Same `gh` process protocol, `GhWrite`
+  guard, and args-builder style; ADR 0008 amended accordingly.
+
 ## 0.4.0
 
 - `@llm4ts/flow/GitHubTool` gains four work-queue operations so a GitHub

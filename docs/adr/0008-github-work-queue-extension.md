@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted.
+Accepted. Amended 2026-07-31: `createIssue` added as a fifth operation —
+the first spec listed issue creation as a non-goal, but consumer-side epic
+decomposition (a triage agent splitting one epic issue into child work
+items) needs it, and a parallel client in the consumer would violate the
+same deep-modules rule this ADR exists to protect. Same style, same
+`GhWrite` guard, URL-parsed result.
 
 ## Context
 

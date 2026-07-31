@@ -158,6 +158,33 @@ export const issueListArgs = (repo: RepoRef, filter: IssueListFilter): ReadonlyA
   issueListFields
 ]
 
+export const issueCreateArgs = (
+  repo: RepoRef,
+  title: string,
+  body: string,
+  labels: ReadonlyArray<string>
+): ReadonlyArray<string> => [
+  "issue",
+  "create",
+  "--repo",
+  repo.slug,
+  "--title",
+  title,
+  "--body",
+  body,
+  ...labels.flatMap((label) => ["--label", label])
+]
+
+export const parseIssueUrl = (url: string): IssueRef | undefined => {
+  const match = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/issues\/(\d+)\s*$/.exec(url.trim())
+  const owner = match?.[1]
+  const repo = match?.[2]
+  const number = Number.parseInt(match?.[3] ?? "", 10)
+  return owner === undefined || repo === undefined || !Number.isInteger(number) || number <= 0
+    ? undefined
+    : IssueRef.make({ owner, repo, number })
+}
+
 export const issueEditLabelsArgs = (
   ref: IssueRef,
   add: ReadonlyArray<string>,
@@ -340,6 +367,12 @@ export interface GitHubToolShape {
     repo: RepoRef,
     filter?: IssueListFilter
   ) => Effect.Effect<ReadonlyArray<IssueSummary>, FlowError>
+  readonly createIssue: (
+    repo: RepoRef,
+    title: string,
+    body: string,
+    labels?: ReadonlyArray<string>
+  ) => Effect.Effect<IssueRef, FlowError>
   readonly editIssueLabels: (
     ref: IssueRef,
     add: ReadonlyArray<string>,
@@ -449,6 +482,26 @@ export const makeGitHubTool = (
         "gh issue list",
         run(issueListArgs(repo, filter)).pipe(
           Effect.flatMap((result) => parseIssueList(output(result)))
+        )
+      ),
+    createIssue: (repo, title, body, labels = []) =>
+      write(
+        "gh issue create",
+        run(issueCreateArgs(repo, title, body, labels)).pipe(
+          Effect.flatMap((result) => {
+            const ref = output(result)
+              .split(/\r?\n/)
+              .map(parseIssueUrl)
+              .find((item) => item !== undefined)
+            return ref === undefined
+              ? Effect.fail(
+                  ProcessError.make({
+                    message: "gh issue create",
+                    detail: `could not parse an issue URL from: ${output(result)}`
+                  })
+                )
+              : Effect.succeed(ref)
+          })
         )
       ),
     editIssueLabels: (ref, add, remove) =>
