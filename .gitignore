@@ -17,3 +17,4 @@ coverage/
 repos/
 .ralph-auto/
 .llm4ts/
+packages/shell/flows/

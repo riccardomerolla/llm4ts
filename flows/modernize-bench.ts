@@ -40,7 +40,6 @@ import { loadBenchRecords, appendBenchRecord, renderBenchReport } from "@llm4ts/
 import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
 import { Info, TokensUsed } from "@llm4ts/flow/FlowEvents"
 import { packageVersion } from "@llm4ts/flow/Package"
-import { loadPack } from "@llm4ts/flow/Pack"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { mergeReviewResults } from "@llm4ts/flow/Review"
 import { coverage, coverageUnits, features, matchingFiles } from "@llm4ts/flow/SpecChecks"
@@ -54,6 +53,7 @@ import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
+import { openPack } from "@llm4ts/runner/Packs"
 import { reviewFingerprint } from "@llm4ts/runner/ReviewFingerprint"
 
 const ModDir = "docs/modernization"
@@ -77,7 +77,6 @@ const machine = (): BenchMachine =>
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Benchmark a modernization extraction run")
-  const packDir = process.env.LLM4TS_PACK ?? "packs/cobol-springboot"
   const mode =
     process.env.LLM4TS_BENCH_MODE?.trim() ??
     (input.prompt.trim().toLowerCase() === "report" ? "report" : "measure")
@@ -110,9 +109,16 @@ const program = Effect.gen(function* () {
     (context) =>
       Effect.scoped(
         Effect.gen(function* () {
-          const launchWorkspace = yield* makeNodeWorkspace(input.workspace)
           const estate = yield* makeNodeWorkspace(input.workDir)
-          const pack = yield* stage(context.events, "pack", loadPack(launchWorkspace, packDir))
+          const { pack } = yield* stage(
+            context.events,
+            "pack",
+            openPack({
+              environment: process.env,
+              launchDir: input.workspace,
+              flowDir: import.meta.dirname
+            })
+          )
           const modDirAbs = join(input.workDir, ModDir)
           // The tap observes the same events the terminal renders, so the
           // measurement never needs its own instrumentation inside the flow.

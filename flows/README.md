@@ -38,6 +38,19 @@ pnpm --filter @llm4ts/flows implement -- \
   "Add a multiply function with tests"
 ```
 
+> **Run these commands from the llm4ts checkout.** `pnpm --filter` resolves
+> the package against the pnpm workspace at the _current directory_ — invoked
+> from anywhere else (for example from the repository you are targeting) pnpm
+> prints `No projects found in "<dir>"` and exits **without running the
+> flow**. That message comes from pnpm, not from a connector — it is not a
+> Gemini/Google Cloud "No project found" error. Either `cd` into the llm4ts
+> checkout, point pnpm at it with `pnpm -C /path/to/llm4ts --filter …`, or use
+> the installed CLI, which works from any directory:
+>
+> ```sh
+> llm4ts run modernize-survey --repo /path/to/legacy-estate
+> ```
+
 ## Seed a complete workflow
 
 `examples/seed.sh` copies a minimal starter into a new directory, initializes
@@ -169,8 +182,11 @@ survey → [human approves waves] → extract → [human approves the pack]
 Every phase reads a modernization **pack** (`@llm4ts/flow/Pack`): a directory
 with a `pack.md` manifest (sources/programs regexes, gates, judge rubric,
 `## Coverage:` unit rules, `## Survey:` edge rules, equivalence policy) plus
-`prompts/` and `reviewers/` sidecars. `LLM4TS_PACK` selects one, resolved
-against the launch directory (default `packs/cobol-springboot`).
+`prompts/` and `reviewers/` sidecars. `LLM4TS_PACK` selects one (default
+`packs/cobol-springboot`), resolved against the launch directory first, then
+against the flow script's own directory — so the built-in packs shipped with
+`@llm4ts/shell` are found even when a flow is launched from an unrelated
+directory. An absolute `LLM4TS_PACK` is used as-is.
 
 Six reference packs ship, each pairing a legacy source technology with a
 target stack, plus the [scaffold](fixtures/scaffolds/) that seeds an empty

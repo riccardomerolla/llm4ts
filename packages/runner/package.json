@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/runner",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Node runner, CLI, terminal, and MCP composition for llm4ts",
   "license": "MIT",
   "type": "module",
@@ -27,6 +27,7 @@
     "./NodeTemporaryFiles": "./dist/NodeTemporaryFiles.js",
     "./NodeWorkspace": "./dist/NodeWorkspace.js",
     "./NodeRuntime": "./dist/NodeRuntime.js",
+    "./Packs": "./dist/Packs.js",
     "./ReviewFingerprint": "./dist/ReviewFingerprint.js",
     "./Terminal": "./dist/Terminal.js",
     "./TerminalInteraction": "./dist/TerminalInteraction.js",

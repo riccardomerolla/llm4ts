@@ -34,7 +34,7 @@ import {
 import { renderEquivReport, VectorVerdict } from "@llm4ts/flow/EquivReport"
 import { FlowAborted, FlowLlmError, PlanParseError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
-import { loadPack, type Pack } from "@llm4ts/flow/Pack"
+import type { Pack } from "@llm4ts/flow/Pack"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { Plan, Task } from "@llm4ts/flow/Plan"
@@ -49,6 +49,7 @@ import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
+import { openPack } from "@llm4ts/runner/Packs"
 
 const ModDir = "docs/modernization"
 
@@ -278,7 +279,6 @@ const specPrograms = Effect.fn("modernize-verify.specPrograms")(function* (
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Prove the implementation equivalent to its spec pack")
-  const packDir = process.env.LLM4TS_PACK ?? "packs/cobol-springboot"
   const coder = coderFromEnv(process.env)
   const files = nodePlainFileStore
   const planPath = join(input.workDir, ModDir, "plan.md")
@@ -295,9 +295,16 @@ const program = Effect.gen(function* () {
     },
     (context) =>
       Effect.gen(function* () {
-        const launchWorkspace = yield* makeNodeWorkspace(input.workspace)
         const target = yield* makeNodeWorkspace(input.workDir)
-        const pack = yield* stage(context.events, "pack", loadPack(launchWorkspace, packDir))
+        const { pack } = yield* stage(
+          context.events,
+          "pack",
+          openPack({
+            environment: process.env,
+            launchDir: input.workspace,
+            flowDir: import.meta.dirname
+          })
+        )
 
         yield* stage(
           context.events,

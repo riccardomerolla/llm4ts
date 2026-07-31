@@ -19,8 +19,9 @@
 // `- [ ] Approved` marker in `docs/modernization/README.md`.
 //
 // Pack: LLM4TS_PACK=<dir> (default packs/cobol-springboot, resolved against the
-// launch dir). LLM4TS_WAVE=<name> scopes the run to one wave of the approved
-// plan. Judge context is bounded by LLM4TS_JUDGE_SOURCES_LIMIT (chars).
+// launch dir, then against the flow's own directory — the built-in packs).
+// LLM4TS_WAVE=<name> scopes the run to one wave of the approved plan. Judge
+// context is bounded by LLM4TS_JUDGE_SOURCES_LIMIT (chars).
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
@@ -29,7 +30,7 @@ import type { JsonSchema } from "@llm4ts/core/Models"
 import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { makeChat } from "@llm4ts/flow/Chat"
-import { loadPack, type Pack } from "@llm4ts/flow/Pack"
+import type { Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { defaultPlanInstructions, planFrom } from "@llm4ts/flow/Planner"
@@ -48,6 +49,7 @@ import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { reviewFingerprint } from "@llm4ts/runner/ReviewFingerprint"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
+import { loadUniversalPatternCards, openPack } from "@llm4ts/runner/Packs"
 
 const ModDir = "docs/modernization"
 const MaxRounds = 3
@@ -202,7 +204,6 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
     "Extract the complete behavioural spec pack for this legacy estate"
   )
-  const packDir = process.env.LLM4TS_PACK ?? "packs/cobol-springboot"
   const coder = coderFromEnv(process.env)
   const files = nodePlainFileStore
   const modDirAbs = join(input.workDir, ModDir)
@@ -218,9 +219,17 @@ const program = Effect.gen(function* () {
     },
     (context) =>
       Effect.gen(function* () {
-        const launchWorkspace = yield* makeNodeWorkspace(input.workspace)
         const repo = yield* makeNodeWorkspace(input.workDir)
-        const pack = yield* stage(context.events, "pack", loadPack(launchWorkspace, packDir))
+        const opened = yield* stage(
+          context.events,
+          "pack",
+          openPack({
+            environment: process.env,
+            launchDir: input.workspace,
+            flowDir: import.meta.dirname
+          })
+        )
+        const pack = opened.pack
         yield* stage(
           context.events,
           "branch",
@@ -273,8 +282,8 @@ const program = Effect.gen(function* () {
         // Pattern cards are selected deterministically from the SOURCE, never by
         // the model: implementation later injects exactly the cards cited here.
         const cards = [
-          ...(yield* loadPatternCards(launchWorkspace, `${packDir}/patterns`)),
-          ...(yield* loadPatternCards(launchWorkspace, "patterns"))
+          ...(yield* loadPatternCards(opened.workspace, `${opened.dir}/patterns`)),
+          ...(yield* loadUniversalPatternCards([input.workspace, import.meta.dirname]))
         ]
 
         // One structured analyst call per program, resumable per program: a rerun

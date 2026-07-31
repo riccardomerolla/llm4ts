@@ -24,7 +24,6 @@ import * as Schema from "effect/Schema"
 import { FlowAborted, PersistenceError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { packageVersion } from "@llm4ts/flow/Package"
-import { loadPack } from "@llm4ts/flow/Pack"
 import { parsePlan } from "@llm4ts/flow/Plan"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
@@ -36,6 +35,7 @@ import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
+import { openPack } from "@llm4ts/runner/Packs"
 
 const ModDir = "docs/modernization"
 const skipped = new Set([".git", "target", "node_modules", "dist"])
@@ -84,7 +84,6 @@ const copyFile = Effect.fn("modernize-seed.copyFile")(function* (
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Seed the target repository from the approved spec pack")
-  const packDir = process.env.LLM4TS_PACK ?? "packs/cobol-springboot"
   const legacyRepo = process.env.LLM4TS_LEGACY_REPO?.trim()
   const files = nodePlainFileStore
 
@@ -106,10 +105,18 @@ const program = Effect.gen(function* () {
               "set LLM4TS_LEGACY_REPO to the legacy repository holding the approved spec pack"
           })
         }
-        const launchWorkspace = yield* makeNodeWorkspace(input.workspace)
         const legacy = yield* makeNodeWorkspace(legacyRepo)
         const target = yield* makeNodeWorkspace(input.workDir)
-        const pack = yield* stage(context.events, "pack", loadPack(launchWorkspace, packDir))
+        const opened = yield* stage(
+          context.events,
+          "pack",
+          openPack({
+            environment: process.env,
+            launchDir: input.workspace,
+            flowDir: import.meta.dirname
+          })
+        )
+        const pack = opened.pack
         const specPackRoot = join(legacyRepo, ModDir)
 
         yield* stage(
@@ -138,7 +145,7 @@ const program = Effect.gen(function* () {
             }
             // The scaffold path is relative to the pack directory.
             const scaffoldRoot = join(pack.dir, pack.scaffold)
-            const scaffold = yield* makeNodeWorkspace(join(input.workspace, scaffoldRoot))
+            const scaffold = yield* makeNodeWorkspace(join(opened.workspace.root, scaffoldRoot))
             const paths = (yield* scaffold.discover()).filter((path) => !isLitter(path))
             for (const path of paths) {
               yield* target.write(path, yield* scaffold.read(path))

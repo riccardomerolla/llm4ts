@@ -299,6 +299,13 @@ reference release.
   - The source's per-phase model presets (a Gemini Pro/Flash split by seat)
     are replaced by the repository's own `LLM4TS_CODER` connector selection
     with a read-only derived reasoning seat, matching every other llm4ts flow.
+  - Pack resolution gains a fallback the source does not need:
+    `LLM4TS_PACK` resolves against the launch directory first, then against
+    the flow script's own directory (`@llm4ts/runner/Packs.openPack`), and an
+    absolute path is used as-is. The built-in packs, universal pattern cards,
+    and scaffolds ship inside `@llm4ts/shell`'s built-in flow tier, so
+    `llm4ts run modernize-<phase>` works from any directory — the source's
+    scripts are always launched from their own checkout.
 - The JavaScript facade is asynchronous rather than a literal port of the
   source Java facade's blocking bridge. It is the single Promise/exception
   boundary, supports `AbortSignal`, delegates to the public connector registry,

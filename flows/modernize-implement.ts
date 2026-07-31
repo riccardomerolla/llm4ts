@@ -25,7 +25,6 @@ import { judge } from "@llm4ts/core/eval/Judge"
 import { makeChat } from "@llm4ts/flow/Chat"
 import { FlowAborted, FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
-import { loadPack } from "@llm4ts/flow/Pack"
 import { loadPatternCards, taggedPatternIds } from "@llm4ts/flow/Patterns"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { implementTaskLoop, stage } from "@llm4ts/flow/PlanExecution"
@@ -44,6 +43,7 @@ import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
+import { loadUniversalPatternCards, openPack } from "@llm4ts/runner/Packs"
 
 const ModDir = "docs/modernization"
 
@@ -87,7 +87,6 @@ const issueText = (issues: ReadonlyArray<ReviewIssue>): string =>
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Implement the seeded modernization plan")
-  const packDir = process.env.LLM4TS_PACK ?? "packs/cobol-springboot"
   const coder = coderFromEnv(process.env)
   const files = nodePlainFileStore
   const planPath = join(input.workDir, ModDir, "plan.md")
@@ -104,9 +103,17 @@ const program = Effect.gen(function* () {
     },
     (context) =>
       Effect.gen(function* () {
-        const launchWorkspace = yield* makeNodeWorkspace(input.workspace)
         const target = yield* makeNodeWorkspace(input.workDir)
-        const pack = yield* stage(context.events, "pack", loadPack(launchWorkspace, packDir))
+        const opened = yield* stage(
+          context.events,
+          "pack",
+          openPack({
+            environment: process.env,
+            launchDir: input.workspace,
+            flowDir: import.meta.dirname
+          })
+        )
+        const pack = opened.pack
 
         yield* stage(
           context.events,
@@ -161,8 +168,8 @@ const program = Effect.gen(function* () {
         // ids, and only the cited cards reach the brief.
         const specText = yield* gatherSpecs(target, pack.specsDir)
         const cards = [
-          ...(yield* loadPatternCards(launchWorkspace, `${packDir}/patterns`)),
-          ...(yield* loadPatternCards(launchWorkspace, "patterns"))
+          ...(yield* loadPatternCards(opened.workspace, `${opened.dir}/patterns`)),
+          ...(yield* loadUniversalPatternCards([input.workspace, import.meta.dirname]))
         ]
         const cited = new Set(taggedPatternIds(specText))
         const playbook = cards.filter((card) => cited.has(card.id))
