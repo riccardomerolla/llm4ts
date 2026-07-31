@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+- `@llm4ts/flow/GitHubTool` gains four work-queue operations so a GitHub
+  repository can serve as an agent work queue: `listIssues` (label, state,
+  and assignee filters, schema-decoded into the new `IssueSummary` via the
+  new `RepoRef`), `editIssueLabels` (repeated add/remove flags; an edit
+  with no labels on either side is a no-op that never spawns `gh`),
+  `assignIssue`, and `closeIssue`. All four follow the existing `gh`
+  process protocol and are guarded by `GhRead`/`GhWrite`. This is an
+  intentional additive extension beyond the pinned llm4zio v4.2.0 `GhTool`
+  surface, recorded in ADR 0008 and the parity ledger; the first consumer
+  is the Nightcall work-queue orchestrator.
+
 ## 0.3.1
 
 - `llm4ts doctor` gains a prerequisites section: environment a connector needs
