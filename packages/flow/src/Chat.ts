@@ -4,6 +4,7 @@ import * as Semaphore from "effect/Semaphore"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { Message, type LlmResponse } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
+import { withToolActivity } from "./Activity.ts"
 import { FlowLlmError } from "./FlowError.ts"
 import { TokensUsed, type FlowEventsShape } from "./FlowEvents.ts"
 
@@ -64,9 +65,10 @@ export const makeChat = Effect.fn("@llm4ts/flow/Chat.make")(function* (
   ): Effect.fn.Return<string, FlowLlmError> {
     const userTurn = Message.make({ role: "User", content: prompt })
     const messages = [...(yield* Ref.get(history)), userTurn]
-    const response = yield* collect(service.executeStreamWithHistory(messages)).pipe(
-      Effect.mapError(FlowLlmError.from)
-    )
+    const stream = service.executeStreamWithHistory(messages)
+    const response = yield* collect(
+      options.events === undefined ? stream : withToolActivity(options.events, stream)
+    ).pipe(Effect.mapError(FlowLlmError.from))
     yield* publishUsage(options, response)
     yield* Ref.set(history, [
       ...messages,
