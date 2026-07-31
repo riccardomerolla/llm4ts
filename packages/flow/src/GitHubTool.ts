@@ -32,6 +32,38 @@ export class Issue extends Schema.Class<Issue>("Issue")({
   author: Schema.String
 }) {}
 
+export class RepoRef extends Schema.Class<RepoRef>("RepoRef")({
+  owner: Schema.String,
+  repo: Schema.String
+}) {
+  get slug(): string {
+    return `${this.owner}/${this.repo}`
+  }
+}
+
+export const IssueState = Schema.Literals(["open", "closed", "all"])
+export type IssueState = typeof IssueState.Type
+
+export interface IssueListFilter {
+  readonly labels?: ReadonlyArray<string>
+  readonly state?: IssueState
+  readonly assignee?: string
+  readonly limit?: number
+}
+
+export class IssueSummary extends Schema.Class<IssueSummary>("IssueSummary")({
+  number: Schema.Int,
+  title: Schema.String,
+  body: Schema.String,
+  author: Schema.String,
+  labels: Schema.Array(Schema.String),
+  updatedAt: Schema.String
+}) {
+  ref(repo: RepoRef): IssueRef {
+    return IssueRef.make({ owner: repo.owner, repo: repo.repo, number: this.number })
+  }
+}
+
 export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   owner: Schema.String,
   repo: Schema.String,
@@ -109,6 +141,56 @@ export const prCommentArgs = (pr: PullRequest, body: string): ReadonlyArray<stri
   body
 ]
 
+export const issueListFields = "number,title,body,author,labels,updatedAt"
+
+export const issueListArgs = (repo: RepoRef, filter: IssueListFilter): ReadonlyArray<string> => [
+  "issue",
+  "list",
+  "--repo",
+  repo.slug,
+  "--state",
+  filter.state ?? "open",
+  ...(filter.labels ?? []).flatMap((label) => ["--label", label]),
+  ...(filter.assignee === undefined ? [] : ["--assignee", filter.assignee]),
+  "--limit",
+  String(filter.limit ?? 100),
+  "--json",
+  issueListFields
+]
+
+export const issueEditLabelsArgs = (
+  ref: IssueRef,
+  add: ReadonlyArray<string>,
+  remove: ReadonlyArray<string>
+): ReadonlyArray<string> => [
+  "issue",
+  "edit",
+  String(ref.number),
+  "--repo",
+  `${ref.owner}/${ref.repo}`,
+  ...add.flatMap((label) => ["--add-label", label]),
+  ...remove.flatMap((label) => ["--remove-label", label])
+]
+
+export const issueAssignArgs = (ref: IssueRef, login: string): ReadonlyArray<string> => [
+  "issue",
+  "edit",
+  String(ref.number),
+  "--repo",
+  `${ref.owner}/${ref.repo}`,
+  "--add-assignee",
+  login
+]
+
+export const issueCloseArgs = (ref: IssueRef, comment?: string): ReadonlyArray<string> => [
+  "issue",
+  "close",
+  String(ref.number),
+  "--repo",
+  `${ref.owner}/${ref.repo}`,
+  ...(comment === undefined ? [] : ["--comment", comment])
+]
+
 export const prPatchArgs = (
   pr: PullRequest,
   title: string,
@@ -144,6 +226,21 @@ class GhIssue extends Schema.Class<GhIssue>("GhIssue")({
   author: GhAuthor
 }) {}
 
+class GhLabel extends Schema.Class<GhLabel>("GhLabel")({
+  name: Schema.String
+}) {}
+
+class GhIssueSummary extends Schema.Class<GhIssueSummary>("GhIssueSummary")({
+  number: Schema.Int,
+  title: Schema.String,
+  body: Schema.String,
+  author: GhAuthor,
+  labels: Schema.Array(GhLabel).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Object.freeze([])))
+  ),
+  updatedAt: Schema.String
+}) {}
+
 class GhCheck extends Schema.Class<GhCheck>("GhCheck")({
   status: Schema.optionalKey(Schema.String),
   conclusion: Schema.optionalKey(Schema.String),
@@ -170,6 +267,31 @@ export const parseIssue = (json: string): Effect.Effect<Issue, ProcessError> =>
       ProcessError.make({
         message: "gh issue view",
         detail: `invalid issue JSON: ${String(error)}`
+      })
+    )
+  )
+
+export const parseIssueList = (
+  json: string
+): Effect.Effect<ReadonlyArray<IssueSummary>, ProcessError> =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(GhIssueSummary)))(json).pipe(
+    Effect.map((issues) =>
+      issues.map(
+        (issue) =>
+          new IssueSummary({
+            number: issue.number,
+            title: issue.title,
+            body: issue.body,
+            author: issue.author.login,
+            labels: issue.labels.map((label) => label.name),
+            updatedAt: issue.updatedAt
+          })
+      )
+    ),
+    Effect.mapError((error) =>
+      ProcessError.make({
+        message: "gh issue list",
+        detail: `invalid issue list JSON: ${String(error)}`
       })
     )
   )
@@ -214,6 +336,17 @@ export interface GitHubToolShape {
     body: string
   ) => Effect.Effect<void, FlowError>
   readonly prChecks: (pr: PullRequest) => Effect.Effect<BuildOutcome, FlowError>
+  readonly listIssues: (
+    repo: RepoRef,
+    filter?: IssueListFilter
+  ) => Effect.Effect<ReadonlyArray<IssueSummary>, FlowError>
+  readonly editIssueLabels: (
+    ref: IssueRef,
+    add: ReadonlyArray<string>,
+    remove: ReadonlyArray<string>
+  ) => Effect.Effect<void, FlowError>
+  readonly assignIssue: (ref: IssueRef, login: string) => Effect.Effect<void, FlowError>
+  readonly closeIssue: (ref: IssueRef, comment?: string) => Effect.Effect<void, FlowError>
 }
 
 const output = (result: ProcessResult): string => result.stdout.join("\n").trim()
@@ -310,6 +443,21 @@ export const makeGitHubTool = (
         run(prChecksArgs(pr)).pipe(
           Effect.flatMap((result) => outcomeFromChecksJson(output(result)))
         )
-      )
+      ),
+    listIssues: (repo, filter = {}) =>
+      read(
+        "gh issue list",
+        run(issueListArgs(repo, filter)).pipe(
+          Effect.flatMap((result) => parseIssueList(output(result)))
+        )
+      ),
+    editIssueLabels: (ref, add, remove) =>
+      add.length === 0 && remove.length === 0
+        ? Effect.void
+        : write("gh issue edit", run(issueEditLabelsArgs(ref, add, remove)).pipe(Effect.asVoid)),
+    assignIssue: (ref, login) =>
+      write("gh issue edit", run(issueAssignArgs(ref, login)).pipe(Effect.asVoid)),
+    closeIssue: (ref, comment) =>
+      write("gh issue close", run(issueCloseArgs(ref, comment)).pipe(Effect.asVoid))
   }
 }

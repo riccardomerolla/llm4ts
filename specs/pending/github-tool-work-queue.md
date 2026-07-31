@@ -13,27 +13,27 @@ requires an ADR or a `docs/parity.md` note (see tasks).
 
 ## Decisions (agreed 2026-07-31)
 
-| Decision   | Choice                                                                                                                                          |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Seam       | Extend `makeGitHubTool` in `packages/flow/src/GitHubTool.ts`; no new module, no parallel client.                                                 |
-| Protocol   | Same `gh` CLI process protocol via `ProcessExecutor`: pure `*Args` builders + schema-parsed `--json` output, testable with the process fakes.    |
-| Capability | Reads guarded by `Caps.GhRead`, mutations by `Caps.GhWrite`, via the existing `guarded` helper and `read`/`write` wrappers.                      |
-| Scope      | Minimal op set derived from the Nightcall label state machine; nothing speculative (no milestones, projects, reactions, or issue creation).      |
+| Decision   | Choice                                                                                                                                                 |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Seam       | Extend `makeGitHubTool` in `packages/flow/src/GitHubTool.ts`; no new module, no parallel client.                                                       |
+| Protocol   | Same `gh` CLI process protocol via `ProcessExecutor`: pure `*Args` builders + schema-parsed `--json` output, testable with the process fakes.          |
+| Capability | Reads guarded by `Caps.GhRead`, mutations by `Caps.GhWrite`, via the existing `guarded` helper and `read`/`write` wrappers.                            |
+| Scope      | Minimal op set derived from the Nightcall label state machine; nothing speculative (no milestones, projects, reactions, or issue creation).            |
 | Parity     | Additive extension; existing op behavior unchanged. Record as an intentional extension in `docs/parity.md` and an ADR noting llm4zio back-port intent. |
 
 ## Operations
 
 - `listIssues(repo, filter)` — `gh issue list --repo <owner>/<repo> --state
-  <state> [--label <l>]... [--assignee <login>] --limit <n> --json
-  number,title,body,author,labels,updatedAt`. Needs a `RepoRef` schema
+<state> [--label <l>]... [--assignee <login>] --limit <n> --json
+number,title,body,author,labels,updatedAt`. Needs a `RepoRef` schema
   (owner/repo without an issue number) and an `IssueSummary` schema class
   (number, title, body, author login, label names, updatedAt). `Caps.GhRead`.
 - `editIssueLabels(ref, add, remove)` — `gh issue edit <n> --repo ...`
   with repeated `--add-label`/`--remove-label` flags. `Caps.GhWrite`.
 - `assignIssue(ref, login)` — `gh issue edit <n> --repo ... --add-assignee
-  <login>`. `Caps.GhWrite`.
+<login>`. `Caps.GhWrite`.
 - `closeIssue(ref, comment?)` — `gh issue close <n> --repo ...
-  [--comment <body>]`. `Caps.GhWrite`.
+[--comment <body>]`. `Caps.GhWrite`.
 
 Label values are data, never interpolated into shell strings; args stay
 `ReadonlyArray<string>` exactly like the existing builders. No secrets in

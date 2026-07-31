@@ -150,7 +150,11 @@ const failingHosting: GitHubToolShape = {
   writeIssueComment: (_ref, _body) => unusedFlow,
   writePrComment: (_pr, _body) => unusedFlow,
   updatePr: (_pr, _title, _body) => unusedFlow,
-  prChecks: (_pr) => unusedFlow
+  prChecks: (_pr) => unusedFlow,
+  listIssues: (_repo, _filter) => unusedFlow,
+  editIssueLabels: (_ref, _add, _remove) => unusedFlow,
+  assignIssue: (_ref, _login) => unusedFlow,
+  closeIssue: (_ref, _comment) => unusedFlow
 }
 
 describe("Flow", () => {
