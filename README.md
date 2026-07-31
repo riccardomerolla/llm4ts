@@ -42,7 +42,9 @@ LLM4TS_CODER=codex npx -y @llm4ts/shell run implement "add a health endpoint"
 `llm4ts view <flow>` prints a flow's source, `llm4ts ask "<prompt>"` streams
 a one-shot prompt to your coding agent (Claude Code, Codex, Gemini CLI, and
 friends), and `llm4ts doctor` reports which connectors and credentials are
-available on your machine. `llm4ts --help` shows all options.
+available on your machine — including per-connector prerequisites a run needs
+before it starts, such as the Google Cloud project the Gemini CLI resolves at
+auth setup. `llm4ts --help` shows all options.
 
 Your coding agent can delegate work to llm4ts too: the
 [using-llm4ts skill](skills/using-llm4ts/README.md) teaches Claude Code, Pi,

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1
+
+- `llm4ts doctor` gains a prerequisites section: environment a connector needs
+  before a run starts, as opposed to whether its CLI is installed. The first
+  check covers the Gemini CLI, which resolves credentials during auth setup and
+  fails a Workspace or enterprise account with "No project found" when neither
+  `GOOGLE_CLOUD_PROJECT`/`GOOGLE_CLOUD_PROJECT_ID`, `GEMINI_API_KEY`, nor a
+  Vertex AI configuration is present — a message that names nothing about
+  llm4ts. A personal OAuth login needs no environment at all, so an
+  unconfigured environment is reported as a caveat rather than a failure, and
+  the hint names the shell-startup trap that commonly hides the variable from
+  non-interactive shells and IDE terminals. Key values are never echoed.
+
 ## 0.3.0
 
 - Legacy modernization reaches full parity with the pinned source's example
