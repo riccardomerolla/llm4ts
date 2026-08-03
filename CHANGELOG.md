@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.2
+
+- Equivalence observations accept JSON scalars. A replay harness dumping a
+  COBOL record emits numerics as JSON numbers, but the observation schema
+  required strings, so `{"ZSTC": 0}` failed the whole replay stage with
+  `Expected string, got 0 at [0]["fields"]["ZSTC"]` instead of producing a
+  diff. Field maps (`fields`, `key`, `set`, and a vector's `inputs`) are now
+  canonicalised to strings on every side that reads them — replayed output,
+  stored vectors, and the model-generated vectors — so comparison stays
+  string-based and symmetric. `null` reads as no value (empty). Note that
+  JSON numbers carry no trailing zeros: a harness needing fixed precision
+  (money, `PIC 9(5)V99`) should emit those fields as strings, which
+  `flows/README.md` now states.
+
 ## 0.7.1
 
 - A finished task is no longer lost to a base-ref lookup (issue #8). A

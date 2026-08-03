@@ -280,6 +280,13 @@ comparison policy, and reports rule-by-rule coverage against the frozen
 `rules.txt`. Failures are triaged into fix specs plus plan tasks and the phase
 exits non-zero until every vector is green.
 
+The replay command must print a JSON array of observations on stdout. Field
+values may be any JSON scalar — `{"ZSTC": 0}` is as acceptable as
+`{"ZSTC": "0"}` — and are rendered to strings before comparison, with `null`
+read as no value (empty). Because JSON numbers carry no trailing zeros, emit
+fixed-precision fields (money, `PIC 9(5)V99`) as **strings** so `0.10` does not
+arrive as `0.1` and diff against the expected value.
+
 ### Phase 5 — review
 
 ```sh

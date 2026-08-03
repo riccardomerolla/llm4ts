@@ -47,6 +47,77 @@ export const EquivObservation = Schema.Union([
 ])
 export type EquivObservation = typeof EquivObservation.Type
 
+/**
+ * The observation properties that carry a field map, whose values a replay
+ * harness may legitimately emit as JSON scalars.
+ */
+const fieldMapKeys: ReadonlyArray<string> = ["fields", "key", "set"]
+
+const canonicalValue = (value: unknown): string => {
+  switch (typeof value) {
+    case "string":
+      return value
+    case "number":
+      return Number.isFinite(value) ? String(value) : ""
+    case "boolean":
+      return String(value)
+    case "object":
+      // null reads as "no value", which the legacy side renders as empty.
+      return value === null ? "" : JSON.stringify(value)
+    default:
+      return ""
+  }
+}
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+/**
+ * Canonicalises the field maps of parsed observation JSON so a replay harness
+ * can emit natural JSON types.
+ *
+ * Observations compare field values as strings, and the schema accordingly
+ * required strings — but a harness dumping a COBOL record emits numerics as
+ * JSON numbers (`"ZSTC": 0`), which failed the whole replay stage with a
+ * schema error rather than a diff. Scalars are rendered here, on both the
+ * expected and the actual side, so the comparison stays string-based and
+ * symmetric. Note that JSON numbers carry no trailing zeros: a harness that
+ * needs fixed precision (money, `PIC 9(5)V99`) should emit those fields as
+ * strings.
+ */
+export const canonicaliseObservations = (parsed: unknown): unknown => {
+  if (!Array.isArray(parsed)) {
+    return parsed
+  }
+  return parsed.map((observation) => {
+    if (!isPlainObject(observation)) {
+      return observation
+    }
+    const canonicalised: Record<string, unknown> = { ...observation }
+    for (const key of fieldMapKeys) {
+      const map = canonicalised[key]
+      if (isPlainObject(map)) {
+        canonicalised[key] = Object.fromEntries(
+          Object.entries(map).map(([name, value]) => [name, canonicalValue(value)])
+        )
+      }
+    }
+    return canonicalised
+  })
+}
+
+/** One field map rendered to the strings observations compare as. */
+export const canonicaliseFieldMap = (
+  map: Readonly<Record<string, unknown>>
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(Object.entries(map).map(([name, value]) => [name, canonicalValue(value)]))
+
+/** `canonicaliseObservations` applied to a parsed vector's observations. */
+export const canonicaliseVector = (parsed: unknown): unknown =>
+  isPlainObject(parsed) && Array.isArray(parsed.observations)
+    ? { ...parsed, observations: canonicaliseObservations(parsed.observations) }
+    : parsed
+
 export const Observations = Object.freeze({
   record: (kind: string, fields: Readonly<Record<string, string>>): RecordObservation => ({
     type: "record",
@@ -269,7 +340,6 @@ export const Replayed = Schema.Union([ReplayedObserved, ReplayedCrashed])
 export type Replayed = typeof Replayed.Type
 
 const vectorCodec = Schema.fromJsonString(EquivVector)
-const observationsCodec = Schema.fromJsonString(Schema.Array(EquivObservation))
 
 export const writeEquivVectors = Effect.fn("@llm4ts/flow/Equiv.writeVectors")(function* (
   files: PlainFileStoreShape,
@@ -305,11 +375,21 @@ export const readEquivVectors = Effect.fn("@llm4ts/flow/Equiv.readVectors")(func
       .map((line) => line.trim())
       .filter((line) => line.length > 0),
     (line, index) =>
-      Schema.decodeUnknownEffect(vectorCodec)(line).pipe(
-        Effect.mapError((error) =>
+      Effect.try({
+        try: () => canonicaliseVector(JSON.parse(line)),
+        catch: () =>
           PlanParseError.make({
-            message: `malformed vector at ${path}:${index + 1}: ${String(error)}`
+            message: `malformed vector at ${path}:${index + 1}: not JSON`
           })
+      }).pipe(
+        Effect.flatMap((parsed) =>
+          Schema.decodeUnknownEffect(EquivVector)(parsed).pipe(
+            Effect.mapError((error) =>
+              PlanParseError.make({
+                message: `malformed vector at ${path}:${index + 1}: ${String(error)}`
+              })
+            )
+          )
         )
       ),
     { concurrency: 1 }
@@ -367,11 +447,23 @@ export const replayEquivVector = Effect.fn("@llm4ts/flow/Equiv.replayVector")(fu
     })
   }
   const output = result.stdout.join("\n")
-  const actual = yield* Schema.decodeUnknownEffect(observationsCodec)(output).pipe(
-    Effect.mapError((error) =>
+  const actual = yield* Effect.try({
+    try: () => canonicaliseObservations(JSON.parse(output)),
+    catch: () =>
       PlanParseError.make({
-        message: `replay output for ${vector.program}/${vector.id} is not an observation array: ${String(error)}`
+        message:
+          `replay output for ${vector.program}/${vector.id} is not JSON: ` +
+          `${output.slice(0, 200)}`
       })
+  }).pipe(
+    Effect.flatMap((parsed) =>
+      Schema.decodeUnknownEffect(Schema.Array(EquivObservation))(parsed).pipe(
+        Effect.mapError((error) =>
+          PlanParseError.make({
+            message: `replay output for ${vector.program}/${vector.id} is not an observation array: ${String(error)}`
+          })
+        )
+      )
     )
   )
   return ReplayedObserved.make({ actual })
