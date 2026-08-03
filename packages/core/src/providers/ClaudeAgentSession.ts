@@ -23,6 +23,7 @@ import {
   jsonBooleanField,
   jsonField,
   jsonIntField,
+  jsonNumberField,
   jsonStringField,
   jsonText,
   parseJsonLine,
@@ -108,7 +109,10 @@ const resultEvents = (json: JsonValue): ReadonlyArray<SessionEvent> => {
                 ? {}
                 : {
                     cached: jsonIntField(usage, "cache_read_input_tokens") ?? 0
-                  })
+                  }),
+              ...(jsonNumberField(json, "total_cost_usd") === undefined
+                ? {}
+                : { costUsd: jsonNumberField(json, "total_cost_usd") ?? 0 })
             })
           })
         ]

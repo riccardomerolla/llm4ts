@@ -70,6 +70,33 @@ describe("pricing and cost tracking", () => {
       assert.match(summary, /estimated from the pricing table/)
     })
   )
+
+  it.effect("prefers backend-reported cost over the pricing table and sums it", () =>
+    Effect.gen(function* () {
+      const tracker = yield* makeCostTracker()
+      yield* tracker.record(StageStarted.make({ stage: "Task" }))
+      yield* tracker.record(
+        TokensUsed.make({
+          agent: "coder",
+          usage: TokenUsage.make({ prompt: 100, completion: 10, total: 110, costUsd: 0.25 })
+        })
+      )
+      yield* tracker.record(
+        TokensUsed.make({
+          agent: "coder",
+          usage: TokenUsage.make({ prompt: 50, completion: 5, total: 55, costUsd: 0.5 })
+        })
+      )
+      const cells = yield* tracker.cells
+      const summary = yield* tracker.summary
+
+      // Model is unknown, so the pricing table has nothing — the reported
+      // cost carries the cell anyway, summed across events.
+      assert.strictEqual(cells[0]?.model, "(unknown)")
+      assert.strictEqual(cells[0]?.costUsd, 0.75)
+      assert.match(summary, /Total: \$0\.7500/)
+    })
+  )
 })
 
 describe("cost ledger and budgets", () => {

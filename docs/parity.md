@@ -327,3 +327,16 @@ reference release.
   amended) using the same `gh` process protocol, args-builder style, and
   `GhRead`/`GhWrite` capability guards; existing operation behavior is
   unchanged. Back-porting the same operations to llm4zio is intended.
+- `TokenUsage` carries an optional `costUsd` — the cost the backend itself
+  reported (the Claude CLI's `total_cost_usd`, parsed by both the streaming
+  connector and the agent session). The source models usage as token counts
+  only. Cost consumers (`CostTracker` cells and summaries) prefer the
+  reported figure over pricing-table estimates. The Claude result event's
+  `modelUsage` single key also serves as a model-name fallback when no init
+  line was observed.
+- `implementPlanFlow` accepts `noopTaskPolicy: "fail" | "complete"`
+  (default "fail", the source behavior): "complete" marks an unconfirmed
+  no-change task complete with a notice instead of aborting, for pipelines
+  whose final state is re-judged downstream (CI gate, fresh-context
+  review). Driven by autonomous-loop runs repeatedly losing finished work
+  to a coder that would not utter the confirmation token.

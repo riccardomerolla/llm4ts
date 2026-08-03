@@ -137,7 +137,11 @@ export class TokenUsage extends Schema.Class<TokenUsage>("TokenUsage")({
   prompt: Schema.Int,
   completion: Schema.Int,
   total: Schema.Int,
-  cached: Schema.optionalKey(Schema.Int)
+  cached: Schema.optionalKey(Schema.Int),
+  // Cost as reported by the backend itself (e.g. the Claude CLI's
+  // total_cost_usd). When present it is authoritative — consumers prefer
+  // it over any pricing-table estimate.
+  costUsd: Schema.optionalKey(Schema.Number)
 }) {}
 
 const emptyMetadata: Readonly<Record<string, string>> = Object.freeze({})

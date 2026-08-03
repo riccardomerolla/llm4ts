@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.3
+
+- Backend-reported cost reaches invoices. `TokenUsage` gains an optional
+  `costUsd`; the Claude CLI connector and agent session parse the result
+  event's `total_cost_usd` into it, `CostTracker` sums it per cell and
+  prefers it over pricing-table estimates (which only fill in when the
+  backend reported nothing), and the result event's `modelUsage` key
+  doubles as a model-name fallback so usage stops rendering as
+  `(unknown)` when the init line was missed. Driven by a Nightcall run
+  that burned 766k coder tokens and invoiced $0.00.
+- `implementPlanFlow` accepts `noopTaskPolicy: "complete"`: an unconfirmed
+  no-change task is marked complete with an Info notice instead of
+  aborting the flow. Default stays `"fail"`. For pipelines whose final
+  state is re-judged downstream (CI gate, fresh-context QA), one coder
+  that will not utter TASK_ALREADY_SATISFIED no longer sinks a branch of
+  otherwise-finished work — the failure mode that killed three attempts
+  on the same issue while its importers sat complete and green.
+
 ## 0.7.2
 
 - Equivalence observations accept JSON scalars. A replay harness dumping a

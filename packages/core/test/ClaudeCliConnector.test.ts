@@ -23,7 +23,7 @@ import {
 const streamLines = [
   '{"type":"system","subtype":"init","model":"claude-sonnet-4-6"}',
   '{"type":"assistant","message":{"content":[{"type":"text","text":"{\\"lane\\":\\"Frontend\\",\\"rationale\\":\\"UI change\\"}"},{"type":"tool_use","name":"Edit","id":"tool-1","input":{"file_path":"src/lib.rs"}}]}}',
-  '{"type":"result","result":"done","usage":{"input_tokens":1200,"output_tokens":40,"cache_read_input_tokens":1000}}'
+  '{"type":"result","result":"done","total_cost_usd":0.1234,"modelUsage":{"claude-sonnet-4-6":{}},"usage":{"input_tokens":1200,"output_tokens":40,"cache_read_input_tokens":1000}}'
 ]
 
 const triageSchema = Schema.Struct({
@@ -141,6 +141,9 @@ describe("ClaudeCliConnector", () => {
     assert.strictEqual(chunks[0]?.delta.includes("Frontend"), true)
     assert.strictEqual(chunks[1]?.metadata.tool_input.includes("src/lib.rs"), true)
     assert.strictEqual(chunks[2]?.usage?.completion, 40)
+    // Backend-reported cost and the modelUsage fallback both survive parsing.
+    assert.strictEqual(chunks[2]?.usage?.costUsd, 0.1234)
+    assert.strictEqual(chunks[2]?.metadata.model, "claude-sonnet-4-6")
   })
 })
 
@@ -188,6 +191,7 @@ describe("ClaudeAgentSession", () => {
 
         assert.strictEqual(result.text, "done")
         assert.strictEqual(result.usage?.total, 1240)
+        assert.strictEqual(result.usage?.costUsd, 0.1234)
         assert.strictEqual(result.model, "claude-sonnet-4-6")
       })
     )

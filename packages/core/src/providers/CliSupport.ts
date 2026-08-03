@@ -35,6 +35,11 @@ export const jsonIntField = (value: JsonValue | undefined, name: string): number
   return typeof field === "number" && Number.isFinite(field) ? Math.trunc(field) : undefined
 }
 
+export const jsonNumberField = (value: JsonValue | undefined, name: string): number | undefined => {
+  const field = jsonField(value, name)
+  return typeof field === "number" && Number.isFinite(field) ? field : undefined
+}
+
 export const jsonBooleanField = (
   value: JsonValue | undefined,
   name: string

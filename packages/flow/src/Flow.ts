@@ -56,6 +56,15 @@ export interface ImplementPlanOptions {
   readonly maxRounds?: number
   readonly lint?: Effect.Effect<ReviewResult, FlowError>
   readonly format?: Effect.Effect<void, FlowError>
+  /**
+   * What to do when a task produces no file changes and the coder does not
+   * confirm TASK_ALREADY_SATISFIED. "fail" (default) aborts the flow —
+   * the safe reading when nothing downstream re-checks the work. "complete"
+   * marks the task complete with an Info notice — for pipelines whose final
+   * state is judged downstream anyway (a CI gate, a fresh-context review),
+   * where one unconfirmed no-op should not sink otherwise-finished work.
+   */
+  readonly noopTaskPolicy?: "fail" | "complete"
 }
 
 const defaultCommitMessage = (plan: Plan, task: Task): string => `${plan.epicId}: ${task.title}`
@@ -125,6 +134,14 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
               yield* context.events.publish(
                 Info.make({
                   message: `task "${task.title}" confirmed already satisfied; skipping review and commit`
+                })
+              )
+              return
+            }
+            if (options.noopTaskPolicy === "complete") {
+              yield* context.events.publish(
+                Info.make({
+                  message: `task "${task.title}" produced no changes without confirming TASK_ALREADY_SATISFIED; marking complete per noopTaskPolicy`
                 })
               )
               return

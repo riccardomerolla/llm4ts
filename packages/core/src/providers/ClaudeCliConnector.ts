@@ -21,6 +21,7 @@ import {
   jsonArray,
   jsonField,
   jsonIntField,
+  jsonNumberField,
   jsonStringField,
   optionalModelArgs,
   parseJsonLine,
@@ -79,14 +80,27 @@ export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> 
       const prompt = jsonIntField(usage, "input_tokens") ?? 0
       const completion = jsonIntField(usage, "output_tokens") ?? 0
       const cached = jsonIntField(usage, "cache_read_input_tokens")
+      // The CLI reports its own exact cost on the result event; carry it so
+      // trackers prefer it over pricing-table estimates. modelUsage's key is
+      // a model-name fallback for when no init line was observed.
+      const costUsd = jsonNumberField(json, "total_cost_usd")
+      const modelUsage = jsonField(json, "modelUsage")
+      const modelNames =
+        modelUsage !== undefined &&
+        modelUsage !== null &&
+        typeof modelUsage === "object" &&
+        !Array.isArray(modelUsage)
+          ? Object.keys(modelUsage)
+          : []
       return [
         usageEventChunk(
-          undefined,
+          modelNames.length === 1 ? modelNames[0] : undefined,
           TokenUsage.make({
             prompt,
             completion,
             total: prompt + completion,
-            ...(cached === undefined ? {} : { cached })
+            ...(cached === undefined ? {} : { cached }),
+            ...(costUsd === undefined ? {} : { costUsd })
           })
         )
       ]

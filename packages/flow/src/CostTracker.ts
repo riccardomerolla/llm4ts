@@ -35,6 +35,9 @@ const mergeUsage = (previous: TokenUsage | undefined, usage: TokenUsage): TokenU
   const cachedValues = [previous?.cached, usage.cached].flatMap((value) =>
     value === undefined ? [] : [value]
   )
+  const costValues = [previous?.costUsd, usage.costUsd].flatMap((value) =>
+    value === undefined ? [] : [value]
+  )
   return TokenUsage.make({
     prompt: (previous?.prompt ?? 0) + usage.prompt,
     completion: (previous?.completion ?? 0) + usage.completion,
@@ -43,9 +46,19 @@ const mergeUsage = (previous: TokenUsage | undefined, usage: TokenUsage): TokenU
       ? {}
       : {
           cached: cachedValues.reduce((sum, value) => sum + value, 0)
+        }),
+    ...(costValues.length === 0
+      ? {}
+      : {
+          costUsd: costValues.reduce((sum, value) => sum + value, 0)
         })
   })
 }
+
+// Backend-reported cost is authoritative; the pricing table only fills in
+// when the backend said nothing.
+const costOf = (model: string, usage: TokenUsage): number | undefined =>
+  usage.costUsd ?? (model === "(unknown)" ? undefined : estimateCostUsd(model, usage))
 
 const addUsage = (
   values: ReadonlyMap<string, TokenUsage>,
@@ -90,7 +103,7 @@ const renderSummary = (state: CostState): string => {
   const models = [...state.byModel.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([model, usage]) => {
-      const cost = model === "(unknown)" ? undefined : estimateCostUsd(model, usage)
+      const cost = costOf(model, usage)
       return { line: tokenLine(model, usage, cost), cost }
     })
   if (agents.length === 0 && models.length === 0) {
@@ -129,7 +142,7 @@ export const makeCostTracker = Effect.fn("@llm4ts/flow/CostTracker.make")(
                 return []
               }
               const [stage, agent, model] = parts
-              const costUsd = model === "(unknown)" ? undefined : estimateCostUsd(model, usage)
+              const costUsd = costOf(model, usage)
               return [
                 CostCell.make({
                   stage,

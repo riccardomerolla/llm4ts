@@ -862,4 +862,41 @@ describe("Flow gate and diff safety", () => {
       assert.isFalse(persisted?.tasks.some((task) => task.completed))
     })
   )
+
+  it.effect("completes an unconfirmed no-change task when noopTaskPolicy is complete", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const asked = yield* Ref.make<ReadonlyArray<string>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      const plan = Plan.make({
+        epicId: "epic-lenient",
+        tasks: [Task.make({ title: "unconfirmed no-op", description: "already satisfied" })]
+      })
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: coderService(asked),
+        git: { ...makeFakeGit(gitLog), diffAll: Effect.succeed("") },
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+
+      const completed = yield* implementPlanFlow(context, {
+        store,
+        planPath: ".llm4ts/plan-lenient.md",
+        plan: Effect.succeed(plan),
+        noopTaskPolicy: "complete"
+      })
+      const log = yield* Ref.get(gitLog)
+
+      assert.isTrue(completed.tasks.every((task) => task.completed))
+      assert.deepStrictEqual(log.commits, [])
+    })
+  )
 })
