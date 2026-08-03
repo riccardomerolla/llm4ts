@@ -104,6 +104,66 @@ describe("equivalence vector boundaries", () => {
     })
   )
 
+  // A harness dumping a COBOL record emits numerics as JSON numbers; the
+  // string-only schema turned that into a stage-killing schema error rather
+  // than a diff.
+  it.effect("accepts replay output whose field values are JSON scalars", () =>
+    Effect.gen(function* () {
+      const command = ["replay"]
+      const output = JSON.stringify([
+        { type: "record", kind: "output", fields: { ZSTC: 0, FEE: 2.5, OK: true, NOTE: null } },
+        {
+          type: "db",
+          table: "LEDGER",
+          op: "insert",
+          key: { ID: 42 },
+          set: { AMOUNT: 10.25, FLAG: false }
+        }
+      ])
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [processCommandKey(command), ProcessResult.make({ stdout: [output], exitCode: 0 })]
+        ])
+      })
+      const events = yield* makeCollectingFlowEvents
+      const replayed = yield* replayEquivVector(fake.executor, events, command, "/repo", vector)
+
+      assert.strictEqual(replayed._tag, "Observed")
+      const observed = replayed._tag === "Observed" ? replayed.actual : []
+      assert.deepStrictEqual(observed[0]?.type === "record" ? observed[0].fields : undefined, {
+        ZSTC: "0",
+        FEE: "2.5",
+        OK: "true",
+        // null reads as "no value", which the legacy side renders as empty.
+        NOTE: ""
+      })
+      assert.deepStrictEqual(observed[1]?.type === "db" ? observed[1].set : undefined, {
+        AMOUNT: "10.25",
+        FLAG: "false"
+      })
+    })
+  )
+
+  it.effect("reads stored vectors whose field values are JSON scalars", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      const line = JSON.stringify({
+        schemaVersion: CurrentEquivSchema,
+        program: "ACCTXFR",
+        id: "test1",
+        tier: "generated",
+        rules: ["R-1"],
+        inputs: { AMOUNT: "10" },
+        observations: [{ type: "record", kind: "output", fields: { ZSTC: 0 } }]
+      })
+      yield* memory.replace({ "vectors.jsonl": `${line}\n` })
+      const loaded = yield* readEquivVectors(memory.store, "vectors.jsonl")
+      const first = loaded[0]?.observations[0]
+
+      assert.deepStrictEqual(first?.type === "record" ? first.fields : undefined, { ZSTC: "0" })
+    })
+  )
+
   it.effect("runs replay commands behind Exec capability and decodes observations", () =>
     Effect.gen(function* () {
       const command = ["replay"]

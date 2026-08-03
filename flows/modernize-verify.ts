@@ -25,6 +25,7 @@ import {
   CurrentEquivSchema,
   EquivVector,
   Observations,
+  canonicaliseFieldMap,
   readEquivVectors,
   replayEquivVector,
   diffObservations,
@@ -58,18 +59,26 @@ const ModDir = "docs/modernization"
  * The model-facing vector shape: flat maps only, so structured output stays
  * schema-simple. `kind` is "record" (an emitted record) or "db" (a mutation).
  */
+/**
+ * Values are accepted as any JSON scalar and rendered to strings by
+ * `canonicaliseFieldMap`: asked for a numeric COBOL field a model answers
+ * `"ZSTC": 0` as often as `"0"`, and rejecting that wastes a generation turn
+ * over a difference the comparison does not care about.
+ */
+const GeneratedValue = Schema.Union([Schema.String, Schema.Number, Schema.Boolean])
+
 class GeneratedObservation extends Schema.Class<GeneratedObservation>("GeneratedObservation")({
   kind: Schema.String,
   channel: Schema.String,
   op: Schema.String,
-  key: Schema.Record(Schema.String, Schema.String),
-  fields: Schema.Record(Schema.String, Schema.String)
+  key: Schema.Record(Schema.String, GeneratedValue),
+  fields: Schema.Record(Schema.String, GeneratedValue)
 }) {}
 
 class GeneratedVector extends Schema.Class<GeneratedVector>("GeneratedVector")({
   id: Schema.String,
   rules: Schema.Array(Schema.String),
-  inputs: Schema.Record(Schema.String, Schema.String),
+  inputs: Schema.Record(Schema.String, GeneratedValue),
   observations: Schema.Array(GeneratedObservation)
 }) {}
 
@@ -154,10 +163,17 @@ const toObservation = (
 ): Effect.Effect<EquivObservation, PlanParseError> => {
   switch (generated.kind.toLowerCase()) {
     case "record":
-      return Effect.succeed(Observations.record(generated.channel, generated.fields))
+      return Effect.succeed(
+        Observations.record(generated.channel, canonicaliseFieldMap(generated.fields))
+      )
     case "db":
       return Effect.succeed(
-        Observations.dbMutation(generated.channel, generated.op, generated.key, generated.fields)
+        Observations.dbMutation(
+          generated.channel,
+          generated.op,
+          canonicaliseFieldMap(generated.key),
+          canonicaliseFieldMap(generated.fields)
+        )
       )
     default:
       return Effect.fail(
@@ -182,7 +198,7 @@ const toVector = Effect.fn("modernize-verify.toVector")(function* (
     id: generated.id,
     tier: "generated",
     rules: generated.rules,
-    inputs: generated.inputs,
+    inputs: canonicaliseFieldMap(generated.inputs),
     observations
   })
 })
