@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.5
+
+- `GitHubTool` gains `mergePr` (method squash/merge/rebase, optional
+  `--delete-branch`) and exposes `viewOpenPr` — the open PR whose head is
+  the working directory's current branch. Together with `prChecks`, a
+  consumer can implement continuous delivery: verify a PR's checks are
+  green and merge it without a human click. Same `gh` protocol and
+  `GhRead`/`GhWrite` guards.
+
 ## 0.7.4
 
 - `GitHubTool.writeIssueComment` returns the created comment's

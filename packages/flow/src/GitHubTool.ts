@@ -250,6 +250,23 @@ export const issueCloseArgs = (ref: IssueRef, comment?: string): ReadonlyArray<s
   ...(comment === undefined ? [] : ["--comment", comment])
 ]
 
+export const MergeMethod = Schema.Literals(["squash", "merge", "rebase"])
+export type MergeMethod = typeof MergeMethod.Type
+
+export const prMergeArgs = (
+  pr: PullRequest,
+  method: MergeMethod,
+  deleteBranch: boolean
+): ReadonlyArray<string> => [
+  "pr",
+  "merge",
+  String(pr.number),
+  "--repo",
+  `${pr.owner}/${pr.repo}`,
+  `--${method}`,
+  ...(deleteBranch ? ["--delete-branch"] : [])
+]
+
 export const prPatchArgs = (
   pr: PullRequest,
   title: string,
@@ -405,6 +422,14 @@ export interface GitHubToolShape {
     body: string
   ) => Effect.Effect<void, FlowError>
   readonly prChecks: (pr: PullRequest) => Effect.Effect<BuildOutcome, FlowError>
+  // The open PR whose head is the working directory's current branch,
+  // if any — the lookup a consumer needs before acting on "its" PR.
+  readonly viewOpenPr: Effect.Effect<PullRequest | undefined, FlowError>
+  readonly mergePr: (
+    pr: PullRequest,
+    method?: MergeMethod,
+    deleteBranch?: boolean
+  ) => Effect.Effect<void, FlowError>
   readonly listIssues: (
     repo: RepoRef,
     filter?: IssueListFilter
@@ -524,6 +549,9 @@ export const makeGitHubTool = (
       write("gh pr comment", run(prCommentArgs(pr, body)).pipe(Effect.asVoid)),
     updatePr: (pr, title, body) =>
       write("gh pr edit", run(prPatchArgs(pr, title, body)).pipe(Effect.asVoid)),
+    viewOpenPr: read("gh pr view", findOpenPr),
+    mergePr: (pr, method = "squash", deleteBranch = true) =>
+      write("gh pr merge", run(prMergeArgs(pr, method, deleteBranch)).pipe(Effect.asVoid)),
     prChecks: (pr) =>
       read(
         "gh pr checks",

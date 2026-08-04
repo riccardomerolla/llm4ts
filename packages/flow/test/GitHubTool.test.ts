@@ -31,6 +31,7 @@ import {
   parsePullRequestUrl,
   prChecksArgs,
   prCreateArgs,
+  prMergeArgs,
   prPatchArgs
 } from "@llm4ts/flow/GitHubTool"
 
@@ -187,6 +188,17 @@ describe("GitHub tool protocol", () => {
       issueCommentEditArgs(IssueCommentRef.make({ owner: "acme", repo: "widgets", id: 9 }), "B"),
       ["api", "--method", "PATCH", "repos/acme/widgets/issues/comments/9", "-f", "body=B"]
     )
+    const mergeTarget = PullRequest.make({ owner: "acme", repo: "widgets", number: 7, url: "u" })
+    assert.deepStrictEqual(prMergeArgs(mergeTarget, "squash", true), [
+      "pr",
+      "merge",
+      "7",
+      "--repo",
+      "acme/widgets",
+      "--squash",
+      "--delete-branch"
+    ])
+    assert.deepStrictEqual(prMergeArgs(mergeTarget, "rebase", false).slice(-1), ["--rebase"])
   })
 
   it.effect("decodes issue lists and rejects malformed payloads", () =>
