@@ -319,11 +319,15 @@ reference release.
 - Published packages export generated JavaScript and declarations from `dist`
   only. npm provenance is enabled for tag releases. OCI publishing is omitted
   because this release has no image-level server contract.
-- `@llm4ts/flow/GitHubTool` adds five work-queue operations with no source
+- `@llm4ts/flow/GitHubTool` adds six work-queue operations with no source
   counterpart in llm4zio v4.2.0 `GhTool`: `listIssues`, `editIssueLabels`,
   `assignIssue`, `closeIssue`, and `createIssue` (added for consumer-side
   epic decomposition, where a triage agent turns one epic issue into child
-  work items). This is an intentional additive extension (ADR 0008, as
+  work items), and `editIssueComment` — with `writeIssueComment` now
+  returning the created comment's `IssueCommentRef` parsed from the gh
+  output URL (undefined when absent; the source returned Unit) — so a
+  consumer can keep a posted plan checklist up to date as tasks complete.
+  This is an intentional additive extension (ADR 0008, as
   amended) using the same `gh` process protocol, args-builder style, and
   `GhRead`/`GhWrite` capability guards; existing operation behavior is
   unchanged. Back-porting the same operations to llm4zio is intended.

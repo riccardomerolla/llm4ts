@@ -8,12 +8,14 @@ import {
 } from "@llm4ts/core/ProcessExecutor"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import {
+  IssueCommentRef,
   IssueRef,
   PullRequest,
   RepoRef,
   issueAssignArgs,
   issueCloseArgs,
   issueCommentArgs,
+  issueCommentEditArgs,
   issueCreateArgs,
   issueEditLabelsArgs,
   issueListArgs,
@@ -23,6 +25,7 @@ import {
   outcomeFromChecksJson,
   parseIssue,
   parseIssueList,
+  parseIssueCommentUrl,
   parseIssueRef,
   parseIssueUrl,
   parsePullRequestUrl,
@@ -175,6 +178,15 @@ describe("GitHub tool protocol", () => {
       "acme/widgets#12"
     )
     assert.isUndefined(parseIssueUrl("https://github.com/acme/widgets/pull/12"))
+    const comment = parseIssueCommentUrl(
+      "https://github.com/acme/widgets/issues/17#issuecomment-987654"
+    )
+    assert.strictEqual(comment?.id, 987654)
+    assert.isUndefined(parseIssueCommentUrl("https://github.com/acme/widgets/issues/17"))
+    assert.deepStrictEqual(
+      issueCommentEditArgs(IssueCommentRef.make({ owner: "acme", repo: "widgets", id: 9 }), "B"),
+      ["api", "--method", "PATCH", "repos/acme/widgets/issues/comments/9", "-f", "body=B"]
+    )
   })
 
   it.effect("decodes issue lists and rejects malformed payloads", () =>

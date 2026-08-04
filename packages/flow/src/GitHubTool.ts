@@ -121,6 +121,38 @@ export const issueViewArgs = (ref: IssueRef): ReadonlyArray<string> => [
   "title,body,author"
 ]
 
+export class IssueCommentRef extends Schema.Class<IssueCommentRef>("IssueCommentRef")({
+  owner: Schema.String,
+  repo: Schema.String,
+  id: Schema.Int
+}) {}
+
+// `gh issue comment` prints the created comment's URL
+// (https://host/owner/repo/issues/7#issuecomment-123456).
+export const parseIssueCommentUrl = (url: string): IssueCommentRef | undefined => {
+  const match = /^https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/issues\/\d+#issuecomment-(\d+)\s*$/.exec(
+    url.trim()
+  )
+  const owner = match?.[1]
+  const repo = match?.[2]
+  const id = Number.parseInt(match?.[3] ?? "", 10)
+  return owner === undefined || repo === undefined || !Number.isInteger(id) || id <= 0
+    ? undefined
+    : IssueCommentRef.make({ owner, repo, id })
+}
+
+export const issueCommentEditArgs = (
+  comment: IssueCommentRef,
+  body: string
+): ReadonlyArray<string> => [
+  "api",
+  "--method",
+  "PATCH",
+  `repos/${comment.owner}/${comment.repo}/issues/comments/${comment.id}`,
+  "-f",
+  `body=${body}`
+]
+
 export const issueCommentArgs = (ref: IssueRef, body: string): ReadonlyArray<string> => [
   "issue",
   "comment",
@@ -355,7 +387,17 @@ export interface GitHubToolShape {
     draft?: boolean
   ) => Effect.Effect<PullRequest, FlowError>
   readonly readIssue: (ref: IssueRef) => Effect.Effect<Issue, FlowError>
-  readonly writeIssueComment: (ref: IssueRef, body: string) => Effect.Effect<void, FlowError>
+  // Returns the created comment's reference when the gh output carries it
+  // (undefined otherwise), so callers can edit the comment later — e.g. a
+  // plan checklist kept up to date as tasks complete.
+  readonly writeIssueComment: (
+    ref: IssueRef,
+    body: string
+  ) => Effect.Effect<IssueCommentRef | undefined, FlowError>
+  readonly editIssueComment: (
+    comment: IssueCommentRef,
+    body: string
+  ) => Effect.Effect<void, FlowError>
   readonly writePrComment: (pr: PullRequest, body: string) => Effect.Effect<void, FlowError>
   readonly updatePr: (
     pr: PullRequest,
@@ -465,7 +507,19 @@ export const makeGitHubTool = (
         run(issueViewArgs(ref)).pipe(Effect.flatMap((result) => parseIssue(output(result))))
       ),
     writeIssueComment: (ref, body) =>
-      write("gh issue comment", run(issueCommentArgs(ref, body)).pipe(Effect.asVoid)),
+      write(
+        "gh issue comment",
+        run(issueCommentArgs(ref, body)).pipe(
+          Effect.map((result) =>
+            output(result)
+              .split(/\r?\n/)
+              .map(parseIssueCommentUrl)
+              .find((item) => item !== undefined)
+          )
+        )
+      ),
+    editIssueComment: (comment, body) =>
+      write("gh issue comment edit", run(issueCommentEditArgs(comment, body)).pipe(Effect.asVoid)),
     writePrComment: (pr, body) =>
       write("gh pr comment", run(prCommentArgs(pr, body)).pipe(Effect.asVoid)),
     updatePr: (pr, title, body) =>

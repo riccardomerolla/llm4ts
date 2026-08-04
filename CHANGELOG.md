@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.4
+
+- `GitHubTool.writeIssueComment` returns the created comment's
+  `IssueCommentRef` (parsed from the URL `gh issue comment` prints;
+  undefined when absent), and the new `editIssueComment` PATCHes a
+  comment body via `gh api` — together they let a consumer post a plan
+  as a task-list comment and check items off by editing it as work
+  completes. Same protocol and guards; ADR 0008 lineage.
+
 ## 0.7.3
 
 - Backend-reported cost reaches invoices. `TokenUsage` gains an optional
