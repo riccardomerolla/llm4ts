@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.6
+
+- `GitHubTool.readIssueComments` decodes an issue's comment thread
+  (author login, body, createdAt) via `gh issue view --json comments` —
+  the read side of the comment channel, letting a consumer's triage agent
+  act on human feedback (e.g. an epic-validation loop where the CEO's
+  comments seed the next iteration's decomposition).
+
 ## 0.7.5
 
 - `GitHubTool` gains `mergePr` (method squash/merge/rebase, optional

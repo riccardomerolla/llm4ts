@@ -15,6 +15,7 @@ import {
   issueAssignArgs,
   issueCloseArgs,
   issueCommentArgs,
+  issueCommentsArgs,
   issueCommentEditArgs,
   issueCreateArgs,
   issueEditLabelsArgs,
@@ -25,6 +26,7 @@ import {
   outcomeFromChecksJson,
   parseIssue,
   parseIssueList,
+  parseIssueComments,
   parseIssueCommentUrl,
   parseIssueRef,
   parseIssueUrl,
@@ -200,6 +202,25 @@ describe("GitHub tool protocol", () => {
     ])
     assert.deepStrictEqual(prMergeArgs(mergeTarget, "rebase", false).slice(-1), ["--rebase"])
   })
+
+  it.effect("decodes issue comments with author logins", () =>
+    Effect.gen(function* () {
+      const comments = yield* parseIssueComments(
+        '{"comments":[{"author":{"login":"ceo"},"body":"More contrast please","createdAt":"2026-08-04T10:00:00Z"},' +
+          '{"author":{"login":"bot"},"body":"Shipped\\n\\n— Nightcall","createdAt":"2026-08-04T11:00:00Z"}]}'
+      )
+      const empty = yield* parseIssueComments('{"comments":[]}')
+
+      assert.strictEqual(comments.length, 2)
+      assert.strictEqual(comments[0]?.author, "ceo")
+      assert.include(comments[0]?.body, "contrast")
+      assert.deepStrictEqual(empty, [])
+      assert.deepStrictEqual(
+        issueCommentsArgs(IssueRef.make({ owner: "acme", repo: "widgets", number: 3 })).slice(-2),
+        ["--json", "comments"]
+      )
+    })
+  )
 
   it.effect("decodes issue lists and rejects malformed payloads", () =>
     Effect.gen(function* () {

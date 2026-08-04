@@ -323,7 +323,9 @@ reference release.
   counterpart in llm4zio v4.2.0 `GhTool`: `listIssues`, `editIssueLabels`,
   `assignIssue`, `closeIssue`, and `createIssue` (added for consumer-side
   epic decomposition, where a triage agent turns one epic issue into child
-  work items), `editIssueComment`, `viewOpenPr` (the open PR for the
+  work items), `editIssueComment`, `readIssueComments` (author, body,
+  createdAt per comment — the upward-feedback channel an epic-validation
+  loop reads), `viewOpenPr` (the open PR for the
   working directory's current branch), and `mergePr` (squash by default,
   optional branch deletion — the consumer-side continuous-delivery gate) —
   with `writeIssueComment` now

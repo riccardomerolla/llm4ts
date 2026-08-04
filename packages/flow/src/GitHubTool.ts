@@ -153,6 +153,22 @@ export const issueCommentEditArgs = (
   `body=${body}`
 ]
 
+export class IssueComment extends Schema.Class<IssueComment>("IssueComment")({
+  author: Schema.String,
+  body: Schema.String,
+  createdAt: Schema.String
+}) {}
+
+export const issueCommentsArgs = (ref: IssueRef): ReadonlyArray<string> => [
+  "issue",
+  "view",
+  String(ref.number),
+  "--repo",
+  `${ref.owner}/${ref.repo}`,
+  "--json",
+  "comments"
+]
+
 export const issueCommentArgs = (ref: IssueRef, body: string): ReadonlyArray<string> => [
   "issue",
   "comment",
@@ -317,6 +333,18 @@ class GhIssueSummary extends Schema.Class<GhIssueSummary>("GhIssueSummary")({
   updatedAt: Schema.String
 }) {}
 
+class GhComment extends Schema.Class<GhComment>("GhComment")({
+  author: GhAuthor,
+  body: Schema.String,
+  createdAt: Schema.String
+}) {}
+
+class GhComments extends Schema.Class<GhComments>("GhComments")({
+  comments: Schema.Array(GhComment).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Object.freeze([])))
+  )
+}) {}
+
 class GhCheck extends Schema.Class<GhCheck>("GhCheck")({
   status: Schema.optionalKey(Schema.String),
   conclusion: Schema.optionalKey(Schema.String),
@@ -372,6 +400,28 @@ export const parseIssueList = (
     )
   )
 
+export const parseIssueComments = (
+  json: string
+): Effect.Effect<ReadonlyArray<IssueComment>, ProcessError> =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(GhComments))(json).pipe(
+    Effect.map((parsed) =>
+      parsed.comments.map(
+        (comment) =>
+          new IssueComment({
+            author: comment.author.login,
+            body: comment.body,
+            createdAt: comment.createdAt
+          })
+      )
+    ),
+    Effect.mapError((error) =>
+      ProcessError.make({
+        message: "gh issue view comments",
+        detail: `invalid comments JSON: ${String(error)}`
+      })
+    )
+  )
+
 export const outcomeFromChecksJson = (json: string): Effect.Effect<BuildOutcome, ProcessError> =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(GhChecks))(json).pipe(
     Effect.map((parsed) => {
@@ -404,6 +454,9 @@ export interface GitHubToolShape {
     draft?: boolean
   ) => Effect.Effect<PullRequest, FlowError>
   readonly readIssue: (ref: IssueRef) => Effect.Effect<Issue, FlowError>
+  readonly readIssueComments: (
+    ref: IssueRef
+  ) => Effect.Effect<ReadonlyArray<IssueComment>, FlowError>
   // Returns the created comment's reference when the gh output carries it
   // (undefined otherwise), so callers can edit the comment later — e.g. a
   // plan checklist kept up to date as tasks complete.
@@ -530,6 +583,13 @@ export const makeGitHubTool = (
       read(
         "gh issue view",
         run(issueViewArgs(ref)).pipe(Effect.flatMap((result) => parseIssue(output(result))))
+      ),
+    readIssueComments: (ref) =>
+      read(
+        "gh issue view comments",
+        run(issueCommentsArgs(ref)).pipe(
+          Effect.flatMap((result) => parseIssueComments(output(result)))
+        )
       ),
     writeIssueComment: (ref, body) =>
       write(
