@@ -167,6 +167,11 @@ describe("Basecamp tool protocol", () => {
       const comments = yield* parseCardComments(commentsJson)
       const steps = yield* parseCardSteps(stepsJson)
       const noSteps = yield* parseCardSteps("null")
+      // The CLI prints `null` (not []) for empty listings across the
+      // board: cards in an empty column, comments on a bare card, columns.
+      const noCards = yield* parseCards("null")
+      const noComments = yield* parseCardComments("null")
+      const noColumns = yield* parseColumns("null")
       const invalid = yield* Effect.flip(parseCards('[{"id":"x"}]'))
 
       assert.deepStrictEqual(columns, [
@@ -186,6 +191,9 @@ describe("Basecamp tool protocol", () => {
         [false, true]
       )
       assert.deepStrictEqual(noSteps, [])
+      assert.deepStrictEqual(noCards, [])
+      assert.deepStrictEqual(noComments, [])
+      assert.deepStrictEqual(noColumns, [])
       assert.strictEqual(invalid._tag, "Process")
     })
   )

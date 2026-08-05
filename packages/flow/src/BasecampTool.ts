@@ -179,12 +179,14 @@ const columnStruct = Schema.Struct({
   title: Schema.String
 })
 
+// The CLI prints `null` (not `[]`) for every empty listing — columns,
+// cards in a column, comments — so all list decoders tolerate it.
 export const parseColumns = (json: string): Effect.Effect<ReadonlyArray<Column>, ProcessError> =>
   decodeJson(
     "basecamp parse columns",
-    Schema.fromJsonString(Schema.Array(columnStruct)),
+    Schema.fromJsonString(Schema.NullOr(Schema.Array(columnStruct))),
     json
-  ).pipe(Effect.map((columns) => columns.map((column) => Column.make(column))))
+  ).pipe(Effect.map((columns) => (columns ?? []).map((column) => Column.make(column))))
 
 const cardStruct = Schema.Struct({
   id: Schema.Int,
@@ -217,9 +219,11 @@ export const parseCard = (json: string): Effect.Effect<Card, ProcessError> =>
   )
 
 export const parseCards = (json: string): Effect.Effect<ReadonlyArray<Card>, ProcessError> =>
-  decodeJson("basecamp parse cards", Schema.fromJsonString(Schema.Array(cardStruct)), json).pipe(
-    Effect.map((items) => items.map(toCard))
-  )
+  decodeJson(
+    "basecamp parse cards",
+    Schema.fromJsonString(Schema.NullOr(Schema.Array(cardStruct))),
+    json
+  ).pipe(Effect.map((items) => (items ?? []).map(toCard)))
 
 const commentStruct = Schema.Struct({
   id: Schema.Int,
@@ -233,11 +237,11 @@ export const parseCardComments = (
 ): Effect.Effect<ReadonlyArray<CardComment>, ProcessError> =>
   decodeJson(
     "basecamp parse comments",
-    Schema.fromJsonString(Schema.Array(commentStruct)),
+    Schema.fromJsonString(Schema.NullOr(Schema.Array(commentStruct))),
     json
   ).pipe(
     Effect.map((comments) =>
-      comments.map((comment) =>
+      (comments ?? []).map((comment) =>
         CardComment.make({
           id: comment.id,
           author: comment.creator.name,

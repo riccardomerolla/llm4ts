@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1
+
+- `BasecampTool` list decoders (`parseCards`, `parseCardComments`,
+  `parseColumns`) tolerate the CLI's `null` output for empty listings —
+  an empty column printed `null`, not `[]`, and `listCards` failed with a
+  parse error. Found by the first consumer (Dunder Mifflin) on its first
+  heartbeat against an empty board; steps already handled this.
+
 ## 0.8.0
 
 - New `@llm4ts/flow/BasecampTool`: a Basecamp card table as an agent work
