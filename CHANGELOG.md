@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.7.6
+## 0.8.0
+
+- New `@llm4ts/flow/BasecampTool`: a Basecamp card table as an agent work
+  queue, wrapping the `basecamp` CLI through the same `ProcessExecutor`
+  protocol, args-builder style, and capability guards as `GitHubTool`.
+  Columns are data discovered from the board (one cached fetch per tool
+  instance) with case-insensitive `resolveColumn` failing typed
+  (`ColumnNotFound` lists the available titles); cards
+  list/read/move/create/assign, card comments, and card steps round out
+  the claim→work→report→done loop. Card and comment bodies stay verbatim
+  rich-text HTML in `contentHtml` fields — writes pass through to the
+  CLI, which accepts Markdown. ADR 0009.
+- Core capabilities grow `BasecampRead`/`BasecampWrite` and a `basecamp`
+  grant level in `Grants`; grants serialized before the field existed
+  decode as `"None"`, so old persisted grants deny Basecamp access.
 
 - `GitHubTool.readIssueComments` decodes an issue's comment thread
   (author login, body, createdAt) via `gh issue view --json comments` —
