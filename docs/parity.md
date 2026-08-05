@@ -349,3 +349,12 @@ reference release.
   whose final state is re-judged downstream (CI gate, fresh-context
   review). Driven by autonomous-loop runs repeatedly losing finished work
   to a coder that would not utter the confirmation token.
+- `@llm4ts/flow/BasecampTool` is a new module with no llm4zio v4.2.0
+  counterpart: a Basecamp card table as an agent work queue (list/resolve
+  columns, list/read/move/create/assign cards, card comments, card steps)
+  wrapping the `basecamp` CLI through the same `ProcessExecutor` protocol,
+  args-builder style, and capability guards as `GitHubTool`, behind new
+  `BasecampRead`/`BasecampWrite` capabilities and a `basecamp` grant level
+  (grants persisted before the field existed decode as "None"). Card and
+  comment bodies are exposed verbatim as `contentHtml` — Basecamp stores
+  rich-text HTML, not Markdown. Intentional additive extension: ADR 0009.

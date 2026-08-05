@@ -34,6 +34,8 @@ describe("Grants algebra", () => {
       Capabilities.GhWrite,
       Capabilities.AdoRead,
       Capabilities.AdoWrite,
+      Capabilities.BasecampRead,
+      Capabilities.BasecampWrite,
       Capabilities.Exec("ls"),
       Capabilities.UseCoder,
       Capabilities.UseReasoning,
@@ -43,6 +45,33 @@ describe("Grants algebra", () => {
     assert.isTrue(capabilities.every((capability) => allows(allGrants, capability)))
     assert.isTrue(capabilities.every((capability) => !allows(noneGrants, capability)))
   })
+
+  it("orders basecamp read and write grants", () => {
+    const read = new Grants({ ...noneGrants, basecamp: "Read" })
+    const write = new Grants({ ...noneGrants, basecamp: "Write" })
+
+    assert.isTrue(allows(read, Capabilities.BasecampRead))
+    assert.isFalse(allows(read, Capabilities.BasecampWrite))
+    assert.isTrue(allows(write, Capabilities.BasecampRead))
+    assert.isTrue(allows(write, Capabilities.BasecampWrite))
+    assert.strictEqual(intersectGrants(write, read).basecamp, "Read")
+    assert.strictEqual(unionGrants(read, write).basecamp, "Write")
+  })
+
+  it.effect("decodes persisted grants missing the basecamp field as None", () =>
+    Effect.gen(function* () {
+      const grantsCodec = Schema.toCodecJson(Grants)
+      const encoded = yield* Schema.encodeEffect(grantsCodec)(allGrants)
+      const legacy =
+        typeof encoded === "object" && encoded !== null && !Array.isArray(encoded)
+          ? Object.fromEntries(Object.entries(encoded).filter(([key]) => key !== "basecamp"))
+          : encoded
+      const decoded = yield* Schema.decodeUnknownEffect(grantsCodec)(legacy)
+
+      assert.strictEqual(decoded.basecamp, "None")
+      assert.isFalse(allows(decoded, Capabilities.BasecampRead))
+    })
+  )
 
   it("orders read, write, and push grants", () => {
     const read = new Grants({ ...noneGrants, git: "Read" })

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-08-05). To be accepted when the module lands per
+Accepted (2026-08-05). Implemented per
 `specs/pending/basecamp-tool-card-queue.md`.
 
 ## Context

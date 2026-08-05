@@ -15,17 +15,17 @@ note (see tasks).
 
 ## Decisions (agreed 2026-08-05)
 
-| Decision    | Choice                                                                                                                                                                     |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Role        | Work-queue tool in `packages/flow`, third sibling of `GitHubTool` and `AzureDevOpsTool`; same deep-module pattern (schemas + pure args builders + guarded service).         |
-| Primitive   | Card tables. Columns are the workflow states; moving a card is the state transition. Todos/todolists are out of scope.                                                       |
-| Abstraction | Standalone `BasecampToolShape` with card-native ops. No shared WorkQueue interface with `GitHubTool` — flows compose the two tools explicitly (Basecamp queue, GitHub PRs). |
-| Protocol    | The `basecamp` CLI via `ProcessExecutor`: pure `*Args` builders + schema-parsed `--json` output, testable with the process fakes. Auth stays inside the CLI (no secrets).   |
-| Identity    | `makeBasecampTool(process, workDir, events, projectRef)`. `BasecampProjectRef` carries `project` (id or name) and optional `cardTable` id (CLI requires it only when a project has several tables). One tool instance = one board. |
+| Decision    | Choice                                                                                                                                                                                                                                                                  |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Role        | Work-queue tool in `packages/flow`, third sibling of `GitHubTool` and `AzureDevOpsTool`; same deep-module pattern (schemas + pure args builders + guarded service).                                                                                                     |
+| Primitive   | Card tables. Columns are the workflow states; moving a card is the state transition. Todos/todolists are out of scope.                                                                                                                                                  |
+| Abstraction | Standalone `BasecampToolShape` with card-native ops. No shared WorkQueue interface with `GitHubTool` — flows compose the two tools explicitly (Basecamp queue, GitHub PRs).                                                                                             |
+| Protocol    | The `basecamp` CLI via `ProcessExecutor`: pure `*Args` builders + schema-parsed `--json` output, testable with the process fakes. Auth stays inside the CLI (no secrets).                                                                                               |
+| Identity    | `makeBasecampTool(process, workDir, events, projectRef)`. `BasecampProjectRef` carries `project` (id or name) and optional `cardTable` id (CLI requires it only when a project has several tables). One tool instance = one board.                                      |
 | Columns     | Columns as data: a `Column` schema class (id, title) discovered from the board and cached for the tool's lifetime; `resolveColumn(title)` fails with a typed error when the title is missing. No workflow-state literals in the library — flows name their own columns. |
-| Content     | HTML verbatim: card/comment bodies read via `--json` are exposed as-is in fields named `contentHtml` — never pretend they are Markdown. Writes accept plain text/Markdown strings and pass them to the CLI unmodified. No converter in the library. |
-| Capability  | Reads guarded by `Capabilities.BasecampRead`, mutations by `Capabilities.BasecampWrite`, via the existing `guarded` helper and `read`/`write` wrappers.                     |
-| Parity      | Additive module beyond llm4zio v4.2.0. Record in `docs/parity.md` and ADR 0009.                                                                                            |
+| Content     | HTML verbatim: card/comment bodies read via `--json` are exposed as-is in fields named `contentHtml` — never pretend they are Markdown. Writes accept plain text/Markdown strings and pass them to the CLI unmodified. No converter in the library.                     |
+| Capability  | Reads guarded by `Capabilities.BasecampRead`, mutations by `Capabilities.BasecampWrite`, via the existing `guarded` helper and `read`/`write` wrappers.                                                                                                                 |
+| Parity      | Additive module beyond llm4zio v4.2.0. Record in `docs/parity.md` and ADR 0009.                                                                                                                                                                                         |
 
 ## Operations
 
@@ -117,4 +117,4 @@ CLI's own auth store and must never appear in args, events, or errors.
       extension beyond llm4zio v4.2.0.
 - [ ] Finalize ADR 0009 (status Proposed → Accepted) once the shape lands.
 - [ ] Verification chain: `pnpm typecheck && pnpm lint && pnpm format:check
-      && pnpm test`.
+&& pnpm test`.

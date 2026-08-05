@@ -9,6 +9,8 @@ export class GhRead extends Schema.TaggedClass<GhRead>()("GhRead", {}) {}
 export class GhWrite extends Schema.TaggedClass<GhWrite>()("GhWrite", {}) {}
 export class AdoRead extends Schema.TaggedClass<AdoRead>()("AdoRead", {}) {}
 export class AdoWrite extends Schema.TaggedClass<AdoWrite>()("AdoWrite", {}) {}
+export class BasecampRead extends Schema.TaggedClass<BasecampRead>()("BasecampRead", {}) {}
+export class BasecampWrite extends Schema.TaggedClass<BasecampWrite>()("BasecampWrite", {}) {}
 export class Exec extends Schema.TaggedClass<Exec>()("Exec", {
   command: Schema.String
 }) {}
@@ -24,6 +26,8 @@ export const Capability = Schema.Union([
   GhWrite,
   AdoRead,
   AdoWrite,
+  BasecampRead,
+  BasecampWrite,
   Exec,
   UseCoder,
   UseReasoning,
@@ -40,6 +44,8 @@ export const Capabilities = Object.freeze({
   GhWrite: new GhWrite(),
   AdoRead: new AdoRead(),
   AdoWrite: new AdoWrite(),
+  BasecampRead: new BasecampRead(),
+  BasecampWrite: new BasecampWrite(),
   Exec: (command: string): Exec => new Exec({ command }),
   UseCoder: new UseCoder(),
   UseReasoning: new UseReasoning(),
@@ -115,6 +121,9 @@ export class Grants extends Schema.Class<Grants>("Grants")({
   git: GrantLevel,
   gh: GrantLevel,
   ado: GrantLevel,
+  // Grants serialized before the basecamp field existed decode as "None":
+  // old persisted grants deny Basecamp access by definition.
+  basecamp: GrantLevel.pipe(Schema.withDecodingDefaultKey(Effect.succeed("None"))),
   exec: ExecGrant,
   coder: Schema.Boolean,
   reasoning: Schema.Boolean,
@@ -125,6 +134,7 @@ export const allGrants = new Grants({
   git: "Push",
   gh: "Write",
   ado: "Write",
+  basecamp: "Write",
   exec: ExecGrants.All,
   coder: true,
   reasoning: true,
@@ -135,6 +145,7 @@ export const noneGrants = new Grants({
   git: "None",
   gh: "None",
   ado: "None",
+  basecamp: "None",
   exec: ExecGrants.Denied,
   coder: false,
   reasoning: false,
@@ -146,6 +157,7 @@ export const intersectGrants = (first: Grants, second: Grants): Grants =>
     git: minLevel(first.git, second.git),
     gh: minLevel(first.gh, second.gh),
     ado: minLevel(first.ado, second.ado),
+    basecamp: minLevel(first.basecamp, second.basecamp),
     exec: intersectExec(first.exec, second.exec),
     coder: first.coder && second.coder,
     reasoning: first.reasoning && second.reasoning,
@@ -157,6 +169,7 @@ export const unionGrants = (first: Grants, second: Grants): Grants =>
     git: maxLevel(first.git, second.git),
     gh: maxLevel(first.gh, second.gh),
     ado: maxLevel(first.ado, second.ado),
+    basecamp: maxLevel(first.basecamp, second.basecamp),
     exec: unionExec(first.exec, second.exec),
     coder: first.coder || second.coder,
     reasoning: first.reasoning || second.reasoning,
@@ -190,6 +203,10 @@ export const allows = (grants: Grants, capability: Capability): boolean => {
       return levelRank(grants.ado) >= levelRank("Read")
     case "AdoWrite":
       return levelRank(grants.ado) >= levelRank("Write")
+    case "BasecampRead":
+      return levelRank(grants.basecamp) >= levelRank("Read")
+    case "BasecampWrite":
+      return levelRank(grants.basecamp) >= levelRank("Write")
     case "Exec":
       return execAllows(grants.exec, capability.command)
     case "UseCoder":

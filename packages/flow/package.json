@@ -16,6 +16,7 @@
     "./package.json": "./package.json",
     "./Activity": "./dist/Activity.js",
     "./AzureDevOpsTool": "./dist/AzureDevOpsTool.js",
+    "./BasecampTool": "./dist/BasecampTool.js",
     "./Bench": "./dist/Bench.js",
     "./BenchReport": "./dist/BenchReport.js",
     "./CapabilityGuard": "./dist/CapabilityGuard.js",

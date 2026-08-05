@@ -105,6 +105,15 @@ export class FlowCapabilityDenied extends Schema.TaggedErrorClass<FlowCapability
   }
 }
 
+export class ColumnNotFound extends Schema.TaggedErrorClass<ColumnNotFound>()("ColumnNotFound", {
+  title: Schema.String,
+  available: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    return `column "${this.title}" not found on the card table; available: ${this.available.join(", ")}`
+  }
+}
+
 export class BudgetExceeded extends Schema.TaggedErrorClass<BudgetExceeded>()("BudgetExceeded", {
   metric: Schema.Literals(["tokens", "costUsd"]),
   limit: Schema.Number,
@@ -126,6 +135,7 @@ export const FlowError = Schema.Union([
   ProcessError,
   FlowLlmError,
   FlowCapabilityDenied,
+  ColumnNotFound,
   BudgetExceeded
 ])
 export type FlowError = typeof FlowError.Type
