@@ -155,6 +155,14 @@ export const cardCommentCreateArgs = (cardId: number, body: string): ReadonlyArr
   "create",
   String(cardId),
   body,
+  ...jsonFlags
+]
+
+export const cardCommentUpdateArgs = (commentId: number, body: string): ReadonlyArray<string> => [
+  "comments",
+  "update",
+  String(commentId),
+  body,
   "--quiet"
 ]
 
@@ -298,6 +306,19 @@ const commentStruct = Schema.Struct({
   created_at: Schema.String
 })
 
+const toCardComment = (item: typeof commentStruct.Type): CardComment =>
+  CardComment.make({
+    id: item.id,
+    author: item.creator.name,
+    contentHtml: item.content,
+    createdAt: item.created_at
+  })
+
+export const parseCardComment = (json: string): Effect.Effect<CardComment, ProcessError> =>
+  decodeJson("basecamp parse comment", Schema.fromJsonString(commentStruct), json).pipe(
+    Effect.map(toCardComment)
+  )
+
 export const parseCardComments = (
   json: string
 ): Effect.Effect<ReadonlyArray<CardComment>, ProcessError> =>
@@ -305,18 +326,7 @@ export const parseCardComments = (
     "basecamp parse comments",
     Schema.fromJsonString(Schema.NullOr(Schema.Array(commentStruct))),
     json
-  ).pipe(
-    Effect.map((comments) =>
-      (comments ?? []).map((comment) =>
-        CardComment.make({
-          id: comment.id,
-          author: comment.creator.name,
-          contentHtml: comment.content,
-          createdAt: comment.created_at
-        })
-      )
-    )
-  )
+  ).pipe(Effect.map((comments) => (comments ?? []).map(toCardComment)))
 
 const stepStruct = Schema.Struct({
   id: Schema.Int,
@@ -404,7 +414,8 @@ export interface BasecampToolShape {
   readonly readCardComments: (
     cardId: number
   ) => Effect.Effect<ReadonlyArray<CardComment>, FlowError>
-  readonly writeCardComment: (cardId: number, body: string) => Effect.Effect<void, FlowError>
+  readonly writeCardComment: (cardId: number, body: string) => Effect.Effect<CardComment, FlowError>
+  readonly editCardComment: (commentId: number, body: string) => Effect.Effect<void, FlowError>
   readonly listSteps: (cardId: number) => Effect.Effect<ReadonlyArray<CardStep>, FlowError>
   readonly completeStep: (stepId: number) => Effect.Effect<void, FlowError>
   readonly listMessages: Effect.Effect<ReadonlyArray<Message>, FlowError>
@@ -523,7 +534,14 @@ export const makeBasecampTool = Effect.fn("@llm4ts/flow/BasecampTool.make")(func
     writeCardComment: (cardId, body) =>
       write(
         "basecamp comments create",
-        run(cardCommentCreateArgs(cardId, body)).pipe(Effect.asVoid)
+        run(cardCommentCreateArgs(cardId, body)).pipe(
+          Effect.flatMap((result) => parseCardComment(output(result)))
+        )
+      ),
+    editCardComment: (commentId, body) =>
+      write(
+        "basecamp comments update",
+        run(cardCommentUpdateArgs(commentId, body)).pipe(Effect.asVoid)
       ),
     listSteps: (cardId) =>
       read(

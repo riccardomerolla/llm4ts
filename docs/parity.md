@@ -365,3 +365,7 @@ reference release.
   read-only policy surface (checklist rubrics injected into prompts).
   Same protocol, guards, and null-tolerant decoding; additive under ADR
   0009 (Dunder Mifflin memory/policy design, 2026-08-05).
+- `BasecampTool.writeCardComment` returns the created `CardComment` and
+  `editCardComment` updates one in place (`comments update`) — the
+  living-comment pair for consumer work logs, mirroring the 0.7.4
+  `GitHubTool` comment-ref evolution. Additive under ADR 0009.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0
+
+- `BasecampTool.writeCardComment` returns the created `CardComment`
+  (parsed from `comments create --json`; it returned void), and the new
+  `editCardComment(commentId, body)` updates a comment in place via
+  `comments update` — the pair a consumer needs for living work-log
+  comments edited as agents work, the same evolution
+  `GitHubTool.writeIssueComment` took in 0.7.4 for Nightcall's living
+  checklists. Driven by Dunder Mifflin's ongoing-work trace design.
+
 ## 0.9.1
 
 - `effect` is pinned to the exact beta (4.0.0-beta.102) in every

@@ -24,7 +24,9 @@ import {
   cardAssignArgs,
   cardColumnsArgs,
   cardCommentCreateArgs,
+  cardCommentUpdateArgs,
   cardCommentsArgs,
+  parseCardComment,
   cardCreateArgs,
   cardListArgs,
   cardMoveArgs,
@@ -152,6 +154,14 @@ describe("Basecamp tool protocol", () => {
       "create",
       "9953237984",
       "Done ✅",
+      "--json",
+      "--quiet"
+    ])
+    assert.deepStrictEqual(cardCommentUpdateArgs(9953911001, "WORK-LOG\nupdated"), [
+      "comments",
+      "update",
+      "9953911001",
+      "WORK-LOG\nupdated",
       "--quiet"
     ])
     assert.deepStrictEqual(cardStepsArgs(board, 9953237984).slice(0, 3), [
@@ -176,6 +186,10 @@ describe("Basecamp tool protocol", () => {
       const card = yield* parseCard(cardJson)
       const cards = yield* parseCards(`[${cardJson}]`)
       const comments = yield* parseCardComments(commentsJson)
+      const single = yield* parseCardComment(
+        '{"id":9953911001,"title":"Re: X","type":"Comment","content":"<p>WORK-LOG</p>",' +
+          '"creator":{"id":27418068,"name":"Riccardo Merolla"},"created_at":"2026-08-06T08:00:00.000Z"}'
+      )
       const steps = yield* parseCardSteps(stepsJson)
       const noSteps = yield* parseCardSteps("null")
       // The CLI prints `null` (not []) for empty listings across the
@@ -197,6 +211,8 @@ describe("Basecamp tool protocol", () => {
       assert.strictEqual(cards.length, 1)
       assert.strictEqual(comments[0]?.author, "Riccardo Merolla")
       assert.include(comments[0]?.contentHtml, "Figuring it out")
+      assert.strictEqual(single.id, 9953911001)
+      assert.strictEqual(single.contentHtml, "<p>WORK-LOG</p>")
       assert.deepStrictEqual(
         steps.map((step) => step.completed),
         [false, true]
