@@ -358,3 +358,10 @@ reference release.
   (grants persisted before the field existed decode as "None"). Card and
   comment bodies are exposed verbatim as `contentHtml` — Basecamp stores
   rich-text HTML, not Markdown. Intentional additive extension: ADR 0009.
+- `@llm4ts/flow/BasecampTool` additionally exposes message-board and
+  todolist reads plus message creation (`listMessages`, `createMessage`
+  with `--no-subscribe`, `listTodolists`, `listTodos`) so a consumer can
+  use a Basecamp project as agent memory (distilled lesson posts) and
+  read-only policy surface (checklist rubrics injected into prompts).
+  Same protocol, guards, and null-tolerant decoding; additive under ADR
+  0009 (Dunder Mifflin memory/policy design, 2026-08-05).

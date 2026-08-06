@@ -10,6 +10,17 @@ import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import {
   BasecampProjectRef,
   Column,
+  Message,
+  Todolist,
+  TodoItem,
+  messageCreateArgs,
+  messageListArgs,
+  parseMessage,
+  parseMessages,
+  parseTodolists,
+  parseTodos,
+  todoListArgs,
+  todolistListArgs,
   cardAssignArgs,
   cardColumnsArgs,
   cardCommentCreateArgs,
@@ -262,6 +273,96 @@ describe("Basecamp tool protocol", () => {
       assert.strictEqual(created.title, "Schema derivation")
       assert.strictEqual(denied._tag, "CapabilityDenied")
       assert.strictEqual((yield* fake.recorded).length, 2)
+    })
+  )
+
+  it("builds message and todolist argv with the project flag only", () => {
+    const scoped = BasecampProjectRef.make({ project: "47528834", cardTable: "9953815788" })
+
+    // messages/todolists commands reject --card-table: it must never
+    // leak into their argv even when the board ref carries one.
+    assert.deepStrictEqual(messageListArgs(scoped), [
+      "messages",
+      "list",
+      "--project",
+      "47528834",
+      "--json",
+      "--quiet"
+    ])
+    assert.deepStrictEqual(messageCreateArgs(scoped, "[all] Lesson", "Body"), [
+      "messages",
+      "create",
+      "[all] Lesson",
+      "Body",
+      "--no-subscribe",
+      "--project",
+      "47528834",
+      "--json",
+      "--quiet"
+    ])
+    assert.deepStrictEqual(todolistListArgs(scoped), [
+      "todolists",
+      "list",
+      "--project",
+      "47528834",
+      "--json",
+      "--quiet"
+    ])
+    assert.deepStrictEqual(todoListArgs(scoped, 10171715260), [
+      "todos",
+      "list",
+      "--list",
+      "10171715260",
+      "--project",
+      "47528834",
+      "--json",
+      "--quiet"
+    ])
+  })
+
+  it.effect("decodes messages, todolists, and todos from CLI JSON", () =>
+    Effect.gen(function* () {
+      // Trimmed from live riccardo.log captures (message 10171714810,
+      // todolist 10171715260).
+      const message = yield* parseMessage(
+        '{"id":10171714810,"title":"[all] Every link in copy must resolve","type":"Message",' +
+          '"content":"<div>Origin: card 10169400204.</div>","status":"active",' +
+          '"created_at":"2026-08-05T19:20:00.000Z","app_url":"https://example.test/m"}'
+      )
+      const messages = yield* parseMessages(
+        '[{"id":10171714810,"title":"[all] T","content":"<p>C</p>","created_at":"2026-08-05T19:20:00.000Z"}]'
+      )
+      const todolists = yield* parseTodolists(
+        '[{"id":10171715260,"title":"Policy: qa [all]","name":"Policy: qa [all]",' +
+          '"description":"Rubric","completed_ratio":"0/4","type":"Todolist"}]'
+      )
+      const todos = yield* parseTodos(
+        '[{"id":1,"title":"Every URL resolves","content":"Every URL resolves",' +
+          '"completed":false,"position":1,"type":"Todo"}]'
+      )
+      const noMessages = yield* parseMessages("null")
+      const noTodolists = yield* parseTodolists("null")
+      const noTodos = yield* parseTodos("null")
+
+      assert.deepStrictEqual(
+        message,
+        Message.make({
+          id: 10171714810,
+          title: "[all] Every link in copy must resolve",
+          contentHtml: "<div>Origin: card 10169400204.</div>",
+          createdAt: "2026-08-05T19:20:00.000Z"
+        })
+      )
+      assert.strictEqual(messages.length, 1)
+      assert.deepStrictEqual(todolists, [
+        Todolist.make({ id: 10171715260, title: "Policy: qa [all]" })
+      ])
+      assert.deepStrictEqual(todos, [
+        TodoItem.make({ id: 1, title: "Every URL resolves", completed: false })
+      ])
+      assert.deepStrictEqual(noMessages, [])
+      assert.deepStrictEqual(noTodolists, [])
+      assert.deepStrictEqual(noTodos, [])
     })
   )
 

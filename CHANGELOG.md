@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0
+
+- `BasecampTool` grows the memory/policy surface: `listMessages` and
+  `createMessage(title, body)` (posted with `--no-subscribe`) for
+  message-board lesson posts, `listTodolists` and `listTodos(id)` for
+  read-only checklist rubrics. Message/todolist commands pass `--project`
+  only (never `--card-table`); list decoders stay null-tolerant. Driven
+  by Dunder Mifflin's agency-memory design: lessons as searchable,
+  CEO-curatable messages; policy as CEO-editable todolists.
+
 ## 0.8.1
 
 - `BasecampTool` list decoders (`parseCards`, `parseCardComments`,

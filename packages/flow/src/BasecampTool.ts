@@ -44,6 +44,24 @@ export class CardStep extends Schema.Class<CardStep>("CardStep")({
   completed: Schema.Boolean
 }) {}
 
+export class Message extends Schema.Class<Message>("Message")({
+  id: Schema.Int,
+  title: Schema.String,
+  contentHtml: Schema.String,
+  createdAt: Schema.String
+}) {}
+
+export class Todolist extends Schema.Class<Todolist>("Todolist")({
+  id: Schema.Int,
+  title: Schema.String
+}) {}
+
+export class TodoItem extends Schema.Class<TodoItem>("TodoItem")({
+  id: Schema.Int,
+  title: Schema.String,
+  completed: Schema.Boolean
+}) {}
+
 const projectFlags = (board: BasecampProjectRef): ReadonlyArray<string> => [
   "--project",
   board.project,
@@ -160,6 +178,54 @@ export const cardStepCompleteArgs = (
   "--quiet"
 ]
 
+// Messages and todolists commands take --project only: --card-table
+// belongs to the cards subcommands and is rejected elsewhere.
+const projectOnlyFlags = (board: BasecampProjectRef): ReadonlyArray<string> => [
+  "--project",
+  board.project
+]
+
+export const messageListArgs = (board: BasecampProjectRef): ReadonlyArray<string> => [
+  "messages",
+  "list",
+  ...projectOnlyFlags(board),
+  ...jsonFlags
+]
+
+// --no-subscribe: agent-written memory must not notify humans per post.
+export const messageCreateArgs = (
+  board: BasecampProjectRef,
+  title: string,
+  body: string
+): ReadonlyArray<string> => [
+  "messages",
+  "create",
+  title,
+  body,
+  "--no-subscribe",
+  ...projectOnlyFlags(board),
+  ...jsonFlags
+]
+
+export const todolistListArgs = (board: BasecampProjectRef): ReadonlyArray<string> => [
+  "todolists",
+  "list",
+  ...projectOnlyFlags(board),
+  ...jsonFlags
+]
+
+export const todoListArgs = (
+  board: BasecampProjectRef,
+  todolistId: number
+): ReadonlyArray<string> => [
+  "todos",
+  "list",
+  "--list",
+  String(todolistId),
+  ...projectOnlyFlags(board),
+  ...jsonFlags
+]
+
 const decodeJson = <A, S extends Schema.Codec<A, string>>(
   operation: string,
   schema: S,
@@ -268,6 +334,60 @@ export const parseCardSteps = (
     json
   ).pipe(Effect.map((steps) => (steps ?? []).map((step) => CardStep.make(step))))
 
+const messageStruct = Schema.Struct({
+  id: Schema.Int,
+  title: Schema.String,
+  content: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  created_at: Schema.String
+})
+
+const toMessage = (item: typeof messageStruct.Type): Message =>
+  Message.make({
+    id: item.id,
+    title: item.title,
+    contentHtml: item.content ?? "",
+    createdAt: item.created_at
+  })
+
+export const parseMessage = (json: string): Effect.Effect<Message, ProcessError> =>
+  decodeJson("basecamp parse message", Schema.fromJsonString(messageStruct), json).pipe(
+    Effect.map(toMessage)
+  )
+
+export const parseMessages = (json: string): Effect.Effect<ReadonlyArray<Message>, ProcessError> =>
+  decodeJson(
+    "basecamp parse messages",
+    Schema.fromJsonString(Schema.NullOr(Schema.Array(messageStruct))),
+    json
+  ).pipe(Effect.map((items) => (items ?? []).map(toMessage)))
+
+const todolistStruct = Schema.Struct({
+  id: Schema.Int,
+  title: Schema.String
+})
+
+export const parseTodolists = (
+  json: string
+): Effect.Effect<ReadonlyArray<Todolist>, ProcessError> =>
+  decodeJson(
+    "basecamp parse todolists",
+    Schema.fromJsonString(Schema.NullOr(Schema.Array(todolistStruct))),
+    json
+  ).pipe(Effect.map((items) => (items ?? []).map((item) => Todolist.make(item))))
+
+const todoStruct = Schema.Struct({
+  id: Schema.Int,
+  title: Schema.String,
+  completed: Schema.Boolean
+})
+
+export const parseTodos = (json: string): Effect.Effect<ReadonlyArray<TodoItem>, ProcessError> =>
+  decodeJson(
+    "basecamp parse todos",
+    Schema.fromJsonString(Schema.NullOr(Schema.Array(todoStruct))),
+    json
+  ).pipe(Effect.map((items) => (items ?? []).map((item) => TodoItem.make(item))))
+
 export interface BasecampToolShape {
   readonly listColumns: Effect.Effect<ReadonlyArray<Column>, FlowError>
   readonly resolveColumn: (title: string) => Effect.Effect<Column, FlowError>
@@ -287,6 +407,10 @@ export interface BasecampToolShape {
   readonly writeCardComment: (cardId: number, body: string) => Effect.Effect<void, FlowError>
   readonly listSteps: (cardId: number) => Effect.Effect<ReadonlyArray<CardStep>, FlowError>
   readonly completeStep: (stepId: number) => Effect.Effect<void, FlowError>
+  readonly listMessages: Effect.Effect<ReadonlyArray<Message>, FlowError>
+  readonly createMessage: (title: string, body: string) => Effect.Effect<Message, FlowError>
+  readonly listTodolists: Effect.Effect<ReadonlyArray<Todolist>, FlowError>
+  readonly listTodos: (todolistId: number) => Effect.Effect<ReadonlyArray<TodoItem>, FlowError>
 }
 
 const output = (result: ProcessResult): string => result.stdout.join("\n").trim()
@@ -412,6 +536,28 @@ export const makeBasecampTool = Effect.fn("@llm4ts/flow/BasecampTool.make")(func
       write(
         "basecamp cards step complete",
         run(cardStepCompleteArgs(board, stepId)).pipe(Effect.asVoid)
+      ),
+    listMessages: read(
+      "basecamp messages list",
+      run(messageListArgs(board)).pipe(Effect.flatMap((result) => parseMessages(output(result))))
+    ),
+    createMessage: (title, body) =>
+      write(
+        "basecamp messages create",
+        run(messageCreateArgs(board, title, body)).pipe(
+          Effect.flatMap((result) => parseMessage(output(result)))
+        )
+      ),
+    listTodolists: read(
+      "basecamp todolists list",
+      run(todolistListArgs(board)).pipe(Effect.flatMap((result) => parseTodolists(output(result))))
+    ),
+    listTodos: (todolistId) =>
+      read(
+        "basecamp todos list",
+        run(todoListArgs(board, todolistId)).pipe(
+          Effect.flatMap((result) => parseTodos(output(result)))
+        )
       )
   }
 })
