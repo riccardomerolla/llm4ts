@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.1
+
+- `effect` is pinned to the exact beta (4.0.0-beta.102) in every
+  package's peer range and in the pack-smoke consumer. The 0.9.0 release
+  gate failed when the caret range resolved effect 4.0.0-beta.104, which
+  removed `Schema.TaggedErrorClass`; prerelease betas break APIs, so the
+  supported version is now stated exactly. Upgrading the effect pin is a
+  deliberate migration, not a range drift. (0.9.0 was never published.)
+
 ## 0.9.0
 
 - `BasecampTool` grows the memory/policy surface: `listMessages` and

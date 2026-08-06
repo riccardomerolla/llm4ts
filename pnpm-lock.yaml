@@ -84,7 +84,7 @@ importers:
   packages/core:
     devDependencies:
       effect:
-        specifier: ^4.0.0-beta.102
+        specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
 
   packages/flow:
@@ -94,7 +94,7 @@ importers:
         version: link:../core
     devDependencies:
       effect:
-        specifier: ^4.0.0-beta.102
+        specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
 
   packages/js:
@@ -110,7 +110,7 @@ importers:
         version: link:../runner
     devDependencies:
       effect:
-        specifier: ^4.0.0-beta.102
+        specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
 
   packages/modernize:
@@ -126,7 +126,7 @@ importers:
         version: link:../runner
     devDependencies:
       effect:
-        specifier: ^4.0.0-beta.102
+        specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
 
   packages/runner:
@@ -139,13 +139,13 @@ importers:
         version: link:../flow
     devDependencies:
       effect:
-        specifier: ^4.0.0-beta.102
+        specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
 
   packages/shell:
     dependencies:
       '@effect/platform-node':
-        specifier: ^4.0.0-beta.102
+        specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102(effect@4.0.0-beta.102)(ioredis@5.11.1)
       '@llm4ts/core':
         specifier: workspace:*
@@ -161,7 +161,7 @@ importers:
         version: link:../runner
     devDependencies:
       effect:
-        specifier: ^4.0.0-beta.102
+        specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
 
 packages:

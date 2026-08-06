@@ -41,7 +41,7 @@ try {
         name: "llm4ts-pack-smoke",
         private: true,
         type: "module",
-        dependencies: { ...fileDeps, effect: "^4.0.0-beta.102" },
+        dependencies: { ...fileDeps, effect: "4.0.0-beta.102" },
         overrides: fileDeps
       },
       null,

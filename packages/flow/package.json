@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/flow",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Effect-native LLM workflow, persistence, review, and repository automation",
   "license": "MIT",
   "type": "module",
@@ -88,9 +88,9 @@
     "@llm4ts/core": "workspace:*"
   },
   "peerDependencies": {
-    "effect": "^4.0.0-beta.102"
+    "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
-    "effect": "^4.0.0-beta.102"
+    "effect": "4.0.0-beta.102"
   }
 }

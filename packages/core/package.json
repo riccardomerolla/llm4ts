@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/core",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Effect-native LLM contracts, providers, tools, evaluation, and observability",
   "license": "MIT",
   "type": "module",
@@ -97,9 +97,9 @@
     "typescript"
   ],
   "peerDependencies": {
-    "effect": "^4.0.0-beta.102"
+    "effect": "4.0.0-beta.102"
   },
   "devDependencies": {
-    "effect": "^4.0.0-beta.102"
+    "effect": "4.0.0-beta.102"
   }
 }
