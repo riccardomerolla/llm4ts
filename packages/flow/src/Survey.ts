@@ -29,6 +29,43 @@ export class SurveyGraph extends Schema.Class<SurveyGraph>("SurveyGraph")({
   }
 }
 
+/**
+ * The transitive dependency closure of `program` as repo-relative paths,
+ * breadth-first, excluding the program itself. The `seen` set is required, not
+ * optional bookkeeping: COBOL copybook graphs genuinely contain cycles (a
+ * copybook that COPYs something which eventually COPYs back), and without it
+ * this walk would never terminate on a real estate. Truncated to `maxFiles` so
+ * a program pulling hundreds of copybooks still gets a bounded, visible subset
+ * instead of an unbounded read.
+ */
+export const closureFor = (
+  graph: SurveyGraph,
+  program: string,
+  maxFiles: number
+): ReadonlyArray<string> => {
+  const pathOf = new Map(graph.nodes.map((node) => [node.name, node.path]))
+  const walk = (
+    frontier: ReadonlyArray<string>,
+    seen: ReadonlySet<string>,
+    acc: ReadonlyArray<string>
+  ): ReadonlyArray<string> => {
+    if (frontier.length === 0 || acc.length >= maxFiles) {
+      return acc.slice(0, maxFiles)
+    }
+    const next = [
+      ...new Set(frontier.flatMap((from) => graph.outgoing(from).map((edge) => edge.to)))
+    ].filter((name) => !seen.has(name))
+    return walk(next, new Set([...seen, ...next]), [
+      ...acc,
+      ...next.flatMap((name) => {
+        const path = pathOf.get(name)
+        return path === undefined ? [] : [path]
+      })
+    ])
+  }
+  return walk([program], new Set([program]), [])
+}
+
 const unitName = (path: string): string => {
   const base = path.split("/").at(-1) ?? path
   const dot = base.lastIndexOf(".")

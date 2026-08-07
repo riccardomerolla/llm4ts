@@ -33,9 +33,17 @@ export interface Pack {
   readonly prompts: Readonly<Record<string, string>>
   readonly lenses: ReadonlyArray<Reviewer>
   readonly lessons: string | undefined
+  // Regex template locating a program's TARGET implementation files (relative
+  // paths), `<NAME>` substituted with the program name. The seam that makes
+  // per-program judging possible.
+  readonly programFiles: string | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
   readonly prompt: (name: string) => string | undefined
+  // The regex for `program`'s implementation files: the `programFiles:`
+  // template with `<NAME>` substituted, or a case-insensitive "path contains
+  // the program name" fallback.
+  readonly filesFor: (program: string) => RegExp
 }
 
 interface ParsedManifest {
@@ -134,6 +142,17 @@ const dimensions = (body: string | undefined): ReadonlyArray<Dimension> =>
       : [Dimension.make({ name, rubric, maxScore })]
   })
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const isValidRegExp = (source: string): boolean => {
+  try {
+    new RegExp(source)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const markdownSidecars = Effect.fn("@llm4ts/flow/Pack.markdownSidecars")(function* (
   workspace: WorkspaceShape,
   directory: string
@@ -173,6 +192,16 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, text]) => parseReviewer(name, text))
   const fields = manifest.fields
+  const programFiles = fields["programFiles"]
+  // Validated at load so a mis-typed template fails the pack, not a later
+  // phase; substitution cannot introduce invalid syntax because the fallback
+  // probe uses an alphanumeric stand-in and real substitutions are escaped
+  // only in the no-template fallback, mirroring the reference behavior.
+  if (programFiles !== undefined && !isValidRegExp(programFiles.replaceAll("<NAME>", "PROBE"))) {
+    return yield* PlanParseError.make({
+      message: `pack manifest 'programFiles:' is not a valid regex template: ${programFiles}`
+    })
+  }
   const pack: Pack = {
     name: manifest.name,
     source: fields.source ?? "",
@@ -198,9 +227,16 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     prompts,
     lenses,
     lessons: lessons === undefined || lessons.length === 0 ? undefined : lessons,
+    programFiles,
     dir: directory,
     gate: (name) => gates[name],
-    prompt: (name) => prompts[name]
+    prompt: (name) => prompts[name],
+    // The template is anchored to the whole path (the reference full-matches);
+    // the fallback is a deliberate substring "path contains the name" match.
+    filesFor: (program) =>
+      programFiles === undefined
+        ? new RegExp(escapeRegExp(program), "i")
+        : new RegExp(`^(?:${programFiles.replaceAll("<NAME>", program)})$`)
   }
   return pack
 })

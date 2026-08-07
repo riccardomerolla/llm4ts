@@ -63,6 +63,49 @@ unit: CALL '([^']+)'
       assert.strictEqual(pack.equivalence.ordering, "PerKey")
       assert.isTrue(pack.equivalence.ignore.has("timestamp"))
       assert.match(lessons, /Keep ids stable/)
+      // No programFiles template: filesFor falls back to a case-insensitive
+      // name match with regex metacharacters escaped.
+      assert.strictEqual(pack.programFiles, undefined)
+      assert.isTrue(pack.filesFor("payroll").test("src/main/java/PAYROLL.java"))
+      assert.isFalse(pack.filesFor("payroll").test("src/main/java/Billing.java"))
+      assert.isFalse(pack.filesFor("pay.roll").test("src/payQroll.java"))
+    })
+  )
+
+  it.effect("substitutes <NAME> into the programFiles template", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "pack/pack.md",
+        `# Pack: cobol-springboot
+
+source: cobol
+programFiles: src/main/java/.*<NAME>.*\\.java
+`
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      assert.strictEqual(pack.programFiles, "src/main/java/.*<NAME>.*\\.java")
+      assert.isTrue(pack.filesFor("Payroll").test("src/main/java/PayrollService.java"))
+      assert.isFalse(pack.filesFor("Payroll").test("src/main/java/Billing.java"))
+      // The template is used verbatim: unlike the fallback it is case-sensitive.
+      assert.isFalse(pack.filesFor("Payroll").test("src/main/java/PAYROLL.java"))
+    })
+  )
+
+  it.effect("rejects an invalid programFiles regex template at load time", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "pack/pack.md",
+        `# Pack: broken
+
+source: cobol
+programFiles: src/(<NAME>
+`
+      )
+      const error = yield* Effect.flip(loadPack(workspace, "pack"))
+      assert.strictEqual(error._tag, "PlanParse")
+      assert.include(error.message, "programFiles")
     })
   )
 })

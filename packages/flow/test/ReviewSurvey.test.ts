@@ -7,6 +7,9 @@ import { ReviewResult } from "@llm4ts/flow/Review"
 import { CoverageRule, coverage, features } from "@llm4ts/flow/SpecChecks"
 import {
   SurveyEdge,
+  SurveyGraph,
+  SurveyNode,
+  closureFor,
   mergeSurveyEdges,
   renderSurveyInventory,
   surveyGraph
@@ -112,4 +115,36 @@ describe("spec checks and survey", () => {
       assert.match(report, /3 unit\(s\), 2 edge\(s\)/)
     })
   )
+})
+
+describe("include closure", () => {
+  const node = (name: string): SurveyNode =>
+    SurveyNode.make({ path: `src/${name}.cbl`, name, lines: 1, units: 1 })
+  const edge = (from: string, to: string): SurveyEdge => SurveyEdge.make({ from, to, kind: "copy" })
+
+  it("walks breadth-first, excluding the program itself", () => {
+    const graph = SurveyGraph.make({
+      nodes: [node("MAIN"), node("A"), node("B"), node("C")],
+      edges: [edge("MAIN", "A"), edge("MAIN", "B"), edge("A", "C")]
+    })
+    assert.deepStrictEqual(closureFor(graph, "MAIN", 40), ["src/A.cbl", "src/B.cbl", "src/C.cbl"])
+  })
+
+  it("terminates on cyclic graphs", () => {
+    const graph = SurveyGraph.make({
+      nodes: [node("MAIN"), node("A"), node("B")],
+      edges: [edge("MAIN", "A"), edge("A", "B"), edge("B", "A"), edge("B", "MAIN")]
+    })
+    assert.deepStrictEqual(closureFor(graph, "MAIN", 40), ["src/A.cbl", "src/B.cbl"])
+  })
+
+  it("bounds the closure to maxFiles and skips dependencies with no inventory path", () => {
+    const graph = SurveyGraph.make({
+      nodes: [node("MAIN"), node("A"), node("B"), node("C")],
+      edges: [edge("MAIN", "A"), edge("MAIN", "GHOST"), edge("A", "B"), edge("B", "C")]
+    })
+    // GHOST has no node, so it contributes no path; the cap still holds.
+    assert.deepStrictEqual(closureFor(graph, "MAIN", 2), ["src/A.cbl", "src/B.cbl"])
+    assert.deepStrictEqual(closureFor(graph, "MAIN", 40), ["src/A.cbl", "src/B.cbl", "src/C.cbl"])
+  })
 })

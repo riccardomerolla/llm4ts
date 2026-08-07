@@ -142,4 +142,57 @@ describe("GitTool", () => {
       })
     )
   )
+
+  it.effect("scopes diffVsBaseScoped to its paths, and empty paths never mean everything", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        yield* git.config("user.name", "llm4ts test")
+        yield* git.config("user.email", "llm4ts@example.invalid")
+        yield* Effect.promise(() => writeFile(join(root, "value.txt"), "one\n", "utf8"))
+        yield* git.commitAll("first")
+        yield* git.createBranch("epic/work")
+        yield* Effect.promise(() => writeFile(join(root, "alpha.txt"), "alpha\n", "utf8"))
+        yield* Effect.promise(() => writeFile(join(root, "beta.txt"), "beta\n", "utf8"))
+        yield* git.commitAll("second")
+
+        const scoped = yield* git.diffVsBaseScoped("main", ["alpha.txt"])
+        assert.include(scoped, "alpha.txt")
+        assert.notInclude(scoped, "beta.txt")
+
+        assert.strictEqual(yield* git.diffVsBaseScoped("main", []), "")
+      })
+    )
+  )
+
+  // The empty-paths early return must sit INSIDE the capability guard: were it
+  // hoisted out, diffVsBaseScoped(base, []) would silently succeed under
+  // grants that deny GitRead — no typed failure, no audit event — the exact
+  // hole no other GitRead method has.
+  it.effect("consults the GitRead guard even when the path list is empty", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        const noGit = new Grants({
+          ...allGrants,
+          git: "None"
+        })
+
+        const denied = yield* Effect.flip(restricted(noGit)(git.diffVsBaseScoped("main", [])))
+        assert.strictEqual(denied._tag, "CapabilityDenied")
+        const recorded = yield* events.recorded
+        assert.isTrue(
+          recorded.some(
+            (event) => event._tag === "CapabilityDenied" && event.capability === "GitRead"
+          )
+        )
+      })
+    )
+  )
 })

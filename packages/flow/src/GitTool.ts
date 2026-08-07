@@ -29,6 +29,11 @@ export interface GitToolShape {
   readonly diffAll: Effect.Effect<string, FlowError>
   readonly defaultBase: Effect.Effect<string, FlowError>
   readonly diffVsBase: (base: string, threeDot?: boolean) => Effect.Effect<string, FlowError>
+  readonly diffVsBaseScoped: (
+    base: string,
+    paths: ReadonlyArray<string>,
+    threeDot?: boolean
+  ) => Effect.Effect<string, FlowError>
   readonly changedFilesVsBase: (
     base: string,
     threeDot?: boolean
@@ -206,6 +211,22 @@ export const makeGitTool = (
     defaultBase: read("git defaultBase", defaultBaseEffect),
     diffVsBase: (base, threeDot = true) =>
       read("git diffVsBase", runOrFail(["diff", `${base}${threeDot ? "..." : ".."}HEAD`])),
+    // Diff vs base restricted to paths — the per-program / per-lens scoping
+    // primitive. An EMPTY paths list returns the empty string rather than the
+    // whole diff: bare `git diff <range> --` means "everything", which would
+    // silently defeat every caller that scopes by a computed, possibly-empty
+    // file set. The empty check lives INSIDE read(...), not before it — a
+    // pre-guard early return would let diffVsBaseScoped(base, []) silently
+    // succeed under grants that deny GitRead, with no CapabilityDenied audit.
+    diffVsBaseScoped: (base, paths, threeDot = true) =>
+      read(
+        "git diffVsBase (scoped)",
+        Effect.suspend(() =>
+          paths.length === 0
+            ? Effect.succeed("")
+            : runOrFail(["diff", `${base}${threeDot ? "..." : ".."}HEAD`, "--", ...paths])
+        )
+      ),
     changedFilesVsBase: (base, threeDot = true) =>
       read(
         "git changedFilesVsBase",
