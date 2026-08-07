@@ -3,7 +3,7 @@
 `CliConnectorConfig.readOnly` is trusted by real consumers — the runner's
 `asReadOnly` builds every reviewer seat with it, and the dogfood loop's
 review verdicts assume the reviewer could not have edited the tree it
-judged. But most connectors map the flag onto approval/permission *modes*,
+judged. But most connectors map the flag onto approval/permission _modes_,
 and orca proved (orca #73/#83/#84, fixed in #89) that at least for claude
 those are requests, not restrictions: under `--permission-mode plan` the
 `init` tool list is byte-identical to the default mode's — `Bash`, `Write`,
@@ -14,17 +14,17 @@ are absent from `init` and `ToolSearch` cannot resurrect them.
 
 llm4ts today, per connector:
 
-| Connector   | `readOnly` maps to                                             | Shape                                          |
-| ----------- | -------------------------------------------------------------- | ---------------------------------------------- |
+| Connector   | `readOnly` maps to                                                       | Shape                                                                                                                                |
+| ----------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | claude      | `permission-mode: default` + `disallowed-tools: Write,Edit,NotebookEdit` | denylist — misses `Bash` and MCP write tools by construction; headless default-mode `Bash` behavior unverified and version-dependent |
-| gemini      | `--approval-mode plan`                                         | mode — unverified as a gate                    |
-| grok        | `--permission-mode plan`                                       | mode — unverified as a gate                    |
-| opencode    | `--agent plan`                                                 | mode — unverified as a gate                    |
-| antigravity | `mode: plan`                                                   | mode — unverified as a gate                    |
-| cursor      | omits `--force`                                                | approval default — a request by definition     |
-| copilot     | *(nothing — the flag is silently ignored)*                     | none                                           |
-| codex       | `sandbox: "read-only"`                                         | OS-level sandbox — a real gate                 |
-| pi          | `--tools read`                                                 | allowlist-shaped — verify what "read" includes |
+| gemini      | `--approval-mode plan`                                                   | mode — unverified as a gate                                                                                                          |
+| grok        | `--permission-mode plan`                                                 | mode — unverified as a gate                                                                                                          |
+| opencode    | `--agent plan`                                                           | mode — unverified as a gate                                                                                                          |
+| antigravity | `mode: plan`                                                             | mode — unverified as a gate                                                                                                          |
+| cursor      | omits `--force`                                                          | approval default — a request by definition                                                                                           |
+| copilot     | _(nothing — the flag is silently ignored)_                               | none                                                                                                                                 |
+| codex       | `sandbox: "read-only"`                                                   | OS-level sandbox — a real gate                                                                                                       |
+| pi          | `--tools read`                                                           | allowlist-shaped — verify what "read" includes                                                                                       |
 
 This is inherited parity: pinned llm4zio maps claude the same denylist way
 (its `CoderPolicy` scaladoc: "Claude expresses deny-lists via
@@ -39,13 +39,13 @@ actually enforce the config" fixes and can share a verification pass.
 
 ## Decisions
 
-| Question                  | Decision                                                                                                                                                                                                                                        |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Claude allowlist          | Adopt orca's verified set verbatim: `--tools Read,Grep,Glob,Skill` (claude 2.1.222 yields an `init` list of exactly those four). Explicit `flags` win on conflict, same rule as the turn-limit spec. Drop the `permission-mode`/`disallowed-tools` pair from the `readOnly` branch — the allowlist subsumes it; `CoderPolicy`'s publish-grade `disallowed-tools` merging is a separate seam and stays. |
-| The cost of losing `Bash` | Accepted, eyes open (orca #84, 87 reviewer sessions): 64% of reviewer `Bash` calls are search/read/list — covered by `Grep`/`Read`/`Glob` at more turns (75% of calls batched several ops); 34% touch git, mostly re-deriving a diff the prompt already carries. llm4ts reviewers get the diff in-prompt (`reviewAndFixLoop`), so the bet is the same one orca made. |
-| Network access            | No new tier. `readOnly` stays a boolean and excludes web tools. Orca's NetworkOnly finding is recorded for whoever needs it later: `--tools` only *advertises* — a gated tool still needs `--allowedTools` on top, because headless stdin is closed and nobody can approve, so the call fails silently as a `tool_result`. |
+| Question                       | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude allowlist               | Adopt orca's verified set verbatim: `--tools Read,Grep,Glob,Skill` (claude 2.1.222 yields an `init` list of exactly those four). Explicit `flags` win on conflict, same rule as the turn-limit spec. Drop the `permission-mode`/`disallowed-tools` pair from the `readOnly` branch — the allowlist subsumes it; `CoderPolicy`'s publish-grade `disallowed-tools` merging is a separate seam and stays.                                                                                                                                                                                                                            |
+| The cost of losing `Bash`      | Accepted, eyes open (orca #84, 87 reviewer sessions): 64% of reviewer `Bash` calls are search/read/list — covered by `Grep`/`Read`/`Glob` at more turns (75% of calls batched several ops); 34% touch git, mostly re-deriving a diff the prompt already carries. llm4ts reviewers get the diff in-prompt (`reviewAndFixLoop`), so the bet is the same one orca made.                                                                                                                                                                                                                                                              |
+| Network access                 | No new tier. `readOnly` stays a boolean and excludes web tools. Orca's NetworkOnly finding is recorded for whoever needs it later: `--tools` only _advertises_ — a gated tool still needs `--allowedTools` on top, because headless stdin is closed and nobody can approve, so the call fails silently as a `tool_result`.                                                                                                                                                                                                                                                                                                        |
 | Connectors without a real gate | Honesty over theater: the capability record gains `readOnlyEnforcement: "enforced" \| "advisory" \| "ignored"` (codex/pi/claude-after-this-spec → `enforced`; the plan-mode family → `advisory`; copilot/cursor → `ignored`, cursor's approval default being indistinguishable from ignored in headless runs). Consumers pick reviewer seats on it; flows publish the existing `CapabilityUnenforceable` event when `readOnly` is requested from a non-`enforced` connector. Upgrading a connector to `enforced` requires the same evidence orca produced: the harness's advertised tool list observed with and without the flag. |
-| Other harnesses           | Do not guess. Gemini/grok/opencode/antigravity keep their current flags but are labeled `advisory` until someone verifies their plan modes actually remove write tools; verification is a per-connector follow-up, not a blocker for this spec.       |
+| Other harnesses                | Do not guess. Gemini/grok/opencode/antigravity keep their current flags but are labeled `advisory` until someone verifies their plan modes actually remove write tools; verification is a per-connector follow-up, not a blocker for this spec.                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ## Tasks
 

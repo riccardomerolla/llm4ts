@@ -409,3 +409,12 @@ reference release.
     public mutable fiber-local, and one flow is one process, so the
     ambient cell preserves the source's read-back semantics. Flows that
     need private logs (tests, concurrent embedders) wrap themselves.
+- Read-only enforcement diverges from the pinned source (ADR 0010,
+  2026-08-07): claude's `readOnly` emits a `--tools Read,Grep,Glob,Skill`
+  allowlist instead of the source's `--disallowed-tools` denylist — orca
+  #89 proved permission modes and denylists are requests, not capability
+  removals. `ConnectorCapabilities.readOnlyEnforcement`
+  (`enforced`/`advisory`/`ignored`) grades every connector's mapping, and
+  the runner publishes `CapabilityUnenforceable` when a `readOnly` seat
+  resolves to a non-enforced connector. See
+  `docs/provider-capabilities.md` for the per-connector grades.

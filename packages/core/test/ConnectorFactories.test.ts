@@ -118,6 +118,15 @@ describe("ConnectorFactories", () => {
       assert.isTrue(mock.capabilities.streaming)
       assert.isTrue(mock.capabilities.structuredOutput)
       assert.isTrue(mock.capabilities.usageReporting)
+
+      // Read-only enforcement grades (ADR 0010): claude's --tools allowlist
+      // is a real removal; gemini/antigravity lean on unverified plan modes;
+      // copilot ignores the flag; API providers execute no tools at all.
+      assert.strictEqual(claude.capabilities.readOnlyEnforcement, "enforced")
+      assert.strictEqual(gemini.capabilities.readOnlyEnforcement, "advisory")
+      assert.strictEqual(antigravity.capabilities.readOnlyEnforcement, "advisory")
+      assert.strictEqual(copilot.capabilities.readOnlyEnforcement, "ignored")
+      assert.strictEqual(mock.capabilities.readOnlyEnforcement, "enforced")
     })
   )
 })

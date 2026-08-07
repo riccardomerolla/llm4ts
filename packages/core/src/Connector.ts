@@ -51,7 +51,9 @@ export interface CliConnectorShape extends ConnectorShape {
   readonly completeStream: (prompt: string) => Stream.Stream<LlmChunk, LlmError>
 }
 
-export const apiConnectorCapabilities = (): ConnectorCapabilities => ConnectorCapabilities.make({})
+// API providers execute no tools at all, so read-only holds vacuously.
+export const apiConnectorCapabilities = (): ConnectorCapabilities =>
+  ConnectorCapabilities.make({ readOnlyEnforcement: "enforced" })
 
 export const timedHealthCheck = (
   isAvailable: Effect.Effect<boolean>

@@ -5,7 +5,13 @@ import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { ProviderError, type LlmError } from "../Errors.ts"
 import type { StructuredResult } from "../LlmService.ts"
-import { ConnectorIds, LlmChunk, TokenUsage, type JsonSchema } from "../Models.ts"
+import {
+  ConnectorCapabilities,
+  ConnectorIds,
+  LlmChunk,
+  TokenUsage,
+  type JsonSchema
+} from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { collect } from "../Streaming.ts"
 import type { TemporaryFilesShape } from "../TemporaryFiles.ts"
@@ -193,6 +199,11 @@ export const makeCodexConnector = (
   const base = makeCliConnector({
     id: ConnectorIds.Codex,
     interactionSupport: "InteractiveStdin",
+    // `sandbox: read-only` is an OS-level sandbox — a real capability gate.
+    capabilities: ConnectorCapabilities.make({
+      interactiveSessions: true,
+      readOnlyEnforcement: "enforced"
+    }),
     buildArgv: (prompt, _context) => ["codex", "exec", ...extraArgs, prompt],
     buildInteractiveArgv: (_context) => ["codex", ...extraArgs],
     complete,

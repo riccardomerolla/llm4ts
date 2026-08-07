@@ -36,8 +36,13 @@ export const makeCopilotConnector = (
     id: ConnectorIds.Copilot,
     interactionSupport: "ContinuationOnly",
     // This CLI does not surface token usage, so TokensUsed events (and
-    // therefore cost summaries and budgets) cannot include it.
-    capabilities: ConnectorCapabilities.make({ usageReporting: false }),
+    // therefore cost summaries and budgets) cannot include it. `readOnly`
+    // reaches no argv at all — the capability record says so instead of
+    // pretending.
+    capabilities: ConnectorCapabilities.make({
+      usageReporting: false,
+      readOnlyEnforcement: "ignored"
+    }),
     buildArgv: (prompt, _context) => buildCopilotArgv(prompt),
     buildInteractiveArgv: (_context) => ["gh", "copilot"],
     complete,

@@ -13,7 +13,12 @@ import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactori
 import { makeCostTracker, type CostTracker } from "@llm4ts/flow/CostTracker"
 import { checkCostBudget, makeCostRecord, type CostBudget } from "@llm4ts/flow/CostLedger"
 import { FlowLlmError, describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
-import { FlowEvents, makeFlowEventHub, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
+import {
+  FlowEvents,
+  FlowEventsValues,
+  makeFlowEventHub,
+  type FlowEventHub
+} from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
@@ -117,13 +122,36 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   // whole stage, silently.
   const resilient = (service: LlmServiceShape): Effect.Effect<LlmServiceShape> =>
     makeTransientRetry(service).pipe(Effect.provideService(FlowEvents, events))
+  // A readOnly seat on a harness whose mapping is not a real capability
+  // removal is a request, not a restriction (ADR 0010) — say so on the run's
+  // events instead of pretending, so consumers can pick reviewer seats on
+  // `capabilities.readOnlyEnforcement`.
+  const announceReadOnlyGrade = (
+    configuration: ConnectorConfig,
+    connector: { readonly capabilities: { readonly readOnlyEnforcement: string } }
+  ): Effect.Effect<void> =>
+    configuration instanceof CliConnectorConfig &&
+    configuration.readOnly &&
+    connector.capabilities.readOnlyEnforcement !== "enforced"
+      ? events.publish(
+          FlowEventsValues.CapabilityUnenforceable(
+            `readOnly requested from '${configuration.connectorId.value}', but its harness mapping ` +
+              `is ${connector.capabilities.readOnlyEnforcement} — the flag is a request, not a ` +
+              "capability removal"
+          )
+        )
+      : Effect.void
   // The spread keeps everything the connector carries beyond the service
   // methods — notably `capabilities`, which the flow context exposes.
   const resolveSeat = (configuration: ConnectorConfig) =>
     dependencies.registry.resolve(configuration).pipe(
       Effect.mapError(FlowLlmError.from),
       Effect.flatMap((connector) =>
-        Effect.map(resilient(connector), (retrying) => ({ ...connector, ...retrying }))
+        announceReadOnlyGrade(configuration, connector).pipe(
+          Effect.andThen(
+            Effect.map(resilient(connector), (retrying) => ({ ...connector, ...retrying }))
+          )
+        )
       )
     )
   const coder = yield* resolveSeat(coderConfig)

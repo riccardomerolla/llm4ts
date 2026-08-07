@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Read-only is a capability removal, not a request (ADR 0010,
+  `specs/pending/cli-read-only-enforcement.md`): claude's `readOnly` now
+  emits a `--tools Read,Grep,Glob,Skill` allowlist — orca #89 proved plan
+  mode removes no tools and a `disallowed-tools` denylist misses `Bash`
+  and MCP write tools by construction. `ConnectorCapabilities` gains
+  `readOnlyEnforcement` (`enforced` — claude/codex/pi and API providers;
+  `advisory` — the plan-mode family; `ignored` — copilot/cursor), the
+  capability matrix documents the grades, and the runner publishes
+  `CapabilityUnenforceable` when a `readOnly` seat resolves to a
+  non-enforced connector. Explicit `flags.tools` wins on conflict.
+
 - Parity: adopt llm4zio v4.3.0 (`0494a4ad`) — bounded context for the
   modernization pipeline (`specs/pending/llm4zio-4.3.0-parity.md`):
   - **Fixed**: `TransientRetry` no longer retries deterministic client

@@ -112,8 +112,13 @@ export const makeCursorConnector = (
     id: ConnectorIds.Cursor,
     interactionSupport: "ContinuationOnly",
     // This CLI does not surface token usage, so TokensUsed events (and
-    // therefore cost summaries and budgets) cannot include it.
-    capabilities: ConnectorCapabilities.make({ usageReporting: false }),
+    // therefore cost summaries and budgets) cannot include it. Read-only maps
+    // only to omitting `--force` — an approval default that is
+    // indistinguishable from ignored in headless runs.
+    capabilities: ConnectorCapabilities.make({
+      usageReporting: false,
+      readOnlyEnforcement: "ignored"
+    }),
     buildArgv: (prompt, _context) => buildArgv(prompt),
     buildInteractiveArgv: (_context) => ["cursor-agent", ...extraArgs],
     complete,

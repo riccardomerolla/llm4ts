@@ -3,7 +3,7 @@ import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { ProviderError } from "../Errors.ts"
-import { ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
+import { ConnectorCapabilities, ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   jsonBooleanField,
@@ -133,6 +133,13 @@ export const makePiConnector = (
   return makeCliConnector({
     id: ConnectorIds.Pi,
     interactionSupport: "InteractiveStdin",
+    // `--tools read` is pi's documented comma-separated ALLOWLIST of tool
+    // names: only `read` is enabled, so bash/edit/write are absent — a real
+    // capability removal, the same mechanism class as claude's `--tools`.
+    capabilities: ConnectorCapabilities.make({
+      interactiveSessions: true,
+      readOnlyEnforcement: "enforced"
+    }),
     buildArgv: (prompt, _context) => ["pi", "-p", ...extraArgs, prompt],
     buildInteractiveArgv: (_context) => ["pi", ...extraArgs],
     complete,

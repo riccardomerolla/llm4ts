@@ -30,12 +30,22 @@ import {
   usageEventChunk
 } from "./CliSupport.ts"
 
+/**
+ * Read-only is a `--tools` ALLOWLIST, not a permission mode or a denylist
+ * (ADR 0010). Plan mode removes no tools — the `init` tool list under it is
+ * byte-identical to the default mode's, `Bash` included — and a
+ * `--disallowed-tools` denylist misses `Bash` and MCP write tools by
+ * construction. `--tools` is a real capability removal: the dropped tools are
+ * absent from `init` and `ToolSearch` cannot resurrect them (verified against
+ * claude 2.1.222). Explicit `flags.tools` wins on conflict.
+ */
+export const claudeReadOnlyTools = "Read,Grep,Glob,Skill"
+
 export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => {
   const effectiveFlags = config.readOnly
     ? {
-        ...config.flags,
-        "permission-mode": "default",
-        "disallowed-tools": "Write,Edit,NotebookEdit"
+        tools: claudeReadOnlyTools,
+        ...config.flags
       }
     : config.flags
   return [...optionalModelArgs(config.model), ...sortedFlagArgs(effectiveFlags)]
@@ -181,7 +191,8 @@ export const makeClaudeCliConnector = (
       interactiveSessions: true,
       askUser: true,
       approval: true,
-      resumableSessions: true
+      resumableSessions: true,
+      readOnlyEnforcement: "enforced"
     }),
     buildArgv: (prompt, _context) => ["claude", "--print", ...extraArgs, prompt],
     buildInteractiveArgv: (_context) => ["claude", ...extraArgs],

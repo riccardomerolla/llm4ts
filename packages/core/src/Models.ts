@@ -241,6 +241,20 @@ export class HealthStatus extends Schema.Class<HealthStatus>("HealthStatus")({
 export const InteractionSupport = Schema.Literals(["InteractiveStdin", "ContinuationOnly"])
 export type InteractionSupport = typeof InteractionSupport.Type
 
+/**
+ * How honestly a connector's `readOnly` mapping restricts the harness:
+ * - "enforced": a real capability removal — the write tools are absent from
+ *   the harness's advertised surface (a `--tools` allowlist, an OS sandbox),
+ *   verified against the harness's own tool list.
+ * - "advisory": an approval/permission MODE the harness may not treat as a
+ *   capability gate. Upgrading to "enforced" requires observing the harness's
+ *   advertised tool list with and without the flag.
+ * - "ignored": the flag reaches no argv at all, or is indistinguishable from
+ *   ignored in headless runs.
+ */
+export const ReadOnlyEnforcement = Schema.Literals(["enforced", "advisory", "ignored"])
+export type ReadOnlyEnforcement = typeof ReadOnlyEnforcement.Type
+
 export class ConnectorCapabilities extends Schema.Class<ConnectorCapabilities>(
   "ConnectorCapabilities"
 )({
@@ -250,5 +264,8 @@ export class ConnectorCapabilities extends Schema.Class<ConnectorCapabilities>(
   askUser: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   approval: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   structuredOutput: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true))),
-  usageReporting: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true)))
+  usageReporting: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true))),
+  readOnlyEnforcement: ReadOnlyEnforcement.pipe(
+    Schema.withConstructorDefault(Effect.succeed<ReadOnlyEnforcement>("advisory"))
+  )
 }) {}

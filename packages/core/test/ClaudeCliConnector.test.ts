@@ -59,13 +59,16 @@ describe("ClaudeCliConnector", () => {
       })
     )
 
+    // Read-only is a --tools ALLOWLIST (ADR 0010): a real capability removal,
+    // not a permission mode. User-configured flags pass through unchanged —
+    // the allowlist already bounds the tool surface.
     assert.deepStrictEqual(claudeCliExtraArgs(config), [
       "--model",
       "sonnet",
-      "--disallowed-tools",
-      "Write,Edit,NotebookEdit",
       "--permission-mode",
-      "default",
+      "acceptEdits",
+      "--tools",
+      "Read,Grep,Glob,Skill",
       "--zeta"
     ])
     assert.deepStrictEqual(
@@ -78,6 +81,21 @@ describe("ClaudeCliConnector", () => {
     assert.isTrue(connector.capabilities.askUser)
     assert.isTrue(connector.capabilities.approval)
     assert.isTrue(connector.capabilities.resumableSessions)
+    assert.strictEqual(connector.capabilities.readOnlyEnforcement, "enforced")
+  })
+
+  it("lets an explicit tools flag win over the read-only allowlist, and omits it otherwise", () => {
+    const overridden = CliConnectorConfig.make({
+      connectorId: ConnectorIds.ClaudeCli,
+      readOnly: true,
+      flags: { tools: "Read,Grep,Glob,WebFetch" }
+    })
+    assert.deepStrictEqual(claudeCliExtraArgs(overridden), ["--tools", "Read,Grep,Glob,WebFetch"])
+
+    const writable = CliConnectorConfig.make({
+      connectorId: ConnectorIds.ClaudeCli
+    })
+    assert.deepStrictEqual(claudeCliExtraArgs(writable), [])
   })
 
   it.effect("passes prompts through stdin and stamps served model onto usage", () =>
