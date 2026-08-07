@@ -43,9 +43,30 @@ export list; the following modules are the main entry points.
   planning and resumable work.
 - `@llm4ts/flow/Workspace*`: contained filesystem access and workspace tools.
 - `@llm4ts/flow/GitTool`, `GitHubTool`, and `AzureDevOpsTool`: audited repository
-  and forge boundaries.
+  and forge boundaries. `GitTool.diffVsBaseScoped(base, paths)` is the
+  path-scoped diff primitive: empty paths yield `""` (never the whole diff),
+  and the capability guard runs either way.
+- `@llm4ts/flow/Context`: context budgeting for LLM prompts, in characters
+  (deterministic, no tokenizer). `cap(text, limit)` never returns more than
+  `limit` chars (marker included; head ¾, tail ¼); `capped(label, text, limit)`
+  additionally publishes a `FlowEvent` and records the truncation;
+  `withShrink(label, f)` runs `f` at the budget and retries prompt-too-large
+  failures at ½ then ¼ before failing with a message naming
+  `LLM4TS_CONTEXT_BUDGET` (`LLM4TS_JUDGE_SOURCES_LIMIT` is the deprecated
+  alias; default 400_000). `truncations` reads back what this run shortened —
+  flows append it to `provenance.json` — and `isolateTruncations` scopes a
+  private log.
+- `@llm4ts/flow/ProgramJudge`: per-program spec-compliance judging.
+  `groupFiles` partitions changed files by the pack's per-program regex;
+  `judgeAllPrograms` judges each program against only its slice of the diff
+  (cached per program, resumable), judges the unassigned remainder once, and
+  reports every spec'd program with no matching changed file as a Critical
+  finding.
 - `@llm4ts/flow/Reviewer`, `Pack`, `Review`, `SpecChecks`, and `Survey`:
   file-scoped review lenses, bounded review/fix loops, and discovery.
+  `Pack.programFiles`/`filesFor(program)` locate a program's implementation
+  files; `Survey.closureFor(graph, program, maxFiles)` resolves the bounded
+  breadth-first include closure extract hands its analysts.
 - `@llm4ts/flow/PrSummary`: structured pull-request titles and bodies.
 - `@llm4ts/flow/Replay`, `Equiv`, and `EquivReport`: offline replay and
   behavioral proof.

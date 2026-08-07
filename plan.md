@@ -16,8 +16,8 @@ originally occupied this repository.
 When sources disagree, use this order:
 
 1. Explicit decisions recorded in this plan or later accepted ADRs.
-2. The pinned original source: `llm4zio` tag `v4.2.0`, observed at commit
-   `adf23e11`.
+2. The pinned original source: `llm4zio` tag `v4.3.0`, observed at commit
+   `0494a4ad`.
 3. The behavioral and non-functional contracts in `docs/csp/`.
 4. Idiomatic Effect-TS behavior and the locally pinned Effect source.
 
@@ -33,8 +33,10 @@ completion checklist.
 ## Pinned Baselines
 
 - Reference implementation: `/Users/riccardo/git/github/riccardomerolla/llm4zio`
-- Reference release: `v4.2.0`
-- Reference commit observed during planning: `adf23e11`
+- Reference release: `v4.3.0` (adopted 2026-08-07 via
+  `specs/pending/llm4zio-4.3.0-parity.md`; originally planned against `v4.2.0`
+  at `adf23e11`)
+- Reference commit observed during planning: `0494a4ad`
 - Effect reference checkout: `.repos/effect`
 - Effect reference commit: `504343b0cdf9a0306191c069c31b7d569eba0ed7`
 - Effect package line: `4.0.0-beta.102`

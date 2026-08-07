@@ -22,14 +22,14 @@ wait for the rest.
 
 ## Decisions
 
-| Question                | Decision                                                                                                                                                                                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Env knob names          | `LLM4TS_CONTEXT_BUDGET` (chars, default 400_000), with the existing `LLM4TS_JUDGE_SOURCES_LIMIT` (`flows/modernize-extract.ts`) kept as the deprecated alias — mirrors upstream's `LLM4ZIO_CONTEXT_BUDGET` / `LLM4ZIO_JUDGE_SOURCES_LIMIT` pair. New knobs: `LLM4TS_ANALYST_TURNS`, `LLM4TS_MAX_CLOSURE_FILES`. Record the renames in `docs/parity.md`. |
-| Budget unit             | Characters, not tokens — deterministic, no tokenizer dependency, same as upstream (~3.5 chars/token; 400k ≈ 115k tokens, conservative for every provider).                                                                                              |
-| Truncation storage      | Fiber-local (`FiberRef`), written **only** by `capped`/`withShrink`, so no call site can truncate without recording, and concurrent flows don't cross-contaminate. Same rule as upstream.                                                              |
-| `ProgramJudge` placement | `@llm4ts/flow` (like `Review.ts`, `SpecChecks.ts`), not `@llm4ts/modernize` — llm4ts phase logic lives in `flows/*.ts` scripts, so shared seams must sit in the flow package to be testable and reusable. Divergence from upstream's module layout; note it in `docs/parity.md`. |
-| `withShrink` cause suppression | Upstream drops the typed cause on terminal shrink failure because its `AutoResume` would otherwise replay the failing budget ladder forever. llm4ts has no AutoResume — still drop the cause (embed its message in the error text, as upstream does) so the behavior contract matches and a future resume feature cannot reintroduce the loop. |
-| v4.2.0 remainder        | Out of scope: the v4.2.0 tracked-capabilities work is already ported; upstream's `examples/*.sc` compile fixes are Scala-specific. The orca read-only-allowlist finding is a separate spec.                                                             |
+| Question                       | Decision                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Env knob names                 | `LLM4TS_CONTEXT_BUDGET` (chars, default 400_000), with the existing `LLM4TS_JUDGE_SOURCES_LIMIT` (`flows/modernize-extract.ts`) kept as the deprecated alias — mirrors upstream's `LLM4ZIO_CONTEXT_BUDGET` / `LLM4ZIO_JUDGE_SOURCES_LIMIT` pair. New knobs: `LLM4TS_ANALYST_TURNS`, `LLM4TS_MAX_CLOSURE_FILES`. Record the renames in `docs/parity.md`. |
+| Budget unit                    | Characters, not tokens — deterministic, no tokenizer dependency, same as upstream (~3.5 chars/token; 400k ≈ 115k tokens, conservative for every provider).                                                                                                                                                                                              |
+| Truncation storage             | Fiber-local (`FiberRef`), written **only** by `capped`/`withShrink`, so no call site can truncate without recording, and concurrent flows don't cross-contaminate. Same rule as upstream.                                                                                                                                                               |
+| `ProgramJudge` placement       | `@llm4ts/flow` (like `Review.ts`, `SpecChecks.ts`), not `@llm4ts/modernize` — llm4ts phase logic lives in `flows/*.ts` scripts, so shared seams must sit in the flow package to be testable and reusable. Divergence from upstream's module layout; note it in `docs/parity.md`.                                                                        |
+| `withShrink` cause suppression | Upstream drops the typed cause on terminal shrink failure because its `AutoResume` would otherwise replay the failing budget ladder forever. llm4ts has no AutoResume — still drop the cause (embed its message in the error text, as upstream does) so the behavior contract matches and a future resume feature cannot reintroduce the loop.          |
+| v4.2.0 remainder               | Out of scope: the v4.2.0 tracked-capabilities work is already ported; upstream's `examples/*.sc` compile fixes are Scala-specific. The orca read-only-allowlist finding is a separate spec.                                                                                                                                                             |
 
 ## Tasks
 
@@ -168,8 +168,8 @@ wait for the rest.
 - [ ] `CHANGELOG.md` entry; `docs/api.md` (Context, diffVsBase,
       programFiles).
 - [ ] Full verification chain: `pnpm typecheck && pnpm lint &&
-      pnpm format:check && pnpm test`, then `pnpm build &&
-      node scripts/pack-smoke.mjs`.
+pnpm format:check && pnpm test`, then `pnpm build &&
+node scripts/pack-smoke.mjs`.
 
 ## References
 

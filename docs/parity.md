@@ -3,8 +3,8 @@
 This ledger tracks the Effect-TS implementation against the owned `llm4zio`
 reference release.
 
-- Reference tag: `v4.2.0`
-- Reference commit observed during planning: `adf23e11`
+- Reference tag: `v4.3.0` (commit `0494a4ad`; adopted 2026-08-07 through the
+  bounded-context parity update, `specs/pending/llm4zio-4.3.0-parity.md`)
 - Effect reference commit: `504343b0cdf9a0306191c069c31b7d569eba0ed7`
 
 | Reference source                                      | Reference test                                                  | llm4ts module                                          | llm4ts test                              | CSP                                  |
@@ -98,6 +98,13 @@ reference release.
 | `examples/judge-suite.sc`                             | repeated LLM-as-a-Judge example                                 | `flows/judge-suite.ts`                                 | typed build; live execution is opt-in    | evaluation example                   |
 | `llm4zio-modernize/modernize/*.scala`                 | phase and artifact-resume behavior                              | `@llm4ts/modernize/Modernize`, `Approval`, `Artifacts` | `Modernize.test.ts`, `Artifacts.test.ts` | six-phase modernization product      |
 | `llm4zio-java/javaapi/*.scala`                        | `JavaApiSpec.scala`, facade mock-flow behavior                  | `@llm4ts/js`, `@llm4ts/js/Client`                      | `Client.test.ts`, typed docs example     | language-friendly facade             |
+| `llm4zio-flow/Context.scala`                          | `ContextSpec.scala`                                             | `@llm4ts/flow/Context`                                 | `Context.test.ts`                        | context budgeting and truncation     |
+| `llm4zio-modernize/ProgramJudge.scala`                | `ProgramJudgeSpec.scala`                                        | `@llm4ts/flow/ProgramJudge`                            | `ProgramJudge.test.ts`                   | per-program spec-compliance judging  |
+| `ExtractFlow.closureFor`                              | `IncludeClosureSpec.scala`                                      | `@llm4ts/flow/Survey#closureFor`                       | `ReviewSurvey.test.ts`                   | bounded analyst include closure      |
+| `GitTool.diffVsBase(base, paths)`                     | `GitToolSpec.scala`                                             | `@llm4ts/flow/GitTool#diffVsBaseScoped`                | `GitTool.test.ts`                        | path-scoped diff primitive           |
+| `Pack.programFiles` / `filesFor`                      | `PackSpec.scala`                                                | `@llm4ts/flow/Pack#programFiles`, `filesFor`           | `Pack.test.ts`                           | per-program file location seam       |
+| `Provenance.contextTruncations`                       | `ProvenanceSpec.scala`                                          | `@llm4ts/flow/Provenance`                              | `Context.test.ts`                        | truncation evidence chain            |
+| `ImplementFlow` chat-per-task                         | `ChatPerTaskSpec.scala`                                         | `flows/modernize-implement.ts`                         | `modernize-implement.smoke.test.ts`      | bounded implement transcripts        |
 
 ## Accepted Adaptations
 
@@ -369,3 +376,36 @@ reference release.
   `editCardComment` updates one in place (`comments update`) — the
   living-comment pair for consumer work logs, mirroring the 0.7.4
   `GitHubTool` comment-ref evolution. Additive under ADR 0009.
+- v4.3.0 bounded-context adoption (2026-08-07) — Effect-native renames and
+  divergences, behavior contract unchanged:
+  - Env knobs are `LLM4TS_*`: `LLM4TS_CONTEXT_BUDGET` (with
+    `LLM4TS_JUDGE_SOURCES_LIMIT` as the deprecated alias, mirroring the
+    source's `LLM4ZIO_*` pair), `LLM4TS_ANALYST_TURNS`,
+    `LLM4TS_MAX_CLOSURE_FILES`. Node has no system-property channel, so the
+    source's `llm4zio.<NAME>` property fallback has no counterpart.
+  - `ProgramJudge` lives in `@llm4ts/flow`, not the modernize package:
+    llm4ts phase logic runs in `flows/*.ts` scripts, so shared seams must
+    sit in the flow package to be testable and reusable. It takes its
+    `GitTool`, file store, and content `fingerprint` function explicitly
+    (hashing stays in `@llm4ts/runner`; the flow package remains
+    Node-API-free).
+  - The path-scoped diff is `diffVsBaseScoped(base, paths, threeDot?)` — a
+    distinct member rather than the source's overload, since TypeScript
+    object properties cannot overload without runtime argument sniffing.
+    Same contract: empty paths yield `""`, and the check runs inside the
+    `GitRead` guard so denials still audit.
+  - `Pack.filesFor` returns a compiled `RegExp`, not a pattern string:
+    JavaScript has no inline `(?i)` flag, so the case-insensitive fallback
+    carries the `i` flag while a `programFiles:` template is compiled
+    anchored (`^(?:…)$`) to mirror Scala's full-string `matches`. Invalid
+    templates fail at pack load as `PlanParseError`.
+  - `Context.withShrink` drops the typed cause on terminal failure exactly
+    as the source does. llm4ts has no AutoResume yet; the contract is kept
+    so a future resume layer cannot re-enter a permanently failing budget
+    ladder.
+  - Truncation recording uses a `Context.Reference`-held `Ref` (ambient
+    default cell, one per process) plus an explicit `isolateTruncations`
+    combinator, instead of the source's `FiberRef`: Effect 4 exposes no
+    public mutable fiber-local, and one flow is one process, so the
+    ambient cell preserves the source's read-back semantics. Flows that
+    need private logs (tests, concurrent embedders) wrap themselves.

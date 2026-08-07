@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+- Parity: adopt llm4zio v4.3.0 (`0494a4ad`) — bounded context for the
+  modernization pipeline (`specs/pending/llm4zio-4.3.0-parity.md`):
+  - **Fixed**: `TransientRetry` no longer retries deterministic client
+    errors. Gemini wraps every error — including 400s — in
+    `[API Error: …]`, so the `"api error"` transient signal retried
+    unfixable failures three times and reported them as transient. A
+    deterministic-4xx guard now wins; new `isContextOverflow` /
+    `isContextOverflowMessage` classifiers share one phrasing list with
+    `Context.withShrink`.
+  - New `@llm4ts/flow/Context`: `cap` (hard character cap, marker
+    included, head ¾ / tail ¼), `capped` (caps, publishes a `FlowEvent`,
+    records the truncation), `withShrink` (full → ½ → ¼ retry ladder for
+    prompt-too-large failures; exhaustion names the knob), `budget`
+    (`LLM4TS_CONTEXT_BUDGET`, default 400k chars, with
+    `LLM4TS_JUDGE_SOURCES_LIMIT` as the deprecated alias), `truncations`
+    and `isolateTruncations`. Truncations are recorded only by
+    `capped`/`withShrink`, so no call site can truncate silently.
+  - `Provenance.contextTruncations` (defaulted; old manifests still load)
+    — the implement, review, and verify flows append this run's recorded
+    truncations to `provenance.json`, so a verdict rendered on a
+    partially-read spec pack says so in the evidence chain.
+  - `GitTool.diffVsBaseScoped(base, paths)` — path-scoped diff; empty
+    paths yield `""` (never the whole diff) and the `GitRead` guard still
+    runs, so denials still audit.
+  - `Pack.programFiles` template + `filesFor(program)` (compiled
+    `RegExp`; case-insensitive name-match fallback), and
+    `Survey.closureFor` — the breadth-first, cycle-safe, bounded include
+    closure.
+  - New `@llm4ts/flow/ProgramJudge`: per-program spec-compliance judging
+    (each call sees one program's spec and one program's diff slice),
+    cached per program via `ReviewCache`; a spec'd program with no
+    matching changed file is a **Critical** finding, not a silent pass.
+  - Modernize flows decomposed: implement uses a fresh chat per task and
+    per-program judging plus a bounded traceability pass; review scopes
+    each lens to the diff of the files it matched and drops the diff from
+    the distill prompt; verify triages equivalence failures per program;
+    extract hands the analyst a resolved include closure (bounded by
+    `LLM4TS_ANALYST_TURNS` / `LLM4TS_MAX_CLOSURE_FILES`) and uses the
+    shared Context ladder; survey caps its graph-refine and triage
+    prompts.
+
 ## 0.10.0
 
 - `BasecampTool.writeCardComment` returns the created `CardComment`
