@@ -13,7 +13,16 @@ export class Provenance extends Schema.Class<Provenance>("Provenance")({
   specs: Schema.Record(Schema.String, Schema.String),
   gateVerdicts: Schema.Record(Schema.String, Schema.String),
   equivalenceReport: Schema.optionalKey(Schema.String),
-  fixSpecs: Schema.Array(Schema.String)
+  fixSpecs: Schema.Array(Schema.String),
+  // Context truncations recorded while producing this evidence
+  // (Context.renderTruncation strings). A gate verdict rendered on a
+  // partially-read spec pack says so HERE — that visibility is the whole
+  // reason truncation is allowed at all. Defaulted so manifests written
+  // before this field still load.
+  contextTruncations: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([]))
+  )
 }) {}
 
 const join = (root: string, path: string): string =>
