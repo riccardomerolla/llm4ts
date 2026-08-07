@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/modernize",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Resumable six-phase modernization product built on llm4ts",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0
 
 - Read-only is a capability removal, not a request (ADR 0010,
   `specs/pending/cli-read-only-enforcement.md`): claude's `readOnly` now
