@@ -17,12 +17,15 @@
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
+import { Dimension } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import type { JsonSchema } from "@llm4ts/core/Models"
-import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
+import { capped, renderTruncation, truncations, withShrink } from "@llm4ts/flow/Context"
+import { FlowAborted } from "@llm4ts/flow/FlowError"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
-import { Info } from "@llm4ts/flow/FlowEvents"
+import { FlowEvents, Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import { judgeAllPrograms } from "@llm4ts/flow/ProgramJudge"
+import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
 import { appendPackLesson, type Pack } from "@llm4ts/flow/Pack"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { Plan, Task } from "@llm4ts/flow/Plan"
@@ -42,6 +45,7 @@ import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
 import { openPack } from "@llm4ts/runner/Packs"
+import { reviewFingerprint } from "@llm4ts/runner/ReviewFingerprint"
 
 const ModDir = "docs/modernization"
 
@@ -115,16 +119,18 @@ const gatherDir = Effect.fn("modernize-review.gatherDir")(function* (
   return parts.join("\n\n")
 })
 
-const distillPrompt = (
-  pack: Pack,
-  findings: ReviewResult,
-  scored: EvalResult,
-  diff: string
-): string =>
+/**
+ * The distill prompt carries findings and judge verdicts, NOT the diff: every
+ * finding already names what it is about (reviewer issues carry file/line,
+ * judge issues name their program), so anything the distiller needs arrived
+ * scoped upstream — reintroducing the whole diff here is exactly the
+ * unbounded prompt this flow no longer sends.
+ */
+const distillPrompt = (pack: Pack, findings: ReviewResult, judged: ReviewResult): string =>
   [
     pack.prompt("review") ?? "",
     "",
-    "Below are the raw reviewer findings and judge scores for a modernization increment.",
+    "Below are the raw reviewer findings and judge verdicts for a modernization increment.",
     "Distill them:",
     '- "fixes": findings where the implementation VIOLATES the committed specs. Each gets a',
     "  short spec document (Markdown: what is wrong, the spec rule it violates, the expected",
@@ -139,12 +145,53 @@ const distillPrompt = (
       .map((issue) => `- [${issue.severity}] ${issue.title}: ${issue.description}`)
       .join("\n"),
     "",
-    "Judge scores:",
-    scored.scores.map((score) => `- ${score.name}: ${score.score} — ${score.reasoning}`).join("\n"),
-    "",
-    "Diff under review:",
-    diff
+    "Judge findings (per-program spec-compliance):",
+    judged.isClean
+      ? "- all programs cleared the bar"
+      : judged.issues.map((issue) => `- ${issue.title}: ${issue.description}`).join("\n")
   ].join("\n")
+
+/** The spec'd programs: top-level `<NAME>.md` under the specs dir, indexes aside. */
+const specPrograms = Effect.fn("modernize-review.specPrograms")(function* (
+  target: WorkspaceShape,
+  specsDir: string
+) {
+  const paths = yield* target.discover(`${specsDir}/*.md`).pipe(Effect.orElseSucceed(() => []))
+  return [...paths]
+    .map((path) => path.split("/").at(-1) ?? path)
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => name.slice(0, -".md".length))
+    .filter((name) => !["traceability", "mapping", "README"].includes(name))
+    .sort()
+})
+
+/** Append this run's recorded truncations to provenance.json, when present. */
+const recordTruncations = (
+  manifestPath: string,
+  events: FlowEventsShape
+): Effect.Effect<void, never> =>
+  Effect.gen(function* () {
+    const recorded = yield* truncations
+    if (recorded.length === 0) {
+      return
+    }
+    const store = makeProvenanceStore(nodePlainFileStore)
+    yield* store
+      .extend(manifestPath, (current) =>
+        Provenance.make({
+          ...current,
+          contextTruncations: [...current.contextTruncations, ...recorded.map(renderTruncation)]
+        })
+      )
+      .pipe(
+        Effect.asVoid,
+        Effect.catch(() =>
+          events.publish(
+            Info.make({ message: "no provenance.json — seeded by an older run; skipping" })
+          )
+        )
+      )
+  })
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Review the modernization increment against its spec pack")
@@ -222,43 +269,82 @@ const program = Effect.gen(function* () {
             )
             const results: Array<ReviewResult> = []
             for (const lens of roster) {
-              const prompt = `${lens.systemPrompt}\n\n${reviewPrompt(
-                `modernization increment vs committed specs\n\n${specText}`,
-                diff
-              )}`
+              // Scope the diff to what this lens actually cares about; a lens
+              // matching everything still sees the whole diff, just capped
+              // like everything else below.
+              const scoped = changedFiles.filter((file) => lens.matches([file]))
+              const lensDiff = yield* context.git.diffVsBaseScoped(base, scoped)
               results.push(
-                yield* structuredAndPublish(
-                  reviewService,
-                  context.events,
-                  prompt,
-                  ReviewResult,
-                  reviewJsonSchema,
-                  "reviewer"
+                yield* withShrink(`review[${lens.name}]`, (cap) =>
+                  Effect.gen(function* () {
+                    const cappedSpecs = yield* capped(`specs[${lens.name}]`, specText, cap)
+                    const cappedDiff = yield* capped(`diff[${lens.name}]`, lensDiff, cap)
+                    const prompt = `${lens.systemPrompt}\n\n${reviewPrompt(
+                      `modernization increment vs committed specs\n\n${cappedSpecs}`,
+                      cappedDiff
+                    )}`
+                    return yield* structuredAndPublish(
+                      reviewService,
+                      context.events,
+                      prompt,
+                      ReviewResult,
+                      reviewJsonSchema,
+                      "reviewer"
+                    )
+                  })
                 )
               )
             }
             return mergeReviewResults(results)
-          })
+          }).pipe(Effect.provideService(FlowEvents, context.events))
         )
 
-        const scored = yield* stage(
+        // Per-program spec-compliance judging: each judge call sees one
+        // program's spec and one program's slice of the diff, cached under
+        // the gate dir so an unchanged program re-judges nothing.
+        const judged = yield* stage(
           context.events,
           "judge",
-          judge(context.reasoning, complianceDimensions)
-            .evaluate(Sample.make({ response: diff, context: specText, query: input.prompt }))
-            .pipe(Effect.mapError(FlowLlmError.from))
+          Effect.gen(function* () {
+            const programs = yield* specPrograms(target, pack.specsDir)
+            return yield* judgeAllPrograms({
+              pack,
+              judge: judge(context.reasoning, complianceDimensions),
+              dimensions: complianceDimensions,
+              git: context.git,
+              files,
+              gateDir: join(input.workDir, ModDir, "gate"),
+              base,
+              programs,
+              specFor: (program) =>
+                files
+                  .read(join(input.workDir, pack.specsDir, `${program}.md`))
+                  .pipe(Effect.map((text) => text ?? "")),
+              query: input.prompt,
+              fingerprint: reviewFingerprint
+            })
+          }).pipe(Effect.provideService(FlowEvents, context.events))
         )
 
         const outcome = yield* stage(
           context.events,
           "distill",
-          structuredAndPublish(
-            context.reasoning,
-            context.events,
-            distillPrompt(pack, findings, scored, diff),
-            ReviewOutcome,
-            reviewOutcomeJsonSchema
-          )
+          withShrink("distill", (cap) =>
+            Effect.gen(function* () {
+              const prompt = yield* capped(
+                "distill prompt",
+                distillPrompt(pack, findings, judged),
+                cap
+              )
+              return yield* structuredAndPublish(
+                context.reasoning,
+                context.events,
+                prompt,
+                ReviewOutcome,
+                reviewOutcomeJsonSchema
+              )
+            })
+          ).pipe(Effect.provideService(FlowEvents, context.events))
         )
 
         yield* stage(
@@ -332,6 +418,10 @@ const program = Effect.gen(function* () {
             )
           })
         )
+
+        // Truncations recorded while reviewing/judging land in the evidence
+        // chain — before the commit stage, so the manifest change is included.
+        yield* recordTruncations(join(input.workDir, ModDir, "provenance.json"), context.events)
 
         yield* stage(
           context.events,

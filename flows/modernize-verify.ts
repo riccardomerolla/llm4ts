@@ -32,10 +32,11 @@ import {
   writeEquivVectors,
   type EquivObservation
 } from "@llm4ts/flow/Equiv"
+import { capped, renderTruncation, truncations, withShrink } from "@llm4ts/flow/Context"
 import { renderEquivReport, VectorVerdict } from "@llm4ts/flow/EquivReport"
 import { FlowAborted, PlanParseError } from "@llm4ts/flow/FlowError"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
-import { Info } from "@llm4ts/flow/FlowEvents"
+import { FlowEvents, Info } from "@llm4ts/flow/FlowEvents"
 import type { Pack } from "@llm4ts/flow/Pack"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { stage } from "@llm4ts/flow/PlanExecution"
@@ -239,6 +240,12 @@ const generatePrompt = (
     feature
   ].join("\n")
 
+/**
+ * One triage call per program (not one for the whole estate): mismatches
+ * already carry their program, so each prompt needs only that program's spec —
+ * never the whole estate's specs concatenated, which is what blows a real
+ * estate's context budget.
+ */
 const triagePrompt = (
   pack: Pack,
   failing: ReadonlyArray<VectorVerdict>,
@@ -398,13 +405,25 @@ const program = Effect.gen(function* () {
                     featurePath === undefined
                       ? ""
                       : yield* target.read(featurePath).pipe(Effect.orElseSucceed(() => ""))
-                  const generated = yield* structuredAndPublish(
-                    context.reasoning,
-                    context.events,
-                    generatePrompt(pack, name, spec, feature, universe),
-                    GeneratedVectors,
-                    generatedVectorsJsonSchema
-                  )
+                  // `universe` is every rule in the estate's rules.txt, sent
+                  // once per program, so this is the largest prompt the phase
+                  // builds — budget it like the rest.
+                  const generated = yield* withShrink(`vectors[${name}]`, (cap) =>
+                    Effect.gen(function* () {
+                      const prompt = yield* capped(
+                        `vectors[${name}]`,
+                        generatePrompt(pack, name, spec, feature, universe),
+                        cap
+                      )
+                      return yield* structuredAndPublish(
+                        context.reasoning,
+                        context.events,
+                        prompt,
+                        GeneratedVectors,
+                        generatedVectorsJsonSchema
+                      )
+                    })
+                  ).pipe(Effect.provideService(FlowEvents, context.events))
                   if (generated.vectors.length === 0) {
                     return yield* FlowAborted.make({
                       message: `generator produced no vectors for ${name}`
@@ -525,21 +544,39 @@ const program = Effect.gen(function* () {
             context.events,
             "triage",
             Effect.gen(function* () {
-              const specTexts: Array<string> = [
-                (yield* files.read(join(input.workDir, pack.specsDir, "traceability.md"))) ?? ""
-              ]
-              for (const name of programs) {
-                specTexts.push(
+              // One triage call PER PROGRAM, each carrying only that program's
+              // spec — not the whole estate's specs in one prompt.
+              const byProgram = [
+                ...new Set(failing.map((verdict) => verdict.vector.program))
+              ].sort()
+              const fixes: Array<VerifyOutcome["fixes"][number]> = []
+              for (const name of byProgram) {
+                const programFailing = failing.filter((verdict) => verdict.vector.program === name)
+                const spec =
                   (yield* files.read(join(input.workDir, pack.specsDir, `${name}.md`))) ?? ""
-                )
+                // Cap the WHOLE rendered prompt, not just the spec: the
+                // mismatch detail block is unbounded too, and shrinking one
+                // ingredient while another grows leaves the ladder failing
+                // all three rungs and then advising a knob that cannot help.
+                const outcome = yield* withShrink(`triage[${name}]`, (cap) =>
+                  Effect.gen(function* () {
+                    const prompt = yield* capped(
+                      `triage[${name}]`,
+                      triagePrompt(pack, programFailing, spec),
+                      cap
+                    )
+                    return yield* structuredAndPublish(
+                      context.reasoning,
+                      context.events,
+                      prompt,
+                      VerifyOutcome,
+                      verifyOutcomeJsonSchema
+                    )
+                  })
+                ).pipe(Effect.provideService(FlowEvents, context.events))
+                fixes.push(...outcome.fixes)
               }
-              const outcome = yield* structuredAndPublish(
-                context.reasoning,
-                context.events,
-                triagePrompt(pack, failing, specTexts.join("\n\n")),
-                VerifyOutcome,
-                verifyOutcomeJsonSchema
-              )
+              const outcome = VerifyOutcome.make({ fixes })
               for (const fix of outcome.fixes) {
                 yield* files.writeAtomic(
                   join(input.workDir, pack.specsDir, "fixes", `fix-${slug(fix.title)}.md`),
@@ -593,12 +630,21 @@ const program = Effect.gen(function* () {
             const provenance = makeProvenanceStore(files)
             const hashes = yield* provenance.hashFiles(input.workDir, [`${ModDir}/equivalence.md`])
             const report = Object.values(hashes)[0]
+            const recorded = yield* truncations
             // Spreading into a plain object would not satisfy the schema's
-            // encoder — the manifest must stay a Provenance instance.
+            // encoder — the manifest must stay a Provenance instance. The
+            // truncations recorded while generating and triaging land here so
+            // a verdict rendered on a partially-read spec pack says so in the
+            // evidence chain.
             yield* provenance.extend(manifest, (current) =>
-              report === undefined
-                ? current
-                : Provenance.make({ ...current, equivalenceReport: report })
+              Provenance.make({
+                ...current,
+                ...(report === undefined ? {} : { equivalenceReport: report }),
+                contextTruncations: [
+                  ...current.contextTruncations,
+                  ...recorded.map(renderTruncation)
+                ]
+              })
             )
           })
         )

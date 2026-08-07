@@ -20,24 +20,30 @@
 // Run: modernize-implement --repo ~/services/meridian-transfers
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import { Dimension, Sample } from "@llm4ts/core/eval/Eval"
+import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
+import type { Evaluator } from "@llm4ts/core/eval/Evaluator"
 import { makeChat } from "@llm4ts/flow/Chat"
+import { capped, renderTruncation, truncations, withShrink } from "@llm4ts/flow/Context"
 import { FlowAborted, FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
-import { Info } from "@llm4ts/flow/FlowEvents"
+import { FlowEvents, Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import { judgeAllPrograms } from "@llm4ts/flow/ProgramJudge"
+import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
 import { loadPatternCards, taggedPatternIds } from "@llm4ts/flow/Patterns"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { implementTaskLoop, stage } from "@llm4ts/flow/PlanExecution"
 import {
+  ReviewIssue,
+  ReviewResult,
   lintCommand,
+  mergeReviewResults,
   minimalReviewers,
-  reviewAndFixLoop,
-  type ReviewIssue,
-  type ReviewResult
+  reviewAndFixLoop
 } from "@llm4ts/flow/Review"
 import { checkWall, wallBreachMessage } from "@llm4ts/flow/Wall"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
 import { asReadOnly, coderFromEnv } from "@llm4ts/runner/Connectors"
+import { reviewFingerprint } from "@llm4ts/runner/ReviewFingerprint"
 import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
@@ -84,6 +90,103 @@ const gatherSpecs = Effect.fn("modernize-implement.gatherSpecs")(function* (
 
 const issueText = (issues: ReadonlyArray<ReviewIssue>): string =>
   issues.map((issue) => `${issue.title}\n${issue.description}`.trim()).join("\n\n")
+
+/** The spec'd programs: top-level `<NAME>.md` under the specs dir, indexes aside. */
+const specPrograms = Effect.fn("modernize-implement.specPrograms")(function* (
+  target: WorkspaceShape,
+  specsDir: string
+) {
+  const paths = yield* target.discover(`${specsDir}/*.md`).pipe(Effect.orElseSucceed(() => []))
+  return [...paths]
+    .map((path) => path.split("/").at(-1) ?? path)
+    .filter((name) => name.endsWith(".md"))
+    .map((name) => name.slice(0, -".md".length))
+    .filter((name) => !["traceability", "mapping", "README"].includes(name))
+    .sort()
+})
+
+/**
+ * One bounded estate-wide pass: the traceability index plus the changed-file
+ * NAMES (never contents). Per-program judging cannot see cross-program
+ * problems — a rule that moved between programs, a scenario orphaned when two
+ * programs were merged — because each of its calls only ever sees one
+ * program's slice of the diff. This pass is the compensating check. Both
+ * parts are capped, not just the index: on a full-estate branch the
+ * changed-file name list alone can run to five figures of lines.
+ */
+const traceabilityPass = (
+  complianceJudge: Evaluator<Sample>,
+  dimensions: ReadonlyArray<Dimension>,
+  trace: string,
+  changedFiles: ReadonlyArray<string>,
+  userPrompt: string
+): Effect.Effect<ReviewResult, FlowError, FlowEvents> =>
+  withShrink("judge[traceability]", (cap) =>
+    Effect.gen(function* () {
+      const cappedTrace = yield* capped("traceability", trace, Math.floor(cap / 2))
+      const cappedNames = yield* capped(
+        "changed files",
+        `Files changed on this branch:\n${changedFiles.join("\n")}`,
+        Math.floor(cap / 2)
+      )
+      return yield* complianceJudge
+        .evaluate(Sample.make({ response: cappedNames, context: cappedTrace, query: userPrompt }))
+        .pipe(Effect.mapError(FlowLlmError.from))
+    })
+  ).pipe(Effect.map((scored: EvalResult) => traceabilityIssues(scored, dimensions)))
+
+const traceabilityIssues = (
+  scored: EvalResult,
+  dimensions: ReadonlyArray<Dimension>
+): ReviewResult => {
+  const subBar = scored.scores.filter(
+    (score) =>
+      score.score < (dimensions.find((dimension) => dimension.name === score.name)?.maxScore ?? 2)
+  )
+  return ReviewResult.make({
+    issues: subBar.map((score) =>
+      ReviewIssue.make({
+        severity: "Critical",
+        title: `judge[traceability]: ${score.name} scored ${score.score}`,
+        description: score.reasoning
+      })
+    ),
+    summary: "judge:traceability"
+  })
+}
+
+/**
+ * Append this run's recorded context truncations to the manifest, so a
+ * verdict rendered on a partially-read spec pack says so in the evidence
+ * chain rather than only in the console log. A repo seeded before provenance
+ * existed simply has no manifest — skip rather than fail.
+ */
+const recordTruncations = (
+  manifestPath: string,
+  events: FlowEventsShape
+): Effect.Effect<void, FlowError> =>
+  Effect.gen(function* () {
+    const recorded = yield* truncations
+    if (recorded.length === 0) {
+      return
+    }
+    const store = makeProvenanceStore(nodePlainFileStore)
+    yield* store
+      .extend(manifestPath, (current) =>
+        Provenance.make({
+          ...current,
+          contextTruncations: [...current.contextTruncations, ...recorded.map(renderTruncation)]
+        })
+      )
+      .pipe(
+        Effect.asVoid,
+        Effect.catch(() =>
+          events.publish(
+            Info.make({ message: "no provenance.json — seeded by an older run; skipping" })
+          )
+        )
+      )
+  })
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Implement the seeded modernization plan")
@@ -191,12 +294,16 @@ const program = Effect.gen(function* () {
           )
         }
 
-        const coderChat = yield* makeChat(context.coder, { system })
         const firstTitle = plan.tasks[0]?.title
 
+        // One chat per task: `Chat` replays its full message list on each ask,
+        // so a shared chat would carry every earlier task's transcript into
+        // task N's prompt. The repo, not the transcript, carries state between
+        // tasks.
         yield* implementTaskLoop(store, context.events, planPath, plan, (task) =>
           Effect.gen(function* () {
             const testsTask = task.title === firstTitle
+            const coderChat = yield* makeChat(context.coder, { system })
             yield* coderChat.ask(plan.taskPrompt(task))
             yield* reviewAndFixLoop({
               reviewers: [...minimalReviewers, ...pack.lenses],
@@ -250,32 +357,52 @@ const program = Effect.gen(function* () {
           )
         }
 
-        // The branch-level judge: bounded rounds of feedback, each re-gated and
-        // committed, failing the flow if the bar is never cleared.
+        // The spec-compliance judge, decomposed: one ProgramJudge pass per
+        // program's own slice of the diff (cached, resumable), plus one
+        // bounded traceability pass over the whole estate — never the whole
+        // spec pack times the whole branch diff in a single call. Bounded
+        // rounds of feedback, each re-gated and committed, failing the flow
+        // if the bar is never cleared.
         yield* stage(
           context.events,
           "judge",
           Effect.gen(function* () {
-            const contractText = yield* gatherSpecs(target, pack.specsDir)
             const complianceJudge = judge(context.reasoning, complianceDimensions)
+            const specsDirAbs = join(input.workDir, pack.specsDir)
+            const gateDir = join(input.workDir, ModDir, "gate")
             const rounds = judgeRounds()
             for (let round = 1; round <= rounds; round += 1) {
               const base = yield* context.git.defaultBase
-              const diff = yield* context.git.diffVsBase(base)
-              const scored = yield* complianceJudge
-                .evaluate(
-                  Sample.make({
-                    response: diff,
-                    context: contractText,
-                    query: input.prompt
-                  })
-                )
-                .pipe(Effect.mapError(FlowLlmError.from))
-              const below = scored.scores.filter((score) => {
-                const max = complianceDimensions.find((d) => d.name === score.name)?.maxScore ?? 2
-                return score.score < max
+              const programs = yield* specPrograms(target, pack.specsDir)
+              const perProgram = yield* judgeAllPrograms({
+                pack,
+                judge: complianceJudge,
+                dimensions: complianceDimensions,
+                git: context.git,
+                files,
+                gateDir,
+                base,
+                programs,
+                specFor: (program) =>
+                  files
+                    .read(join(specsDirAbs, `${program}.md`))
+                    .pipe(Effect.map((text) => text ?? "")),
+                query: input.prompt,
+                fingerprint: reviewFingerprint
               })
-              if (below.length === 0) {
+              const trace = yield* files
+                .read(join(specsDirAbs, "traceability.md"))
+                .pipe(Effect.map((text) => text ?? ""))
+              const changed = yield* context.git.changedFilesVsBase(base)
+              const traced = yield* traceabilityPass(
+                complianceJudge,
+                complianceDimensions,
+                trace,
+                changed,
+                input.prompt
+              )
+              const merged = mergeReviewResults([perProgram, traced])
+              if (merged.isClean) {
                 return yield* context.events.publish(
                   Info.make({ message: "spec-compliance judge: branch cleared the bar" })
                 )
@@ -284,14 +411,18 @@ const program = Effect.gen(function* () {
                 return yield* FlowAborted.make({
                   message:
                     `spec-compliance judge not cleared after ${rounds} round(s):\n` +
-                    below.map((d) => `- ${d.name} ${d.score}: ${d.reasoning}`).join("\n")
+                    merged.issues.map((i) => `- ${i.title}: ${i.description}`).join("\n")
                 })
               }
-              yield* coderChat.ask(
+              // Feedback goes to a FRESH chat: the judge findings carry their
+              // own context, and replaying the whole implementation transcript
+              // is exactly the accumulation this flow no longer does.
+              const feedbackChat = yield* makeChat(context.coder, { system })
+              yield* feedbackChat.ask(
                 [
                   "The final spec-compliance review scored the branch below the bar. Close these gaps",
                   "without weakening any test, then stop:",
-                  ...below.map((d) => `- ${d.name} (${d.score}): ${d.reasoning}`)
+                  ...merged.issues.map((i) => `- ${i.title}: ${i.description}`)
                 ].join("\n")
               )
               if (verifyGate !== undefined) {
@@ -306,8 +437,14 @@ const program = Effect.gen(function* () {
                 .commitAll(`${plan.epicId}: address spec-compliance feedback`)
                 .pipe(Effect.asVoid)
             }
-          })
+          }).pipe(Effect.provideService(FlowEvents, context.events))
         )
+
+        // Truncations recorded while judging land in the evidence chain, and
+        // the per-program verdict cache is committed with them: it is part of
+        // the evidence, and a rerun on a fresh clone resumes from it.
+        yield* recordTruncations(join(input.workDir, ModDir, "provenance.json"), context.events)
+        yield* context.git.commitAll(`${plan.epicId}: judge verdicts`).pipe(Effect.asVoid)
 
         // Publishing is best-effort: a repository with no remote or forge is a
         // normal local run, not a failure.

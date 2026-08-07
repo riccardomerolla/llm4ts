@@ -21,15 +21,18 @@
 // Pack: LLM4TS_PACK=<dir> (default packs/cobol-springboot, resolved against the
 // launch dir, then against the flow's own directory — the built-in packs).
 // LLM4TS_WAVE=<name> scopes the run to one wave of the approved plan. Judge
-// context is bounded by LLM4TS_JUDGE_SOURCES_LIMIT (chars).
+// context is bounded by LLM4TS_CONTEXT_BUDGET (chars;
+// LLM4TS_JUDGE_SOURCES_LIMIT is the deprecated alias). The analyst is bounded
+// by LLM4TS_ANALYST_TURNS and LLM4TS_MAX_CLOSURE_FILES.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import type { JsonSchema } from "@llm4ts/core/Models"
-import { FlowAborted, FlowLlmError } from "@llm4ts/flow/FlowError"
+import { budget, capped, withShrink } from "@llm4ts/flow/Context"
+import { FlowAborted, FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
-import { Info } from "@llm4ts/flow/FlowEvents"
+import { FlowEvents, Info } from "@llm4ts/flow/FlowEvents"
 import { makeChat } from "@llm4ts/flow/Chat"
 import type { Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
@@ -39,13 +42,14 @@ import { defaultPlanInstructions, planFrom } from "@llm4ts/flow/Planner"
 import { ReviewIssue, ReviewResult, mergeReviewResults } from "@llm4ts/flow/Review"
 import { cachedReview } from "@llm4ts/flow/ReviewCache"
 import { coverage, coverageUnits, features, matchingFiles } from "@llm4ts/flow/SpecChecks"
+import { SurveyGraph, closureFor, surveyGraph } from "@llm4ts/flow/Survey"
 import { withDraftApproval, requireApproval } from "@llm4ts/modernize/Approval"
 import {
   ProgramArtifacts,
   ProgramUnit,
   extractProgramsResumably
 } from "@llm4ts/modernize/Artifacts"
-import { asReadOnly, coderFromEnv } from "@llm4ts/runner/Connectors"
+import { asReadOnly, coderFromEnv, withTurnLimit } from "@llm4ts/runner/Connectors"
 import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { reviewFingerprint } from "@llm4ts/runner/ReviewFingerprint"
@@ -56,19 +60,19 @@ import { loadUniversalPatternCards, openPack } from "@llm4ts/runner/Packs"
 const ModDir = "docs/modernization"
 const MaxRounds = 3
 
-const judgeSourcesLimit = (): number => {
-  const raw = Number.parseInt(process.env.LLM4TS_JUDGE_SOURCES_LIMIT ?? "", 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : 400_000
+const positiveEnvInt = (name: string, fallback: number): number => {
+  const raw = Number.parseInt(process.env[name] ?? "", 10)
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback
 }
 
-/** Past the limit keep head + tail so entry points and trailing rules stay visible. */
-const capText = (text: string, limit: number): string => {
-  if (text.length <= limit) {
-    return text
-  }
-  const head = Math.floor((limit * 3) / 4)
-  return `${text.slice(0, head)}\n\n… [truncated] …\n\n${text.slice(text.length - (limit - head))}`
-}
+// Per-program turn budget — bounds a wedged agent, generous for real work.
+const analystTurns = (): number => positiveEnvInt("LLM4TS_ANALYST_TURNS", 48)
+
+/**
+ * Max files named in one program's include closure. A program pulling more
+ * than this gets a bounded, visible subset rather than an unbounded read.
+ */
+const maxClosureFiles = (): number => positiveEnvInt("LLM4TS_MAX_CLOSURE_FILES", 40)
 
 /** `cobol/ACCTXFR.cbl` → `ACCTXFR`: the program name keying every per-program artifact. */
 const programName = (relativePath: string): string => {
@@ -107,12 +111,21 @@ const programArtifactsJsonSchema: JsonSchema = {
   required: ["spec", "feature", "traceability", "mapping"]
 }
 
-const programAsk = (pack: Pack, relativePath: string): string =>
+// The analyst gets a deterministically resolved include closure, not an open
+// "read anything it references" instruction: told to chase references itself,
+// the coding agent pulls files into its own context inside a single turn —
+// which is how extract blew a 1M-token window while its own cap sat untouched.
+const programAsk = (pack: Pack, relativePath: string, closure: ReadonlyArray<string>): string =>
   [
     `Extract the behavioural spec for ONE source unit of this repository: ${relativePath}`,
     "",
-    "Read the source file and anything it references (copybooks, includes, called programs)",
-    `for context, but spec ONLY ${relativePath} and do not modify legacy sources.`,
+    ...(closure.length === 0
+      ? [`Read ${relativePath}. It has no resolved dependencies.`]
+      : [
+          `Read ${relativePath} and EXACTLY these resolved dependencies — do not go looking for others:`,
+          ...closure.map((file) => `- ${file}`)
+        ]),
+    `Spec ONLY ${relativePath} and do not modify legacy sources.`,
     "",
     'Respond only with JSON: {"spec":"…","feature":"…","traceability":"…","mapping":"…"} where:',
     "",
@@ -206,7 +219,7 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
     "Extract the complete behavioural spec pack for this legacy estate"
   )
-  const coder = coderFromEnv(process.env)
+  const coder = withTurnLimit(coderFromEnv(process.env), analystTurns())
   const files = nodePlainFileStore
   const modDirAbs = join(input.workDir, ModDir)
 
@@ -291,6 +304,23 @@ const program = Effect.gen(function* () {
           ...(yield* loadUniversalPatternCards([input.workspace, import.meta.dirname]))
         ]
 
+        // The dependency graph the analysts' include closures are resolved
+        // from — walked over the pack's `## Survey:` edge regexes.
+        const graph = yield* stage(
+          context.events,
+          "graph",
+          pack.survey.length === 0
+            ? context.events
+                .publish(
+                  Info.make({
+                    message:
+                      "pack has no '## Survey:' edge regexes — the analyst gets no resolved closure"
+                  })
+                )
+                .pipe(Effect.as(SurveyGraph.make({ nodes: [], edges: [] })))
+            : surveyGraph(repo, pack.sources ?? ".*", pack.coverage, pack.survey)
+        )
+
         // One structured analyst call per program, resumable per program: a rerun
         // skips every program whose spec exists, and each program gets its own commit.
         yield* stage(
@@ -311,7 +341,11 @@ const program = Effect.gen(function* () {
                     return yield* structuredAndPublish(
                       context.coder,
                       context.events,
-                      `${system}\n\n${programAsk(pack, target.sourcePath)}`,
+                      `${system}\n\n${programAsk(
+                        pack,
+                        target.sourcePath,
+                        closureFor(graph, target.name, maxClosureFiles())
+                      )}`,
                       ProgramArtifacts,
                       programArtifactsJsonSchema,
                       "coder"
@@ -417,44 +451,29 @@ const program = Effect.gen(function* () {
         )
 
         const packJudge = judge(context.reasoning, pack.judgeDimensions)
-        const limit = judgeSourcesLimit()
+        const limit = budget()
 
-        /**
-         * An empty structured response that survives the in-run retries is
-         * usually DETERMINISTIC (context overflow), so repeating the same
-         * prompt cannot succeed — retry at half, then quarter context instead.
-         */
-        const judgeWithShrink = (spec: string, feature: string, source: string) => {
-          const attempt = (
-            cap: number,
-            rest: ReadonlyArray<number>
-          ): Effect.Effect<EvalResult, FlowLlmError> =>
-            packJudge
-              .evaluate(
-                Sample.make({
-                  response: capText(`${spec}\n\n${feature}`, cap),
-                  context: capText(source, cap),
-                  query: input.prompt
-                })
-              )
-              .pipe(
-                Effect.mapError(FlowLlmError.from),
-                Effect.catchIf(
-                  (error) => rest.length > 0 && error.message.includes("empty response"),
-                  (error) => {
-                    const [next, ...remaining] = rest
-                    return context.events
-                      .publish(
-                        Info.make({
-                          message: `judge returned empty at cap ${cap} chars — shrinking to ${next ?? cap}: ${error.message}`
-                        })
-                      )
-                      .pipe(Effect.andThen(attempt(next ?? cap, remaining)))
-                  }
-                )
-              )
-          return attempt(limit, [Math.floor(limit / 2), Math.floor(limit / 4)])
-        }
+        // The shared Context ladder: an oversized prompt retries at half, then
+        // quarter budget (repeating it identically cannot succeed), and every
+        // cap or shrink is recorded and published.
+        const judgeWithShrink = (
+          name: string,
+          spec: string,
+          feature: string,
+          source: string
+        ): Effect.Effect<EvalResult, FlowError> =>
+          withShrink(
+            `judge[${name}]`,
+            (cap) =>
+              Effect.gen(function* () {
+                const response = yield* capped(`spec[${name}]`, `${spec}\n\n${feature}`, cap)
+                const source_ = yield* capped(`source[${name}]`, source, cap)
+                return yield* packJudge
+                  .evaluate(Sample.make({ response, context: source_, query: input.prompt }))
+                  .pipe(Effect.mapError(FlowLlmError.from))
+              }),
+            { start: limit }
+          ).pipe(Effect.provideService(FlowEvents, context.events))
 
         /**
          * Judging is resumable per program: the verdict persists under
@@ -481,7 +500,7 @@ const program = Effect.gen(function* () {
               join(modDirAbs, "gate", `${unit.name}.json`),
               reviewFingerprint(source, spec, feature, rubric),
               context.events.publish(Info.make({ message: `judging ${unit.name}` })).pipe(
-                Effect.andThen(judgeWithShrink(spec, feature, source)),
+                Effect.andThen(judgeWithShrink(unit.name, spec, feature, source)),
                 Effect.map((scored) => judgeIssues(pack, scored, unit.name))
               )
             )
@@ -598,9 +617,12 @@ const program = Effect.gen(function* () {
                   specTexts.push(spec)
                 }
               }
+              const plannerSpecs = yield* capped("plan specs", specTexts.join("\n\n"), limit).pipe(
+                Effect.provideService(FlowEvents, context.events)
+              )
               const plan = yield* planFrom(
                 context.reasoning,
-                capText(specTexts.join("\n\n"), limit),
+                plannerSpecs,
                 `${defaultPlanInstructions}\n\n${pack.prompt("plan") ?? ""}`
               )
               yield* files.writeAtomic(join(modDirAbs, "plan.md"), plan.render)

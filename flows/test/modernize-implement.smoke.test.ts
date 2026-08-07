@@ -27,17 +27,27 @@ const responder = [
   "(prompt) => {",
   commonReplies,
   // Task asks arrive through the coder chat as free text carrying the task's
-  // DESCRIPTION (Plan#taskPrompt), not its title. The chat is shared across
-  // tasks, so every ask replays the whole conversation — act on whichever
-  // instruction appears LAST, which is the one actually being asked now.
+  // DESCRIPTION (Plan#taskPrompt), not its title. Each task gets a FRESH
+  // chat, but judge-feedback asks may still carry earlier context — act on
+  // whichever instruction appears LAST, which is the one being asked now.
+  // The files written carry the program name (acctxfr-*) so the per-program
+  // judge's filesFor fallback assigns them to ACCTXFR.
   '  const encode = prompt.lastIndexOf("Encode Rule 1 as an acceptance test")',
   '  const implement = prompt.lastIndexOf("Make the acceptance test pass")',
+  // Fresh-chat-per-task regression: with one shared chat, task 2's ask would
+  // replay task 1's transcript, so BOTH instructions would arrive in one
+  // prompt. Seeing both is the accumulation bug — fail the run loudly.
+  "  if (implement >= 0 && encode >= 0) {",
+  '    console.error("stale transcript: two task instructions in one ask — chat was shared across tasks")',
+  "    process.exit(1)",
+  "  }",
   "  if (implement >= 0 && implement > encode) {",
+  '    fs.writeFileSync("acctxfr-posting.txt", "posts the ledger\\n")',
   '    fs.writeFileSync("IMPLEMENTED", "done\\n")',
   '    return "Implemented transfer posting; the acceptance test now passes."',
   "  }",
   "  if (encode >= 0) {",
-  '    fs.writeFileSync("acceptance.txt", "asserts rule 1\\n")',
+  '    fs.writeFileSync("acctxfr-acceptance.txt", "asserts rule 1\\n")',
   '    return "Wrote the failing acceptance test."',
   "  }",
   '  return "Acknowledged."',
@@ -91,7 +101,7 @@ describe("modernize-implement end to end (model stubbed)", () => {
       assert.include(log, "meridian-transfers: Implement transfer posting")
 
       // The coder's simulated edits landed and were committed, not left dirty.
-      assert.isTrue(existsSync(join(fixture.target, "acceptance.txt")))
+      assert.isTrue(existsSync(join(fixture.target, "acctxfr-acceptance.txt")))
       assert.isTrue(existsSync(join(fixture.target, "IMPLEMENTED")))
       assert.strictEqual(git(fixture.target, "status", "--porcelain").trim(), "")
 
