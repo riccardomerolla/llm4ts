@@ -27,10 +27,38 @@ const transientSignals: ReadonlyArray<string> = [
   " 504"
 ]
 
+// An "empty response" is ambiguous: gemini returns one both for a random mid-stream
+// flake and for a prompt too large to start on. This classifier sees only the message,
+// so it deliberately treats both as flaky — a fresh process fixes the common (flake)
+// case, and the oversized-prompt case is resolved a layer up by Context.withShrink.
+// Do not route empty responses into isContextOverflow.
 const flakyStreamSignals: ReadonlyArray<string> = [
   "empty response",
   "malformed tool call",
   "invalid stream"
+]
+
+// Deterministic client errors a retry can never fix. Gemini wraps every error in
+// "[API Error: {...}]", including 400s, so the "api error" transient signal would
+// otherwise swallow them.
+const deterministic4xxSignals: ReadonlyArray<string> = [
+  "invalid_argument",
+  '"code": 400',
+  '"code":400',
+  "code=400",
+  "exceeds the maximum number of tokens"
+]
+
+// The message signatures of a prompt-too-large failure, in one place: isContextOverflow
+// matches them on a typed LlmError, and Context.withShrink matches them on a bare
+// message string when no typed cause survived. Two copies of this list would drift.
+const contextOverflowSignals: ReadonlyArray<string> = [
+  "exceeds the maximum number of tokens",
+  "input token count exceeds",
+  "context length exceeded",
+  "maximum context length",
+  "prompt is too long",
+  "request too large"
 ]
 
 const includesSignal = (message: string, signals: ReadonlyArray<string>): boolean => {
@@ -41,13 +69,29 @@ const includesSignal = (message: string, signals: ReadonlyArray<string>): boolea
 export const isFlakyStream = (error: LlmError): boolean =>
   error._tag === "ProviderError" && includesSignal(error.message, flakyStreamSignals)
 
+const isDeterministic4xx = (message: string): boolean =>
+  includesSignal(message, deterministic4xxSignals)
+
+export const isContextOverflowMessage = (message: string): boolean =>
+  includesSignal(message, contextOverflowSignals)
+
+// The prompt was larger than the model's input window. Deterministic: the same prompt
+// always fails, so it is not transient — it routes to Context.withShrink, which retries
+// at a smaller budget.
+export const isContextOverflow = (error: LlmError): boolean =>
+  error._tag === "ProviderError" && isContextOverflowMessage(error.message)
+
 export const isTransient = (error: LlmError): boolean => {
   switch (error._tag) {
     case "TimeoutError":
     case "RateLimitError":
       return true
     case "ProviderError":
-      return !isFlakyStream(error) && includesSignal(error.message, transientSignals)
+      return (
+        !isFlakyStream(error) &&
+        !isDeterministic4xx(error.message) &&
+        includesSignal(error.message, transientSignals)
+      )
     default:
       return false
   }

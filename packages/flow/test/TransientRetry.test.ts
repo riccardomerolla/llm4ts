@@ -18,6 +18,8 @@ import { LlmService, type LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk } from "@llm4ts/core/Models"
 import { FlowEvents, makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import {
+  isContextOverflow,
+  isContextOverflowMessage,
   isFlakyStream,
   isTransient,
   makeTransientRetry,
@@ -93,6 +95,48 @@ describe("TransientRetry", () => {
     assert.isFalse(
       isTransient(ProviderError.make({ message: "you asked for a nonexistent model" }))
     )
+  })
+
+  it("never retries deterministic 4xx failures, even wrapped as API errors", () => {
+    assert.isFalse(
+      isTransient(
+        ProviderError.make({
+          message:
+            'Gemini CLI returned an error: [API Error: {"error":{"code": 400,"status":"INVALID_ARGUMENT"}}]'
+        })
+      )
+    )
+    assert.isFalse(isTransient(ProviderError.make({ message: "request failed: code=400" })))
+    assert.isFalse(
+      isTransient(
+        ProviderError.make({
+          message:
+            "[API Error: The input token count exceeds the maximum number of tokens allowed (1048576).]"
+        })
+      )
+    )
+  })
+
+  it("classifies context overflow as deterministic, not transient", () => {
+    const phrasings = [
+      "input exceeds the maximum number of tokens allowed",
+      "input token count exceeds the limit",
+      "context length exceeded",
+      "this model's maximum context length is 200000 tokens",
+      "prompt is too long: 250000 tokens",
+      "request too large for model"
+    ]
+    for (const message of phrasings) {
+      assert.isTrue(isContextOverflowMessage(message), message)
+      assert.isTrue(isContextOverflow(ProviderError.make({ message })), message)
+      assert.isFalse(isTransient(ProviderError.make({ message })), message)
+    }
+
+    assert.isFalse(isContextOverflowMessage("connection reset by peer"))
+    assert.isFalse(isContextOverflow(TimeoutError.make({ duration: Duration.seconds(1) })))
+    // Empty responses stay flaky-stream: gemini returns one for a mid-stream flake too,
+    // and a fresh process fixes that common case. Context.withShrink handles the rest.
+    assert.isFalse(isContextOverflowMessage("Invalid stream: empty response"))
   })
 
   it("keeps flaky stream failures on an independent retry budget", () => {
