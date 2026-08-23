@@ -63,16 +63,28 @@ export const parseOpenCodeCliStreamLine = (line: string): ReadonlyArray<LlmChunk
         )
       ]
     }
-    case "error":
+    case "error": {
+      // Errors arrive flat ("error": "quota exhausted") or structured
+      // ("error": {name, data: {message}}); surface the deepest message
+      // available and never collapse a structured payload to the bare
+      // literal — a consumer once debugged "opencode error: opencode
+      // error" where "model not found" was sitting in the event.
+      const errorField = jsonField(json, "error")
+      const message =
+        jsonStringField(json, "error") ??
+        jsonStringField(errorField, "message") ??
+        jsonStringField(jsonField(errorField, "data"), "message") ??
+        jsonStringField(json, "message") ??
+        (errorField === undefined ? undefined : JSON.stringify(errorField).slice(0, 300))
       return [
         LlmChunk.make({
           delta: "",
           metadata: {
-            opencodeError:
-              jsonStringField(json, "error") ?? jsonStringField(json, "message") ?? "opencode error"
+            opencodeError: message ?? "opencode error"
           }
         })
       ]
+    }
     default:
       return []
   }

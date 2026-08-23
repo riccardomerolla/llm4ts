@@ -168,6 +168,25 @@ describe("OpenCodeCliConnector", () => {
           .opencodeError,
         "quota exhausted"
       )
+      // opencode's JSON events nest structured errors; the message must
+      // survive instead of collapsing to the literal "opencode error"
+      // (a local-model deployment failed with that twice-useless string).
+      assert.strictEqual(
+        parseOpenCodeCliStreamLine(
+          '{"type":"error","error":{"name":"UnknownError","data":{"message":"model not found: Qwen3.8"}}}'
+        )[0]?.metadata.opencodeError,
+        "model not found: Qwen3.8"
+      )
+      assert.strictEqual(
+        parseOpenCodeCliStreamLine(
+          '{"type":"error","error":{"message":"provider not configured"}}'
+        )[0]?.metadata.opencodeError,
+        "provider not configured"
+      )
+      const fallback = parseOpenCodeCliStreamLine('{"type":"error","error":{"code":42}}')[0]
+        ?.metadata.opencodeError
+      assert.isString(fallback)
+      assert.include(fallback, "42")
       const connector = makeOpenCodeCliConnector(
         CliConnectorConfig.make({ connectorId: ConnectorIds.OpenCode }),
         executorWithStream(['{"type":"error","error":"quota exhausted"}'])
