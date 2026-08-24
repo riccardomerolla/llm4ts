@@ -74,7 +74,7 @@ reference release.
 | CSP workspace and persistence contracts               | clean-spec black-box contracts                                  | `@llm4ts/runner/NodeWorkspace`, `NodePlainFileStore`   | `PersistenceWorkspace.test.ts`           | containment and atomic files         |
 | `llm4zio/flow/GitTool.scala`                          | `GitToolSpec.scala`                                             | `@llm4ts/flow/GitTool`                                 | `GitTool.test.ts`                        | audited repository operations        |
 | `llm4zio/flow/GhTool.scala`                           | `GhToolSpec.scala`                                              | `@llm4ts/flow/GitHubTool`                              | `GitHubTool.test.ts`                     | GitHub issue and pull-request bridge |
-| `llm4zio/flow/AdoTool.scala`                          | `AdoToolSpec.scala`                                             | `@llm4ts/flow/AzureDevOpsTool`                         | `AzureDevOpsTool.test.ts`                | Azure DevOps HTTP bridge             |
+| `llm4zio/flow/AdoTool.scala`                          | `AdoToolSpec.scala`                                             | `@llm4ts/flow/AzureDevOpsTool`                         | `AzureDevOpsTool.test.ts`                | Azure DevOps `az` CLI bridge         |
 | `llm4zio/flow/ReviewCache.scala`                      | `ReviewCacheSpec.scala`                                         | `@llm4ts/flow/ReviewCache`                             | `ReviewSurvey.test.ts`                   | content-addressed review cache       |
 | `llm4zio/flow/SpecChecks.scala`, `Survey.scala`       | specification and survey specs                                  | `@llm4ts/flow/SpecChecks`, `Survey`                    | `ReviewSurvey.test.ts`                   | deterministic review evidence        |
 | `llm4zio/flow/Pack.scala`, `Reviewer.scala`           | pack parser and reviewer specs                                  | `@llm4ts/flow/Pack`, `Reviewer`                        | `Pack.test.ts`, `Review.test.ts`         | review-pack configuration            |
@@ -221,9 +221,10 @@ reference release.
 - Git tests use disposable real repositories. Read, write, and push operations
   require separate audited capabilities before process launch; checkpoints are
   commit identifiers and rollback is an explicit hard reset.
-- GitHub preserves the source-compatible `gh` process protocol, while Azure
-  DevOps uses the injected recorded HTTP boundary. Azure PATs remain redacted
-  and are revealed only while constructing the authorization header.
+- GitHub preserves the source-compatible `gh` process protocol, and Azure
+  DevOps now uses the same process boundary via the `az` CLI (ADR 0011)
+  rather than the source's HTTP bridge. No PAT reaches this library at all:
+  authentication belongs to `az devops login` / `AZURE_DEVOPS_EXT_PAT`.
 - Review fingerprints are computed in the Node runtime with length-prefixed
   SHA-256 inputs. Backend-neutral cache logic receives only the digest, and
   corrupted entries are treated as misses rather than failed reviews.
@@ -295,10 +296,9 @@ reference release.
     files itself. Resume, per-program commits, verdict caching, the
     shrinking-context judge ladder, pattern tagging, and turn-limit recovery
     all match the source.
-  - Azure DevOps work-item creation (the source's optional "Boards" step in
-    seed and review) is absent: `@llm4ts/flow/AzureDevOpsTool` reads and
-    updates work items and opens pull requests, but has no create-work-item
-    request. Both phases simply omit the step.
+  - The source's optional "Boards" step in seed and review is still not
+    wired into either phase, though `@llm4ts/flow/AzureDevOpsTool` now
+    carries `createWorkItem` (ADR 0011). Both phases simply omit the step.
   - `modernize-bench` measures the extraction pipeline — the dominant cost of
     a wave, and what the survey's projection consumes — rather than also
     re-running implementation inside the harness as the source's 767-line
@@ -376,6 +376,15 @@ reference release.
   `editCardComment` updates one in place (`comments update`) — the
   living-comment pair for consumer work logs, mirroring the 0.7.4
   `GitHubTool` comment-ref evolution. Additive under ADR 0009.
+- `AzureDevOpsTool` moved from the source's HTTP bridge to the `az` CLI
+  over `ProcessExecutor` (ADR 0011, 2026-08-24), matching `GhTool`'s
+  process protocol. `AdoConfig.pat` is gone — the CLI owns the credential —
+  and the surface grew the work-queue operations the CLI makes cheap
+  (`listWorkItems`, `readComments`, `writeComment`, `createWorkItem`,
+  `editTags`, `openPrForBranch`, `updatePr`, `writePrComment`,
+  `prPolicies`, `completePr`). `AdoToolSpec.scala`'s request-construction
+  assertions have no counterpart; argv builders and `--output json`
+  fixtures carry the same contract.
 - v4.3.0 bounded-context adoption (2026-08-07) — Effect-native renames and
   divergences, behavior contract unchanged:
   - Env knobs are `LLM4TS_*`: `LLM4TS_CONTEXT_BUDGET` (with

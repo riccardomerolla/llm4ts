@@ -5,6 +5,11 @@ Flow orchestration for [llm4ts](https://github.com/riccardomerolla/llm4ts):
 plain-file persistence, Git/GitHub/Azure DevOps tools, trace recording and
 replay, cost tracking, and benchmarking.
 
+The forge tools drive vendor CLIs rather than REST APIs — `gh` for
+`GitHubTool`, `az` (with the `azure-devops` extension) for
+`AzureDevOpsTool`, `basecamp` for `BasecampTool` — so each CLI owns its own
+credential and no token is passed to, or held by, this package.
+
 ## Install
 
 ```bash

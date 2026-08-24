@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- **Breaking**: `@llm4ts/flow/AzureDevOpsTool` drives the `az` CLI instead
+  of the Azure DevOps REST API (ADR 0011), so it matches the `gh` protocol
+  its siblings already use. `makeAzureDevOpsTool` now takes a process
+  executor and a working directory where it took an `HttpClient`;
+  `AdoRequest`, the `*Request` builders, `authorizationHeader`, and
+  `parseWiqlIds` give way to exported argv builders and `--output json`
+  parsers
+  (`parseWorkItemIds` is the replacement). Every call passes
+  `--detect false` so the CLI cannot retarget another organization from a
+  git remote, and `quoteWiql` escapes WIQL literals so a tag cannot rewrite
+  a query.
+- **Breaking, security**: `AdoConfig.pat` is removed. Azure DevOps
+  credentials belong to the CLI (`az devops login`, or
+  `AZURE_DEVOPS_EXT_PAT` read by `az` itself), exactly as GitHub's belong
+  to `gh` — the library no longer accepts, holds, or forwards a token, and
+  forwards an empty environment to the process executor.
+- `AzureDevOpsTool` grows the control-plane operations the CLI makes cheap:
+  `listWorkItems` (one WIQL call returns whole work items, no id fan-out),
+  `readComments`, `writeComment`, `createWorkItem`, `editTags`
+  (read-merge-write over the semicolon-joined `System.Tags` field, matching
+  the service's case-insensitive tags), `openPrForBranch`, `updatePr`,
+  `writePrComment`, `prPolicies` (branch-policy evaluations mapped to
+  `Success` / `Failure` / `Pending`), and `completePr`. `WorkItem` gains
+  `createdBy` and `changedDate`; `createPr` reuses an active pull request
+  for the branch instead of failing on a duplicate.
+
 ## 0.11.0
 
 - Read-only is a capability removal, not a request (ADR 0010,

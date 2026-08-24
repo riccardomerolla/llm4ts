@@ -45,7 +45,9 @@ export list; the following modules are the main entry points.
 - `@llm4ts/flow/GitTool`, `GitHubTool`, and `AzureDevOpsTool`: audited repository
   and forge boundaries. `GitTool.diffVsBaseScoped(base, paths)` is the
   path-scoped diff primitive: empty paths yield `""` (never the whole diff),
-  and the capability guard runs either way.
+  and the capability guard runs either way. `GitHubTool` drives `gh` and
+  `AzureDevOpsTool` drives `az` (ADR 0011); each CLI owns its own
+  credential, so neither tool accepts or stores a token.
 - `@llm4ts/flow/Context`: context budgeting for LLM prompts, in characters
   (deterministic, no tokenizer). `cap(text, limit)` never returns more than
   `limit` chars (marker included; head ¾, tail ¼); `capped(label, text, limit)`
