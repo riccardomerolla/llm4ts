@@ -10,7 +10,10 @@ import {
   asReadOnly,
   antigravity,
   claude,
+  coderFor,
   coderFromEnv,
+  coderFromEnvironment,
+  coderIds,
   codex,
   cursor,
   enrichApiConnector,
@@ -130,6 +133,41 @@ describe("runner connector presets", () => {
     assert.strictEqual(coderFromEnv({ LLM4ZIO_CODER: "cursor" }), cursor)
     assert.strictEqual(coderFromEnv({ LLM4ZIO_CODER: "opencode" }), opencode)
     assert.strictEqual(coderFromEnv({ LLM4ZIO_CODER: "unknown" }), claude)
+  })
+
+  it("answers to a connector's own id, not only its short name", () => {
+    // `gemini-cli` is what llm4ts calls this connector everywhere it prints
+    // one — events, traces, errors. Accepting only `gemini` meant an
+    // operator who wrote the name they had seen got claude instead, with
+    // nothing said about it.
+    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "gemini-cli" }), gemini)
+    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "claude-cli" }), claude)
+    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "antigravity-cli" }), antigravity)
+    // Whitespace and casing are an operator's, not an identity.
+    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: " Gemini-CLI " }), gemini)
+    assert.include(coderIds, "gemini-cli")
+    assert.include(coderIds, "gemini")
+  })
+
+  it.effect("refuses an unknown coder instead of running a different one", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* coderFromEnvironment({}), claude)
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "gemini-cli" }), gemini)
+
+      const usage = yield* Effect.flip(coderFromEnvironment({ LLM4TS_CODER: "gemni" }))
+
+      assert.include(usage.message, "gemni")
+      // The message names what would have worked.
+      assert.include(usage.message, "gemini-cli")
+    })
+  )
+
+  it("keeps the coder list free of drift", () => {
+    // The ids come from the presets themselves, so a connector renamed in
+    // Models.ts cannot leave a stale alias behind here.
+    assert.strictEqual(coderFor("codex")?.connectorId.value, "codex")
+    assert.strictEqual(coderFor("opencode")?.connectorId.value, "opencode")
+    assert.isUndefined(coderFor("copilot"))
   })
 })
 
