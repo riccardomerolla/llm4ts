@@ -42,8 +42,10 @@
 - **Breaking, security**: `AdoConfig.pat` is removed. Azure DevOps
   credentials belong to the CLI (`az devops login`, or
   `AZURE_DEVOPS_EXT_PAT` read by `az` itself), exactly as GitHub's belong
-  to `gh` — the library no longer accepts, holds, or forwards a token, and
-  forwards an empty environment to the process executor.
+  to `gh` — the library no longer accepts, holds, or forwards a token. It
+  adds no variables of its own to the `az` process either; the child
+  inherits the host's environment, which is how `az` reads that variable,
+  so a PAT stays in the environment and never reaches argv or a log.
 - `AzureDevOpsTool` grows the control-plane operations the CLI makes cheap:
   `listWorkItems` (one WIQL call returns whole work items, no id fan-out),
   `readComments`, `writeComment`, `createWorkItem`, `editTags`
