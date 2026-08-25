@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.3
+
+- **Fixed**: `listWorkItems` crashed with
+  `SchemaError: Unexpected end of JSON input` whenever the query matched
+  nothing. The Azure CLI prints **nothing** for a command whose
+  implementation returns `None` — not `[]` — and `az boards query` returns
+  `None` precisely when the WIQL matches no work items. So an empty queue
+  arrives as empty stdout with exit code 0, which is the ordinary state of
+  a board between pieces of work rather than a failure.
+
+  `parseWorkItems` (and `parseWorkItemIds` through it) now reads empty
+  output as no rows. Malformed output is still a decode error: only
+  emptiness means "nothing matched".
+
 ## 0.13.2
 
 - **Fixed**: every `listWorkItems` call was rejected by Azure DevOps with

@@ -71,6 +71,12 @@ query statement is missing a FROM clause` — a message that names a clause
   the query does have, which cost a release to read correctly. So the query
   orders by `[System.Id] ASC` and `listWorkItems` takes the prefix, which
   is the same answer.
+- **Empty output is a result, not a failure.** The Azure CLI prints
+  nothing at all for a command that returns `None`, and `az boards query`
+  returns `None` exactly when the WIQL matches no work items — so the
+  ordinary "nothing to do" answer is empty stdout with exit code 0, never
+  `[]`. Parsers fed by that command read emptiness as no rows; anything
+  else malformed is still a decode error.
 - **Tags are read-merge-write.** Azure DevOps stores tags as one
   semicolon-joined `System.Tags` string, so `editTags` reads the item,
   merges case-insensitively (the service treats tags that way), and

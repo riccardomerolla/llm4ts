@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/flow",
-  "version": "0.13.2",
+  "version": "0.13.3",
   "description": "Effect-native LLM workflow, persistence, review, and repository automation",
   "license": "MIT",
   "type": "module",
