@@ -421,6 +421,103 @@ export const relationAddArgs = (
   ...json
 ]
 
+// ---------------------------------------------------------------------------
+// Work item links
+// ---------------------------------------------------------------------------
+
+// Azure DevOps models "this is part of that" and "this waits for that" as
+// first-class links, where a GitHub issue has only prose. A consumer that
+// writes `Parent: #12` into a description is describing a relationship the
+// board can hold properly — and only the prose version shows up in the
+// backlog tree, the dependency view, or a query.
+export const WorkItemLinkKind = Schema.Literals([
+  "Parent",
+  "Child",
+  "Related",
+  "Predecessor",
+  "Successor"
+])
+export type WorkItemLinkKind = typeof WorkItemLinkKind.Type
+
+export const workItemLinkKinds: ReadonlyArray<WorkItemLinkKind> = [
+  "Parent",
+  "Child",
+  "Related",
+  "Predecessor",
+  "Successor"
+]
+
+export class WorkItemLink extends Schema.Class<WorkItemLink>("WorkItemLink")({
+  kind: WorkItemLinkKind,
+  id: Schema.Int
+}) {}
+
+// Forward is the one that points away from the "primary" end: a parent's
+// link to its child is Hierarchy-Forward, so a child's link to its parent
+// is the Reverse. Dependency reads the same way — an item's Predecessor is
+// the one it waits for, which is what "blocked by" means.
+const linkReferenceNames: Readonly<Record<WorkItemLinkKind, string>> = {
+  Parent: "System.LinkTypes.Hierarchy-Reverse",
+  Child: "System.LinkTypes.Hierarchy-Forward",
+  Related: "System.LinkTypes.Related",
+  Predecessor: "System.LinkTypes.Dependency-Reverse",
+  Successor: "System.LinkTypes.Dependency-Forward"
+}
+
+export const linkReferenceName = (kind: WorkItemLinkKind): string => linkReferenceNames[kind]
+
+export const linkKindOfReference = (reference: string): WorkItemLinkKind | undefined =>
+  workItemLinkKinds.find(
+    (kind) => linkReferenceNames[kind].toLowerCase() === reference.trim().toLowerCase()
+  )
+
+// A relation's url addresses the work item through the REST API, whatever
+// the organization's host: the id is its last segment.
+export const workItemIdOfUrl = (url: string): number | undefined => {
+  const match = /\/workItems\/(\d+)$/i.exec(url.trim())
+  const digits = match?.[1]
+  return digits === undefined ? undefined : Number(digits)
+}
+
+export const parseWorkItemLinks = (
+  payload: string
+): Effect.Effect<ReadonlyArray<WorkItemLink>, ProcessError> =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(AdoRelations))(payload).pipe(
+    Effect.map((parsed) =>
+      (parsed.relations ?? []).flatMap((relation) => {
+        const kind = linkKindOfReference(relation.rel ?? "")
+        const id = workItemIdOfUrl(relation.url ?? "")
+        // Artifact links and hyperlinks share the relations array; they are
+        // skipped rather than half-decoded, as developmentLinks skips these.
+        return kind === undefined || id === undefined ? [] : [WorkItemLink.make({ kind, id })]
+      })
+    ),
+    Effect.mapError(decodeFailure("az boards work-item show --expand relations"))
+  )
+
+// Work item links take --target-id, where an artifact link takes the
+// --target-url of a vstfs: URI. The CLI resolves --relation-type against
+// the organization's own link types by name.
+export const workItemLinkArgs = (
+  config: AdoConfig,
+  id: number,
+  kind: WorkItemLinkKind,
+  targetId: number
+): ReadonlyArray<string> => [
+  "boards",
+  "work-item",
+  "relation",
+  "add",
+  "--id",
+  String(id),
+  "--relation-type",
+  kind.toLowerCase(),
+  "--target-id",
+  String(targetId),
+  ...org(config),
+  ...json
+]
+
 export const repositoryShowArgs = (
   config: AdoConfig,
   repository: string
@@ -731,6 +828,14 @@ export interface AzureDevOpsToolShape {
   // commits linked to it. Empty when nothing has been linked yet.
   readonly developmentLinks: (id: number) => Effect.Effect<ReadonlyArray<GitArtifact>, FlowError>
   readonly linkArtifact: (id: number, artifact: GitArtifact) => Effect.Effect<void, FlowError>
+  // The work item's own links — hierarchy and dependency — as opposed to
+  // the git objects developmentLinks returns from the same call.
+  readonly workItemLinks: (id: number) => Effect.Effect<ReadonlyArray<WorkItemLink>, FlowError>
+  readonly linkWorkItem: (
+    id: number,
+    kind: WorkItemLinkKind,
+    targetId: number
+  ) => Effect.Effect<void, FlowError>
   // Resolves a repository's GUIDs, which every artifact link needs and no
   // caller can know from a repository name alone.
   readonly repository: (name?: string) => Effect.Effect<GitRepository, FlowError>
@@ -863,6 +968,16 @@ export const makeAzureDevOpsTool = (
       ),
     linkArtifact: (id, artifact) =>
       write("ado linkArtifact", run(relationAddArgs(config, id, artifact)).pipe(Effect.asVoid)),
+    workItemLinks: (id) =>
+      read(
+        "ado workItemLinks",
+        run(workItemShowArgs(config, id, "relations")).pipe(Effect.flatMap(parseWorkItemLinks))
+      ),
+    linkWorkItem: (id, kind, targetId) =>
+      write(
+        "ado linkWorkItem",
+        run(workItemLinkArgs(config, id, kind, targetId)).pipe(Effect.asVoid)
+      ),
     repository: (name = config.repository) =>
       read(
         "ado repository",

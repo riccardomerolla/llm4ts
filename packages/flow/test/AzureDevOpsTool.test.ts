@@ -24,7 +24,12 @@ import {
   parseRepository,
   parseWorkItem,
   parseWorkItemIds,
+  parseWorkItemLinks,
   parseWorkItems,
+  linkKindOfReference,
+  linkReferenceName,
+  workItemIdOfUrl,
+  workItemLinkArgs,
   prCompleteArgs,
   prCreateArgs,
   prListArgs,
@@ -161,6 +166,85 @@ describe("Azure DevOps CLI protocol", () => {
       "SELECT 1",
       "--project"
     ])
+  })
+
+  it.effect("reads the hierarchy and dependency links a board actually holds", () =>
+    Effect.gen(function* () {
+      // Azure DevOps holds "part of" and "waits for" as first-class links.
+      // A `Parent: #12` line in a description says the same thing to a
+      // reader and nothing at all to the backlog tree or a query.
+      const payload = JSON.stringify({
+        id: 7,
+        relations: [
+          {
+            rel: "System.LinkTypes.Hierarchy-Reverse",
+            url: "https://dev.azure.com/acme/_apis/wit/workItems/12"
+          },
+          {
+            rel: "System.LinkTypes.Dependency-Reverse",
+            url: "https://dev.azure.com/acme/_apis/wit/workItems/5"
+          },
+          // Artifact links and hyperlinks share the array; they belong to
+          // developmentLinks, and are skipped here rather than half-read.
+          {
+            rel: "ArtifactLink",
+            url: "vstfs:///Git/Ref/p%2Fr%2FGBmain",
+            attributes: { name: "Branch" }
+          },
+          { rel: "Hyperlink", url: "https://example.com/spec" }
+        ]
+      })
+
+      const links = yield* parseWorkItemLinks(payload)
+
+      assert.deepStrictEqual(
+        links.map((link) => [link.kind, link.id]),
+        [
+          ["Parent", 12],
+          ["Predecessor", 5]
+        ]
+      )
+      // Never touched: the whole relations key is absent, not empty.
+      assert.deepStrictEqual([...(yield* parseWorkItemLinks('{"id":7}'))], [])
+    })
+  )
+
+  it("names links the way Azure DevOps and the CLI each expect", () => {
+    // Forward points away from the primary end: a parent's link to its
+    // child is Hierarchy-Forward, so the child's link back is Reverse.
+    assert.strictEqual(linkReferenceName("Parent"), "System.LinkTypes.Hierarchy-Reverse")
+    assert.strictEqual(linkReferenceName("Child"), "System.LinkTypes.Hierarchy-Forward")
+    // An item's Predecessor is the one it waits for — "blocked by".
+    assert.strictEqual(linkReferenceName("Predecessor"), "System.LinkTypes.Dependency-Reverse")
+    assert.strictEqual(linkKindOfReference("System.LinkTypes.Related"), "Related")
+    assert.isUndefined(linkKindOfReference("ArtifactLink"))
+
+    // The id is the url's last segment, whatever the organization's host.
+    assert.strictEqual(workItemIdOfUrl("https://dev.azure.com/a/_apis/wit/workItems/91"), 91)
+    assert.strictEqual(workItemIdOfUrl("https://tfs.local/tfs/c/_apis/wit/workitems/4"), 4)
+    assert.isUndefined(workItemIdOfUrl("vstfs:///Git/Ref/p%2Fr%2FGBmain"))
+
+    // A work item link takes --target-id; an artifact link takes the
+    // --target-url of a vstfs: URI, and confusing the two is silent.
+    assert.deepStrictEqual(workItemLinkArgs(config, 7, "Predecessor", 5).slice(0, 9), [
+      "boards",
+      "work-item",
+      "relation",
+      "add",
+      "--id",
+      "7",
+      "--relation-type",
+      "predecessor",
+      "--target-id"
+    ])
+    assert.include(
+      relationAddArgs(
+        config,
+        7,
+        GitArtifact.make({ kind: "Branch", projectId: "p", repositoryId: "r", value: "main" })
+      ),
+      "--target-url"
+    )
   })
 
   it("builds a query WIQL's grammar accepts", () => {
