@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0
 
 - `@llm4ts/flow/AzureDevOpsTool` reads and writes a work item's
   **Development** section — the links that tie a work item to the git
