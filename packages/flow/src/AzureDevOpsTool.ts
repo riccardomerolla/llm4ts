@@ -208,11 +208,19 @@ export const wiqlFor = (filter: WorkItemFilter): string => {
       : [`[System.AssignedTo] = ${quoteWiql(filter.assignedTo)}`])
   ]
   const select = workItemFields.map((name) => `[${name}]`).join(", ")
+  // No TOP: WIQL has no such clause. SQL's shape invites one, but the
+  // grammar is SELECT / FROM / WHERE / ORDER BY / ASOF, and the row cap is
+  // the REST `$top` parameter, which `az boards query` does not expose.
+  // A `TOP n` here makes the SELECT list unparseable, so the server never
+  // reaches FROM and answers "TF51006: the query statement is missing a
+  // FROM clause". `filter.limit` is applied to the result instead — the
+  // ORDER BY makes that the same rows in the same order.
   return (
-    `SELECT TOP ${String(filter.limit ?? 100)} ${select} FROM WorkItems ` +
-    `WHERE ${clauses.join(" AND ")} ORDER BY [System.Id] ASC`
+    `SELECT ${select} FROM WorkItems ` + `WHERE ${clauses.join(" AND ")} ORDER BY [System.Id] ASC`
   )
 }
+
+export const defaultWorkItemLimit = 100
 
 export const queryArgs = (config: AdoConfig, wiql: string): ReadonlyArray<string> => [
   "boards",
@@ -830,7 +838,10 @@ export const makeAzureDevOpsTool = (
     listWorkItems: (filter = {}) =>
       read(
         "ado listWorkItems",
-        run(queryArgs(config, wiqlFor(filter))).pipe(Effect.flatMap(parseWorkItems))
+        run(queryArgs(config, wiqlFor(filter))).pipe(
+          Effect.flatMap(parseWorkItems),
+          Effect.map((items) => items.slice(0, filter.limit ?? defaultWorkItemLimit))
+        )
       ),
     wiqlIds: (query) =>
       read("ado wiql", run(queryArgs(config, query)).pipe(Effect.flatMap(parseWorkItemIds))),

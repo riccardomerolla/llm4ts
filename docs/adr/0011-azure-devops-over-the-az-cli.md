@@ -62,6 +62,15 @@ Specifics, and why:
 - **Queue reads are one call.** `az boards query` flattens a WIQL result
   into full work items, so `listWorkItems` polls a queue without a
   fan-out over ids.
+- **The row cap is applied here, not in the query.** WIQL resembles SQL
+  closely enough to invite `SELECT TOP n`, and has no such clause: the
+  grammar is SELECT / FROM / WHERE / ORDER BY / ASOF, and the cap is the
+  REST `$top` parameter, which `az boards query` does not expose. A `TOP n`
+  makes the SELECT list unparseable and the server answers `TF51006: the
+query statement is missing a FROM clause` — a message that names a clause
+  the query does have, which cost a release to read correctly. So the query
+  orders by `[System.Id] ASC` and `listWorkItems` takes the prefix, which
+  is the same answer.
 - **Tags are read-merge-write.** Azure DevOps stores tags as one
   semicolon-joined `System.Tags` string, so `editTags` reads the item,
   merges case-insensitively (the service treats tags that way), and

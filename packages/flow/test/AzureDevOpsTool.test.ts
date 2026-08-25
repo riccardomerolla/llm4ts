@@ -49,9 +49,9 @@ const config = AdoConfig.make({
 
 const ok = (stdout: string): ProcessResult => ProcessResult.make({ stdout: [stdout], exitCode: 0 })
 
-const workItemJson = (overrides: Readonly<Record<string, unknown>> = {}): string =>
+const workItemJson = (overrides: Readonly<Record<string, unknown>> = {}, id = 7): string =>
   JSON.stringify({
-    id: 7,
+    id,
     fields: {
       "System.Title": "Bug",
       "System.Description": "Breaks",
@@ -145,7 +145,6 @@ describe("Azure DevOps CLI protocol", () => {
   it("escapes WIQL literals so a tag cannot rewrite the query", () => {
     assert.strictEqual(quoteWiql("won't fix"), "'won''t fix'")
     const wiql = wiqlFor({ tags: ["factory:ready"], limit: 5, assignedTo: "bot" })
-    assert.match(wiql, /SELECT TOP 5 /)
     assert.match(wiql, /\[System\.State\] <> 'Closed'/)
     assert.match(wiql, /\[System\.Tags\] CONTAINS 'factory:ready'/)
     assert.match(wiql, /\[System\.AssignedTo\] = 'bot'/)
@@ -162,6 +161,42 @@ describe("Azure DevOps CLI protocol", () => {
       "--project"
     ])
   })
+
+  it("builds a query WIQL's grammar accepts", () => {
+    // WIQL reads like SQL and is not SQL: SELECT / FROM / WHERE / ORDER BY /
+    // ASOF is the whole of it. A `SELECT TOP n` — the obvious way to write a
+    // row cap — leaves the SELECT list unparseable, so the server never
+    // reaches FROM and rejects the query with "TF51006: the query statement
+    // is missing a FROM clause". The cap belongs to the REST `$top`
+    // parameter, which `az boards query` gives no way to send.
+    const wiql = wiqlFor({ tags: ["factory:ready"], limit: 5 })
+
+    assert.notMatch(wiql, /\bTOP\b/i)
+    assert.match(wiql, /^SELECT \[System\.Id\], /)
+    assert.match(wiql, / FROM WorkItems WHERE /)
+    assert.match(wiql, / ORDER BY \[System\.Id\] ASC$/)
+  })
+
+  it.effect("applies the row limit to the answer instead", () =>
+    Effect.gen(function* () {
+      const items = [1, 2, 3, 4].map((id) => workItemJson({}, id)).join(",")
+      const responses = new Map([
+        [processCommandKey(["az", ...queryArgs(config, wiqlFor({ limit: 2 }))]), ok(`[${items}]`)]
+      ])
+      const fake = yield* makeFakeProcessExecutor({ responses })
+      const events = yield* makeCollectingFlowEvents
+      const ado = makeAzureDevOpsTool(config, fake.executor, "/work", events)
+
+      const page = yield* ado.listWorkItems({ limit: 2 })
+
+      // ORDER BY [System.Id] ASC makes the prefix deterministic, so this is
+      // the same answer TOP would have given had WIQL had one.
+      assert.deepStrictEqual(
+        page.map((item) => item.id),
+        [1, 2]
+      )
+    })
+  )
 
   it.effect("parses az --output json payloads", () =>
     Effect.gen(function* () {

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.13.2
+
+- **Fixed**: every `listWorkItems` call was rejected by Azure DevOps with
+  `TF51006: The query statement is missing a FROM clause`. The WIQL was
+  built as `SELECT TOP n [System.Id], … FROM WorkItems …`, and WIQL has no
+  `TOP` clause — it looks like SQL, but the grammar is only SELECT / FROM /
+  WHERE / ORDER BY / ASOF. The row cap is the REST `$top` parameter, which
+  `az boards query` gives no way to send. `TOP n` leaves the SELECT list
+  unparseable, so the server never reaches FROM and rejects the query
+  whole.
+
+  `wiqlFor` no longer emits it, and `WorkItemFilter.limit` is applied to
+  the decoded result instead. The query keeps its `ORDER BY [System.Id]
+ASC`, so the prefix that survives is exactly the rows `TOP` would have
+  returned, in the same order.
+
+- New `defaultWorkItemLimit` (100) in `@llm4ts/flow/AzureDevOpsTool`, the
+  cap `listWorkItems` applies when a filter names none.
+
 ## 0.13.1
 
 - **Fixed**: CLI tools that install as a `.cmd` on Windows could not be run
