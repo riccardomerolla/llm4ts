@@ -45,8 +45,11 @@ pure args builders, exported pure parsers over `--output json`, and
 Specifics, and why:
 
 - **No credential in the library.** `AdoConfig` loses `pat` entirely. The
-  tool forwards an empty environment to the executor, so a PAT cannot
-  reach argv, a log line, a trace, or a persisted plan even by accident.
+  tool adds no variables of its own when it launches `az`; the child
+  inherits the host process's environment, which is precisely how `az`
+  finds `AZURE_DEVOPS_EXT_PAT` for itself. A PAT therefore lives in the
+  environment and never reaches argv, a log line, a trace, or a persisted
+  plan — the library has nowhere to put one even by accident.
   `apiVersion` survives for the one call with no first-class verb: reading
   work-item comments through `az devops invoke`.
 - **`--detect false` on every invocation.** The CLI otherwise infers the
