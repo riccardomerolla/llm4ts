@@ -4,7 +4,7 @@ import { FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
 import { AssistantMessage } from "@llm4ts/flow/FlowEvents"
 import { collect } from "@llm4ts/core/Streaming"
 import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
-import { coderFromEnv } from "./Connectors.ts"
+import { coderFromEnvironment } from "./Connectors.ts"
 import { parseFlowArgs, readFlowPrompt, resolveFlowRepo, type ScriptUsage } from "./FlowArgs.ts"
 import { runNode } from "./FlowRunner.ts"
 import { parseVerbosity } from "./Terminal.ts"
@@ -22,7 +22,7 @@ export const makeCliProgram = (
   return Effect.gen(function* () {
     const prompt = yield* readFlowPrompt(parsed.value, defaultPrompt)
     const workDir = yield* resolveFlowRepo(parsed.value, workspace)
-    const selected = coderFromEnv(environment)
+    const selected = yield* coderFromEnvironment(environment)
     const coder = CliConnectorConfig.make({
       ...selected,
       workingDir: workDir

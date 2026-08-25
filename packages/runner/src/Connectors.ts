@@ -201,25 +201,59 @@ export const apiConnectorFromEnvironment = Effect.fn(
   return model === undefined || model.length === 0 ? preset : withModel(preset, model)
 })
 
+// Every coding CLI, with the names an operator may write for it. The
+// connector's own id is always one of them, derived rather than repeated:
+// `gemini-cli` is the string llm4ts prints in events, traces and errors,
+// so it is the name an operator has actually seen — it must not resolve to
+// a different vendor's CLI.
+const coderAliases: ReadonlyArray<readonly [CliConnectorConfig, ReadonlyArray<string>]> = [
+  [claude, ["claude"]],
+  [codex, ["codex"]],
+  [gemini, ["gemini"]],
+  [pi, ["pi"]],
+  [antigravity, ["agy", "antigravity"]],
+  [grok, ["grok"]],
+  [cursor, ["cursor"]],
+  [opencode, ["opencode"]]
+]
+
+const coders = new Map<string, CliConnectorConfig>(
+  coderAliases.flatMap(([preset, aliases]) =>
+    [...aliases, preset.connectorId.value].map((name) => [name, preset] as const)
+  )
+)
+
+export const coderIds: ReadonlyArray<string> = Object.freeze([...coders.keys()].sort())
+
+export const coderFor = (name: string): CliConnectorConfig | undefined =>
+  coders.get(name.trim().toLowerCase())
+
+// Unchecked: an unrecognized name falls back to claude, which silently
+// runs a CLI the operator did not ask for. Prefer coderFromEnvironment,
+// which refuses and names the coders it knows.
 export const coderFromEnv = (
   env: Readonly<Record<string, string | undefined>> = process.env
 ): CliConnectorConfig => {
-  switch (env.LLM4TS_CODER ?? env.LLM4ZIO_CODER ?? "claude") {
-    case "codex":
-      return codex
-    case "gemini":
-      return gemini
-    case "pi":
-      return pi
-    case "agy":
-      return antigravity
-    case "grok":
-      return grok
-    case "cursor":
-      return cursor
-    case "opencode":
-      return opencode
-    default:
-      return claude
-  }
+  const requested = (env.LLM4TS_CODER ?? env.LLM4ZIO_CODER ?? "").trim()
+  return (requested.length === 0 ? claude : coderFor(requested)) ?? claude
 }
+
+// The checked reading, matching apiConnectorFromEnvironment above: an
+// unset variable is the claude default, and an unknown one is a usage
+// error rather than a different coder than the one asked for.
+export const coderFromEnvironment = Effect.fn("@llm4ts/runner/Connectors.coderFromEnvironment")(
+  function* (
+    environment: Readonly<Record<string, string | undefined>> = process.env
+  ): Effect.fn.Return<CliConnectorConfig, ScriptUsage> {
+    const requested = (environment.LLM4TS_CODER ?? environment.LLM4ZIO_CODER ?? "").trim()
+    if (requested.length === 0) {
+      return claude
+    }
+    const preset = coderFor(requested)
+    return preset === undefined
+      ? yield* ScriptUsage.make({
+          message: `unknown LLM4TS_CODER '${requested}'; expected ${coderIds.join("|")}`
+        })
+      : preset
+  }
+)

@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.13.4
+
+- **Fixed**: `LLM4TS_CODER=gemini-cli` ran **claude**. `coderFromEnv`
+  matched only the short names (`gemini`, `agy`, …) and its `default:`
+  branch returned claude, so any other value — a connector's own id, a
+  typo — silently selected a different vendor's CLI. `gemini-cli` is the
+  id llm4ts prints in events, traces and errors, which makes it the name
+  an operator is most likely to write.
+
+  Every coder now answers to its connector id as well as its short name,
+  trimmed and case-insensitively. The ids are derived from the presets, so
+  renaming a connector cannot leave a stale alias behind.
+
+- New `coderFromEnvironment` — the checked reading, matching
+  `apiConnectorFromEnvironment`: an unset variable is still the claude
+  default, but an unknown one fails with `ScriptUsage` naming the coders
+  llm4ts knows instead of running one the operator did not ask for. The
+  `llm4ts` CLI uses it. `coderFromEnv` keeps its signature and its
+  fall-back-to-claude behaviour for existing callers, and now resolves
+  aliases.
+
+- New `coderIds` and `coderFor(name)` for consumers that validate their
+  own configuration.
+
 ## 0.13.3
 
 - **Fixed**: `listWorkItems` crashed with
