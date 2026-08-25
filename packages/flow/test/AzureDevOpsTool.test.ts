@@ -9,20 +9,29 @@ import {
 import {
   AdoConfig,
   AdoPullRequest,
+  GitArtifact,
+  artifactKindOfName,
+  artifactLinkName,
+  artifactUri,
   branchName,
   commentsArgs,
   makeAzureDevOpsTool,
   mergeTags,
   outcomeFromPolicies,
   parseComments,
+  parseDevelopmentLinks,
   parsePullRequests,
+  parseRepository,
   parseWorkItem,
   parseWorkItemIds,
   prCompleteArgs,
   prCreateArgs,
   prListArgs,
   prPolicyArgs,
+  parseArtifactUri,
   queryArgs,
+  relationAddArgs,
+  repositoryShowArgs,
   quoteWiql,
   wiqlFor,
   workItemCommentArgs,
@@ -311,4 +320,167 @@ describe("Azure DevOps CLI protocol", () => {
     assert.strictEqual(pr.id, 9)
     assert.deepStrictEqual(prPolicyArgs(config, pr.id).slice(4, 6), ["--id", "9"])
   })
+})
+
+describe("Azure DevOps development links", () => {
+  const branch = GitArtifact.make({
+    kind: "Branch",
+    projectId: "p-guid",
+    repositoryId: "r-guid",
+    value: "factory/item-7"
+  })
+
+  it("round-trips vstfs artifact URIs, slashes in branch names included", () => {
+    // The project/repo/value triple is ONE encoded segment, which is what
+    // lets `factory/item-7` keep its slash without splitting the URI.
+    assert.strictEqual(artifactUri(branch), "vstfs:///Git/Ref/p-guid%2Fr-guid%2FGBfactory%2Fitem-7")
+    assert.deepStrictEqual(parseArtifactUri(artifactUri(branch)), branch)
+
+    const pr = GitArtifact.make({
+      kind: "PullRequest",
+      projectId: "p-guid",
+      repositoryId: "r-guid",
+      value: "42"
+    })
+    assert.strictEqual(artifactUri(pr), "vstfs:///Git/PullRequestId/p-guid%2Fr-guid%2F42")
+    assert.deepStrictEqual(parseArtifactUri(artifactUri(pr)), pr)
+
+    const commit = GitArtifact.make({
+      kind: "Commit",
+      projectId: "p-guid",
+      repositoryId: "r-guid",
+      value: "abc123"
+    })
+    assert.deepStrictEqual(parseArtifactUri(artifactUri(commit)), commit)
+  })
+
+  it("refuses URIs it cannot act on instead of guessing", () => {
+    assert.isUndefined(parseArtifactUri("vstfs:///Build/Build/99"))
+    assert.isUndefined(parseArtifactUri("https://example.com/branch"))
+    assert.isUndefined(parseArtifactUri("vstfs:///Git/Ref/p-guid%2Fr-guid"))
+    // A malformed percent escape is a bad link, not a thrown URIError.
+    assert.isUndefined(parseArtifactUri("vstfs:///Git/Ref/%E0%A4%A"))
+  })
+
+  it("names links the way the CLI and the REST payloads do", () => {
+    assert.strictEqual(artifactLinkName("PullRequest"), "Pull Request")
+    assert.strictEqual(artifactLinkName("Commit"), "Fixed in Commit")
+    assert.strictEqual(artifactKindOfName("pull request"), "PullRequest")
+    assert.strictEqual(artifactKindOfName("Branch"), "Branch")
+    assert.isUndefined(artifactKindOfName("Integrated in build"))
+    assert.deepStrictEqual(relationAddArgs(config, 7, branch).slice(4, 10), [
+      "--id",
+      "7",
+      "--relation-type",
+      "Branch",
+      "--target-url",
+      artifactUri(branch)
+    ])
+    assert.deepStrictEqual(workItemShowArgs(config, 7, "relations").slice(5, 7), [
+      "--expand",
+      "relations"
+    ])
+    assert.deepStrictEqual(repositoryShowArgs(config, "widgets").slice(0, 5), [
+      "repos",
+      "show",
+      "--repository",
+      "widgets",
+      "--project"
+    ])
+  })
+
+  it.effect("reads the Development section and ignores what it cannot use", () =>
+    Effect.gen(function* () {
+      const links = yield* parseDevelopmentLinks(
+        JSON.stringify({
+          id: 7,
+          fields: {},
+          relations: [
+            { rel: "ArtifactLink", url: artifactUri(branch), attributes: { name: "Branch" } },
+            {
+              rel: "ArtifactLink",
+              url: "vstfs:///Git/PullRequestId/p-guid%2Fr-guid%2F42",
+              attributes: { name: "Pull Request" }
+            },
+            // A build link is a Development link too, but not a git one.
+            {
+              rel: "ArtifactLink",
+              url: "vstfs:///Build/Build/99",
+              attributes: { name: "Integrated in build" }
+            },
+            // Hierarchy relations are not Development links at all.
+            { rel: "System.LinkTypes.Hierarchy-Reverse", url: "https://…/workItems/1" }
+          ]
+        })
+      )
+
+      assert.deepStrictEqual(
+        links.map((link) => `${link.kind}:${link.value}`),
+        ["Branch:factory/item-7", "PullRequest:42"]
+      )
+      // No Development section yet is the normal state, not a failure.
+      assert.deepStrictEqual([...(yield* parseDevelopmentLinks('{"id":7,"fields":{}}'))], [])
+    })
+  )
+
+  it.effect("resolves the GUIDs an artifact link cannot be built without", () =>
+    Effect.gen(function* () {
+      const repository = yield* parseRepository(
+        JSON.stringify({
+          id: "r-guid",
+          name: "widgets",
+          project: { id: "p-guid", name: "acme" },
+          defaultBranch: "refs/heads/main",
+          webUrl: "https://dev.azure.com/acme/acme/_git/widgets"
+        })
+      )
+
+      assert.strictEqual(repository.id, "r-guid")
+      assert.strictEqual(repository.projectId, "p-guid")
+      // Reported as a full ref by the CLI; callers branch by short name.
+      assert.strictEqual(repository.defaultBranch, "main")
+
+      const sparse = yield* parseRepository('{"id":"r","name":"n","project":{"id":"p"}}')
+      assert.strictEqual(sparse.defaultBranch, "")
+      assert.strictEqual(sparse.projectName, "")
+    })
+  )
+
+  it.effect("links a branch and a pull request through the CLI, under the write guard", () =>
+    Effect.gen(function* () {
+      const responses = new Map<string, ProcessResult>([
+        [
+          processCommandKey(["az", ...workItemShowArgs(config, 7, "relations")]),
+          ok(JSON.stringify({ id: 7, fields: {}, relations: [] }))
+        ],
+        [processCommandKey(["az", ...relationAddArgs(config, 7, branch)]), ok("{}")],
+        [
+          processCommandKey(["az", ...repositoryShowArgs(config, "repo")]),
+          ok(
+            JSON.stringify({
+              id: "r-guid",
+              name: "repo",
+              project: { id: "p-guid", name: "project" },
+              defaultBranch: "refs/heads/main"
+            })
+          )
+        ]
+      ])
+      const fake = yield* makeFakeProcessExecutor({ responses })
+      const events = yield* makeCollectingFlowEvents
+      const ado = makeAzureDevOpsTool(config, fake.executor, "/work", events)
+
+      assert.deepStrictEqual([...(yield* ado.developmentLinks(7))], [])
+      const repository = yield* ado.repository()
+      yield* ado.linkArtifact(7, branch)
+
+      const readOnly = new Grants({ ...allGrants, ado: "Read" })
+      const denied = yield* Effect.flip(restricted(readOnly)(ado.linkArtifact(7, branch)))
+
+      assert.strictEqual(repository.id, "r-guid")
+      assert.strictEqual(denied._tag, "CapabilityDenied")
+      const invocations = yield* fake.recorded
+      assert.isTrue(invocations.some((invocation) => invocation.argv.includes("--target-url")))
+    })
+  )
 })

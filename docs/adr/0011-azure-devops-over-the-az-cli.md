@@ -78,6 +78,34 @@ makes cheap — `listWorkItems`, `readComments`, `writeComment`,
 `writePrComment`, `prPolicies`, `completePr` — so that an Azure DevOps
 consumer is not forced back into a parallel client for half its work.
 
+## Amendment (2026-08-25): Development links
+
+Consumers that run a work queue on Azure DevOps hit a structural gap the
+original conversion did not cover. A GitHub issue belongs to a repository,
+so "which repository is this work in?" is free. An Azure DevOps work item
+belongs to a **project**, and a project holds many repositories — the
+answer lives in the work item's **Development** section, as `ArtifactLink`
+relations to a branch, a pull request, or a commit.
+
+Reading and writing those links is Azure DevOps protocol, not consumer
+policy, so it belongs here rather than in each consumer: `developmentLinks`,
+`linkArtifact`, `repository`, and the pure `artifactUri` /
+`parseArtifactUri` pair. Which repository a given work item should be
+worked in, and when to link a branch or a pull request back, stay the
+consumer's decisions.
+
+Two details forced by the platform rather than chosen:
+
+- **Artifact URIs address GUIDs, not names.** `vstfs:///Git/Ref/{projectId}
+%2F{repositoryId}%2FGB{branch}` cannot be built from a repository name,
+  which is why `repository(name)` exists at all. It is deliberately not
+  cached inside the tool: the call is one `az repos show`, and hidden
+  per-instance state would make `makeAzureDevOpsTool` Effect-returning for
+  no real gain. Consumers that poll in a loop can cache it themselves.
+- **The triple is one encoded segment.** Encoding it as three segments
+  would corrupt every branch name containing a slash — which is most of
+  them under any `feature/` or `factory/` convention.
+
 ## Consequences
 
 - **Breaking for existing consumers.** `makeAzureDevOpsTool` now takes a
