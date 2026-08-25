@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.13.1
+
+- **Fixed**: CLI tools that install as a `.cmd` on Windows could not be run
+  at all. `az` and an npm-installed `gemini` are batch files there, and
+  `nodeProcessExecutor` spawns without a shell — which never appends a
+  PATHEXT extension (so a bare `az` is not found) and, since
+  CVE-2024-27980, refuses to spawn a batch file outright (`spawn EINVAL`).
+  The same word typed at a PowerShell prompt works, because a shell does
+  both of those things.
+
+  The executor now does them itself, for batch files only: resolve the
+  command through PATHEXT, then hand it to `cmd.exe /d /s /c` with each
+  argument quoted for the Microsoft C runtime. Turning on Node's
+  `shell: true` would not do — it builds its command line as
+  `${file} ${args.join(" ")}` with no quoting at all, which splits any
+  argument containing a space and hands a WIQL `<>` to cmd.exe as
+  redirection.
+
+  Nothing changes off Windows, or on it for a real executable: `git`,
+  `node` and `.exe`-shipped CLIs are still spawned directly.
+
+- New `@llm4ts/runner/WindowsCommand`: `quoteArgument`, `resolveCommand`,
+  `isBatchFile`, `batchInvocation`, `windowsInvocation` — the pure pieces
+  of the above, exported so consumers can reason about them and so they are
+  testable on any platform (they use win32 path semantics explicitly rather
+  than inheriting the host's).
+
 ## 0.13.0
 
 - `@llm4ts/flow/AzureDevOpsTool` reads and writes a work item's

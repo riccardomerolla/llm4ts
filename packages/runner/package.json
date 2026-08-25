@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/runner",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Node runner, CLI, terminal, and MCP composition for llm4ts",
   "license": "MIT",
   "type": "module",
@@ -32,7 +32,8 @@
     "./Terminal": "./dist/Terminal.js",
     "./TerminalInteraction": "./dist/TerminalInteraction.js",
     "./Package": "./dist/Package.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./WindowsCommand": "./dist/WindowsCommand.js"
   },
   "scripts": {
     "clean": "tsc -b tsconfig.json --clean",

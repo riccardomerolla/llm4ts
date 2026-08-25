@@ -13,6 +13,7 @@ import {
   type ProcessExecutorShape
 } from "@llm4ts/core/ProcessExecutor"
 import { InvalidRequestError, ProviderError, type LlmError } from "@llm4ts/core/Errors"
+import { windowsInvocation } from "./WindowsCommand.ts"
 
 const maxStderrLines = 256
 
@@ -45,15 +46,24 @@ const spawnChild = (
     )
   }
 
+  // Windows only, and only for a batch file: `az`/`gemini` and friends
+  // install as `.cmd`, which has to be resolved through PATHEXT and handed
+  // to cmd.exe — the two things a shell does that a shell-less spawn does
+  // not. See WindowsCommand.ts for why a shell is not the answer instead.
+  const windows = process.platform === "win32" ? windowsInvocation(argv) : undefined
+  const file = windows?.file ?? command
+  const spawnArgs = windows === undefined ? args : windows.args
+
   return Effect.try({
     try: () =>
-      spawn(command, args, {
+      spawn(file, spawnArgs, {
         cwd,
         env: {
           ...process.env,
           ...envVars
         },
-        stdio: "pipe"
+        stdio: "pipe",
+        ...(windows === undefined ? {} : { windowsVerbatimArguments: windows.verbatim })
       }),
     catch: (error) => processFailure(argv, errorMessage(error))
   })
