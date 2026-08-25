@@ -24,6 +24,7 @@ import {
   parseRepository,
   parseWorkItem,
   parseWorkItemIds,
+  parseWorkItems,
   prCompleteArgs,
   prCreateArgs,
   prListArgs,
@@ -176,6 +177,28 @@ describe("Azure DevOps CLI protocol", () => {
     assert.match(wiql, / FROM WorkItems WHERE /)
     assert.match(wiql, / ORDER BY \[System\.Id\] ASC$/)
   })
+
+  it.effect("reads an empty board as an empty queue", () =>
+    Effect.gen(function* () {
+      // The Azure CLI prints NOTHING for a command that returns None, and
+      // `az boards query` returns None exactly when the WIQL matches no
+      // work items. So an idle queue arrives as empty stdout with exit
+      // code 0 — not `[]` — and decoding it as JSON fails with "Unexpected
+      // end of JSON input". A board with nothing on it is the ordinary
+      // case, not an error.
+      const items = yield* parseWorkItems("")
+      const alsoEmpty = yield* parseWorkItems("   \n")
+      const ids = yield* parseWorkItemIds("")
+
+      assert.deepStrictEqual(items, [])
+      assert.deepStrictEqual(alsoEmpty, [])
+      assert.deepStrictEqual(ids, [])
+
+      // Malformed output is still an error: only emptiness is "no rows".
+      const broken = yield* Effect.flip(parseWorkItems("[{"))
+      assert.strictEqual(broken._tag, "Process")
+    })
+  )
 
   it.effect("applies the row limit to the answer instead", () =>
     Effect.gen(function* () {

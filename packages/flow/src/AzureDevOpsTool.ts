@@ -541,15 +541,24 @@ export const parseWorkItem = (payload: string): Effect.Effect<WorkItem, ProcessE
     Effect.mapError(decodeFailure("az boards work-item show"))
   )
 
+// The Azure CLI prints NOTHING for a command that returns None — not
+// `[]`, not `null`. `az boards query` returns None precisely when the WIQL
+// matches no work items, so an empty queue arrives as empty stdout with
+// exit code 0. That is the ordinary state of a board between pieces of
+// work, and parsing it as JSON fails with "Unexpected end of JSON input".
+const noRows = (payload: string): boolean => payload.trim().length === 0
+
 // `az boards query` flattens the WIQL result into a work-item array, so a
 // queue poll is a single call rather than a fan-out over ids.
 export const parseWorkItems = (
   payload: string
 ): Effect.Effect<ReadonlyArray<WorkItem>, ProcessError> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(AdoWorkItem)))(payload).pipe(
-    Effect.map((items) => items.map(toWorkItem)),
-    Effect.mapError(decodeFailure("az boards query"))
-  )
+  noRows(payload)
+    ? Effect.succeed<ReadonlyArray<WorkItem>>([])
+    : Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Array(AdoWorkItem)))(payload).pipe(
+        Effect.map((items) => items.map(toWorkItem)),
+        Effect.mapError(decodeFailure("az boards query"))
+      )
 
 export const parseWorkItemIds = (
   payload: string
