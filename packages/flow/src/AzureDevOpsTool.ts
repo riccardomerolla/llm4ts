@@ -84,12 +84,17 @@ const json = ["--output", "json"]
 // Work item argv
 // ---------------------------------------------------------------------------
 
-export const workItemShowArgs = (config: AdoConfig, id: number): ReadonlyArray<string> => [
+export const workItemShowArgs = (
+  config: AdoConfig,
+  id: number,
+  expand?: "relations" | "all"
+): ReadonlyArray<string> => [
   "boards",
   "work-item",
   "show",
   "--id",
   String(id),
+  ...(expand === undefined ? [] : ["--expand", expand]),
   ...org(config),
   ...json
 ]
@@ -305,6 +310,132 @@ export const prCommentArgs = (
   ...json
 ]
 
+// ---------------------------------------------------------------------------
+// Development links
+// ---------------------------------------------------------------------------
+
+// The "Development" section of a work item is a set of ArtifactLink
+// relations pointing at git objects. Their URLs are `vstfs:` URIs carrying
+// GUIDs, not names — which is why `repository` below exists: a caller that
+// knows a repository by name has to resolve its id before it can link
+// anything to it, and has to reverse the mapping to read a link back.
+export const GitArtifactKind = Schema.Literals(["Branch", "PullRequest", "Commit"])
+export type GitArtifactKind = typeof GitArtifactKind.Type
+
+export class GitArtifact extends Schema.Class<GitArtifact>("GitArtifact")({
+  kind: GitArtifactKind,
+  projectId: Schema.String,
+  repositoryId: Schema.String,
+  // Branch name, pull request id, or commit sha, by kind.
+  value: Schema.String
+}) {}
+
+export const gitArtifactKinds: ReadonlyArray<GitArtifactKind> = ["Branch", "PullRequest", "Commit"]
+
+// The CLI and the REST payloads name these links in prose, not by kind.
+const linkNames: Readonly<Record<GitArtifactKind, string>> = {
+  Branch: "Branch",
+  PullRequest: "Pull Request",
+  Commit: "Fixed in Commit"
+}
+
+export const artifactLinkName = (kind: GitArtifactKind): string => linkNames[kind]
+
+export const artifactKindOfName = (name: string): GitArtifactKind | undefined =>
+  gitArtifactKinds.find((kind) => linkNames[kind].toLowerCase() === name.trim().toLowerCase())
+
+const uriSegment: Readonly<Record<GitArtifactKind, string>> = {
+  Branch: "Ref",
+  PullRequest: "PullRequestId",
+  Commit: "Commit"
+}
+
+// `vstfs:///Git/Ref/{project}%2F{repo}%2FGB{branch}` — the whole
+// project/repo/value triple is ONE percent-encoded segment, which is what
+// lets a branch name contain slashes without splitting the URI.
+export const artifactUri = (artifact: GitArtifact): string => {
+  const value = artifact.kind === "Branch" ? `GB${artifact.value}` : artifact.value
+  return (
+    `vstfs:///Git/${uriSegment[artifact.kind]}/` +
+    encodeURIComponent(`${artifact.projectId}/${artifact.repositoryId}/${value}`)
+  )
+}
+
+export const parseArtifactUri = (uri: string): GitArtifact | undefined => {
+  const match = /^vstfs:\/\/\/Git\/(Ref|PullRequestId|Commit)\/(.+)$/.exec(uri.trim())
+  const segment = match?.[1]
+  const encoded = match?.[2]
+  if (segment === undefined || encoded === undefined) {
+    return undefined
+  }
+  const kind = gitArtifactKinds.find((candidate) => uriSegment[candidate] === segment)
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(encoded)
+  } catch {
+    // A malformed escape is a link we cannot act on, not a crash.
+    return undefined
+  }
+  // Split into exactly three: a branch name may contain further slashes.
+  const first = decoded.indexOf("/")
+  const second = decoded.indexOf("/", first + 1)
+  if (kind === undefined || first < 0 || second < 0) {
+    return undefined
+  }
+  const rest = decoded.slice(second + 1)
+  const value = kind === "Branch" ? (rest.startsWith("GB") ? rest.slice(2) : rest) : rest
+  return value.length === 0
+    ? undefined
+    : GitArtifact.make({
+        kind,
+        projectId: decoded.slice(0, first),
+        repositoryId: decoded.slice(first + 1, second),
+        value
+      })
+}
+
+export const relationAddArgs = (
+  config: AdoConfig,
+  id: number,
+  artifact: GitArtifact
+): ReadonlyArray<string> => [
+  "boards",
+  "work-item",
+  "relation",
+  "add",
+  "--id",
+  String(id),
+  "--relation-type",
+  artifactLinkName(artifact.kind),
+  "--target-url",
+  artifactUri(artifact),
+  ...org(config),
+  ...json
+]
+
+export const repositoryShowArgs = (
+  config: AdoConfig,
+  repository: string
+): ReadonlyArray<string> => [
+  "repos",
+  "show",
+  "--repository",
+  repository,
+  "--project",
+  config.project,
+  ...org(config),
+  ...json
+]
+
+export class GitRepository extends Schema.Class<GitRepository>("GitRepository")({
+  id: Schema.String,
+  name: Schema.String,
+  projectId: Schema.String,
+  projectName: Schema.String,
+  defaultBranch: Schema.String,
+  webUrl: Schema.String
+}) {}
+
 export const prPolicyArgs = (config: AdoConfig, id: number): ReadonlyArray<string> => [
   "repos",
   "pr",
@@ -445,6 +576,72 @@ export const parseComments = (
     Effect.mapError(decodeFailure("az devops invoke wit comments"))
   )
 
+// `relations` is absent — not empty — on a work item whose Development
+// section has never been touched, which is every work item until this tool
+// links one. optionalKey, because a constructor default does not apply on
+// decode and a missing key would fail the normal case.
+const AdoRelations = Schema.Struct({
+  relations: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        rel: Schema.optionalKey(Schema.String),
+        url: Schema.optionalKey(Schema.String),
+        attributes: Schema.optionalKey(Schema.Struct({ name: Schema.optionalKey(Schema.String) }))
+      })
+    )
+  )
+})
+
+// A work item with no Development section decodes to an empty list rather
+// than failing: "nothing linked yet" is the normal state, not an error.
+export const parseDevelopmentLinks = (
+  payload: string
+): Effect.Effect<ReadonlyArray<GitArtifact>, ProcessError> =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(AdoRelations))(payload).pipe(
+    Effect.map((parsed) =>
+      (parsed.relations ?? [])
+        .filter((relation) => (relation.rel ?? "").toLowerCase() === "artifactlink")
+        .flatMap((relation) => {
+          const artifact = parseArtifactUri(relation.url ?? "")
+          if (artifact === undefined) {
+            return []
+          }
+          // The URI segment already fixes the kind; the attribute name is
+          // only a cross-check for the links whose segment is shared.
+          const named = artifactKindOfName(relation.attributes?.name ?? "")
+          return named === undefined || named === artifact.kind ? [artifact] : []
+        })
+    ),
+    Effect.mapError(decodeFailure("az boards work-item show --expand relations"))
+  )
+
+const AdoRepository = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  project: Schema.Struct({
+    id: Schema.String,
+    name: Schema.optionalKey(Schema.String)
+  }),
+  defaultBranch: Schema.optionalKey(Schema.String),
+  webUrl: Schema.optionalKey(Schema.String)
+})
+
+export const parseRepository = (payload: string): Effect.Effect<GitRepository, ProcessError> =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(AdoRepository))(payload).pipe(
+    Effect.map((repository) =>
+      GitRepository.make({
+        id: repository.id,
+        name: repository.name,
+        projectId: repository.project.id,
+        projectName: repository.project.name ?? "",
+        // Reported as a full ref; callers branch and push by short name.
+        defaultBranch: branchName(repository.defaultBranch ?? ""),
+        webUrl: repository.webUrl ?? ""
+      })
+    ),
+    Effect.mapError(decodeFailure("az repos show"))
+  )
+
 const AdoPr = Schema.Struct({
   pullRequestId: Schema.Int,
   repository: Schema.Struct({
@@ -513,6 +710,13 @@ export interface AzureDevOpsToolShape {
   ) => Effect.Effect<ReadonlyArray<WorkItem>, FlowError>
   readonly wiqlIds: (query: string) => Effect.Effect<ReadonlyArray<number>, FlowError>
   readonly readComments: (id: number) => Effect.Effect<ReadonlyArray<WorkItemComment>, FlowError>
+  // The work item's Development section: the branches, pull requests, and
+  // commits linked to it. Empty when nothing has been linked yet.
+  readonly developmentLinks: (id: number) => Effect.Effect<ReadonlyArray<GitArtifact>, FlowError>
+  readonly linkArtifact: (id: number, artifact: GitArtifact) => Effect.Effect<void, FlowError>
+  // Resolves a repository's GUIDs, which every artifact link needs and no
+  // caller can know from a repository name alone.
+  readonly repository: (name?: string) => Effect.Effect<GitRepository, FlowError>
   readonly setFields: (
     id: number,
     fields: Readonly<Record<string, string>>
@@ -632,6 +836,18 @@ export const makeAzureDevOpsTool = (
       read("ado wiql", run(queryArgs(config, query)).pipe(Effect.flatMap(parseWorkItemIds))),
     readComments: (id) =>
       read("ado readComments", run(commentsArgs(config, id)).pipe(Effect.flatMap(parseComments))),
+    developmentLinks: (id) =>
+      read(
+        "ado developmentLinks",
+        run(workItemShowArgs(config, id, "relations")).pipe(Effect.flatMap(parseDevelopmentLinks))
+      ),
+    linkArtifact: (id, artifact) =>
+      write("ado linkArtifact", run(relationAddArgs(config, id, artifact)).pipe(Effect.asVoid)),
+    repository: (name = config.repository) =>
+      read(
+        "ado repository",
+        run(repositoryShowArgs(config, name)).pipe(Effect.flatMap(parseRepository))
+      ),
     setFields,
     setState: (id, state) => setFields(id, { "System.State": state }),
     setAcceptanceCriteria: (id, text) =>

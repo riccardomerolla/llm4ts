@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- `@llm4ts/flow/AzureDevOpsTool` reads and writes a work item's
+  **Development** section — the links that tie a work item to the git
+  objects that implement it, which is how Azure DevOps expresses what
+  GitHub gets from an issue living inside a repository:
+  - `developmentLinks(id)` decodes the `ArtifactLink` relations
+    (`az boards work-item show --expand relations`) into `GitArtifact`
+    values. Non-git Development links (builds) and ordinary hierarchy
+    relations are skipped rather than half-decoded.
+  - `linkArtifact(id, artifact)` adds one, via
+    `az boards work-item relation add`.
+  - `repository(name?)` resolves a repository's GUIDs through
+    `az repos show`, because artifact URIs address projects and
+    repositories by id and no caller can derive those from a name.
+  - `artifactUri` / `parseArtifactUri` build and read the `vstfs:` URIs
+    (`Ref`, `PullRequestId`, `Commit`). The project/repository/value
+    triple is one percent-encoded segment, which is what lets a branch
+    name keep its slashes; a malformed escape yields `undefined` rather
+    than a thrown `URIError`.
+- `workItemShowArgs` takes an optional `expand` (`relations` / `all`).
+- **Fixed**: a work item whose Development section has never been touched
+  omits `relations` entirely rather than sending an empty array. A
+  constructor default does not apply on decode, so that — the normal state
+  of every work item — would have failed to parse.
+
 ## 0.12.0
 
 - **Breaking**: `@llm4ts/flow/AzureDevOpsTool` drives the `az` CLI instead
