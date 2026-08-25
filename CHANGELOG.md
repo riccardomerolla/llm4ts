@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0
 
 - **Breaking**: `@llm4ts/flow/AzureDevOpsTool` drives the `az` CLI instead
   of the Azure DevOps REST API (ADR 0011), so it matches the `gh` protocol
