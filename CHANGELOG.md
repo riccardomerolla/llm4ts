@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.13.5
+
+- `@llm4ts/flow/AzureDevOpsTool` reads and writes a work item's own links,
+  the ones Azure DevOps holds natively where a GitHub issue has only prose:
+  - `workItemLinks(id)` decodes `System.LinkTypes.*` relations from
+    `az boards work-item show --expand relations` into `WorkItemLink`
+    values. Artifact links and hyperlinks share that array and are skipped
+    here, exactly as `developmentLinks` skips these.
+  - `linkWorkItem(id, kind, targetId)` adds one. A work item link takes
+    `--target-id`, where an artifact link takes the `--target-url` of a
+    `vstfs:` URI — the CLI accepts both flags on the same command, so
+    confusing them is silent.
+  - `WorkItemLinkKind` covers `Parent`, `Child`, `Related`, `Predecessor`
+    and `Successor`, with `linkReferenceName` / `linkKindOfReference`
+    mapping to and from the `System.LinkTypes.*` reference names. Forward
+    points away from the primary end (a parent's link to its child is
+    `Hierarchy-Forward`), and an item's `Predecessor` is the one it waits
+    for — which is what "blocked by" means on a board.
+  - `workItemIdOfUrl` reads the id from a relation's REST url.
+
 ## 0.13.4
 
 - **Fixed**: `LLM4TS_CODER=gemini-cli` ran **claude**. `coderFromEnv`
