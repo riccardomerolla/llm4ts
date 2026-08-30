@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<web-app xmlns="http://java.sun.com/xml/ns/javaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://java.sun.com/xml/ns/javaee
+             http://java.sun.com/xml/ns/javaee/web-app_2_5.xsd"
+         version="2.5">
+
+  <display-name>DemoBank Internet Banking Portal</display-name>
+
+  <context-param>
+    <param-name>demobank.esb.endpoint</param-name>
+    <param-value>http://esb-gw.internal.demobank.example:7801/esb/router</param-value>
+  </context-param>
+  <context-param>
+    <param-name>demobank.esb.timeoutMs</param-name>
+    <param-value>12000</param-value>
+  </context-param>
+
+  <servlet>
+    <servlet-name>AccountOverviewServlet</servlet-name>
+    <servlet-class>com.demobank.legacy.web.AccountOverviewServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>AccountOverviewServlet</servlet-name>
+    <url-pattern>/accountOverview</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>BeneficiaryServlet</servlet-name>
+    <servlet-class>com.demobank.legacy.web.BeneficiaryServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>BeneficiaryServlet</servlet-name>
+    <url-pattern>/beneficiary</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>TransferServlet</servlet-name>
+    <servlet-class>com.demobank.legacy.web.TransferServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>TransferServlet</servlet-name>
+    <url-pattern>/transfer</url-pattern>
+  </servlet-mapping>
+
+  <session-config>
+    <session-timeout>10</session-timeout>
+  </session-config>
+
+  <welcome-file-list>
+    <welcome-file>login.jsp</welcome-file>
+  </welcome-file-list>
+
+  <error-page>
+    <error-code>500</error-code>
+    <location>/help.jsp</location>
+  </error-page>
+
+</web-app>

@@ -1,0 +1,269 @@
+/* DemoBank component styles. One class family per design-system component,
+   prefixed db-. Pages never define their own CSS files; they compose these
+   components. See CONTRIBUTING.md. */
+
+body {
+  margin: 0;
+  font-family: var(--db-font-family);
+  font-size: var(--db-font-size-md);
+  color: var(--db-color-ink);
+  background: var(--db-color-surface-sunken);
+}
+
+/* App shell */
+.db-shell-header {
+  display: flex;
+  align-items: center;
+  gap: var(--db-space-6);
+  padding: var(--db-space-3) var(--db-space-6);
+  background: var(--db-color-brand-strong);
+  color: var(--db-color-brand-contrast);
+}
+
+.db-shell-brand {
+  font-size: var(--db-font-size-lg);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.db-shell-nav {
+  display: flex;
+  gap: var(--db-space-4);
+}
+
+.db-shell-nav a {
+  color: var(--db-color-brand-contrast);
+  text-decoration: none;
+  font-size: var(--db-font-size-sm);
+  opacity: 0.9;
+}
+
+.db-shell-nav a:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.db-shell-user {
+  margin-left: auto;
+  font-size: var(--db-font-size-sm);
+  opacity: 0.9;
+}
+
+/* PageLayout */
+.db-page {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: var(--db-space-8) var(--db-space-6);
+}
+
+.db-page-header {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--db-space-4);
+  margin-bottom: var(--db-space-6);
+}
+
+.db-page-title {
+  margin: 0;
+  font-size: var(--db-font-size-xl);
+}
+
+.db-page-subtitle {
+  margin: var(--db-space-1) 0 0;
+  color: var(--db-color-ink-muted);
+  font-size: var(--db-font-size-sm);
+}
+
+.db-page-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--db-space-2);
+}
+
+/* Card */
+.db-card {
+  background: var(--db-color-surface);
+  border: 1px solid var(--db-color-border);
+  border-radius: var(--db-radius-md);
+  box-shadow: var(--db-shadow-card);
+  padding: var(--db-space-6);
+  margin-bottom: var(--db-space-6);
+}
+
+.db-card-title {
+  margin: 0 0 var(--db-space-4);
+  font-size: var(--db-font-size-lg);
+}
+
+/* Button */
+.db-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--db-space-2);
+  padding: var(--db-space-2) var(--db-space-4);
+  border-radius: var(--db-radius-sm);
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: var(--db-font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.db-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.db-button--primary {
+  background: var(--db-color-brand);
+  color: var(--db-color-brand-contrast);
+}
+
+.db-button--primary:hover:not(:disabled) {
+  background: var(--db-color-brand-strong);
+}
+
+.db-button--secondary {
+  background: var(--db-color-surface);
+  color: var(--db-color-brand);
+  border-color: var(--db-color-brand);
+}
+
+.db-button--ghost {
+  background: transparent;
+  color: var(--db-color-brand);
+}
+
+/* Field */
+.db-field {
+  display: block;
+  margin-bottom: var(--db-space-4);
+}
+
+.db-field-label {
+  display: block;
+  margin-bottom: var(--db-space-1);
+  font-size: var(--db-font-size-sm);
+  font-weight: 600;
+}
+
+.db-field input,
+.db-field select,
+.db-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: var(--db-space-2) var(--db-space-3);
+  border: 1px solid var(--db-color-border);
+  border-radius: var(--db-radius-sm);
+  font: inherit;
+  background: var(--db-color-surface);
+}
+
+.db-field--invalid input,
+.db-field--invalid select,
+.db-field--invalid textarea {
+  border-color: var(--db-color-danger);
+}
+
+.db-field-error {
+  margin: var(--db-space-1) 0 0;
+  color: var(--db-color-danger);
+  font-size: var(--db-font-size-sm);
+}
+
+/* Form */
+.db-form-actions {
+  display: flex;
+  gap: var(--db-space-2);
+  margin-top: var(--db-space-6);
+}
+
+.db-form-status {
+  margin: var(--db-space-4) 0 0;
+  padding: var(--db-space-2) var(--db-space-3);
+  border-radius: var(--db-radius-sm);
+  font-size: var(--db-font-size-sm);
+}
+
+.db-form-status--success {
+  background: var(--db-color-success-soft);
+  color: var(--db-color-success);
+}
+
+/* DataTable */
+.db-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.db-table caption {
+  caption-side: top;
+  text-align: left;
+  font-size: var(--db-font-size-sm);
+  color: var(--db-color-ink-muted);
+  margin-bottom: var(--db-space-2);
+}
+
+.db-table th,
+.db-table td {
+  text-align: left;
+  padding: var(--db-space-2) var(--db-space-3);
+  border-bottom: 1px solid var(--db-color-border);
+  font-size: var(--db-font-size-sm);
+}
+
+.db-table th {
+  color: var(--db-color-ink-muted);
+  font-weight: 600;
+}
+
+.db-table-empty {
+  padding: var(--db-space-6);
+  text-align: center;
+  color: var(--db-color-ink-muted);
+}
+
+/* Stepper */
+.db-stepper {
+  display: flex;
+  gap: var(--db-space-4);
+  list-style: none;
+  margin: 0 0 var(--db-space-6);
+  padding: 0;
+}
+
+.db-stepper-step {
+  display: flex;
+  align-items: center;
+  gap: var(--db-space-2);
+  font-size: var(--db-font-size-sm);
+  color: var(--db-color-ink-muted);
+}
+
+.db-stepper-step--active {
+  color: var(--db-color-ink);
+  font-weight: 600;
+}
+
+.db-stepper-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--db-color-surface);
+  border: 1px solid var(--db-color-border);
+}
+
+.db-stepper-step--active .db-stepper-index {
+  background: var(--db-color-brand);
+  border-color: var(--db-color-brand);
+  color: var(--db-color-brand-contrast);
+}
+
+/* Utility */
+.db-loading {
+  color: var(--db-color-ink-muted);
+  font-size: var(--db-font-size-sm);
+}

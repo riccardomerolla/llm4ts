@@ -1,0 +1,38 @@
+/* DemoBank design tokens. Components consume ONLY these custom properties —
+   never hard-coded colors or spacing. See CONTRIBUTING.md. */
+:root {
+  /* Color */
+  --db-color-ink: #16232e;
+  --db-color-ink-muted: #5a6b78;
+  --db-color-surface: #ffffff;
+  --db-color-surface-sunken: #f2f5f7;
+  --db-color-border: #d4dde3;
+  --db-color-brand: #0f5f5c;
+  --db-color-brand-strong: #0a4341;
+  --db-color-brand-contrast: #ffffff;
+  --db-color-danger: #b4232a;
+  --db-color-danger-soft: #fbeaea;
+  --db-color-success: #1d6b3a;
+  --db-color-success-soft: #e8f4ec;
+
+  /* Typography */
+  --db-font-family:
+    'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --db-font-size-sm: 0.8125rem;
+  --db-font-size-md: 0.9375rem;
+  --db-font-size-lg: 1.125rem;
+  --db-font-size-xl: 1.5rem;
+
+  /* Spacing (4px scale) */
+  --db-space-1: 0.25rem;
+  --db-space-2: 0.5rem;
+  --db-space-3: 0.75rem;
+  --db-space-4: 1rem;
+  --db-space-6: 1.5rem;
+  --db-space-8: 2rem;
+
+  /* Shape */
+  --db-radius-sm: 4px;
+  --db-radius-md: 8px;
+  --db-shadow-card: 0 1px 3px rgba(22, 35, 46, 0.12);
+}

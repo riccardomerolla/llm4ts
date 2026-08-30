@@ -1,0 +1,132 @@
+/* DemoBank portal stylesheet. Grown organically since 2005 -- beware. */
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Verdana, Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  background-color: #eef2f5;
+  color: #222222;
+}
+
+#topbar {
+  background-color: #003b6f;
+  color: #ffffff;
+  padding: 8px 14px;
+}
+#topbar .logo {
+  font-size: 18px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+#topbar .userbox {
+  float: right;
+  padding-top: 4px;
+}
+#topbar a {
+  color: #ffd24d;
+}
+
+#nav {
+  background-color: #0d5ca3;
+}
+#nav ul {
+  margin: 0;
+  padding: 0 10px;
+  list-style: none;
+}
+#nav li {
+  display: inline;
+}
+#nav a {
+  display: inline-block;
+  padding: 6px 12px;
+  color: #ffffff;
+  text-decoration: none;
+}
+#nav a:hover {
+  background-color: #1470c4;
+}
+
+#content {
+  padding: 16px;
+  min-height: 380px;
+}
+
+#footer {
+  border-top: 1px solid #b8c4ce;
+  padding: 8px 14px;
+  color: #667788;
+}
+#footer .small {
+  font-size: 9px;
+}
+
+h1 {
+  font-size: 16px;
+  color: #003b6f;
+}
+h2 {
+  font-size: 13px;
+  color: #0d5ca3;
+}
+
+table.data {
+  border-collapse: collapse;
+  width: 100%;
+  background-color: #ffffff;
+}
+table.data th {
+  background-color: #d7e3ee;
+  text-align: left;
+  padding: 4px 8px;
+  border: 1px solid #b8c4ce;
+}
+table.data td {
+  padding: 4px 8px;
+  border: 1px solid #d0d8e0;
+}
+table.data tr.odd {
+  background-color: #f4f8fb;
+}
+td.num,
+th.num {
+  text-align: right;
+}
+
+.btn {
+  background-color: #0d5ca3;
+  color: #ffffff;
+  border: 1px solid #003b6f;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.btnGrey {
+  background-color: #8899aa;
+  border-color: #667788;
+}
+
+.fldErr {
+  border: 1px solid #cc0000;
+  background-color: #fff2f2;
+}
+.errMsg {
+  color: #cc0000;
+  padding-left: 6px;
+}
+.msgOk {
+  color: #1a7a1a;
+  font-weight: bold;
+}
+.msgErr {
+  color: #cc0000;
+  font-weight: bold;
+}
+
+form.legacy label {
+  display: inline-block;
+  width: 160px;
+}
+form.legacy .row {
+  margin-bottom: 6px;
+}

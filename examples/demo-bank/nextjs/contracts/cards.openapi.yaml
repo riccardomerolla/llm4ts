@@ -1,0 +1,57 @@
+# Wire contract for the cards domain. Mirrors src/services/cards/port.ts —
+# keep the two in sync. Served by the API gateway; the SPA never calls it
+# directly outside the cards adapter.
+openapi: 3.0.3
+info:
+  title: DemoBank Cards API
+  version: 1.0.0
+paths:
+  /customers/{customerId}/cards:
+    get:
+      operationId: listCards
+      summary: List payment cards for a customer
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The customer's cards
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CardSummary'
+components:
+  schemas:
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+          description: ISO 4217 code
+    CardSummary:
+      type: object
+      required: [id, label, maskedPan, kind, status, balance]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        maskedPan:
+          type: string
+          description: Masked PAN, e.g. "**** **** **** 4242"
+        kind:
+          type: string
+          enum: [debit, credit]
+        status:
+          type: string
+          enum: [active, blocked]
+        balance:
+          $ref: '#/components/schemas/Money'

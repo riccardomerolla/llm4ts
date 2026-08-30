@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DemoBank legacy portal - build skeleton only.
+  This fixture is not meant to compile or deploy; the pom exists so the
+  tree reads as a period-typical Maven WAR module.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.demobank.legacy</groupId>
+  <artifactId>demobank-portal</artifactId>
+  <version>2.7.14-SNAPSHOT</version>
+  <packaging>war</packaging>
+  <name>DemoBank Internet Banking Portal</name>
+
+  <properties>
+    <project.build.sourceEncoding>ISO-8859-1</project.build.sourceEncoding>
+    <maven.compiler.source>1.6</maven.compiler.source>
+    <maven.compiler.target>1.6</maven.compiler.target>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>javax.servlet</groupId>
+      <artifactId>servlet-api</artifactId>
+      <version>2.5</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>javax.servlet</groupId>
+      <artifactId>jstl</artifactId>
+      <version>1.2</version>
+    </dependency>
+    <dependency>
+      <groupId>javax.servlet.jsp</groupId>
+      <artifactId>jsp-api</artifactId>
+      <version>2.1</version>
+      <scope>provided</scope>
+    </dependency>
+    <!-- ESB connectivity jars are provided by the app server shared lib
+         (see deployment runbook DB-OPS-114, not part of this repo). -->
+  </dependencies>
+
+  <build>
+    <finalName>demobank-portal</finalName>
+  </build>
+</project>

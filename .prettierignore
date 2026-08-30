@@ -14,3 +14,7 @@ flows/packs
 flows/patterns
 flows/fixtures
 packages/shell/flows
+
+# Demo-bank fixture repos: standalone toolchains with their own style; the
+# legacy tree is deliberately period-styled J2EE content.
+examples/demo-bank

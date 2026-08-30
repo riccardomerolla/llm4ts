@@ -1,0 +1,73 @@
+# Wire contract for the profile domain. Mirrors src/services/profile/port.ts —
+# keep the two in sync. Served by the API gateway; the SPA never calls it
+# directly outside the profile adapter.
+openapi: 3.0.3
+info:
+  title: DemoBank Profile API
+  version: 1.0.0
+paths:
+  /customers/{customerId}/profile:
+    get:
+      operationId: getProfile
+      summary: Fetch a customer's profile
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The customer's profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+    put:
+      operationId: updateProfile
+      summary: Update a customer's profile
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+      responses:
+        '200':
+          description: The updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+components:
+  schemas:
+    Profile:
+      type: object
+      required: [customerId, fullName, email, phone]
+      properties:
+        customerId:
+          type: string
+        fullName:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+    ProfileUpdate:
+      type: object
+      required: [fullName, email, phone]
+      properties:
+        fullName:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string

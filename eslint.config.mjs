@@ -73,7 +73,10 @@ export default [
       "flows/packs/**",
       "flows/patterns/**",
       "flows/fixtures/**",
-      "packages/shell/flows/**"
+      "packages/shell/flows/**",
+      // Demo-bank fixture repos: standalone toolchains (the Next.js fixture
+      // lints itself) and deliberately legacy-styled J2EE content.
+      "examples/demo-bank/**"
     ]
   },
   js.configs.recommended,
