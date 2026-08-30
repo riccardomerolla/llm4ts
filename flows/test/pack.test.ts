@@ -66,6 +66,15 @@ const packs = [
     specsDir: "docs/specs",
     featuresDir: "features",
     replay: false
+  },
+  {
+    name: "j2ee-nextjs-spa",
+    source: "jsp",
+    specsDir: "docs/modernization/specs",
+    featuresDir: "docs/modernization/features",
+    coverage: ["servlet-url", "jsp-form", "jsp-ajax"],
+    survey: ["jsp-include", "servlet-class"],
+    replay: false
   }
 ] as const
 

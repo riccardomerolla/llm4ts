@@ -91,7 +91,8 @@ Optional ADO mirror (decide before the workshop, never set it up live):
 ```bash
 export LLM4TS_ADO_ORG_URL=https://dev.azure.com/<org>
 export LLM4TS_ADO_PROJECT=<project>
-export LLM4TS_ADO_PAT=<pat>          # PAT stays in env, never in args or logs
+# Auth belongs to the az CLI itself: `az devops login` beforehand (or
+# AZURE_DEVOPS_EXT_PAT in the shell) — llm4ts never sees the PAT.
 ```
 
 ## Recovery drills (rehearse each one)

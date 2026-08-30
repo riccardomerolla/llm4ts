@@ -1,6 +1,6 @@
 {
   "extends": "../tsconfig.base.json",
-  "include": ["*.ts"],
+  "include": ["*.ts", "lib/**/*.ts"],
   "references": [
     { "path": "../packages/core/tsconfig.src.json" },
     { "path": "../packages/flow/tsconfig.src.json" },

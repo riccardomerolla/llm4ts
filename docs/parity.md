@@ -427,3 +427,9 @@ reference release.
   the runner publishes `CapabilityUnenforceable` when a `readOnly` seat
   resolves to a non-enforced connector. See
   `docs/provider-capabilities.md` for the per-connector grades.
+- Bank-conversion additions beyond the pinned source (ADR 0012,
+  2026-08-30): the new flow modules `PageSpec`, `EstimatedUsage`, and
+  `BoardSync` (whose Azure DevOps adapter rides the az-CLI
+  `AzureDevOpsTool`, ADR 0011), and the `convert-page`/`convert-all`
+  flows with the `j2ee-nextjs-spa` pack. All additive: no llm4zio
+  counterpart exists; back-porting is out of scope for the PoC.
