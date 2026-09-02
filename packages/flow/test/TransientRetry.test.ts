@@ -3,6 +3,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Ref from "effect/Ref"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import {
   ConfigError,
@@ -21,8 +22,10 @@ import {
   isContextOverflow,
   isContextOverflowMessage,
   isFlakyStream,
+  isStructuredParseFailure,
   isTransient,
   makeTransientRetry,
+  repairPrompt,
   transientDelay
 } from "@llm4ts/flow/TransientRetry"
 
@@ -192,6 +195,142 @@ describe("TransientRetry", () => {
         notices.some((message) => message.includes("fresh retry") && message.includes("loop")),
         `retry notice should name the loop: ${notices.join(" | ")}`
       )
+    })
+  )
+
+  it("quotes the parse failure back to the model in the repair prompt", () => {
+    const error = ParseError.make({
+      message:
+        'Failed to parse response as structured output: Expected number, actual "12 EUR" at ["amount"] (tried 2 candidate(s); last: {"amount":"12 EUR"})',
+      raw: '{"amount":"12 EUR"}'
+    })
+    const repaired = repairPrompt("Extract the fee.", error)
+    assert.isTrue(repaired.startsWith("Extract the fee."))
+    assert.include(repaired, "could not be parsed")
+    assert.include(repaired, 'Expected number, actual "12 EUR"')
+    assert.include(repaired, "ONLY the JSON object")
+    // A very long reason is cut so the re-ask does not double the prompt.
+    const long = repairPrompt("p", ParseError.make({ message: "x".repeat(2_000), raw: "" }))
+    assert.isBelow(long.length, 700)
+
+    assert.isTrue(isStructuredParseFailure(error))
+    assert.isFalse(isStructuredParseFailure(ProviderError.make({ message: "Failed to parse" })))
+    assert.isFalse(isFlakyStream(error))
+    assert.isFalse(isTransient(error))
+  })
+
+  const makeStructuredService = (
+    failTimes: number,
+    failure: LlmError
+  ): Effect.Effect<{
+    readonly service: LlmServiceShape
+    readonly prompts: Ref.Ref<ReadonlyArray<string>>
+  }> =>
+    Effect.map(Ref.make<ReadonlyArray<string>>([]), (prompts) => {
+      // Succeeds with 42 decoded through the caller's schema, so the fake is
+      // honest about the service's generic return type without an assertion.
+      const attempt = <A, E, RD, RE>(
+        prompt: string,
+        schema: Schema.ConstraintCodec<A, E, RD, RE>
+      ): Effect.Effect<A, LlmError, RD> =>
+        Ref.updateAndGet(prompts, (seen) => [...seen, prompt]).pipe(
+          Effect.flatMap((seen) =>
+            seen.length <= failTimes
+              ? Effect.fail(failure)
+              : Schema.decodeUnknownEffect(schema)(42).pipe(
+                  Effect.mapError((error) => ParseError.make({ message: String(error), raw: "42" }))
+                )
+          )
+        )
+      return {
+        prompts,
+        service: LlmService.of({
+          executeStream: (_prompt) => Stream.fail(InvalidRequestError.make({ message: "unused" })),
+          executeStreamWithHistory: (_messages) =>
+            Stream.fail(InvalidRequestError.make({ message: "unused" })),
+          executeWithTools: (_prompt, _tools) =>
+            Effect.fail(InvalidRequestError.make({ message: "unused" })),
+          executeStructured: (prompt, schema, _jsonSchema) => attempt(prompt, schema),
+          executeStructuredWithUsage: (prompt, schema, _jsonSchema) =>
+            attempt(prompt, schema).pipe(Effect.map((value) => [value, undefined, undefined])),
+          isAvailable: Effect.succeed(true)
+        })
+      }
+    })
+
+  const parseFailure = ParseError.make({
+    message: 'Failed to parse response as structured output: missing field "waves"',
+    raw: "{}"
+  })
+
+  it.effect("re-asks a structured call with the repair prompt until it parses", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const structured = yield* makeStructuredService(2, parseFailure)
+      const retrying = yield* makeTransientRetry(structured.service, {
+        maxRetries: 0,
+        flakyRetries: 0,
+        flakyDelay: Duration.zero,
+        parseRetries: 2
+      }).pipe(Effect.provideService(FlowEvents, events))
+
+      const [value] = yield* retrying.executeStructuredWithUsage(
+        "Plan the waves.",
+        Schema.Number,
+        {}
+      )
+      assert.strictEqual(value, 42)
+      const prompts = yield* Ref.get(structured.prompts)
+      assert.strictEqual(prompts.length, 3)
+      assert.strictEqual(prompts[0], "Plan the waves.")
+      // Every re-ask is the ORIGINAL prompt plus the latest failure — not a
+      // repair of a repair, which would grow with each attempt.
+      for (const prompt of prompts.slice(1)) {
+        assert.isTrue(prompt.startsWith("Plan the waves."))
+        assert.include(prompt, 'missing field "waves"')
+        assert.strictEqual(prompt.split("could not be parsed").length, 2)
+      }
+      const notices = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Info" ? [event.message] : []
+      )
+      assert.strictEqual(notices.filter((line) => line.includes("repair retry")).length, 2)
+    })
+  )
+
+  it.effect("surfaces the parse failure once the repair budget is spent", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const structured = yield* makeStructuredService(5, parseFailure)
+      const retrying = yield* makeTransientRetry(structured.service, {
+        maxRetries: 0,
+        flakyRetries: 0,
+        flakyDelay: Duration.zero,
+        parseRetries: 2
+      }).pipe(Effect.provideService(FlowEvents, events))
+
+      const error = yield* Effect.flip(retrying.executeStructured("Plan.", Schema.Number, {}))
+      assert.strictEqual(error._tag, "ParseError")
+      assert.strictEqual((yield* Ref.get(structured.prompts)).length, 3)
+    })
+  )
+
+  it.effect("keeps the repair budget separate from transient and flaky retries", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      // A transient failure inside a structured call still takes the
+      // transient budget and re-sends the SAME prompt, not a repair.
+      const structured = yield* makeStructuredService(
+        1,
+        ProviderError.make({ message: "connection reset by peer" })
+      )
+      const retrying = yield* makeTransientRetry(structured.service, {
+        maxRetries: 1,
+        baseDelay: Duration.zero,
+        parseRetries: 0
+      }).pipe(Effect.provideService(FlowEvents, events))
+
+      yield* retrying.executeStructured("Plan.", Schema.Number, {})
+      assert.deepStrictEqual(yield* Ref.get(structured.prompts), ["Plan.", "Plan."])
     })
   )
 

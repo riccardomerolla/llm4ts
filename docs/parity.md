@@ -131,7 +131,12 @@ reference release.
   "potential loop … halted") is a flaky-stream failure, restarted in a fresh
   process on that budget, because the turn is lost while the quota and the
   prompt are intact. The Gemini provider lifts the loop line from stderr into
-  the stream error the way it already lifted quota diagnostics.
+  the stream error the way it already lifted quota diagnostics. A third
+  budget, also beyond the source, covers structured calls whose reply did
+  not decode as the requested JSON: `parseRetries` (default 2) re-asks with
+  the parse failure quoted back and an instruction to reply with the JSON
+  alone (`repairPrompt`), each re-ask being the original prompt plus the
+  latest failure.
 - The token bucket is created as an unscoped Effect service because its `Ref`
   state owns no external resource or finalizer. Its acquisition, timeout, and
   metrics behavior remains source-compatible.

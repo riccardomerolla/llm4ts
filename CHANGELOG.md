@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed**: a structured call whose reply did not decode as the requested
+  JSON (`Failed to parse response as structured output: …`) failed the flow
+  outright. The retry decorator now re-asks up to `parseRetries` times
+  (default 2, independent of the transient and flaky budgets) with the
+  parse failure quoted back to the model and an instruction to reply with
+  the JSON alone — `repairPrompt` in `@llm4ts/flow/TransientRetry`. Every
+  re-ask is the original prompt plus the latest failure, never a repair of a
+  repair. A transient or flaky failure inside a structured call still takes
+  its own budget and re-sends the same prompt. Streams and tool calls are
+  untouched: `isStructuredParseFailure` is a `ParseError`, which only the
+  structured entry points raise.
+
 ## 0.15.0
 
 - `modernize-extract` extracts and judges the programs of a wave
