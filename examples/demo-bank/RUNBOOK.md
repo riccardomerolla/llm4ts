@@ -38,6 +38,7 @@ export LLM4TS_PACK=packs/j2ee-nextjs-spa
 export LLM4TS_LEGACY_REPO=~/demo/legacy-j2ee
 export LLM4TS_JUDGE_ROUNDS=1        # bound judge feedback to one round on stage
 export LLM4TS_MAX_CLOSURE_FILES=8   # bound legacy evidence per page
+export LLM4TS_EXTRACT_CONCURRENCY=3 # pages extracted and judged at once (measure in rehearsal)
 ```
 
 `LLM4TS_PACK` is the one that matters for Act 1: it is what makes the survey
@@ -86,9 +87,16 @@ like this beat).
 LLM4TS_WAVE=wave-1 llm4ts run modernize-extract --repo ~/demo/legacy-j2ee
 ```
 
-Extraction is per-page resumable; if it dies, rerun and narrate the skip
-messages. Show one finished spec: the prose, then the `json pagespec` block,
-then the judge gate verdicts under `docs/modernization/gate/`.
+Extraction runs three pages at once (`LLM4TS_EXTRACT_CONCURRENCY=3` from Act
+0): the pages of a wave are independent, each lands in its own commit holding
+only its four files, and the log interleaves — say so before it starts, then
+point at `git log --oneline` filling up out of page order. Two lines to say
+aloud: concurrency divides the wall clock, not the cost (the estimates in
+Act 3 are identical at 1 or 3), and if a quota death hits mid-batch the pages
+already in flight still finish and land — the rerun resumes only what is
+missing. If the client's plan rate-limits at 3, drop to 1 and narrate the
+same resume. Show one finished spec: the prose, then the `json pagespec`
+block, then the judge gate verdicts under `docs/modernization/gate/`.
 
 ## Act 2 — depth: convert (order: accountOverview → beneficiaryList → transferStep1)
 

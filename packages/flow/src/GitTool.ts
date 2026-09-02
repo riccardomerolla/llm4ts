@@ -43,6 +43,16 @@ export interface GitToolShape {
   readonly checkoutOrCreate: (name: string) => Effect.Effect<void, FlowError>
   readonly createBranch: (name: string) => Effect.Effect<CreateBranch, FlowError>
   readonly commitAll: (message: string) => Effect.Effect<CommitResult, FlowError>
+  /**
+   * Stage ONLY `paths` (added, modified, or deleted) and commit them. The
+   * per-program commit primitive: when several programs are extracted at
+   * once, `commitAll` would sweep another program's half-written files into
+   * this program's commit. An empty `paths` is `NothingToCommit`.
+   */
+  readonly commitPaths: (
+    message: string,
+    paths: ReadonlyArray<string>
+  ) => Effect.Effect<CommitResult, FlowError>
   readonly push: (remote: string, branch: string) => Effect.Effect<void, FlowError>
   readonly checkpoint: Effect.Effect<string, FlowError>
   readonly rollback: (checkpoint: string) => Effect.Effect<void, FlowError>
@@ -174,14 +184,17 @@ export const makeGitTool = (
 
   const addAll = runOrFail(["add", "-A"]).pipe(Effect.asVoid)
 
-  const commitAllEffect = (message: string): Effect.Effect<CommitResult, FlowError> =>
+  const commitStaged = (message: string): Effect.Effect<CommitResult, FlowError> =>
     Effect.gen(function* () {
-      yield* addAll
       const result = yield* run(["commit", "-m", message])
       if (result.exitCode === 0) {
         return new Committed()
       }
-      if (problem(result).includes("nothing to commit")) {
+      // "nothing to commit, working tree clean" when the tree is clean;
+      // "nothing added to commit but untracked files present" when the only
+      // changes are files this commit was not asked to stage.
+      const detail = problem(result)
+      if (detail.includes("nothing to commit") || detail.includes("nothing added to commit")) {
         return new NothingToCommit()
       }
       return yield* ProcessError.make({
@@ -189,6 +202,20 @@ export const makeGitTool = (
         detail: problem(result)
       })
     })
+
+  const commitAllEffect = (message: string): Effect.Effect<CommitResult, FlowError> =>
+    addAll.pipe(Effect.andThen(commitStaged(message)))
+
+  // `add -A -- <paths>` stages additions, modifications, AND deletions of
+  // exactly those paths; a plain `add` would refuse a deleted file. `--only`
+  // on commit would also work but ignores paths that were never tracked.
+  const commitPathsEffect = (
+    message: string,
+    paths: ReadonlyArray<string>
+  ): Effect.Effect<CommitResult, FlowError> =>
+    paths.length === 0
+      ? Effect.succeed(new NothingToCommit())
+      : runOrFail(["add", "-A", "--", ...paths]).pipe(Effect.andThen(commitStaged(message)))
 
   return {
     init: write(
@@ -248,6 +275,7 @@ export const makeGitTool = (
         created._tag === "Created" ? Effect.void : checkout(name)
       ),
     commitAll: (message) => write("git commitAll", commitAllEffect(message)),
+    commitPaths: (message, paths) => write("git commitPaths", commitPathsEffect(message, paths)),
     push: (remote, branch) =>
       gate(
         Capabilities.GitPush,

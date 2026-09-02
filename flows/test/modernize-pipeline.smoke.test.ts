@@ -166,8 +166,36 @@ describe("modernize extract → seed end to end (model stubbed)", () => {
     const fixture = makeFixture()
     try {
       // ---- Phase 1: extract -------------------------------------------------
-      const extract = runFlow(fixture, "modernize-extract", fixture.legacy)
+      // Three programs, three at once: the wave's programs are independent,
+      // and the run must end with one commit per program holding ONLY that
+      // program's files despite the analysts finishing in any order.
+      const extract = runFlow(fixture, "modernize-extract", fixture.legacy, {
+        LLM4TS_EXTRACT_CONCURRENCY: "3"
+      })
       assert.strictEqual(extract.status, 0, failureReport("extract", extract))
+      assert.include(`${extract.stdout}${extract.stderr}`, "up to 3 program(s) at once")
+      for (const program of ["ACCTXFR", "FEECALC", "RUNJOB"]) {
+        const sha = execFileSync(
+          "git",
+          ["log", "--format=%H", "--grep", `spec ${program}$`, "-1"],
+          { cwd: fixture.legacy, encoding: "utf8" }
+        ).trim()
+        assert.isAbove(sha.length, 0, `no commit for spec ${program}`)
+        const touched = execFileSync("git", ["show", "--name-only", "--format=", sha], {
+          cwd: fixture.legacy,
+          encoding: "utf8"
+        })
+          .split("\n")
+          .filter((line) => line.length > 0)
+        assert.isAbove(touched.length, 0)
+        for (const path of touched) {
+          assert.include(
+            path.toLowerCase(),
+            program.toLowerCase(),
+            `commit for ${program} swept in ${path}`
+          )
+        }
+      }
 
       const modDir = join(fixture.legacy, "docs", "modernization")
       const readLegacy = (name: string): string => readFileSync(join(modDir, name), "utf8")

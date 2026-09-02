@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
@@ -47,6 +47,38 @@ describe("GitTool", () => {
           "one\n"
         )
         assert.strictEqual(yield* git.status, "")
+      })
+    )
+  )
+
+  it.effect("commits only the named paths and leaves the rest of the tree alone", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        yield* git.config("user.name", "llm4ts test")
+        yield* git.config("user.email", "llm4ts@example.invalid")
+        yield* Effect.promise(() => mkdir(join(root, "specs"), { recursive: true }))
+        yield* Effect.promise(() => writeFile(join(root, "specs", "A.md"), "a\n", "utf8"))
+        yield* Effect.promise(() => writeFile(join(root, "specs", "B.md"), "b\n", "utf8"))
+
+        assert.strictEqual((yield* git.commitPaths("only A", ["specs/A.md"]))._tag, "Committed")
+        // B is still untracked: a sibling's half-written work never rides along.
+        assert.strictEqual(yield* git.status, "?? specs/B.md")
+        assert.strictEqual((yield* git.commitPaths("nothing", []))._tag, "NothingToCommit")
+        assert.strictEqual(
+          (yield* git.commitPaths("A again", ["specs/A.md"]))._tag,
+          "NothingToCommit"
+        )
+
+        // A deletion of a named path is staged too.
+        yield* Effect.promise(() => rm(join(root, "specs", "A.md")))
+        assert.strictEqual((yield* git.commitPaths("drop A", ["specs/A.md"]))._tag, "Committed")
+        // With no tracked file left under specs/, git reports the untracked
+        // directory itself; B is still the only thing in it.
+        assert.strictEqual(yield* git.status, "?? specs/")
       })
     )
   )

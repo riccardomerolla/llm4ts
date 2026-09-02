@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- `modernize-extract` extracts and judges the programs of a wave
+  concurrently: `LLM4TS_EXTRACT_CONCURRENCY=<n>` (default 1, the previous
+  sequential behaviour). The programs are independent — each analyst reads
+  only its source and resolved closure and writes only its own four files —
+  so this divides wall time without changing tokens, cost, or the bench
+  projection. Supporting changes:
+  - `extractProgramsResumably` (`@llm4ts/modernize/Artifacts`) takes
+    `{ concurrency, onCreated }`: units run under a bounded `Effect.forEach`,
+    `onCreated` runs per program once its artifacts are on disk (the seam
+    for pattern tagging and the program's commit), and a failure stops new
+    programs from starting while the ones in flight finish and land before
+    the first failure, in unit order, is re-raised. `programArtifactPaths`
+    names a program's four files.
+  - `GitTool.commitPaths(message, paths)` stages and commits only the named
+    paths (additions, modifications, deletions; an empty list is
+    `NothingToCommit`). The per-program commit uses it under one permit, so
+    a sibling's half-written artifacts never ride along the way `commitAll`'s
+    `git add -A` would sweep them in.
+- **Fixed**: `GitTool` reported a `Process` error instead of `NothingToCommit`
+  when the tree held only untracked files — git says "nothing added to
+  commit" there, not "nothing to commit".
+
 ## 0.14.0
 
 - **Fixed**: `modernize-survey` reasoned about every estate in COBOL terms.

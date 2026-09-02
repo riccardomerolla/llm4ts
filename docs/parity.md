@@ -325,6 +325,13 @@ reference release.
     `## Survey:` rule names. The source hard-codes COBOL/JCL wording (dynamic
     CALLs, `EXEC PGM=&PGM`, PROC expansions) in the flow script; that wording
     now lives in the two COBOL packs, and the J2EE/JSP packs carry their own.
+  - `modernize-extract` runs the programs of a wave under a bounded
+    concurrency (`LLM4TS_EXTRACT_CONCURRENCY`, default 1) for both the
+    analyst call and the per-program judge. The source script extracts
+    strictly in sequence. Every program keeps its own commit, now scoped to
+    its four files (`GitTool.commitPaths`) rather than `git add -A`, and a
+    failure lets the programs in flight finish and land before it surfaces —
+    at concurrency 1 this is exactly the source's fail-fast order.
   - `surveyGraph` resolves a captured edge target onto a unit by basename
     when the raw capture is not a unit name (`page="header.jsp"` →
     `header`). The source compares captures to unit names verbatim, which is

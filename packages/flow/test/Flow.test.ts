@@ -158,6 +158,10 @@ const makeFakeGit = (log: Ref.Ref<GitLog>): GitToolShape => ({
     Ref.update(log, (current) => ({ ...current, commits: [...current.commits, message] })).pipe(
       Effect.as(Committed.make({}))
     ),
+  commitPaths: (message, _paths) =>
+    Ref.update(log, (current) => ({ ...current, commits: [...current.commits, message] })).pipe(
+      Effect.as(Committed.make({}))
+    ),
   push: (_remote, _branch) => Effect.void,
   checkpoint: Effect.succeed("checkpoint"),
   rollback: (_checkpoint) => Effect.void,

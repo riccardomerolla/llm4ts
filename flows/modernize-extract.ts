@@ -24,8 +24,13 @@
 // context is bounded by LLM4TS_CONTEXT_BUDGET (chars;
 // LLM4TS_JUDGE_SOURCES_LIMIT is the deprecated alias). The analyst is bounded
 // by LLM4TS_ANALYST_TURNS and LLM4TS_MAX_CLOSURE_FILES.
+// LLM4TS_EXTRACT_CONCURRENCY=<n> extracts and judges n programs at once (default
+// 1): the programs of a wave are independent, each gets a commit scoped to its
+// own files, and a failure lets in-flight programs finish before it surfaces.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
+import * as Semaphore from "effect/Semaphore"
 import { Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import type { JsonSchema } from "@llm4ts/core/Models"
@@ -47,7 +52,8 @@ import { withDraftApproval, requireApproval } from "@llm4ts/modernize/Approval"
 import {
   ProgramArtifacts,
   ProgramUnit,
-  extractProgramsResumably
+  extractProgramsResumably,
+  programArtifactPaths
 } from "@llm4ts/modernize/Artifacts"
 import { asReadOnly, coderFromEnv, withTurnLimit } from "@llm4ts/runner/Connectors"
 import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
@@ -73,6 +79,15 @@ const analystTurns = (): number => positiveEnvInt("LLM4TS_ANALYST_TURNS", 48)
  * than this gets a bounded, visible subset rather than an unbounded read.
  */
 const maxClosureFiles = (): number => positiveEnvInt("LLM4TS_MAX_CLOSURE_FILES", 40)
+
+/**
+ * Programs extracted (and judged) at once. The programs of a wave are
+ * independent — each analyst reads its source and resolved closure, writes
+ * its own four files, and gets its own scoped commit — so this divides wall
+ * time without changing tokens or cost. Default 1 keeps the sequential
+ * narration; the bound is about the coder seat's quota, not correctness.
+ */
+const extractConcurrency = (): number => positiveEnvInt("LLM4TS_EXTRACT_CONCURRENCY", 1)
 
 /** `cobol/ACCTXFR.cbl` → `ACCTXFR`: the program name keying every per-program artifact. */
 const programName = (relativePath: string): string => {
@@ -324,87 +339,112 @@ const program = Effect.gen(function* () {
         )
 
         // One structured analyst call per program, resumable per program: a rerun
-        // skips every program whose spec exists, and each program gets its own commit.
+        // skips every program whose spec exists, and each program gets its own
+        // commit scoped to its four files. LLM4TS_EXTRACT_CONCURRENCY runs that
+        // many programs at once; the commit is the one step serialised.
+        const concurrency = extractConcurrency()
         yield* stage(
           context.events,
           "extract",
           Effect.gen(function* () {
-            for (const [index, unit] of units.entries()) {
-              const summary = yield* extractProgramsResumably(
-                files,
-                [unit],
-                (target) =>
-                  Effect.gen(function* () {
-                    yield* context.events.publish(
-                      Info.make({
-                        message: `extracting ${target.sourcePath} (${index + 1}/${units.length})`
-                      })
-                    )
-                    return yield* structuredAndPublish(
-                      context.coder,
-                      context.events,
-                      `${system}\n\n${programAsk(
-                        pack,
-                        target.sourcePath,
-                        closureFor(graph, target.name, maxClosureFiles())
-                      )}`,
-                      ProgramArtifacts,
-                      programArtifactsJsonSchema,
-                      "coder"
-                    ).pipe(
-                      // A turn-limit trip is the wedged-agent tail, not a
-                      // failure: keep whatever the analyst already produced.
-                      Effect.catchIf(
-                        (error) => error.cause?._tag === "TurnLimitError",
-                        (error) =>
-                          Effect.gen(function* () {
-                            const existing = yield* files.read(
-                              join(modDirAbs, "specs", `${target.name}.md`)
-                            )
-                            if (existing === undefined) {
-                              return yield* Effect.fail(error)
-                            }
-                            yield* context.events.publish(
-                              Info.make({
-                                message: `turn limit hit on ${target.sourcePath} after its spec was written — keeping the work`
-                              })
-                            )
-                            return ProgramArtifacts.make({
-                              spec: existing,
-                              feature: "",
-                              traceability: "",
-                              mapping: ""
-                            })
-                          })
-                      )
-                    )
-                  }),
-                modDirAbs
+            const started = yield* Ref.make(0)
+            const commitLock = yield* Semaphore.make(1)
+            if (concurrency > 1) {
+              yield* context.events.publish(
+                Info.make({
+                  message: `extracting up to ${concurrency} program(s) at once (LLM4TS_EXTRACT_CONCURRENCY)`
+                })
               )
-              if (summary.created.length > 0) {
-                // Tag the traceability fragment with the cards this program's
-                // source matches — regex-decided, so implementation's playbook
-                // is reproducible.
-                const source = yield* files.read(join(input.workDir, unit.sourcePath))
-                const matched = source === undefined ? [] : matchingPatternCards(source, cards)
-                if (matched.length > 0) {
-                  const fragmentPath = join(modDirAbs, "traceability", `${unit.name}.md`)
-                  const fragment = (yield* files.read(fragmentPath)) ?? ""
-                  yield* files.writeAtomic(
-                    fragmentPath,
-                    `${fragment.trimEnd()}\n\nPatterns: ${matched.map((card) => card.id).join(", ")}\n`
+            }
+            const summary = yield* extractProgramsResumably(
+              files,
+              units,
+              (target) =>
+                Effect.gen(function* () {
+                  const ordinal = yield* Ref.updateAndGet(started, (count) => count + 1)
+                  yield* context.events.publish(
+                    Info.make({
+                      message: `extracting ${target.sourcePath} (${ordinal}/${units.length})`
+                    })
                   )
-                }
-                yield* context.git
-                  .commitAll(`modernize(${pack.name}): spec ${unit.name}`)
-                  .pipe(Effect.asVoid)
-              } else {
-                yield* context.events.publish(
-                  Info.make({
-                    message: `resume: specs/${unit.name}.md exists — skipping ${unit.sourcePath}`
+                  return yield* structuredAndPublish(
+                    context.coder,
+                    context.events,
+                    `${system}\n\n${programAsk(
+                      pack,
+                      target.sourcePath,
+                      closureFor(graph, target.name, maxClosureFiles())
+                    )}`,
+                    ProgramArtifacts,
+                    programArtifactsJsonSchema,
+                    "coder"
+                  ).pipe(
+                    // A turn-limit trip is the wedged-agent tail, not a
+                    // failure: keep whatever the analyst already produced.
+                    Effect.catchIf(
+                      (error) => error.cause?._tag === "TurnLimitError",
+                      (error) =>
+                        Effect.gen(function* () {
+                          const existing = yield* files.read(
+                            join(modDirAbs, "specs", `${target.name}.md`)
+                          )
+                          if (existing === undefined) {
+                            return yield* Effect.fail(error)
+                          }
+                          yield* context.events.publish(
+                            Info.make({
+                              message: `turn limit hit on ${target.sourcePath} after its spec was written — keeping the work`
+                            })
+                          )
+                          return ProgramArtifacts.make({
+                            spec: existing,
+                            feature: "",
+                            traceability: "",
+                            mapping: ""
+                          })
+                        })
+                    )
+                  )
+                }),
+              modDirAbs,
+              {
+                concurrency,
+                onCreated: (unit) =>
+                  Effect.gen(function* () {
+                    // Tag the traceability fragment with the cards this program's
+                    // source matches — regex-decided, so implementation's playbook
+                    // is reproducible.
+                    const source = yield* files.read(join(input.workDir, unit.sourcePath))
+                    const matched = source === undefined ? [] : matchingPatternCards(source, cards)
+                    if (matched.length > 0) {
+                      const fragmentPath = join(modDirAbs, "traceability", `${unit.name}.md`)
+                      const fragment = (yield* files.read(fragmentPath)) ?? ""
+                      yield* files.writeAtomic(
+                        fragmentPath,
+                        `${fragment.trimEnd()}\n\nPatterns: ${matched.map((card) => card.id).join(", ")}\n`
+                      )
+                    }
+                    // Only this program's files, under one permit: a concurrent
+                    // sibling's half-written artifacts must never ride along.
+                    yield* commitLock.withPermit(
+                      context.git
+                        .commitPaths(
+                          `modernize(${pack.name}): spec ${unit.name}`,
+                          programArtifactPaths(unit, ModDir)
+                        )
+                        .pipe(Effect.asVoid)
+                    )
                   })
-                )
               }
+            )
+            if (summary.skipped.length > 0) {
+              yield* context.events.publish(
+                Info.make({
+                  message:
+                    `resume: ${summary.skipped.length} program(s) already have a spec — skipped ` +
+                    summary.skipped.join(", ")
+                })
+              )
             }
           })
         )
@@ -537,10 +577,9 @@ const program = Effect.gen(function* () {
           })
           const covered = yield* coverage(repo, pack.coverage, trace)
           const wellFormed = yield* features(repo, join(ModDir, "features"))
-          const judged: Array<ReviewResult> = []
-          for (const unit of units) {
-            judged.push(yield* judgeProgram(unit))
-          }
+          // Verdicts are per program and cached per program, so they judge
+          // under the same bound as extraction; the merge is order-stable.
+          const judged = yield* Effect.forEach(units, judgeProgram, { concurrency })
           return mergeReviewResults([covered, wellFormed, docs, ...judged])
         })
 

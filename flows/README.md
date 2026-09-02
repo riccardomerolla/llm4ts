@@ -263,6 +263,16 @@ feature, traceability, and mapping fragments, then a layered gate
 `gate/` and re-judged only when content changes) must clear before the pack
 gets its unchecked approval marker.
 
+The programs of a wave are independent — each analyst reads its own source
+and resolved closure and writes its own four files — so
+`LLM4TS_EXTRACT_CONCURRENCY=<n>` extracts and judges `n` at once (default 1).
+Every program still gets its own commit, scoped to its four files rather than
+`git add -A`, and a failure lets the programs already in flight finish and
+land before it surfaces; a rerun resumes only what is missing. Concurrency
+divides wall time, not tokens: the cost figures and the bench projection are
+unchanged, and the bound exists for the coder seat's quota, not for
+correctness.
+
 ### Phase 2 — seed (deterministic, no model calls)
 
 ```sh
