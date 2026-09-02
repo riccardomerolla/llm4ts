@@ -18,6 +18,7 @@ import {
   buildGeminiArgs,
   extractGeminiCliResponse,
   geminiCliExecutionContextFrom,
+  geminiLoopDiagnostic,
   geminiProcessEnv,
   geminiQuotaDiagnostic,
   geminiSandboxEnvValue,
@@ -285,6 +286,28 @@ describe("Gemini CLI parsing", () => {
     )
     assert.strictEqual(enriched._tag, "Error")
     assert.match(enriched._tag === "Error" ? (enriched.message ?? "") : "", /21h1m53s/)
+
+    // The loop breaker's stderr line rides into an anonymous stream error the
+    // same way, so the retry decorator sees a loop rather than "unknown error".
+    const loop =
+      "A potential loop was detected. This can happen due to repetitive tool calls or other model behavior. The request has been halted."
+    assert.strictEqual(geminiLoopDiagnostic(["stack", loop]), loop)
+    assert.isUndefined(geminiLoopDiagnostic([quota]))
+    assert.isUndefined(geminiQuotaDiagnostic([loop]), "a loop is not a quota")
+    const looped = withGeminiStderrDiagnostic(
+      GeminiCliError.make({ message: "[API Error: An unknown error occurred.]" }),
+      [loop]
+    )
+    assert.match(looped._tag === "Error" ? (looped.message ?? "") : "", /potential loop/)
+    const loopedResult = withGeminiStderrDiagnostic(
+      GeminiCliResult.make({ status: "error", errorMessage: "Loop detected" }),
+      [loop]
+    )
+    assert.strictEqual(
+      loopedResult._tag === "Result" ? loopedResult.errorMessage : "",
+      "Loop detected",
+      "a message that already names the loop is kept verbatim"
+    )
   })
 })
 
@@ -471,6 +494,19 @@ describe("GeminiCliProvider", () => {
         )
       )
       assert.strictEqual(stderrQuota._tag, "UsageLimitError")
+
+      // The loop breaker halts the turn but the process exits 0: with no
+      // assistant text that is a ProviderError naming the loop (so the retry
+      // decorator restarts it), and with text it is nothing at all.
+      const loop = "A potential loop was detected. The request has been halted."
+      const halted = yield* Effect.flip(validateGeminiStreamExit(0, [loop], false))
+      assert.strictEqual(halted._tag, "ProviderError")
+      assert.match(halted.message, /halted the turn: A potential loop/)
+      yield* validateGeminiStreamExit(0, [loop], true)
+      // A non-zero exit keeps the stderr text, loop line included.
+      const haltedNonZero = yield* Effect.flip(validateGeminiStreamExit(1, [loop], false))
+      assert.strictEqual(haltedNonZero._tag, "ProviderError")
+      assert.match(haltedNonZero.message, /potential loop/)
     })
   )
 

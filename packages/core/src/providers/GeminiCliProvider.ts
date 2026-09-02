@@ -27,6 +27,7 @@ import { collect } from "../Streaming.ts"
 import { jsonCandidates, parseFromText, withSchemaHint } from "../StructuredOutput.ts"
 import {
   failClassifiedCliError,
+  isLoopDetectedMessage,
   jsonField,
   jsonIntField,
   jsonObjectEntries,
@@ -224,17 +225,28 @@ export const geminiQuotaDiagnostic = (stderr: ReadonlyArray<string>): string | u
     })
     ?.trim()
 
+/**
+ * The stderr line where Gemini CLI's loop breaker reports that it halted
+ * the turn. Surfaced into the stream's error so the retry decorator sees a
+ * loop, not an anonymous "[API Error: An unknown error occurred.]".
+ */
+export const geminiLoopDiagnostic = (stderr: ReadonlyArray<string>): string | undefined =>
+  stderr.find((line) => isLoopDetectedMessage(line))?.trim()
+
 export const withGeminiStderrDiagnostic = (
   event: GeminiCliStreamEvent,
   stderr: ReadonlyArray<string>
 ): GeminiCliStreamEvent => {
-  const diagnostic = geminiQuotaDiagnostic(stderr)
+  const diagnostic = geminiQuotaDiagnostic(stderr) ?? geminiLoopDiagnostic(stderr)
   if (diagnostic === undefined) {
     return event
   }
   const merged = (base: string | undefined): string => {
     const normalized = base?.trim()
-    if (normalized !== undefined && geminiQuotaDiagnostic([normalized]) !== undefined) {
+    if (
+      normalized !== undefined &&
+      (geminiQuotaDiagnostic([normalized]) !== undefined || isLoopDetectedMessage(normalized))
+    ) {
       return normalized
     }
     return normalized === undefined || normalized.length === 0
@@ -290,11 +302,20 @@ export const validateGeminiStreamExit = (
   turnLimit?: number
 ): Effect.Effect<void, LlmError> => {
   const diagnostic = geminiQuotaDiagnostic(stderr)
+  const loop = geminiLoopDiagnostic(stderr)
   const stderrText = stderr.join("\n").trim()
   if (exitCode === 0) {
-    return diagnostic !== undefined && !sawAssistantText
-      ? failClassifiedCliError("gemini", "Gemini CLI quota exhausted", diagnostic)
-      : Effect.void
+    if (sawAssistantText) {
+      return Effect.void
+    }
+    if (diagnostic !== undefined) {
+      return failClassifiedCliError("gemini", "Gemini CLI quota exhausted", diagnostic)
+    }
+    // The loop breaker halts the turn and the process still exits 0: without
+    // this the flow would see an empty response and lose the reason.
+    return loop === undefined
+      ? Effect.void
+      : Effect.fail(ProviderError.make({ message: `Gemini CLI halted the turn: ${loop}` }))
   }
   if (exitCode === 42 || exitCode === 53) {
     return validateGeminiExitCode(

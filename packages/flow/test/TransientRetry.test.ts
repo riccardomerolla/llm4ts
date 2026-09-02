@@ -150,6 +150,51 @@ describe("TransientRetry", () => {
     assert.isFalse(isFlakyStream(ParseError.make({ message: "wrong shape", raw: '{"a":1}' })))
   })
 
+  it("treats a coding agent's loop breaker as a fresh-retry flake, never deterministic", () => {
+    // Gemini CLI halts a repetitive turn; the process exits, the quota is
+    // untouched, and the same prompt in a fresh process ordinarily completes.
+    for (const message of [
+      "Gemini CLI returned an error: A potential loop was detected. This can happen due to repetitive tool calls or other model behavior. The request has been halted.",
+      "Gemini CLI halted the turn: Loop detected: repetitive tool calls",
+      "Gemini CLI stream error (type=loop): LOOP DETECTED"
+    ]) {
+      const error = ProviderError.make({ message })
+      assert.isTrue(isFlakyStream(error), message)
+      assert.isFalse(isTransient(error), message)
+      assert.isFalse(isContextOverflow(error), message)
+    }
+    assert.isFalse(isFlakyStream(ProviderError.make({ message: "for loop syntax error" })))
+  })
+
+  it.effect("retries a loop-detected turn on the flaky budget until it completes", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const counted = yield* makeCountingService(
+        2,
+        ProviderError.make({
+          message:
+            "Gemini CLI returned an error: A potential loop was detected. The request has been halted."
+        })
+      )
+      const retrying = yield* makeTransientRetry(counted.service, {
+        maxRetries: 0,
+        flakyRetries: 2,
+        flakyDelay: Duration.zero
+      }).pipe(Effect.provideService(FlowEvents, events))
+
+      const result = yield* Stream.runCollect(retrying.executeStream("hello"))
+      assert.strictEqual(result[0]?.delta, "ok")
+      assert.strictEqual(yield* Ref.get(counted.attempts), 3)
+      const notices = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Info" ? [event.message] : []
+      )
+      assert.isTrue(
+        notices.some((message) => message.includes("fresh retry") && message.includes("loop")),
+        `retry notice should name the loop: ${notices.join(" | ")}`
+      )
+    })
+  )
+
   it("honors bounded provider retry-after durations", () => {
     assert.strictEqual(
       Duration.toMillis(

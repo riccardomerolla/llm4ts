@@ -20,6 +20,19 @@
     `NothingToCommit`). The per-program commit uses it under one permit, so
     a sibling's half-written artifacts never ride along the way `commitAll`'s
     `git add -A` would sweep them in.
+- **Fixed**: a Gemini CLI turn halted by its loop breaker ("A potential
+  loop was detected … The request has been halted", or a bare "Loop
+  detected") failed the flow outright. The turn is lost, the quota is not,
+  and a fresh process with the same prompt ordinarily completes — so the
+  retry decorator now classifies it as a flaky stream (the fresh-retry
+  budget, six attempts by default; `isFlakyStream` is true, `isTransient`
+  false), and the Gemini provider makes sure the reason reaches it:
+  `geminiLoopDiagnostic` lifts the stderr line into an anonymous stream
+  error the way quota diagnostics already were, and a halted turn that
+  still exits 0 with no assistant text fails as a `ProviderError` naming
+  the halted turn instead of surfacing as an empty response. The signal
+  list lives once, in `@llm4ts/core/providers/CliSupport`
+  (`loopDetectionSignals`, `isLoopDetectedMessage`).
 - **Fixed**: `GitTool` reported a `Process` error instead of `NothingToCommit`
   when the tree held only untracked files — git says "nothing added to
   commit" there, not "nothing to commit".

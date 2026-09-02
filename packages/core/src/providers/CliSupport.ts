@@ -89,6 +89,22 @@ export const usageEventChunk = (model: string | undefined, usage: TokenUsage): L
           }
   })
 
+/**
+ * The message signatures of a coding agent's own loop breaker. Gemini CLI
+ * halts a turn whose tool calls or model output repeat ("A potential loop
+ * was detected … The request has been halted"); the turn is lost, not the
+ * quota, and a fresh process with the same prompt ordinarily completes. So
+ * this is a flaky-stream failure for the retry decorator, never a
+ * deterministic one — one list here, matched by the provider on stderr and
+ * by `@llm4ts/flow/TransientRetry` on the resulting error message.
+ */
+export const loopDetectionSignals: ReadonlyArray<string> = ["loop detected", "potential loop"]
+
+export const isLoopDetectedMessage = (message: string): boolean => {
+  const normalized = message.toLowerCase()
+  return loopDetectionSignals.some((signal) => normalized.includes(signal))
+}
+
 export const failClassifiedCliError = Effect.fn(
   "@llm4ts/core/providers/CliSupport.failClassifiedCliError"
 )(function* (

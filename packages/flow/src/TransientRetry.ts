@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import type { LlmError } from "@llm4ts/core/Errors"
 import { LlmService, type LlmServiceShape } from "@llm4ts/core/LlmService"
+import { isLoopDetectedMessage } from "@llm4ts/core/providers/CliSupport"
 import type { LlmChunk } from "@llm4ts/core/Models"
 import { FlowEvents, Info } from "./FlowEvents.ts"
 
@@ -66,8 +67,14 @@ const includesSignal = (message: string, signals: ReadonlyArray<string>): boolea
   return signals.some((signal) => normalized.includes(signal))
 }
 
+// A coding agent's own loop breaker (Gemini CLI: "A potential loop was
+// detected … The request has been halted") is flaky in the same sense: the
+// turn is lost, the quota is not, and a fresh process with the same prompt
+// ordinarily completes — so it takes the fresh-retry budget, not the
+// transient one, and is never treated as deterministic.
 export const isFlakyStream = (error: LlmError): boolean =>
-  error._tag === "ProviderError" && includesSignal(error.message, flakyStreamSignals)
+  error._tag === "ProviderError" &&
+  (includesSignal(error.message, flakyStreamSignals) || isLoopDetectedMessage(error.message))
 
 const isDeterministic4xx = (message: string): boolean =>
   includesSignal(message, deterministic4xxSignals)

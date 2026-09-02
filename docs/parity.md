@@ -126,7 +126,12 @@ reference release.
 - Transient retry is an Effect service decorator created from the underlying
   `LlmService` and `FlowEvents` service. It preserves the source's separate
   transient and flaky-stream budgets, visible notices, bounded retry-after
-  handling, and whole-stream restart semantics.
+  handling, and whole-stream restart semantics. One classification is added
+  beyond the source: a coding agent's own loop breaker (Gemini CLI's
+  "potential loop … halted") is a flaky-stream failure, restarted in a fresh
+  process on that budget, because the turn is lost while the quota and the
+  prompt are intact. The Gemini provider lifts the loop line from stderr into
+  the stream error the way it already lifted quota diagnostics.
 - The token bucket is created as an unscoped Effect service because its `Ref`
   state owns no external resource or finalizer. Its acquisition, timeout, and
   metrics behavior remains source-compatible.
