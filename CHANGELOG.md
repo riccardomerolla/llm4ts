@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.1
 
 - **Fixed**: a structured call whose reply did not decode as the requested
   JSON (`Failed to parse response as structured output: …`) failed the flow
