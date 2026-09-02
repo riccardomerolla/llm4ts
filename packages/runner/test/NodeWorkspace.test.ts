@@ -1,8 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import * as Effect from "effect/Effect"
+import { defaultWorkspaceLimits } from "@llm4ts/flow/Workspace"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
 
 const temporaryDirectory = Effect.acquireRelease(
@@ -48,6 +49,63 @@ describe("symlink-aware bounded workspace", () => {
         assert.strictEqual(oversizeRead._tag, "WorkspaceLimit")
         assert.include(oversizeRead.message, "many/big")
         assert.strictEqual(overflow._tag, "WorkspaceLimit")
+      })
+    )
+  )
+
+  it.effect("prunes excluded directories and spends the result cap on matching files only", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryDirectory
+        const write = (path: string): Promise<void> =>
+          mkdir(join(root, dirname(path)), { recursive: true }).then(() =>
+            writeFile(join(root, path), "x")
+          )
+        yield* Effect.promise(() =>
+          Promise.all([
+            write("src/main/webapp/login.jsp"),
+            write("src/main/webapp/WEB-INF/web.xml"),
+            write("src/main/webapp/WEB-INF/lib/a.jar"),
+            write("src/main/webapp/WEB-INF/lib/b.jar"),
+            write("src/main/webapp/WEB-INF/lib/c.jar"),
+            write("target/classes/Login.class"),
+            write(".git/objects/ab/cdef"),
+            write("node_modules/dep/index.js")
+          ])
+        )
+        const workspace = yield* makeNodeWorkspace(root, {
+          ...defaultWorkspaceLimits,
+          maxResults: 2
+        })
+
+        // Two sources under a cap of two: the jars in the same tree must not
+        // count, and the git/build/dependency trees are never entered.
+        const sources = yield* workspace.discover("**/*", { matching: /\.(jsp|xml)$/ })
+        assert.deepStrictEqual([...sources].sort(), [
+          "src/main/webapp/WEB-INF/web.xml",
+          "src/main/webapp/login.jsp"
+        ])
+        const excluded = yield* workspace.discover("**/*", {
+          matching: /\.(jsp|xml)$/,
+          excluding: /WEB-INF/
+        })
+        assert.deepStrictEqual(excluded, ["src/main/webapp/login.jsp"])
+
+        const overflow = yield* Effect.flip(workspace.discover())
+        assert.strictEqual(overflow._tag, "WorkspaceLimit")
+
+        const generous = yield* makeNodeWorkspace(root)
+        const all = yield* generous.discover()
+        assert.isFalse(all.some((path) => path.startsWith(".git/")))
+        assert.isFalse(all.some((path) => path.startsWith("target/")))
+        assert.isFalse(all.some((path) => path.startsWith("node_modules/")))
+        assert.include(all, "src/main/webapp/WEB-INF/lib/a.jar")
+
+        const unpruned = yield* makeNodeWorkspace(root, {
+          ...defaultWorkspaceLimits,
+          excludeDirs: []
+        })
+        assert.include(yield* unpruned.discover(), ".git/objects/ab/cdef")
       })
     )
   )

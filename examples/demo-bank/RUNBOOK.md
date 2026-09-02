@@ -104,6 +104,7 @@ export LLM4TS_ADO_PROJECT=<project>
 | A page's tests refuse to go green | Let `convert-all` mark it failed and keep walking (default); return to it in discussion. `LLM4TS_FAIL_FAST=1` exists but stays OFF on stage. |
 | Machine sleep / network blip | Same as rate limit: rerun. |
 | Judge keeps rejecting | `LLM4TS_JUDGE_ROUNDS=1` already bounds it; the failure lands on the board with its reason — governance beat, not a crash. |
+| Survey aborts with `discovery stopped at N matching files` (a client's real estate, never the fixture) | The abort names the knobs: tighten the pack's `sources:`/`exclude:`, prune more with `LLM4TS_EXCLUDE_DIRS=.git,node_modules,generated`, or raise `LLM4TS_MAX_DISCOVER_RESULTS`. Rerun. |
 | Everything is on fire | `node examples/demo-bank/reset-demo.mjs ~/demo` and restart the act; Act 1 re-runs in minutes. |
 
 ## Rehearsal log (fill in — the durations above are placeholders until this is done twice)

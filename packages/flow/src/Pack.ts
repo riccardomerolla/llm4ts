@@ -21,6 +21,10 @@ export interface Pack {
   readonly source: string
   readonly scaffold: string | undefined
   readonly sources: string | undefined
+  // Regex over repo-relative paths that `sources:` matches but the estate
+  // does not own: vendored copies, generated exports, test doubles. Excluded
+  // paths never enter the survey graph or the extraction inventory.
+  readonly exclude: string | undefined
   readonly programs: string | undefined
   readonly specsDir: string
   readonly featuresDir: string
@@ -202,11 +206,18 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
       message: `pack manifest 'programFiles:' is not a valid regex template: ${programFiles}`
     })
   }
+  const exclude = fields.exclude
+  if (exclude !== undefined && !isValidRegExp(exclude)) {
+    return yield* PlanParseError.make({
+      message: `pack manifest 'exclude:' is not a valid regex: ${exclude}`
+    })
+  }
   const pack: Pack = {
     name: manifest.name,
     source: fields.source ?? "",
     scaffold: fields.scaffold,
     sources: fields.sources,
+    exclude,
     programs: fields.programs,
     specsDir: fields["specs-dir"] ?? "docs/specs",
     featuresDir: fields["features-dir"] ?? "features",

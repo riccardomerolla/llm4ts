@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed**: `modernize-survey` reasoned about every estate in COBOL terms.
+  The graph-refine and triage prompts were hard-coded in the flow script
+  (dynamic `CALL`s, `EXEC PGM=&PGM`, PROC expansions), so a J2EE run under
+  `packs/j2ee-nextjs-spa` swapped the regexes but not the instructions.
+  `@llm4ts/flow/Survey` now exports `surveyRefinePrompt` /
+  `surveyTriagePrompt`: a stack-neutral frame that states the graph's
+  provenance from the pack's own `## Survey:` rule names and takes the
+  stack-specific paragraph from two new pack sidecars,
+  `prompts/survey-refine.md` and `prompts/survey-triage.md`. The COBOL packs
+  carry the former wording verbatim; `j2ee-nextjs-spa`, `jsp-nextjs`, and
+  `jsp-bff-nextjs` describe web.xml mappings, includes, forwards, redirects,
+  form and ajax targets, and how to weigh fragments, servlets, and ESB
+  wrappers. A pack without the sidecars gets a neutral default.
+- **Fixed**: discovery overflowed its 1 000-result cap on any real J2EE
+  estate before the first source was seen — every file under the repository
+  root counted, `.git/objects`, `target/`, and `WEB-INF/lib` included, and
+  the only override was for read bytes. `Workspace.discover` now takes
+  `matching`/`excluding` regexes so the cap counts candidate units;
+  `surveyGraph` and `matchingFiles` pass the pack's `sources:` through it;
+  `WorkspaceLimits.excludeDirs` prunes `.git`, `.hg`, `.svn`,
+  `node_modules`, `target`, `build`, `dist`, and `out` at any depth
+  (`LLM4TS_EXCLUDE_DIRS=<names>` replaces the list);
+  `legacySourceWorkspaceLimits` allows 20 000 results
+  (`LLM4TS_MAX_DISCOVER_RESULTS=<count>` overrides); packs gain an optional
+  `exclude:` regex for vendored or generated sources; and the survey aborts
+  an overflow with those knobs named instead of a bare limit number.
+- **Fixed**: path-shaped edge targets never matched a unit. A JSP include
+  of `header.jsp` captured that path while the node was named `header`, so
+  every layout fragment showed zero incoming edges and the inventory flagged
+  the most-included files in a web estate as retire candidates — with the
+  triage prompt told to trust it. `surveyGraph` now folds a capture onto the
+  unit whose basename matches; unknown references stay as captured.
+
 ## 0.13.5
 
 - `@llm4ts/flow/AzureDevOpsTool` reads and writes a work item's own links,

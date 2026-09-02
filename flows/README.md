@@ -180,9 +180,9 @@ survey → [human approves waves] → extract → [human approves the pack]
 ```
 
 Every phase reads a modernization **pack** (`@llm4ts/flow/Pack`): a directory
-with a `pack.md` manifest (sources/programs regexes, gates, judge rubric,
-`## Coverage:` unit rules, `## Survey:` edge rules, equivalence policy) plus
-`prompts/` and `reviewers/` sidecars. `LLM4TS_PACK` selects one (default
+with a `pack.md` manifest (sources/programs regexes, an optional `exclude:`
+regex, gates, judge rubric, `## Coverage:` unit rules, `## Survey:` edge
+rules, equivalence policy) plus `prompts/` and `reviewers/` sidecars. `LLM4TS_PACK` selects one (default
 `packs/cobol-springboot`), resolved against the launch directory first, then
 against the flow script's own directory — so the built-in packs shipped with
 `@llm4ts/shell` are found even when a flow is launched from an unrelated
@@ -193,6 +193,25 @@ an 8 MiB per-file cap — legacy estates routinely carry multi-megabyte
 programs and generated copybooks. A `read bytes exceeded limit` failure
 names the offending file; raise the cap with `LLM4TS_MAX_READ_BYTES=<bytes>`
 when an estate legitimately exceeds it.
+
+Discovery is bounded the same way, and sized for estates (20 000 files for
+the estate-reading phases, 1 000 elsewhere). Only files the pack's `sources:`
+regex matches — minus its optional `exclude:` regex — are returned and
+counted, and version-control, dependency, and build-output directories
+(`.git`, `node_modules`, `target`, `build`, `dist`, …) are never entered, so
+a J2EE tree full of jars and compiled classes does not spend the cap before
+the first JSP is seen. When an estate still overflows, the survey aborts with
+the three knobs spelled out: narrow `sources:`/`exclude:` in the pack,
+replace the pruned directory list with `LLM4TS_EXCLUDE_DIRS=<names>`, or
+raise the cap with `LLM4TS_MAX_DISCOVER_RESULTS=<count>`.
+
+The survey's two reasoning prompts (graph refine, triage) name no technology
+themselves: the pack contributes the stack-specific paragraph through the
+`prompts/survey-refine.md` and `prompts/survey-triage.md` sidecars (where a
+COBOL pack talks about dynamic CALLs and JCL symbolic parameters, a J2EE pack
+talks about web.xml mappings, includes, forwards, and ajax targets), and the
+graph's provenance is stated from the pack's own `## Survey:` rule names. A
+pack without the sidecars gets a neutral default.
 
 Six reference packs ship, each pairing a legacy source technology with a
 target stack, plus the [scaffold](fixtures/scaffolds/) that seeds an empty

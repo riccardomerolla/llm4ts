@@ -21,16 +21,22 @@ const capture = (regex: RegExp, text: string): ReadonlyArray<string> => {
   return values
 }
 
+/**
+ * Repo-relative paths matching `regex` and not matching `exclude`, sorted.
+ * The regex is applied INSIDE discovery so the workspace's result cap counts
+ * candidate units, not every file that shares the tree with them.
+ */
 export const matchingFiles = (
   workspace: WorkspaceShape,
-  regex: string
+  regex: string,
+  exclude?: string
 ): Effect.Effect<ReadonlyArray<string>, WorkspaceError> =>
-  workspace.discover().pipe(
-    Effect.map((paths) => {
-      const expression = new RegExp(regex)
-      return paths.filter((path) => expression.test(path)).sort()
+  workspace
+    .discover("**/*", {
+      matching: new RegExp(regex),
+      ...(exclude === undefined ? {} : { excluding: new RegExp(exclude) })
     })
-  )
+    .pipe(Effect.map((paths) => [...paths].sort()))
 
 export const coverageUnits = Effect.fn("@llm4ts/flow/SpecChecks.coverageUnits")(function* (
   workspace: WorkspaceShape,

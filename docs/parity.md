@@ -311,6 +311,25 @@ reference release.
     cap instead of the 1 MiB workspace default, overridable with
     `LLM4TS_MAX_READ_BYTES`. The source scripts read files unboundedly; the
     Effect port keeps a cap but sizes it for real estates.
+  - Discovery under those limits is narrowed at the source, not after the
+    fact: `Workspace.discover` takes `matching`/`excluding` regexes, so the
+    result cap (20 000 for the estate-reading phases, `LLM4TS_MAX_DISCOVER_RESULTS`)
+    counts candidate units rather than every file in the tree, and
+    `WorkspaceLimits.excludeDirs` (`.git`, `node_modules`, `target`, `build`,
+    `dist`, …; `LLM4TS_EXCLUDE_DIRS`) is never entered. Packs gain an optional
+    `exclude:` regex for vendored or generated sources. The source scripts
+    glob the estate unboundedly and have no such cap to size.
+  - The survey's graph-refine and triage prompts are composed by
+    `@llm4ts/flow/Survey` from a stack-neutral frame plus the pack's
+    `prompts/survey-refine.md` / `prompts/survey-triage.md` sidecars and its
+    `## Survey:` rule names. The source hard-codes COBOL/JCL wording (dynamic
+    CALLs, `EXEC PGM=&PGM`, PROC expansions) in the flow script; that wording
+    now lives in the two COBOL packs, and the J2EE/JSP packs carry their own.
+  - `surveyGraph` resolves a captured edge target onto a unit by basename
+    when the raw capture is not a unit name (`page="header.jsp"` →
+    `header`). The source compares captures to unit names verbatim, which is
+    exact for `CALL 'FEECALC'` and wrong for every path-shaped reference a
+    web estate makes.
   - Pack resolution gains a fallback the source does not need:
     `LLM4TS_PACK` resolves against the launch directory first, then against
     the flow script's own directory (`@llm4ts/runner/Packs.openPack`), and an

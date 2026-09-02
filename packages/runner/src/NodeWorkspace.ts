@@ -15,6 +15,8 @@ import {
   SearchMatch,
   Workspace,
   defaultWorkspaceLimits,
+  discoverAccepts,
+  type DiscoverOptions,
   type WorkspaceError,
   type WorkspaceLimits,
   type WorkspaceShape
@@ -184,11 +186,15 @@ export const makeNodeWorkspace = Effect.fn("@llm4ts/runner/NodeWorkspace.make")(
       })
     })
 
-  const discover = (pattern = "**/*"): Effect.Effect<ReadonlyArray<string>, WorkspaceError> =>
+  const discover = (
+    pattern = "**/*",
+    options: DiscoverOptions = {}
+  ): Effect.Effect<ReadonlyArray<string>, WorkspaceError> =>
     Effect.tryPromise({
       try: async () => {
         const normalizedPattern = pattern.replaceAll("\\", "/")
         const matcher = normalizedPattern === "**/*" ? /.*/ : globRegex(normalizedPattern)
+        const excluded = new Set(limits.excludeDirs ?? [])
         const results: Array<string> = []
         const walk = async (directory: string, depth: number): Promise<void> => {
           if (depth > limits.maxDepth) {
@@ -207,8 +213,10 @@ export const makeNodeWorkspace = Effect.fn("@llm4ts/runner/NodeWorkspace.make")(
             const absolute = resolve(directory, entry.name)
             const path = relative(root, absolute).split(sep).join("/")
             if (entry.isDirectory()) {
-              await walk(absolute, depth + 1)
-            } else if (entry.isFile() && matcher.test(path)) {
+              if (!excluded.has(entry.name)) {
+                await walk(absolute, depth + 1)
+              }
+            } else if (entry.isFile() && matcher.test(path) && discoverAccepts(path, options)) {
               results.push(path)
               if (results.length > limits.maxResults) {
                 throw WorkspaceLimitError.make({

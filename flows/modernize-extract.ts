@@ -265,7 +265,7 @@ const program = Effect.gen(function* () {
         const all = yield* stage(
           context.events,
           "inventory",
-          matchingFiles(repo, pack.programs ?? pack.sources ?? ".*")
+          matchingFiles(repo, pack.programs ?? pack.sources ?? ".*", pack.exclude)
         )
         const wave = process.env.LLM4TS_WAVE?.trim()
         const programs =
@@ -318,7 +318,9 @@ const program = Effect.gen(function* () {
                   })
                 )
                 .pipe(Effect.as(SurveyGraph.make({ nodes: [], edges: [] })))
-            : surveyGraph(repo, pack.sources ?? ".*", pack.coverage, pack.survey)
+            : surveyGraph(repo, pack.sources ?? ".*", pack.coverage, pack.survey, {
+                ...(pack.exclude === undefined ? {} : { exclude: pack.exclude })
+              })
         )
 
         // One structured analyst call per program, resumable per program: a rerun

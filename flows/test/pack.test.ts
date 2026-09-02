@@ -168,6 +168,18 @@ describe.each(packs)("flows/packs/$name", (expected) => {
           `${expected.name} replays vectors but ships no 'vectors' prompt`
         )
       }
+      // A pack that can be surveyed (it has edge rules) owns the wording of
+      // the survey's two reasoning prompts; the flow's frame names no stack,
+      // so without these the model would triage a J2EE estate blind.
+      if (pack.survey.length > 0) {
+        for (const name of ["survey-refine", "survey-triage"]) {
+          const prompt = pack.prompt(name) ?? ""
+          assert.isAbove(prompt.length, 0, `${expected.name} is missing the '${name}' prompt`)
+          if (expected.source !== "cobol") {
+            assert.notMatch(prompt, /COBOL|JCL|copybook/i, `${name} in ${expected.name}`)
+          }
+        }
+      }
       assert.isAbove(pack.lenses.length, 0, "packs ship reviewer lenses for the review phase")
       for (const lens of pack.lenses) {
         assert.isAbove(lens.systemPrompt.length, 0, `${lens.name} has an empty prompt`)

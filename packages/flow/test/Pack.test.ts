@@ -108,4 +108,28 @@ programFiles: src/(<NAME>
       assert.include(error.message, "programFiles")
     })
   )
+
+  it.effect("reads an optional exclude regex and rejects an invalid one at load time", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write("none/pack.md", "# Pack: plain\n\nsource: jsp\n")
+      assert.strictEqual((yield* loadPack(workspace, "none")).exclude, undefined)
+
+      yield* workspace.write(
+        "pack/pack.md",
+        `# Pack: j2ee
+
+source: jsp
+sources: .*\\.(jsp|java|xml)
+exclude: ^(vendor|generated)/
+`
+      )
+      assert.strictEqual((yield* loadPack(workspace, "pack")).exclude, "^(vendor|generated)/")
+
+      yield* workspace.write("broken/pack.md", "# Pack: broken\n\nsource: jsp\nexclude: ^(vendor\n")
+      const error = yield* Effect.flip(loadPack(workspace, "broken"))
+      assert.strictEqual(error._tag, "PlanParse")
+      assert.include(error.message, "exclude")
+    })
+  )
 })

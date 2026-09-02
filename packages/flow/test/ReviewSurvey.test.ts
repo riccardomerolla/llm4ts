@@ -12,7 +12,9 @@ import {
   closureFor,
   mergeSurveyEdges,
   renderSurveyInventory,
-  surveyGraph
+  surveyGraph,
+  surveyRefinePrompt,
+  surveyTriagePrompt
 } from "@llm4ts/flow/Survey"
 import { makeMemoryWorkspace } from "@llm4ts/flow/Workspace"
 
@@ -115,6 +117,127 @@ describe("spec checks and survey", () => {
       assert.match(report, /3 unit\(s\), 2 edge\(s\)/)
     })
   )
+})
+
+describe("web estate survey", () => {
+  const jspRules = [
+    CoverageRule.make({
+      name: "jsp-include",
+      files: "\\.jsp$",
+      unit: '<jsp:include page="([^"]+)"'
+    }),
+    CoverageRule.make({
+      name: "servlet-class",
+      files: "web\\.xml$",
+      unit: "<servlet-class>[a-z.]*\\.([A-Za-z0-9]+)</servlet-class>"
+    })
+  ]
+
+  it.effect("resolves path-shaped references onto units so fragments keep their callers", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "src/main/webapp/login.jsp",
+        '<jsp:include page="header.jsp" />\n<jsp:include page="/WEB-INF/fragments/footer.jsp" />\n'
+      )
+      yield* workspace.write("src/main/webapp/header.jsp", "<h1>Bank</h1>\n")
+      yield* workspace.write("src/main/webapp/WEB-INF/fragments/footer.jsp", "<p/>\n")
+      yield* workspace.write(
+        "src/main/webapp/WEB-INF/web.xml",
+        "<servlet-class>com.bank.web.LoginServlet</servlet-class>\n" +
+          "<servlet-class>com.bank.web.GhostServlet</servlet-class>\n"
+      )
+      yield* workspace.write(
+        "src/main/java/com/bank/web/LoginServlet.java",
+        "class LoginServlet {}\n"
+      )
+      // Sources the estate does not own: the copy under target/ is pruned by
+      // the default limits, the vendored one by the exclude regex.
+      yield* workspace.write("target/webapp/login.jsp", '<jsp:include page="header.jsp" />\n')
+      yield* workspace.write("vendor/theme/header.jsp", "<h1>Theme</h1>\n")
+
+      const graph = yield* surveyGraph(workspace, "\\.(jsp|java|xml)$", [], jspRules, {
+        exclude: "^vendor/"
+      })
+
+      assert.deepStrictEqual(graph.nodes.map((node) => node.name).sort(), [
+        "LoginServlet",
+        "footer",
+        "header",
+        "login",
+        "web"
+      ])
+      assert.deepStrictEqual(
+        graph.edges.map((edge) => `${edge.from}->${edge.to} (${edge.kind})`).sort(),
+        [
+          "login->footer (jsp-include)",
+          "login->header (jsp-include)",
+          "web->GhostServlet (servlet-class)",
+          "web->LoginServlet (servlet-class)"
+        ]
+      )
+      // The bug this guards: header/footer used to carry zero incoming edges
+      // and be flagged as retire candidates in the inventory.
+      assert.strictEqual(graph.incoming("header").length, 1)
+      assert.strictEqual(graph.incoming("footer").length, 1)
+      const inventory = renderSurveyInventory(graph)
+      assert.notMatch(inventory, /\| header \|.*retire candidate/)
+      assert.match(
+        inventory,
+        /\| header \| src\/main\/webapp\/header\.jsp \| \d+ \| 0 \| 1 \| 0 \|/
+      )
+    })
+  )
+
+  it("composes the reasoning prompts from the pack's rules and guidance, never a fixed stack", () => {
+    const graph = SurveyGraph.make({
+      nodes: [SurveyNode.make({ path: "a/login.jsp", name: "login", lines: 1, units: 0 })],
+      edges: []
+    })
+    const cobol = {
+      rules: [CoverageRule.make({ name: "calls", files: "", unit: "" })],
+      guidance: "Dynamic CALLs (CALL WS-PROGRAM) and JCL EXEC PGM=&PGM hide targets."
+    }
+    const jsp = {
+      rules: jspRules,
+      guidance: "web.xml servlet-mapping and <jsp:include> wire pages."
+    }
+    const neutral = {
+      rules: [CoverageRule.make({ name: "references", files: "", unit: "" })],
+      guidance: undefined
+    }
+
+    const cobolRefine = surveyRefinePrompt(graph, cobol)
+    assert.include(cobolRefine, "survey rules (calls)")
+    assert.include(cobolRefine, "EXEC PGM=&PGM")
+    assert.include(cobolRefine, "Units: login")
+    assert.include(cobolRefine, '"evidence"')
+
+    const jspRefine = surveyRefinePrompt(graph, jsp)
+    assert.include(jspRefine, "survey rules (jsp-include, servlet-class)")
+    assert.include(jspRefine, "servlet-mapping")
+    assert.notInclude(jspRefine, "COBOL")
+    assert.notInclude(jspRefine, "JCL")
+    assert.notInclude(jspRefine, "COPY")
+
+    const jspTriage = surveyTriagePrompt(graph, "# Estate inventory", jsp)
+    assert.include(jspTriage, "jsp-include, servlet-class")
+    assert.include(jspTriage, "<jsp:include>")
+    assert.include(jspTriage, '"triage"')
+    assert.include(jspTriage, "# Estate inventory")
+    assert.notInclude(jspTriage, "JCL")
+
+    // Both prompts keep working, stack-neutrally, for a pack with no sidecars.
+    const neutralRefine = surveyRefinePrompt(graph, neutral)
+    const neutralTriage = surveyTriagePrompt(graph, "", neutral)
+    for (const prompt of [neutralRefine, neutralTriage]) {
+      assert.notInclude(prompt, "COBOL")
+      assert.notInclude(prompt, "JCL")
+      assert.notInclude(prompt, "servlet")
+    }
+    assert.include(neutralRefine, "refining the dependency graph")
+    assert.include(neutralTriage, "triaging a legacy estate")
+  })
 })
 
 describe("include closure", () => {

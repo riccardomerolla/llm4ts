@@ -141,7 +141,7 @@ const program = Effect.gen(function* () {
 
           const programs = yield* measured(
             "inventory",
-            matchingFiles(estate, pack.programs ?? pack.sources ?? ".*")
+            matchingFiles(estate, pack.programs ?? pack.sources ?? ".*", pack.exclude)
           )
           if (programs.length === 0) {
             return yield* FlowAborted.make({
