@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0
 
 - `modernize-extract` extracts and judges the programs of a wave
   concurrently: `LLM4TS_EXTRACT_CONCURRENCY=<n>` (default 1, the previous
