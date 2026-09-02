@@ -40,6 +40,19 @@ export LLM4TS_JUDGE_ROUNDS=1        # bound judge feedback to one round on stage
 export LLM4TS_MAX_CLOSURE_FILES=8   # bound legacy evidence per page
 ```
 
+`LLM4TS_PACK` is the one that matters for Act 1: it is what makes the survey
+reason in J2EE terms (web.xml mappings, includes, forwards, ajax targets)
+instead of the default COBOL pack's. Discovery needs nothing extra for the
+fixture or for a typical client estate — only files the pack's `sources:`
+regex matches count, and `.git`, `node_modules`, `target`, `build`, `dist`
+are never entered. Keep these two in your back pocket for a real estate with
+an unusual layout, never set them on stage without a reason:
+
+```bash
+export LLM4TS_EXCLUDE_DIRS=.git,node_modules,target,generated   # replaces the pruned list
+export LLM4TS_MAX_DISCOVER_RESULTS=50000                         # default 20000 for estates
+```
+
 ## Act 1 — breadth: survey and extract (~duration: measure in rehearsal)
 
 ```bash
@@ -47,9 +60,27 @@ llm4ts run modernize-survey --repo ~/demo/legacy-j2ee
 ```
 
 Talk track while it runs: 18 pages inventoried, dead pages and fragments
-triaged out, waves proposed. Open `docs/modernization/wave-plan.md` in the
-legacy repo, review it WITH the audience, flip `- [x] Approved` (the human
-gate is the point — banks like this beat).
+triaged out, waves proposed. Three beats, in the order the artifacts land:
+
+1. `docs/modernization/inventory.md` — the deterministic graph, no model
+   involved yet. Point at the `In` column: `header` and `footer` carry one
+   incoming edge per page that includes them, `web` (web.xml) fans out to
+   every servlet, and the genuinely dead pages are the ones flagged
+   `unreferenced — retire candidate?`. That column is what the model is
+   asked to trust.
+2. `docs/modernization/graph-refine.md` — the edges the regexes could not
+   see (form actions and redirects to url-patterns, ajax targets), each with
+   the file and line that establishes it. No evidence, no edge.
+3. `docs/modernization/wave-plan.md` — fragments travel with the first page
+   that includes them, the ESB wrappers come out `wrap` (the port story for
+   Act 2), and the waves are user journeys: read-only screens, then CRUD,
+   then the session-backed transfer stepper last.
+
+Say once that the prompts behind beats 2 and 3 are the pack's
+(`packs/j2ee-nextjs-spa/prompts/survey-*.md`), not the tool's: a client with
+a different stack edits two markdown files, not the pipeline. Review the plan
+WITH the audience, flip `- [x] Approved` (the human gate is the point — banks
+like this beat).
 
 ```bash
 LLM4TS_WAVE=wave-1 llm4ts run modernize-extract --repo ~/demo/legacy-j2ee
