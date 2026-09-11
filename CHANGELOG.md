@@ -23,6 +23,20 @@
   the run's events and cost tracker.
 - New typed errors: `StoryPlanInvalid`, `PerimeterViolation`,
   `MissingDependency`, `MergeConflict`, `StoryFailed`.
+- New flow `epic-stories`: a reasoning seat (`LLM4TS_REASONER`, default
+  claude) splits an epic into a story plan, persisted for approval
+  (`--plan-only`; an existing file wins over regeneration), then `pi`
+  coders (`LLM4TS_CODER`) implement the stories in parallel worktrees under
+  `--concurrency` (default 3), each judged and perimeter-checked before its
+  merge into `epic/<epic-id>`; `--fail-fast` stops at the first failure.
+  The expected split of the demo epic is committed as
+  `flows/fixtures/epic-stories/conto-bonifico.md`.
+- New fixture `examples/internet-banking/portal`: a client-only retail
+  internet-banking SPA (Vite, React 19, Effect HttpApi contracts over a
+  stateful fake transport, English and Italian, per-feature dictionaries,
+  routes and nav with `App.tsx` as the single composition point, Profilo as
+  the exemplar feature) — the target of the `epic-stories` demo, with seed
+  and smoke scripts and a runbook.
 ## 0.15.1
 
 - **Fixed**: a structured call whose reply did not decode as the requested

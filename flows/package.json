@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "implement": "node --experimental-strip-types implement.ts",
+    "epic-stories": "node --experimental-strip-types epic-stories.ts",
     "issue-pr": "node --experimental-strip-types issue-pr.ts",
     "modernize-survey": "node --experimental-strip-types modernize-survey.ts",
     "modernize-extract": "node --experimental-strip-types modernize-extract.ts",

@@ -6,20 +6,21 @@ a single self-contained script: it imports only `@llm4ts/*`, `effect`, and
 one-line description. These scripts double as the built-in flows of the
 `llm4ts` shell.
 
-| Flow                     | What it does                                                | Requirements               |
-| ------------------------ | ----------------------------------------------------------- | -------------------------- |
-| `implement.ts`           | Persistent plan, branch, task review/fix, and commits       | selected CLI + Git         |
-| `issue-pr.ts`            | GitHub issue assessment through pushed pull request         | selected CLI + GitHub      |
-| `sdd.ts`                 | Spec → red tests → implementation → green verification      | selected CLI + Maven       |
-| `local.ts`               | LM Studio reasoning followed by a local pi coding agent     | LM Studio + pi             |
-| `judge-suite.ts`         | Three-run LLM-as-a-Judge evaluation with variance reporting | selected CLI               |
-| `modernize-survey.ts`    | Phase 0 — inventory, dependency graph, triage, wave plan    | selected CLI + Git + pack  |
-| `modernize-extract.ts`   | Phase 1 — legacy estate → judged, approved spec pack        | selected CLI + Git + pack  |
-| `modernize-seed.ts`      | Phase 2 — seed the target from the approved pack (no LLM)   | Git + pack + legacy repo   |
-| `modernize-implement.ts` | Phase 3 — implement the plan behind the pack's gates        | selected CLI + Git + build |
-| `modernize-verify.ts`    | Phase 4 — equivalence vectors, replay, rule coverage        | selected CLI + replay cmd  |
-| `modernize-review.ts`    | Phase 5 — lens review, fix specs, distilled pack lessons    | selected CLI + Git + pack  |
-| `modernize-bench.ts`     | Measure an extraction run; report and project wave cost     | selected CLI + pack        |
+| Flow                     | What it does                                                  | Requirements               |
+| ------------------------ | ------------------------------------------------------------- | -------------------------- |
+| `implement.ts`           | Persistent plan, branch, task review/fix, and commits         | selected CLI + Git         |
+| `epic-stories.ts`        | Epic → story DAG → parallel coders in worktrees → epic branch | reasoner CLI + pi + Git    |
+| `issue-pr.ts`            | GitHub issue assessment through pushed pull request           | selected CLI + GitHub      |
+| `sdd.ts`                 | Spec → red tests → implementation → green verification        | selected CLI + Maven       |
+| `local.ts`               | LM Studio reasoning followed by a local pi coding agent       | LM Studio + pi             |
+| `judge-suite.ts`         | Three-run LLM-as-a-Judge evaluation with variance reporting   | selected CLI               |
+| `modernize-survey.ts`    | Phase 0 — inventory, dependency graph, triage, wave plan      | selected CLI + Git + pack  |
+| `modernize-extract.ts`   | Phase 1 — legacy estate → judged, approved spec pack          | selected CLI + Git + pack  |
+| `modernize-seed.ts`      | Phase 2 — seed the target from the approved pack (no LLM)     | Git + pack + legacy repo   |
+| `modernize-implement.ts` | Phase 3 — implement the plan behind the pack's gates          | selected CLI + Git + build |
+| `modernize-verify.ts`    | Phase 4 — equivalence vectors, replay, rule coverage          | selected CLI + replay cmd  |
+| `modernize-review.ts`    | Phase 5 — lens review, fix specs, distilled pack lessons      | selected CLI + Git + pack  |
+| `modernize-bench.ts`     | Measure an extraction run; report and project wave cost       | selected CLI + pack        |
 
 These flows deliberately invoke real providers or installed coding CLIs and
 are not part of the default test suite. Build the packages once before
@@ -109,6 +110,41 @@ pnpm --filter @llm4ts/flows implement -- \
 Accepted values are `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`,
 `cursor`, and `opencode`. The inherited `LLM4ZIO_CODER` name remains supported
 for migration.
+
+## Parallel stories from an epic
+
+`epic-stories` is the parallel sub-agent flow (ADR 0013). A reasoning seat
+splits the epic into stories with a declared dependency graph and declared
+file ownership, the plan is persisted for approval, and coders implement the
+stories at the same time, each in its own git worktree, merged into an epic
+branch in dependency order behind the target's gates:
+
+```sh
+pnpm --filter @llm4ts/flows epic-stories -- \
+  --repo /path/to/portal \
+  "Add the current account (Conto) and wire transfers (Bonifico)"
+```
+
+- `--plan-only` writes (or re-validates) `.llm4ts/epics/<epic-id>/plan.md`
+  and stops. An existing plan file always wins over regeneration: editing
+  it is the approval and the re-plan path.
+- `--concurrency <n>` (default 3) caps the stories implemented at once;
+  `--fail-fast` stops at the first failed story instead of skipping its
+  dependents.
+- `LLM4TS_REASONER` (default `claude`, or `gemini`) splits, reviews every
+  task and judges every story; `LLM4TS_CODER` (default `pi`) implements.
+  `LLM4TS_GATES="cmd; cmd"` overrides the four default `pnpm` gates.
+- A story that needs unplanned work replies `BLOCKED_ON: …` and fails
+  typed; a story that changes paths outside its `owned` set fails the
+  perimeter check; a merge conflict fails typed and is aborted. Rerunning
+  skips merged stories and resumes the rest.
+- Output: the epic branch `epic/<epic-id>` left in place, story branches
+  `story/<epic-id>/<story-id>`, the board and `report.md` under
+  `.llm4ts/epics/<epic-id>/` — every usage figure an estimate.
+
+The demo epic and its target are in
+[`examples/internet-banking/RUNBOOK.md`](../examples/internet-banking/RUNBOOK.md);
+the expected split is committed as `fixtures/epic-stories/conto-bonifico.md`.
 
 ## GitHub issue to pull request
 
