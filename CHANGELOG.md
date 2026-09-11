@@ -31,6 +31,11 @@
   merge into `epic/<epic-id>`; `--fail-fast` stops at the first failure.
   The expected split of the demo epic is committed as
   `flows/fixtures/epic-stories/conto-bonifico.md`.
+- **Fixed**: the built-in flows shipped inside `@llm4ts/shell` could not
+  load `convert-page`, `convert-all` (and now `epic-stories`): they import
+  `./lib/<name>.ts`, and `scripts/sync-shell-flows.mjs` copied only the
+  top-level scripts. The sync now transpiles `flows/lib/*.ts` beside them
+  and rewrites relative `.ts` specifiers to the shipped `.js`.
 - New fixture `examples/internet-banking/portal`: a client-only retail
   internet-banking SPA (Vite, React 19, Effect HttpApi contracts over a
   stateful fake transport, English and Italian, per-feature dictionaries,

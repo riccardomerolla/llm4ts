@@ -30,22 +30,51 @@ const resourceDirs = ["packs", "patterns", "fixtures"]
 rmSync(targetDir, { recursive: true, force: true })
 mkdirSync(targetDir, { recursive: true })
 
+/**
+ * Relative imports between flow sources name `.ts` files (the repository
+ * rule); the shipped copies are `.js`, so the specifiers are rewritten
+ * with them. Package imports are untouched.
+ */
+const rewriteRelativeImports = (source) =>
+  source.replace(/(from\s+["'])(\.\.?\/[^"']+)\.ts(["'])/g, "$1$2.js$3")
+
+const transpile = (source, fileName) =>
+  rewriteRelativeImports(
+    ts.transpileModule(source, {
+      fileName,
+      compilerOptions: {
+        module: ts.ModuleKind.ESNext,
+        target: ts.ScriptTarget.ES2022,
+        removeComments: false
+      }
+    }).outputText
+  )
+
 let copied = 0
 for (const entry of readdirSync(sourceDir)) {
   if (!entry.endsWith(".ts")) {
     continue
   }
   const source = readFileSync(path.join(sourceDir, entry), "utf8")
-  const transpiled = ts.transpileModule(source, {
-    fileName: entry,
-    compilerOptions: {
-      module: ts.ModuleKind.ESNext,
-      target: ts.ScriptTarget.ES2022,
-      removeComments: false
-    }
-  })
-  writeFileSync(path.join(targetDir, entry.replace(/\.ts$/, ".js")), transpiled.outputText)
+  writeFileSync(path.join(targetDir, entry.replace(/\.ts$/, ".js")), transpile(source, entry))
   copied += 1
+}
+// The flows' shared library (`flows/lib/*.ts`, imported as `./lib/<name>.ts`
+// by the convert-* and epic-stories flows) ships beside them the same way.
+const libDir = path.join(sourceDir, "lib")
+if (existsSync(libDir)) {
+  mkdirSync(path.join(targetDir, "lib"), { recursive: true })
+  for (const entry of readdirSync(libDir)) {
+    if (!entry.endsWith(".ts")) {
+      continue
+    }
+    const source = readFileSync(path.join(libDir, entry), "utf8")
+    writeFileSync(
+      path.join(targetDir, "lib", entry.replace(/\.ts$/, ".js")),
+      transpile(source, entry)
+    )
+    copied += 1
+  }
 }
 for (const name of resourceDirs) {
   const source = path.join(sourceDir, name)
