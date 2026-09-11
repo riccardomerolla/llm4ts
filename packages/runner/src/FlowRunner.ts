@@ -6,6 +6,7 @@ import { CliConnectorConfig, defaultReasoningConfig } from "@llm4ts/core/Connect
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import type { HttpClientShape } from "@llm4ts/core/HttpClient"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
+import type { ConnectorCapabilities } from "@llm4ts/core/Models"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { TemporaryFilesShape } from "@llm4ts/core/TemporaryFiles"
 import type { GeminiCliExecutorShape } from "@llm4ts/core/providers/GeminiCliProvider"
@@ -105,17 +106,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   const events = yield* makeFlowEventHub()
   const tracker = yield* makeCostTracker()
   yield* tracker.consume(events)
-  const coderConfig = prepareConnector(
-    options.coder,
-    options.workDir,
-    options.environment ?? process.env
-  )
   const reasoning = defaultReasoningConfig(options.coder, options.reasoning)
-  const reasoningPrepared = prepareConnector(
-    reasoning,
-    options.workDir,
-    options.environment ?? process.env
-  )
   // Every seat retries transient provider failures and flaky streams (an
   // empty response or malformed tool call), announcing each attempt on the
   // run's events. Without the wrapper one hiccup from a CLI agent failed the
@@ -154,28 +145,59 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         )
       )
     )
-  const coder = yield* resolveSeat(coderConfig)
-  const reasoningService = yield* resolveSeat(reasoningPrepared)
-  const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
-    resolveSeat(
-      prepareConnector(configuration, options.workDir, options.environment ?? process.env)
+  const seatsFor = Effect.fn("@llm4ts/runner/FlowRunner.seatsFor")(function* (
+    workDir: string
+  ): Effect.fn.Return<
+    {
+      readonly coder: LlmServiceShape & { readonly capabilities: ConnectorCapabilities }
+      readonly reasoning: LlmServiceShape
+      readonly reviewers: ReadonlyArray<LlmServiceShape>
+    },
+    FlowError,
+    Scope.Scope
+  > {
+    const environment = options.environment ?? process.env
+    const coder = yield* resolveSeat(prepareConnector(options.coder, workDir, environment))
+    const reasoningService = yield* resolveSeat(prepareConnector(reasoning, workDir, environment))
+    const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
+      resolveSeat(prepareConnector(configuration, workDir, environment))
     )
-  )
+    return { coder, reasoning: reasoningService, reviewers }
+  })
+  const contextAt = (
+    workDir: string,
+    seats: {
+      readonly coder: LlmServiceShape & { readonly capabilities: ConnectorCapabilities }
+      readonly reasoning: LlmServiceShape
+      readonly reviewers: ReadonlyArray<LlmServiceShape>
+    },
+    rebind: boolean
+  ): FlowContextShape =>
+    FlowContext.of({
+      reasoning: seats.reasoning,
+      coder: seats.coder,
+      git: makeGitTool(dependencies.process, workDir, events),
+      hosting: makeGitHubTool(dependencies.process, workDir, events),
+      events,
+      reviewers: seats.reviewers,
+      coderCapabilities: seats.coder.capabilities,
+      userPrompt: options.userPrompt,
+      workDir,
+      workspace: options.workspace,
+      // Rebinding is one level deep: a story worktree's context has no
+      // `contextFor` of its own — nothing in the design nests worktrees.
+      ...(rebind
+        ? {
+            contextFor: (directory: string) =>
+              Effect.map(seatsFor(directory), (rebound) => contextAt(directory, rebound, false))
+          }
+        : {})
+    })
+  const seats = yield* seatsFor(options.workDir)
   return {
     events,
     tracker,
-    context: FlowContext.of({
-      reasoning: reasoningService,
-      coder,
-      git: makeGitTool(dependencies.process, options.workDir, events),
-      hosting: makeGitHubTool(dependencies.process, options.workDir, events),
-      events,
-      reviewers,
-      coderCapabilities: coder.capabilities,
-      userPrompt: options.userPrompt,
-      workDir: options.workDir,
-      workspace: options.workspace
-    })
+    context: contextAt(options.workDir, seats, true)
   }
 })
 

@@ -124,6 +124,74 @@ export class BudgetExceeded extends Schema.TaggedErrorClass<BudgetExceeded>()("B
   }
 }
 
+/** A story plan that failed deterministic validation — every violation, not the first (ADR 0013). */
+export class StoryPlanInvalid extends Schema.TaggedErrorClass<StoryPlanInvalid>()(
+  "StoryPlanInvalid",
+  {
+    violations: Schema.Array(Schema.String)
+  }
+) {
+  get message(): string {
+    return `story plan invalid:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** A story branch changed paths outside the story's declared `owned` set. */
+export class PerimeterViolation extends Schema.TaggedErrorClass<PerimeterViolation>()(
+  "PerimeterViolation",
+  {
+    story: Schema.String,
+    outside: Schema.Array(Schema.String),
+    sharedReadOnly: Schema.Array(Schema.String)
+  }
+) {
+  get message(): string {
+    const lines = [`story '${this.story}' changed paths outside its perimeter:`]
+    for (const path of this.sharedReadOnly) {
+      lines.push(`- ${path} (shared read-only: revert it, or request it as a dedicated story)`)
+    }
+    for (const path of this.outside) {
+      lines.push(`- ${path} (not in the story's owned paths)`)
+    }
+    return lines.join("\n")
+  }
+}
+
+/** The coder ended a story with `BLOCKED_ON:` — unplanned work belongs to another story. */
+export class MissingDependency extends Schema.TaggedErrorClass<MissingDependency>()(
+  "MissingDependency",
+  {
+    story: Schema.String,
+    need: Schema.String
+  }
+) {
+  get message(): string {
+    return `story '${this.story}' is blocked on unplanned work: ${this.need}`
+  }
+}
+
+/** A story branch did not merge cleanly into the epic branch; the merge was aborted. */
+export class MergeConflict extends Schema.TaggedErrorClass<MergeConflict>()("MergeConflict", {
+  branch: Schema.String,
+  into: Schema.String,
+  paths: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const where = this.paths.length === 0 ? "" : `: ${this.paths.join(", ")}`
+    return `merging '${this.branch}' into '${this.into}' conflicted${where}`
+  }
+}
+
+/** One story failed; carries the story id so a fail-fast run names its cause. */
+export class StoryFailed extends Schema.TaggedErrorClass<StoryFailed>()("StoryFailed", {
+  story: Schema.String,
+  reason: Schema.String
+}) {
+  get message(): string {
+    return `story '${this.story}' failed: ${this.reason}`
+  }
+}
+
 export const FlowError = Schema.Union([
   PersistenceError,
   PlanParseError,
@@ -136,6 +204,11 @@ export const FlowError = Schema.Union([
   FlowLlmError,
   FlowCapabilityDenied,
   ColumnNotFound,
-  BudgetExceeded
+  BudgetExceeded,
+  StoryPlanInvalid,
+  PerimeterViolation,
+  MissingDependency,
+  MergeConflict,
+  StoryFailed
 ])
 export type FlowError = typeof FlowError.Type

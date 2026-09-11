@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- Parallel story execution (ADR 0013). `@llm4ts/flow/StoryPlan` holds an
+  epic's stories with declared dependencies and file ownership, validated
+  deterministically (every violation reported at once) and persisted as an
+  editable ` ```json storyplan ` block. `@llm4ts/flow/Perimeter`
+  fails a story whose branch touched paths outside its `owned` set.
+  `@llm4ts/flow/Stories.implementStoriesFlow` runs stories in per-story git
+  worktrees under a concurrency cap, each through the unchanged
+  `implementPlanFlow`, judges and perimeter-checks the branch, merges it
+  into the epic branch one at a time, re-gates the epic head after every
+  merge (rolling a red merge back), skips a failed story's dependents
+  (`failFast` stops instead), resumes by story-entry hash, treats the
+  coder's `BLOCKED_ON:` reply as a typed `MissingDependency`, and writes
+  the board and an `EpicReport` whose usage figures are estimates.
+- `@llm4ts/flow/GitTool`: `merge` (a conflict fails typed with the
+  conflicting paths and aborts), `addWorktreeNewBranch`, `removeWorktree`
+  with `force`, `branchExists`, `deleteBranch`, `isAncestor`.
+- `@llm4ts/flow/FlowContext`: optional `contextFor(workDir)` — the runner
+  rebinds every seat to another directory (a story worktree) while sharing
+  the run's events and cost tracker.
+- New typed errors: `StoryPlanInvalid`, `PerimeterViolation`,
+  `MissingDependency`, `MergeConflict`, `StoryFailed`.
 ## 0.15.1
 
 - **Fixed**: a structured call whose reply did not decode as the requested

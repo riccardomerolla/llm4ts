@@ -166,7 +166,12 @@ const makeFakeGit = (log: Ref.Ref<GitLog>): GitToolShape => ({
   checkpoint: Effect.succeed("checkpoint"),
   rollback: (_checkpoint) => Effect.void,
   addWorktree: (_path, _branch) => Effect.void,
-  removeWorktree: (_path) => Effect.void
+  addWorktreeNewBranch: (_path, _branch, _startPoint) => Effect.void,
+  removeWorktree: (_path, _force) => Effect.void,
+  branchExists: (_name) => Effect.succeed(false),
+  deleteBranch: (_name) => Effect.void,
+  isAncestor: (_commit, _of) => Effect.succeed(false),
+  merge: (_branch, _message) => Effect.void
 })
 
 // diffAll reports empty for the first call (the no-op task), non-empty from

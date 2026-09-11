@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { Capabilities, type Capability } from "@llm4ts/core/Capability"
 import type { ProcessExecutorShape, ProcessResult } from "@llm4ts/core/ProcessExecutor"
-import { ProcessError, type FlowError } from "./FlowError.ts"
+import { MergeConflict, ProcessError, type FlowError } from "./FlowError.ts"
 import type { FlowEventsShape } from "./FlowEvents.ts"
 import { guarded } from "./CapabilityGuard.ts"
 
@@ -56,8 +56,26 @@ export interface GitToolShape {
   readonly push: (remote: string, branch: string) => Effect.Effect<void, FlowError>
   readonly checkpoint: Effect.Effect<string, FlowError>
   readonly rollback: (checkpoint: string) => Effect.Effect<void, FlowError>
+  /** Checks an EXISTING branch out into a new worktree at `path`. */
   readonly addWorktree: (path: string, branch: string) => Effect.Effect<void, FlowError>
-  readonly removeWorktree: (path: string) => Effect.Effect<void, FlowError>
+  /** Creates `branch` at `startPoint` and checks it out into a new worktree at `path`. */
+  readonly addWorktreeNewBranch: (
+    path: string,
+    branch: string,
+    startPoint: string
+  ) => Effect.Effect<void, FlowError>
+  /** `force` also removes a worktree holding untracked or modified files. */
+  readonly removeWorktree: (path: string, force?: boolean) => Effect.Effect<void, FlowError>
+  readonly branchExists: (name: string) => Effect.Effect<boolean, FlowError>
+  readonly deleteBranch: (name: string) => Effect.Effect<void, FlowError>
+  /** Whether `commit` is reachable from `of` — a merged story branch is an ancestor of the epic head. */
+  readonly isAncestor: (commit: string, of: string) => Effect.Effect<boolean, FlowError>
+  /**
+   * Merges `branch` into the checked-out branch with a merge commit. A
+   * conflict fails typed with the conflicting paths and leaves the tree as it
+   * was (the merge is aborted), so the next merge can proceed.
+   */
+  readonly merge: (branch: string, message: string) => Effect.Effect<void, FlowError>
 }
 
 const nonInteractiveEnvironment = Object.freeze({
@@ -287,7 +305,59 @@ export const makeGitTool = (
       write("git rollback", runOrFail(["reset", "--hard", checkpoint]).pipe(Effect.asVoid)),
     addWorktree: (path, branch) =>
       write("git worktree add", runOrFail(["worktree", "add", path, branch]).pipe(Effect.asVoid)),
-    removeWorktree: (path) =>
-      write("git worktree remove", runOrFail(["worktree", "remove", path]).pipe(Effect.asVoid))
+    addWorktreeNewBranch: (path, branch, startPoint) =>
+      write(
+        "git worktree add -b",
+        runOrFail(["worktree", "add", "-b", branch, path, startPoint]).pipe(Effect.asVoid)
+      ),
+    removeWorktree: (path, force = false) =>
+      write(
+        "git worktree remove",
+        runOrFail(["worktree", "remove", ...(force ? ["--force"] : []), path]).pipe(Effect.asVoid)
+      ),
+    branchExists: (name) =>
+      read(
+        "git branchExists",
+        Effect.map(verifiedRef(`refs/heads/${name}`), (found) => found !== undefined)
+      ),
+    deleteBranch: (name) =>
+      write("git branch -D", runOrFail(["branch", "-D", name]).pipe(Effect.asVoid)),
+    isAncestor: (commit, of) =>
+      read(
+        "git merge-base --is-ancestor",
+        Effect.flatMap(run(["merge-base", "--is-ancestor", commit, of]), (result) =>
+          result.exitCode === 0
+            ? Effect.succeed(true)
+            : result.exitCode === 1
+              ? Effect.succeed(false)
+              : Effect.fail(
+                  ProcessError.make({
+                    message: `git merge-base --is-ancestor ${commit} ${of}`,
+                    detail: problem(result)
+                  })
+                )
+        )
+      ),
+    merge: (branch, message) =>
+      write(
+        "git merge",
+        Effect.gen(function* () {
+          const result = yield* run(["merge", "--no-ff", "-m", message, branch])
+          if (result.exitCode === 0) {
+            return
+          }
+          const into = yield* runOrFail(["rev-parse", "--abbrev-ref", "HEAD"])
+          const unmerged = yield* run(["diff", "--name-only", "--diff-filter=U"])
+          const paths = text(unmerged.stdout)
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0)
+          // Abort regardless of the outcome so the epic tree is clean for the
+          // next story; a merge that failed before starting has nothing to
+          // abort and git says so, which is not a second failure.
+          yield* run(["merge", "--abort"])
+          return yield* MergeConflict.make({ branch, into, paths })
+        })
+      )
   }
 }

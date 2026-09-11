@@ -69,6 +69,20 @@ export list; the following modules are the main entry points.
   `Pack.programFiles`/`filesFor(program)` locate a program's implementation
   files; `Survey.closureFor(graph, program, maxFiles)` resolves the bounded
   breadth-first include closure extract hands its analysts.
+- `@llm4ts/flow/StoryPlan`, `Perimeter`, and `Stories`: the parallel story
+  executor (ADR 0013). `StoryPlan` is the epic-level plan — stories with
+  `dependsOn`, `owned`, `sharedReadOnly`, and `provides` — embedded as a
+  ` ```json storyplan ` block in the markdown the operator edits;
+  `validateStoryPlan` reports every violation (cycles, unknown targets,
+  overlapping ownership) at once, and `topologicalWaves`/`readyStories` are
+  the pure scheduling helpers. `Perimeter.enforcePerimeter` fails a story
+  whose branch changed paths outside its `owned` set. `implementStoriesFlow`
+  runs stories in per-story worktrees under a concurrency cap, each through
+  the unchanged `implementPlanFlow`, judges and perimeter-checks the branch,
+  merges it into the epic branch one at a time, re-gates the epic head, and
+  writes the board and the `EpicReport` (usage figures estimated). Seats come
+  from the `contextFor` option; the `BLOCKED_ON:` sentinel ends a story as a
+  typed `MissingDependency`.
 - `@llm4ts/flow/PrSummary`: structured pull-request titles and bodies.
 - `@llm4ts/flow/Replay`, `Equiv`, and `EquivReport`: offline replay and
   behavioral proof.
@@ -76,7 +90,10 @@ export list; the following modules are the main entry points.
 ## Runner
 
 - `@llm4ts/runner/FlowRunner`: `runEmbedded`, `runNode`, and Node dependency
-  presets.
+  presets. The flow context carries `contextFor(workDir)`: the same seats
+  rebound to another directory (a story worktree), sharing the run's events
+  and cost tracker — what `implementStoriesFlow` needs and the runner's only
+  part in parallel story execution.
 - `@llm4ts/runner/Connectors`: API presets, source-compatible environment
   enrichment, immutable configuration transforms, and edit-capable CLI presets.
 - `@llm4ts/runner/Cli`: command-line composition.

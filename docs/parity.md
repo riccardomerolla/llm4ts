@@ -469,3 +469,10 @@ reference release.
   `AzureDevOpsTool`, ADR 0011), and the `convert-page`/`convert-all`
   flows with the `j2ee-nextjs-spa` pack. All additive: no llm4zio
   counterpart exists; back-porting is out of scope for the PoC.
+- Parallel story execution beyond the pinned source (ADR 0013,
+  2026-09-11): the flow modules `StoryPlan`, `Perimeter`, and `Stories`,
+  the `GitTool` merge/worktree/branch operations they need, the flow
+  context's `contextFor` seat rebind supplied by the runner, and the
+  `epic-stories` flow. Every llm4zio flow runs one coder at a time; this
+  runs several, each confined to a declared story in its own worktree.
+  Additive; back-porting is out of scope.
