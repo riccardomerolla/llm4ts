@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0
 
 - Parallel story execution (ADR 0013). `@llm4ts/flow/StoryPlan` holds an
   epic's stories with declared dependencies and file ownership, validated
@@ -42,6 +42,7 @@
   routes and nav with `App.tsx` as the single composition point, Profilo as
   the exemplar feature) — the target of the `epic-stories` demo, with seed
   and smoke scripts and a runbook.
+
 ## 0.15.1
 
 - **Fixed**: a structured call whose reply did not decode as the requested

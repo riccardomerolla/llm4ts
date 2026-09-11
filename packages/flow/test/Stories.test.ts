@@ -123,6 +123,7 @@ const baseGit: GitToolShape = {
   checkoutOrCreate: () => Effect.void,
   createBranch: () => unusedFlow,
   commitAll: () => Effect.succeed(Committed.make({})),
+  commitPaths: () => Effect.succeed(Committed.make({})),
   push: () => Effect.void,
   checkpoint: Effect.succeed("checkpoint"),
   rollback: () => Effect.void,

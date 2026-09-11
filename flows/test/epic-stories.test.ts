@@ -124,6 +124,7 @@ const gitOver = (log: Ref.Ref<ReadonlyArray<string>>, prefix: string): GitToolSh
     checkoutOrCreate: (name) => note(`checkout:${name}`),
     createBranch: () => unusedFlow,
     commitAll: (message) => note(`commit:${message}`).pipe(Effect.as(Committed.make({}))),
+    commitPaths: (message) => note(`commit:${message}`).pipe(Effect.as(Committed.make({}))),
     push: () => Effect.void,
     checkpoint: Effect.succeed("head"),
     rollback: () => Effect.void,
