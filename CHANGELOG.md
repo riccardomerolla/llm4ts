@@ -36,6 +36,12 @@
   `./lib/<name>.ts`, and `scripts/sync-shell-flows.mjs` copied only the
   top-level scripts. The sync now transpiles `flows/lib/*.ts` beside them
   and rewrites relative `.ts` specifiers to the shipped `.js`.
+- **Fixed**: a fresh `npm install` of `@llm4ts/shell` resolved
+  `@effect/platform-node-shared` to a newer beta (the transitive range is
+  `^4.0.0-beta.102`) whose modules the pinned `effect` beta does not have,
+  and npm's peer resolution spun for minutes before failing. The shell now
+  pins `@effect/platform-node-shared` at the same exact beta as everything
+  else, so consumers resolve the matching version.
 - New fixture `examples/internet-banking/portal`: a client-only retail
   internet-banking SPA (Vite, React 19, Effect HttpApi contracts over a
   stateful fake transport, English and Italian, per-feature dictionaries,

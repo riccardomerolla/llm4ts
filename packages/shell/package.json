@@ -53,6 +53,7 @@
   ],
   "dependencies": {
     "@effect/platform-node": "4.0.0-beta.102",
+    "@effect/platform-node-shared": "4.0.0-beta.102",
     "@llm4ts/core": "workspace:*",
     "@llm4ts/flow": "workspace:*",
     "@llm4ts/modernize": "workspace:*",
