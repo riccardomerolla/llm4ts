@@ -76,7 +76,10 @@ export default [
       "packages/shell/flows/**",
       // Demo-bank fixture repos: standalone toolchains (the Next.js fixture
       // lints itself) and deliberately legacy-styled J2EE content.
-      "examples/demo-bank/**"
+      "examples/demo-bank/**",
+      // Internet-banking portal fixture: a standalone Vite/React toolchain
+      // that lints itself (ADR 0013).
+      "examples/internet-banking/portal/**"
     ]
   },
   js.configs.recommended,
