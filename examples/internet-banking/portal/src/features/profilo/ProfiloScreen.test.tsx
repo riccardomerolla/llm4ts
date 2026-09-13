@@ -36,7 +36,10 @@ describe("ProfiloScreen", () => {
     expect(screen.getByText("Giulia Bianchi")).toBeDefined()
     expect(screen.getByText("BNCGLI85M41F205X")).toBeDefined()
     expect(screen.getByText("14/03/2016")).toBeDefined()
-    expect(screen.getByLabelText("Email")).toHaveProperty("value", "giulia.bianchi@example.invalid")
+    // The inputs are filled by an effect after the data lands: wait for it.
+    await waitFor(() =>
+      expect(screen.getByLabelText("Email")).toHaveProperty("value", "giulia.bianchi@example.invalid")
+    )
   })
 
   it("renders the same screen in English", async () => {
