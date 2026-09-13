@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.2
 
 - Portal fixture: eslint ignores `.llm4ts/` and any nested `dist/`. The
   epic checkout's `eslint .` walked into the story worktrees under
@@ -8,6 +8,12 @@
   merge in the rehearsal was rolled back by 6975 lint errors that were not
   its own. Any target repository that keeps worktrees under `.llm4ts/`
   needs the same exclusion in tools that walk the tree.
+- The committed Conto e Bonifico plan is more precise where the rehearsal
+  showed the coder choosing a narrower reading: the Payments contract
+  names its three transfer states and what the code `000000` does, the
+  create payload lists its fields including a typed beneficiary, and the
+  transfer form depends on the Accounts contract it draws source accounts
+  from. Two stories had stopped with `BLOCKED_ON` on exactly those gaps.
 
 ## 0.16.1
 
