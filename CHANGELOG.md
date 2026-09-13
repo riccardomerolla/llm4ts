@@ -28,6 +28,9 @@ Findings of the first live rehearsal of `epic-stories` (ADR 0013):
   contract stories a test file each: the judge asks for tests, and a story
   cannot add one outside its owned paths — both contract stories stopped
   with `BLOCKED_ON` for exactly that during the rehearsal.
+- Story task loops run with `noopTaskPolicy: "complete"`: a task the coder
+  found already satisfied, without replying the exact sentinel, was failing
+  the whole story although the story is judged and gated afterwards.
 - **Fixed**: `makeLocalBoardSync` lost transitions under concurrent
   mutation — three stories starting at once each loaded the board, changed
   their own item, and the last save won, so the board showed one active

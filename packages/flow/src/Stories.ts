@@ -462,6 +462,11 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         chatPerTask: true,
         checkoutBranch: false,
         lint: options.gates(state.worktree),
+        // A story's final state is judged and gated downstream (judge round,
+        // perimeter check, epic gates), so a task the coder finds already
+        // satisfied — without saying the exact sentinel — must not sink the
+        // story: the option exists for pipelines shaped like this one.
+        noopTaskPolicy: "complete",
         ...(options.reviewers === undefined ? {} : { reviewers: options.reviewers }),
         ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds })
       })
