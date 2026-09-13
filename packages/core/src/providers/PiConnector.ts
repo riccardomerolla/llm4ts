@@ -42,7 +42,21 @@ export const parsePiStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
       return [toolEventChunk(jsonStringField(json, "toolName") ?? "", jsonField(json, "args"))]
     case "message_end":
     case "agent_end": {
-      const usage = jsonField(jsonField(json, "message"), "usage")
+      const message = jsonField(json, "message")
+      // pi reports a provider refusal (a usage limit, an auth failure) as an
+      // assistant message that stopped with an error and exits 0; without
+      // this it reads as an empty, successful reply.
+      if (jsonStringField(message, "stopReason") === "error") {
+        return [
+          LlmChunk.make({
+            delta: "",
+            metadata: {
+              piError: jsonStringField(message, "errorMessage") ?? "pi stopped with an error"
+            }
+          })
+        ]
+      }
+      const usage = jsonField(message, "usage")
       if (usage === undefined) {
         return []
       }

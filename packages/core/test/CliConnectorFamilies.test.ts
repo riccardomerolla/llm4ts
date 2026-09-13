@@ -102,6 +102,14 @@ describe("PiConnector", () => {
           .piError,
         "extension exploded"
       )
+      // A provider refusal arrives as an assistant message that stopped with
+      // an error, on a process that exits 0.
+      assert.strictEqual(
+        parsePiStreamLine(
+          '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Codex error: The usage limit has been reached"}}'
+        )[0]?.metadata.piError,
+        "Codex error: The usage limit has been reached"
+      )
       const connector = makePiConnector(
         CliConnectorConfig.make({ connectorId: ConnectorIds.Pi }),
         makeProcessExecutor({
