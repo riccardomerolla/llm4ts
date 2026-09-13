@@ -47,7 +47,7 @@ The expected split of the demo epic against the internet-banking portal fixture 
     {
       "id": "payments-contract",
       "title": "Payments domain contract and stateful fake routes",
-      "description": "Declare the Payments HttpApi in src/contracts/payments.ts: list saved beneficiaries (name, IBAN), create a transfer (from account id, beneficiary name, IBAN, amount in cents, description, execution date) returning a pending transfer with an id, confirm a transfer with a six-digit SCA code (any code confirms except 000000, which is refused as UnprocessableEntity), list transfers newest first with their state (pending, confirmed, refused), and get one transfer. Implement src/contracts/payments.fake.ts with an in-memory store per page session so a created then confirmed transfer appears in the list, a reset function, and the exported paymentsDomain. Run pnpm openapi and commit contracts/openapi/payments.json. Follow src/contracts/profile.ts and profile.fake.ts exactly. Add src/contracts/payments.test.ts covering the fake routes through the typed client: create then confirm then list, and the refused code 000000.",
+      "description": "Declare the Payments HttpApi in src/contracts/payments.ts: list saved beneficiaries (name, IBAN), create a transfer (from account id, beneficiary name, IBAN, amount in cents, description, execution date) returning a pending transfer with an id, confirm a transfer with a six-digit SCA code: TransferState is exactly \"pending\" | \"confirmed\" | \"refused\"; any six-digit code other than 000000 moves the transfer to confirmed, the code 000000 moves it to refused and returns the refused transfer (HTTP 200, not an error), and a code that is not six digits is UnprocessableEntity; list transfers newest first with their state, and get one transfer. Implement src/contracts/payments.fake.ts with an in-memory store per page session so a created then confirmed transfer appears in the list, a reset function, and the exported paymentsDomain. Run pnpm openapi and commit contracts/openapi/payments.json. Follow src/contracts/profile.ts and profile.fake.ts exactly. Add src/contracts/payments.test.ts covering the fake routes through the typed client: create then confirm then list, and the refused code 000000.",
       "dependsOn": [],
       "owned": [
         "src/contracts/payments.ts",
@@ -68,7 +68,8 @@ The expected split of the demo epic against the internet-banking portal fixture 
         "client.payments.confirm({ params: { transferId }, payload: { code } })",
         "client.payments.list()",
         "client.payments.get({ params: { transferId } })",
-        "src/contracts/payments.test.ts"
+        "src/contracts/payments.test.ts",
+        "TransferState = \"pending\" | \"confirmed\" | \"refused\""
       ]
     },
     {
