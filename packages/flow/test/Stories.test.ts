@@ -628,6 +628,34 @@ describe("Stories executor", () => {
     })
   )
 
+  it.effect(
+    "setup runs in every worktree before its seats, and a failing setup fails the story",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const context = yield* makeContext(harness)
+        const options = yield* makeOptions(harness, diamond, context, {
+          concurrency: 1,
+          setup: (workDir) =>
+            workDir.endsWith("/b")
+              ? Effect.fail(FlowAborted.make({ message: "worktree setup failed (pnpm install)" }))
+              : record(harness, `setup:${workDir.split("/").at(-1) ?? ""}`)
+        })
+        const report = yield* implementStoriesFlow(context, options)
+        const log = yield* Ref.get(harness.log)
+        assert.isBelow(log.indexOf("setup:a"), log.indexOf("seats:a"))
+        assert.isAbove(
+          log.indexOf("setup:a"),
+          log.indexOf("worktree-new:story/diamond/a@epic/diamond->/repo/.llm4ts/worktrees/a")
+        )
+        const b = report.stories.find((outcome) => outcome.id === "b")
+        assert.strictEqual(b?.status, "failed")
+        assert.include(b?.reason ?? "", "worktree setup failed")
+        assert.notInclude(log, "seats:b")
+        assert.strictEqual(report.stories.find((outcome) => outcome.id === "d")?.status, "skipped")
+      })
+  )
+
   it.effect("an invalid plan fails typed before any branch is touched", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness()

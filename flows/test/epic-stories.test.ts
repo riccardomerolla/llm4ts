@@ -39,8 +39,10 @@ import {
   judgeStory,
   parseEpicArgs,
   reasonerFromEnvironment,
+  setupIn,
   storyCoderFromEnvironment,
-  storyPlanInstructions
+  storyPlanInstructions,
+  worktreeSetupCommand
 } from "../lib/epic-stories.ts"
 
 const fixture = readFileSync(
@@ -218,6 +220,31 @@ describe("epic-stories flags and seats", () => {
         ["pnpm typecheck", "pnpm lint"]
       )
       assert.isTrue(invoked.every((call) => call.cwd === "/wt"))
+    })
+  )
+
+  it.effect("worktree setup defaults to an offline install and fails typed with the output", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(worktreeSetupCommand({}), ["pnpm", "install", "--offline"])
+      assert.isUndefined(worktreeSetupCommand({ LLM4TS_WORKTREE_SETUP: " " }))
+      assert.deepStrictEqual(worktreeSetupCommand({ LLM4TS_WORKTREE_SETUP: "npm ci" }), [
+        "npm",
+        "ci"
+      ])
+      const events = yield* makeFlowEventHub()
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["pnpm", "install", "--offline"]),
+            ProcessResult.make({ exitCode: 1, stdout: [], stderr: ["ERR_PNPM_NO_OFFLINE_META"] })
+          ]
+        ])
+      })
+      const error = yield* Effect.flip(
+        setupIn(fake.executor, events, ["pnpm", "install", "--offline"])("/wt")
+      )
+      assert.include(error.message, "worktree setup failed (pnpm install --offline)")
+      assert.include(error.message, "ERR_PNPM_NO_OFFLINE_META")
     })
   )
 

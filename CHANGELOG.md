@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+Findings of the first live rehearsal of `epic-stories` (ADR 0013):
+
+- `implementStoriesFlow` gained a `setup` step run in every story worktree
+  before its coder — a worktree is a fresh checkout without installed
+  dependencies, so the gates could not run there and the coder wandered
+  outside its perimeter trying to install them. The flow defaults it to
+  `pnpm install --offline` (`LLM4TS_WORKTREE_SETUP` overrides; empty
+  disables).
+- `LLM4TS_CODER_MODEL` / `LLM4TS_REASONING_MODEL` select the seats' models
+  (pi takes `provider/model`), which is how a pi sitting on an exhausted
+  free tier is moved to a provider with capacity.
+- **Fixed**: a failed `pi -p` completion reported an empty reason. pi
+  explains a refusal on stderr (a provider quota, a missing model) and
+  prints nothing on stdout; both streams are reported now.
+- The shell's `run` command parses its own flags first, so a flow's flags
+  go after `--`; the runbook and README say so.
+
 ## 0.16.0
 
 - Parallel story execution (ADR 0013). `@llm4ts/flow/StoryPlan` holds an

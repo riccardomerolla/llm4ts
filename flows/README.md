@@ -135,7 +135,11 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   dependents.
 - `LLM4TS_REASONER` (default `claude`, or `gemini`) splits, reviews every
   task and judges every story; `LLM4TS_CODER` (default `pi`) implements.
-  `LLM4TS_GATES="cmd; cmd"` overrides the four default `pnpm` gates.
+  `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi
+  takes `provider/model`, e.g. `openai-codex/gpt-5.5`).
+  `LLM4TS_GATES="cmd; cmd"` overrides the four default `pnpm` gates;
+  `LLM4TS_WORKTREE_SETUP` (default `pnpm install --offline`) prepares each
+  story worktree, which starts as a fresh checkout without dependencies.
 - A story that needs unplanned work replies `BLOCKED_ON: …` and fails
   typed; a story that changes paths outside its `owned` set fails the
   perimeter check; a merge conflict fails typed and is aborted. Rerunning

@@ -10,7 +10,7 @@ import { TokenUsage, type JsonSchema } from "@llm4ts/core/Models"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import { cap } from "@llm4ts/flow/Context"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
-import { FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
+import { FlowAborted, FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
 import type { FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { stableHash } from "@llm4ts/flow/Plan"
 import { lintCommand, mergeReviewResults, ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
@@ -35,7 +35,8 @@ export const epicUsage = [
   "  --fail-fast         stop the epic at the first failed story",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
   "       LLM4TS_CODER (default pi) implements; LLM4TS_REASONING_MODEL / LLM4TS_CODER_MODEL",
-  "       pick their models (pi: provider/model). LLM4TS_GATES overrides the gate commands."
+  "       pick their models (pi: provider/model). LLM4TS_GATES overrides the gate commands;",
+  "       LLM4TS_WORKTREE_SETUP (default: pnpm install --offline) prepares each worktree."
 ].join("\n")
 
 /** The flow's own flags, taken out before the shared `--repo`/prompt parsing sees the rest. */
@@ -282,6 +283,43 @@ export const judgeStory = (
     .pipe(
       Effect.mapError(FlowLlmError.from),
       Effect.map((scored) => subBar(scored, story))
+    )
+
+// ---- Worktree setup --------------------------------------------------------------
+
+export const defaultWorktreeSetup: ReadonlyArray<string> = ["pnpm", "install", "--offline"]
+
+/**
+ * `LLM4TS_WORKTREE_SETUP="pnpm install --offline"` (the default) prepares
+ * each story worktree; an empty value disables the step. Offline by default:
+ * the runbook warms the pnpm store once, and a workshop stage has no network.
+ */
+export const worktreeSetupCommand = (
+  environment: Readonly<Record<string, string | undefined>>
+): ReadonlyArray<string> | undefined => {
+  const raw = environment.LLM4TS_WORKTREE_SETUP
+  if (raw === undefined) {
+    return defaultWorktreeSetup
+  }
+  const parts = raw
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0)
+  return parts.length === 0 ? undefined : parts
+}
+
+/** Runs the setup command in a worktree; a non-zero exit fails the story with the output. */
+export const setupIn =
+  (process: ProcessExecutorShape, events: FlowEventsShape, command: ReadonlyArray<string>) =>
+  (workDir: string): Effect.Effect<void, FlowError> =>
+    Effect.flatMap(lintCommand(process, events, command, workDir), (result) =>
+      result.isClean
+        ? Effect.void
+        : FlowAborted.make({
+            message: `worktree setup failed (${command.join(" ")}):\n${result.issues
+              .map((issue) => issue.description)
+              .join("\n")}`
+          })
     )
 
 // ---- Gates ---------------------------------------------------------------------

@@ -25,11 +25,20 @@ demo customer, switch languages).
 
 Seats: the orchestrator is `claude` by default (`LLM4TS_REASONER=gemini`
 for the Gemini CLI); the coders are `pi`. Both CLIs must be installed and
-authenticated on the machine; `llm4ts doctor` lists what it finds.
+authenticated on the machine; `llm4ts doctor` lists what it finds. Prove
+each one answers a trivial prompt before the session — `claude -p "OK"`
+and `pi -p "OK"` — and put pi on a provider with real capacity: its
+default free-tier model allows a handful of requests a day, and a story
+needs dozens.
 
 ```bash
-export LLM4TS_CONTEXT_BUDGET=120000   # bound diffs handed to the judge
+export LLM4TS_CONTEXT_BUDGET=120000              # bound diffs handed to the judge
+export LLM4TS_CODER_MODEL=openai-codex/gpt-5.5   # pi: provider/model with capacity
 ```
+
+Every story runs in its own worktree, a fresh checkout that is installed
+with `pnpm install --offline` from the store you warmed above before the
+coder starts (`LLM4TS_WORKTREE_SETUP` overrides the command).
 
 ## Act 1 — the split (plan only)
 

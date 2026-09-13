@@ -38,7 +38,9 @@ import {
   judgeStory,
   parseEpicArgs,
   reasonerFromEnvironment,
-  storyCoderFromEnvironment
+  setupIn,
+  storyCoderFromEnvironment,
+  worktreeSetupCommand
 } from "./lib/epic-stories.ts"
 
 /** `LLM4TS_CODER_MODEL` / `LLM4TS_REASONING_MODEL`: pi takes `provider/model` (e.g. `openai-codex/gpt-5.5`). */
@@ -118,6 +120,7 @@ const program = Effect.gen(function* () {
           })
         }
         const gates = gatesIn(nodeProcessExecutor, events, gateCommands(process.env))
+        const setupCommand = worktreeSetupCommand(process.env)
         const report = yield* implementStoriesFlow(
           { ...context, reasoning: reasoningMeter.service },
           {
@@ -144,6 +147,9 @@ const program = Effect.gen(function* () {
                 }
                 return seats
               }),
+            ...(setupCommand === undefined
+              ? {}
+              : { setup: setupIn(nodeProcessExecutor, events, setupCommand) }),
             gates,
             judge: (story, diff) => judgeStory(reasoningMeter.service, story, diff, contextBudget),
             system: (story) =>

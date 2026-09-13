@@ -252,6 +252,12 @@ export interface StoriesOptions {
   /** Seats rooted in a worktree; the executor never resolves seats itself. */
   readonly contextFor: (workDir: string) => Effect.Effect<StorySeats, FlowError, Scope.Scope>
   readonly board: BoardSyncShape
+  /**
+   * Prepares a worktree before its coder runs — a fresh checkout has no
+   * installed dependencies, so the gates cannot run there without this.
+   * Runs on every start and resume; a failure fails the story.
+   */
+  readonly setup?: (workDir: string) => Effect.Effect<void, FlowError>
   /** The target's gates, run in a worktree per task and on the epic checkout after each merge. */
   readonly gates: (workDir: string) => Effect.Effect<ReviewResult, FlowError>
   /** Story-level judge over the branch's diff against the epic branch; omit to skip. */
@@ -504,6 +510,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         branch: state.branch,
         judge: "merged on a previous run"
       })
+    }
+    if (options.setup !== undefined) {
+      yield* stage(events, `story ${story.id}: setup`, options.setup(state.worktree))
     }
     const result = yield* Effect.scoped(implementStory(story, state))
     yield* integrate(story, state.branch)
