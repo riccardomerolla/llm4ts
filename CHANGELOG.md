@@ -18,6 +18,11 @@ Findings of the first live rehearsal of `epic-stories` (ADR 0013):
   prints nothing on stdout; both streams are reported now.
 - The shell's `run` command parses its own flags first, so a flow's flags
   go after `--`; the runbook and README say so.
+- `BLOCKED_ON:` counts only when the coder's reply ENDS with it: a coder's
+  own skills can make it announce a missing reference checkout and then
+  carry on, and a story that then completed its tasks was being failed.
+  The rules now say tooling, dependencies and reference repositories are
+  never a reason to stop.
 - **Fixed**: `makeLocalBoardSync` lost transitions under concurrent
   mutation — three stories starting at once each loaded the board, changed
   their own item, and the last save won, so the board showed one active

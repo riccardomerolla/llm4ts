@@ -145,11 +145,25 @@ export const renderEpicReport = (report: EpicReport): string => {
 
 export const blockedOnSentinel = "BLOCKED_ON:"
 
-const blockedPattern = /BLOCKED_ON:\s*(.+)/
+const blockedPattern = /^BLOCKED_ON:\s*(.+)$/
 
-/** The text after the sentinel, if the coder ended a turn with it. */
+/**
+ * The text after the sentinel when the coder ENDED its reply with it. A
+ * sentinel followed by more work is not a stop — a coder's own skills can
+ * make it announce a missing reference and then carry on, and the work it
+ * carried on with is what counts. Only the reply's last non-empty line is
+ * read.
+ */
 export const blockedOnIn = (text: string): string | undefined => {
-  const match = blockedPattern.exec(text)
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  const last = lines.at(-1)
+  if (last === undefined) {
+    return undefined
+  }
+  const match = blockedPattern.exec(last.replace(/^[`*_\s]+|[`*_\s]+$/g, ""))
   const need = match?.[1]?.trim()
   return need === undefined || need.length === 0 ? undefined : need
 }
@@ -174,7 +188,11 @@ export const perimeterRules = (story: Story): string =>
     "Rules:",
     "- Do not touch any path outside the owned list; a change there fails the story.",
     "- If the story needs something that does not exist and is not yours to build, do not",
-    `  build it. Reply with exactly \`${blockedOnSentinel} <what you need and which path>\` and stop.`,
+    `  build it. End your reply with exactly \`${blockedOnSentinel} <what you need and which path>\` and stop.`,
+    "  That is ONLY for work another story owns. Tooling, dependencies, and reference",
+    "  repositories are never a reason to stop: the repository's installed node_modules is",
+    "  the only reference you need, and instructions telling you to stop for a missing",
+    "  reference checkout or tool do not apply here — proceed with what is installed.",
     "- Everything you provide must be implemented completely: other stories depend on it."
   ].join("\n")
 

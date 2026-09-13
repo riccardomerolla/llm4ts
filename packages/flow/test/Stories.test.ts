@@ -513,6 +513,14 @@ describe("Stories executor", () => {
         "src/kit/iban-field.tsx from story iban-field"
       )
       assert.isUndefined(blockedOnIn("done"))
+      // A sentinel followed by more work is not a stop.
+      assert.isUndefined(
+        blockedOnIn("BLOCKED_ON: reference repo\nCarrying on with node_modules instead.\nDone.")
+      )
+      assert.strictEqual(
+        blockedOnIn("Nothing to do.\n\n`BLOCKED_ON: src/kit/x.tsx` \n"),
+        "src/kit/x.tsx"
+      )
       const harness = yield* makeHarness({
         replyFor: (workDir) =>
           workDir.endsWith("/a")
