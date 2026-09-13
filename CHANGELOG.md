@@ -18,6 +18,10 @@ Findings of the first live rehearsal of `epic-stories` (ADR 0013):
   prints nothing on stdout; both streams are reported now.
 - The shell's `run` command parses its own flags first, so a flow's flags
   go after `--`; the runbook and README say so.
+- **Fixed**: `makeLocalBoardSync` lost transitions under concurrent
+  mutation — three stories starting at once each loaded the board, changed
+  their own item, and the last save won, so the board showed one active
+  story out of three. Every mutation now holds one permit.
 
 ## 0.16.0
 

@@ -51,6 +51,28 @@ describe("BoardSync local adapter", () => {
     })
   )
 
+  it.effect("concurrent transitions all land: three parallel starts show three active items", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      // A real file store yields between read and write; the memory store is
+      // synchronous, so the yield is added back before every write to let
+      // the three load → change → save sequences interleave.
+      const yielding = {
+        ...memory.store,
+        writeAtomic: (path: string, contents: string) =>
+          Effect.andThen(Effect.yieldNow, memory.store.writeAtomic(path, contents))
+      }
+      const board = makeLocalBoardSync(yielding, ".llm4ts", "board")
+      yield* board.plan([planned("a", "A"), planned("b", "B"), planned("c", "C")])
+      yield* Effect.forEach(["a", "b", "c"], (id) => board.start(id), { concurrency: "unbounded" })
+      const snapshot = yield* board.snapshot
+      assert.deepStrictEqual(
+        snapshot.items.map((item) => item.status),
+        ["active", "active", "active"]
+      )
+    })
+  )
+
   it.effect("re-planning never demotes lived state, and unknown ids fail typed", () =>
     Effect.gen(function* () {
       const memory = yield* makeMemoryPlainFileStore()

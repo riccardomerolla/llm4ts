@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import * as Semaphore from "effect/Semaphore"
 import { quoteWiql, type AzureDevOpsToolShape } from "./AzureDevOpsTool.ts"
 import { FlowAborted, type FlowError } from "./FlowError.ts"
 import { loadVersioned, saveVersioned, type PlainFileStoreShape } from "./Persistence.ts"
@@ -138,6 +139,10 @@ export const makeLocalBoardSync = (
 ): BoardSyncShape => {
   const jsonPath = join(directory, "board.json")
   const markdownPath = join(directory, "board.md")
+  // Every mutation is load → change → save; stories running in parallel
+  // (ADR 0013) mutate the board at the same time, and without the permit
+  // the last save wins and the others' transitions vanish.
+  const lock = Semaphore.makeUnsafe(1)
 
   const load: Effect.Effect<Board, FlowError> = loadVersioned(
     files,
@@ -155,29 +160,33 @@ export const makeLocalBoardSync = (
     id: string,
     transform: (item: BoardItem) => BoardItem
   ): Effect.Effect<void, FlowError> =>
-    Effect.gen(function* () {
-      const board = yield* load
-      if (!board.items.some((item) => item.id === id)) {
-        return yield* FlowAborted.make({ message: `board has no item '${id}' — plan it first` })
-      }
-      yield* save(
-        Board.make({
-          ...board,
-          items: board.items.map((item) => (item.id === id ? transform(item) : item))
-        })
-      )
-    })
+    lock.withPermit(
+      Effect.gen(function* () {
+        const board = yield* load
+        if (!board.items.some((item) => item.id === id)) {
+          return yield* FlowAborted.make({ message: `board has no item '${id}' — plan it first` })
+        }
+        yield* save(
+          Board.make({
+            ...board,
+            items: board.items.map((item) => (item.id === id ? transform(item) : item))
+          })
+        )
+      })
+    )
 
   return {
     plan: (items) =>
-      Effect.gen(function* () {
-        const board = yield* load
-        const known = new Map(board.items.map((item) => [item.id, item] as const))
-        // Known ids keep their lived state — re-planning must never demote a
-        // converted page back to "planned".
-        const merged = [...board.items, ...items.filter((item) => !known.has(item.id))]
-        yield* save(Board.make({ title: board.title, items: merged }))
-      }),
+      lock.withPermit(
+        Effect.gen(function* () {
+          const board = yield* load
+          const known = new Map(board.items.map((item) => [item.id, item] as const))
+          // Known ids keep their lived state — re-planning must never demote a
+          // converted page back to "planned".
+          const merged = [...board.items, ...items.filter((item) => !known.has(item.id))]
+          yield* save(Board.make({ title: board.title, items: merged }))
+        })
+      ),
     start: (id) => update(id, (item) => BoardItem.make({ ...item, status: "active" })),
     complete: (id, result) => update(id, (item) => applyResult(item, "done", result)),
     fail: (id, reason) =>
