@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.1
 
 Findings of the first live rehearsal of `epic-stories` (ADR 0013):
 
