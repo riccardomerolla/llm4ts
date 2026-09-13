@@ -125,6 +125,8 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   "Add the current account (Conto) and wire transfers (Bonifico)"
 ```
 
+- Through the shell, the flow's own flags go after `--`, which ends the
+  shell's flag parsing: `llm4ts run epic-stories --repo <path> -- --plan-only "…"`.
 - `--plan-only` writes (or re-validates) `.llm4ts/epics/<epic-id>/plan.md`
   and stops. An existing plan file always wins over regeneration: editing
   it is the approval and the re-plan path.

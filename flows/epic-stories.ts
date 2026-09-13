@@ -1,11 +1,12 @@
 // Split an epic into stories with a declared dependency graph, approve the plan, then implement the stories with parallel coders in per-story worktrees merged into an epic branch.
 //
 //   llm4ts run epic-stories --repo ~/demo/portal "Add the current account and wire transfers"
-//   llm4ts run epic-stories --repo ~/demo/portal --plan-only "…"   # write the plan and stop
+//   llm4ts run epic-stories --repo ~/demo/portal -- --plan-only "…"   # write the plan and stop
 //
 // The reasoning seat (LLM4TS_REASONER, default claude) splits the epic,
 // reviews every task and judges every story; the coder seat (LLM4TS_CODER,
-// default pi) implements. The story plan is persisted under
+// default pi) implements; LLM4TS_CODER_MODEL / LLM4TS_REASONING_MODEL pick
+// their models (pi: "provider/model"). The story plan is persisted under
 // .llm4ts/epics/<epic-id>/plan.md BEFORE any coder runs, and an existing
 // file wins over regeneration — editing it is the approval and the re-plan
 // path. Stories run in .llm4ts/worktrees/<story-id> under --concurrency
@@ -14,6 +15,7 @@
 // under .llm4ts/epics/<epic-id>/ carry ESTIMATED usage figures (ADR 0013).
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
+import type { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { budget, cap } from "@llm4ts/flow/Context"
 import { makeLocalBoardSync } from "@llm4ts/flow/BoardSync"
 import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
@@ -22,7 +24,7 @@ import { Info } from "@llm4ts/flow/FlowEvents"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { implementStoriesFlow, type StorySeats } from "@llm4ts/flow/Stories"
 import { makeStoryPlanStore, validateStoryPlan } from "@llm4ts/flow/StoryPlan"
-import { asReadOnly } from "@llm4ts/runner/Connectors"
+import { asReadOnly, withModel } from "@llm4ts/runner/Connectors"
 import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
@@ -39,6 +41,15 @@ import {
   storyCoderFromEnvironment
 } from "./lib/epic-stories.ts"
 
+/** `LLM4TS_CODER_MODEL` / `LLM4TS_REASONING_MODEL`: pi takes `provider/model` (e.g. `openai-codex/gpt-5.5`). */
+const withOptionalModel = (
+  config: CliConnectorConfig,
+  model: string | undefined
+): CliConnectorConfig => {
+  const trimmed = model?.trim()
+  return trimmed === undefined || trimmed.length === 0 ? config : withModel(config, trimmed)
+}
+
 const defaultEpic =
   "Add the retail customer's current account (Conto) with balance and movements, and wire " +
   "transfers (Bonifico) with beneficiary, review, SCA confirmation, and history."
@@ -46,8 +57,14 @@ const defaultEpic =
 const program = Effect.gen(function* () {
   const flags = yield* parseEpicArgs(process.argv.slice(2))
   const input = yield* resolveFlowInput(defaultEpic, flags.rest)
-  const reasoning = yield* reasonerFromEnvironment(process.env)
-  const coder = yield* storyCoderFromEnvironment(process.env)
+  const reasoning = withOptionalModel(
+    yield* reasonerFromEnvironment(process.env),
+    process.env.LLM4TS_REASONING_MODEL
+  )
+  const coder = withOptionalModel(
+    yield* storyCoderFromEnvironment(process.env),
+    process.env.LLM4TS_CODER_MODEL
+  )
   const files = nodePlainFileStore
   const epicId = epicIdFor(input.prompt)
   const stateDir = join(input.workDir, ".llm4ts", "epics", epicId)

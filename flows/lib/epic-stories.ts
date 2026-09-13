@@ -34,7 +34,8 @@ export const epicUsage = [
   "  --concurrency <n>   stories implemented at once (default 3)",
   "  --fail-fast         stop the epic at the first failed story",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
-  "       LLM4TS_CODER (default pi) implements. LLM4TS_GATES overrides the gate commands."
+  "       LLM4TS_CODER (default pi) implements; LLM4TS_REASONING_MODEL / LLM4TS_CODER_MODEL",
+  "       pick their models (pi: provider/model). LLM4TS_GATES overrides the gate commands."
 ].join("\n")
 
 /** The flow's own flags, taken out before the shared `--repo`/prompt parsing sees the rest. */

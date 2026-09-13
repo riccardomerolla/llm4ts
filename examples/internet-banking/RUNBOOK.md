@@ -34,7 +34,7 @@ export LLM4TS_CONTEXT_BUDGET=120000   # bound diffs handed to the judge
 ## Act 1 — the split (plan only)
 
 ```bash
-llm4ts run epic-stories --repo ~/demo/portal --plan-only \
+llm4ts run epic-stories --repo ~/demo/portal -- --plan-only \
   "Add the retail customer's current account (Conto) with balance and movements, and wire transfers (Bonifico) with beneficiary, review, SCA confirmation, and history."
 ```
 
@@ -52,7 +52,7 @@ the generated file to make the run deterministic.
 ## Act 2 — the parallel run
 
 ```bash
-llm4ts run epic-stories --repo ~/demo/portal --concurrency 3 \
+llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 3 \
   "Add the retail customer's current account (Conto) with balance and movements, and wire transfers (Bonifico) with beneficiary, review, SCA confirmation, and history."
 ```
 

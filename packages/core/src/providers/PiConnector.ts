@@ -101,8 +101,11 @@ export const makePiConnector = (
       prompt
     )
     if (result.exitCode !== 0) {
+      // pi explains a refusal on stderr (a usage error, a missing model, an
+      // auth failure); stdout is empty then, so both streams are reported.
+      const detail = [...result.stdout, ...result.stderr].join("\n").trim()
       return yield* ProviderError.make({
-        message: `pi exited with code ${result.exitCode}: ${result.stdout.join("\n")}`
+        message: `pi exited with code ${result.exitCode}${detail.length === 0 ? "" : `: ${detail}`}`
       })
     }
     return result.stdout.join("\n")
