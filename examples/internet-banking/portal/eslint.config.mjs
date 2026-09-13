@@ -5,7 +5,9 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["node_modules/", "dist/", "contracts/openapi/"]
+    // `.llm4ts/` holds the flow's state and its story worktrees (each with
+    // its own dist/ and node_modules/); `eslint .` must not walk into them.
+    ignores: ["**/node_modules/", "**/dist/", "contracts/openapi/", ".llm4ts/"]
   },
   ...tseslint.configs.recommended,
   {

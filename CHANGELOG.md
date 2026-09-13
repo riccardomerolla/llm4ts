@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Portal fixture: eslint ignores `.llm4ts/` and any nested `dist/`. The
+  epic checkout's `eslint .` walked into the story worktrees under
+  `.llm4ts/worktrees/`, each holding a built bundle, and the first story to
+  merge in the rehearsal was rolled back by 6975 lint errors that were not
+  its own. Any target repository that keeps worktrees under `.llm4ts/`
+  needs the same exclusion in tools that walk the tree.
+
 ## 0.16.1
 
 Findings of the first live rehearsal of `epic-stories` (ADR 0013):
