@@ -167,6 +167,8 @@ export const storyPlanInstructions = (epicId: string, guidance: string): string 
     "- Exactly ONE story owns the composition point (`src/App.tsx`): the fan-in that depends on",
     "  every screen story and wires them in.",
     "- A story fits one agent session: one screen, one contract, or one component.",
+    "- Every story OWNS the test files it must write (the judge asks for tests): list them",
+    "  in `owned` explicitly — a story cannot add a test outside its owned paths.",
     `- Use exactly this epicId: "${epicId}". Copy the epic text into "epic".`,
     "",
     "Respond only with JSON:",

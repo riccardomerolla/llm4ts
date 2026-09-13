@@ -23,6 +23,11 @@ Findings of the first live rehearsal of `epic-stories` (ADR 0013):
   carry on, and a story that then completed its tasks was being failed.
   The rules now say tooling, dependencies and reference repositories are
   never a reason to stop.
+- The story-plan generator is told that every story owns the test files
+  it must write, and the committed Conto e Bonifico plan gives its two
+  contract stories a test file each: the judge asks for tests, and a story
+  cannot add one outside its owned paths — both contract stories stopped
+  with `BLOCKED_ON` for exactly that during the rehearsal.
 - **Fixed**: `makeLocalBoardSync` lost transitions under concurrent
   mutation — three stories starting at once each loaded the board, changed
   their own item, and the last save won, so the board showed one active
