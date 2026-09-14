@@ -131,6 +131,20 @@ export class PageSpec extends Schema.Class<PageSpec>("PageSpec")({
   )
 }) {}
 
+/**
+ * The block's shape in one paragraph, for the finding an undecodable block
+ * raises: the analyst that wrote its own richer shape is told exactly which
+ * keys the decoder accepts instead of only where decoding stopped.
+ */
+export const pageSpecShapeHint =
+  "The block must be exactly: { page, route, title, complexity: low|medium|high, " +
+  "forms: [{ name, action, fields: [{ name, label, type, required?, validations: [{ rule, message?, enforcedAt: client|server|both }] }] }], " +
+  "dtos: [{ legacyName, domainName, fields: [{ legacyName, domainName, type }] }], " +
+  "apiCalls: [{ operation, method, path, esbService?, request: [{ legacyName, domainName, type }], response: [{ legacyName, domainName, type }] }], " +
+  "navigation: { inbound: [string], outbound: [string], steps: [string] }, sessionState: [string], openQuestions: [string] }. " +
+  "No other keys (no id, url, queryParams, esbCall, trigger, serverController); every apiCalls entry is an object with operation/method/path; " +
+  "put anything that does not fit into the prose sections or openQuestions."
+
 /** The fence info string marking a page-spec block inside spec markdown. */
 export const pageSpecFenceInfo = "json pagespec"
 

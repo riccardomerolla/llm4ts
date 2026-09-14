@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { parsePageSpec } from "./PageSpec.ts"
+import { pageSpecShapeHint, parsePageSpec } from "./PageSpec.ts"
 import { ReviewIssue, ReviewResult } from "./Review.ts"
 import type { WorkspaceError, WorkspaceShape } from "./Workspace.ts"
 
@@ -240,9 +240,7 @@ export const specSchemaIssues = Effect.fn("@llm4ts/flow/SpecChecks.specSchemaIss
         ReviewIssue.make({
           severity: "Critical",
           title: `judge[${spec.name}]: invalid pagespec block`,
-          description:
-            `${problem} — the spec must embed exactly one \`\`\`json pagespec block that ` +
-            "decodes as a PageSpec (forms, dtos, apiCalls, navigation as objects, not prose)."
+          description: `${problem}. ${pageSpecShapeHint}`
         })
       )
     }
