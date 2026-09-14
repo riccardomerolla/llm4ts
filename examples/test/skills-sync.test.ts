@@ -58,11 +58,9 @@ describe("skills stay in sync with the guide and the codebase", () => {
     }
   })
 
-  it("the flow skill's hello template is chapter 3's hello flow", () => {
+  it("the flow skill's hello template is the built-in flows/hello.ts", () => {
     const template = firstBlock(flowSkill, "ts")
-    const chapter = readRepoFile("docs/guide/03-your-first-flow.md")
-    const guideBlock = firstBlock(chapter, "ts")
-    assert.strictEqual(stripWhitespace(template), stripWhitespace(guideBlock))
+    assert.strictEqual(stripWhitespace(template), stripWhitespace(readRepoFile("flows/hello.ts")))
   })
 
   it("the flow skill's hello template runs zero-install against the mock provider", () => {

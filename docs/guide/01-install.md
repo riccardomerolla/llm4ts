@@ -71,14 +71,15 @@ sdd                  [builtin]  Spec-driven development: write a specification, 
 Each row is a flow: a name, the tier it was found in, and the first comment
 line of its source. `llm4ts view implement` prints that source. Flows are
 discovered in three tiers, and a name in a higher tier shadows the same name
-below it:
+below it. A **kit** (chapter 5) can add flows of its own, labelled with the
+kit's name; `llm4ts kits` lists the kits the same way:
 
 ```mermaid
 flowchart TB
   subgraph tiers["llm4ts list  (first match wins, top to bottom)"]
     P["project<br/><code>./.llm4ts/flows/*.ts</code>"]
     G["global<br/><code>~/.config/llm4ts/flows/*.ts</code>"]
-    B["built-in<br/>shipped inside @llm4ts/shell"]
+    B["built-in<br/>shipped inside @llm4ts/shell<br/>+ kit flows"]
     P -. shadows .-> G -. shadows .-> B
   end
   R["llm4ts run &lt;name&gt; [task...]"] --> N["node --experimental-strip-types &lt;flow&gt;.ts<br/>--repo &lt;dir&gt; &lt;task&gt;"]

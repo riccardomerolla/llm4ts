@@ -1,17 +1,134 @@
 # llm4ts
 
-Effect-native LLM workflows for TypeScript: typed connectors for API providers
-and CLI coding agents, streaming, structured output, tools, plans and review
-loops, repository automation, trace replay, and a Node runner. `llm4ts` is the
-TypeScript implementation of [`llm4zio`](https://github.com/riccardomerolla/llm4zio).
+Effect-native LLM workflows for TypeScript: typed connectors for API
+providers and CLI coding agents, streaming, structured output, tools, plans
+and review loops, repository automation, trace replay, and a Node runner.
+`llm4ts` is the TypeScript implementation of
+[`llm4zio`](https://github.com/riccardomerolla/llm4zio).
 
-New to llm4ts and want to run and write flows? Start with the
+The whole library climbs one ladder, and so does this README: each step
+below is the first screen of a chapter in the
 [getting started guide](docs/guide/README.md).
+
+```mermaid
+flowchart LR
+  A["1. try it<br/>mock provider"] --> B["2. do real work<br/>your coding agent"]
+  B --> C["3. write a flow<br/>.llm4ts/flows/"]
+  C --> D["4. fork a built-in<br/>plan, code, review, commit"]
+  D --> E["5. kits<br/>packs, scaffolds, patterns"]
+  A -.-> F["6. embed it<br/>@llm4ts/js"]
+```
 
 ## Try it in one minute
 
-No Effect knowledge and no credentials required — the built-in mock provider
-works offline:
+Node 22 or newer, nothing to install, no credentials: the built-in `hello`
+flow talks to the mock provider.
+
+```bash
+npx -y @llm4ts/shell run hello "What is llm4ts?"
+```
+
+`npx -y @llm4ts/shell doctor` shows which coding agents and providers your
+machine has; `npm i -g @llm4ts/shell` makes the command `llm4ts`. More:
+[chapter 1](docs/guide/01-install.md).
+
+## Do real work
+
+The `implement` flow plans a task, then implements, reviews, and commits it
+one task at a time, and resumes where it stopped. Point it at a throwaway
+repository and the coding agent you have installed:
+
+```bash
+LLM4TS_CODER=codex llm4ts run implement "Add a multiply function next to add, with tests"
+```
+
+`LLM4TS_CODER` is `claude` (default), `codex`, `gemini`, `pi`, `agy`,
+`grok`, `cursor`, or `opencode`; the CLI must be installed and logged in.
+Every task is a commit on the flow's branch, the plan lives under
+`.llm4ts/` in that repository, and re-running the same command resumes it.
+`llm4ts list` shows the other built-ins: `sdd`, `issue-pr`, `epic-stories`,
+the `modernize-*` phases. More: [chapter 2](docs/guide/02-run-a-flow.md).
+
+## Write a flow
+
+A flow is one TypeScript file in `.llm4ts/flows/` of the directory you
+launch from. Copy the built-in and it is yours:
+
+```bash
+mkdir -p .llm4ts/flows && llm4ts view hello > .llm4ts/flows/hello.ts
+```
+
+<!-- prettier-ignore -->
+```ts
+// Hello: send one prompt to the configured provider and print the answer.
+import * as Effect from "effect/Effect"
+import {
+  apiConnectorFromEnvironment,
+  completeAndPublish,
+  resolveFlowInput,
+  runFlowMain,
+  runNode
+} from "@llm4ts/runner"
+
+const program = Effect.gen(function* () {
+  const input = yield* resolveFlowInput("Say hello and name one thing you can do.")
+  const coder = yield* apiConnectorFromEnvironment()
+  yield* runNode(
+    {
+      workDir: input.workDir,
+      workspace: input.workspace,
+      userPrompt: input.prompt,
+      coder,
+      environment: process.env
+    },
+    (context) => completeAndPublish(context.coder, context.events, input.prompt)
+  )
+})
+
+runFlowMain(program)
+```
+
+No `npm install`: the shell resolves `@llm4ts/runner` and `effect` from its
+own installation. `runNode` wires HTTP, processes, temp files, persistence,
+and connectors, so you never assemble Effect layers; swap
+`apiConnectorFromEnvironment()` for `coderFromEnv(process.env)` and the same
+prompt goes to your coding agent. More:
+[chapter 3](docs/guide/03-your-first-flow.md).
+
+## Fork a built-in
+
+```bash
+llm4ts view implement > .llm4ts/flows/my-implement.ts
+```
+
+Change the system prompt, add review lenses, a lint gate, a formatter, or
+the number of review rounds: they are fields of one options object passed to
+`implementPlanFlow`. The
+[flow authoring guide](docs/flow-authoring.md) goes deeper, down to custom
+task loops. More: [chapter 4](docs/guide/04-fork-a-built-in.md).
+
+## Kits
+
+The `modernize-*` flows rewrite a legacy code base in six phases and know
+nothing about any technology. Everything stack-specific comes from a
+**kit**: pack manifests with prompts and review lenses, the scaffolds they
+seed a target from, translation pattern cards, and stack-only flows. Two
+ship built in, `mainframe-java` (COBOL/JCL and ACE to Spring Boot and Kafka
+Streams) and `j2ee-nextjs` (JSP to Next.js); yours go under `.llm4ts/kits/`.
+
+```bash
+llm4ts kits
+llm4ts run modernize-pack-check --pack cobol-springboot --repo /path/to/legacy-estate
+```
+
+The check loads a pack and matches its rules against the estate without a
+model call. More: [chapter 5](docs/guide/05-your-first-pack.md) and
+[kits/](kits/README.md).
+
+## Embed it
+
+To call an LLM from your own program, `@llm4ts/js` is a Promise client
+over the same connectors:
 
 ```js
 import { createClient } from "@llm4ts/js"
@@ -21,85 +138,30 @@ const response = await client.complete("Hello")
 console.log(response.content)
 ```
 
-Swap `provider` for `openai`, `anthropic`, `gemini`, `lm-studio`, or `ollama`;
-API keys are read from the standard environment variables
-(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`). Secrets stay
-redacted end to end — they never appear in argv, logs, traces, or error
-messages.
+Swap `provider` for `openai`, `anthropic`, `gemini`, `lm-studio`, or
+`ollama`; API keys are read from the standard environment variables and
+never appear in argv, logs, traces, or error messages. Effect programs use
+`runNode` directly; the [examples](examples/README.md) show both.
 
-## Run a flow from the terminal
+## Your coding agent can use llm4ts too
 
-`@llm4ts/shell` ships the `llm4ts` CLI. With no arguments it opens an
-interactive menu; with arguments it is a subcommand CLI over the flows it
-discovers across three tiers — your project's `.llm4ts/flows/`, your global
-`~/.config/llm4ts/flows/`, and the built-ins shipped with the shell:
-
-```bash
-npx -y @llm4ts/shell list
-```
-
-```bash
-LLM4TS_CODER=codex npx -y @llm4ts/shell run implement "add a health endpoint"
-```
-
-`llm4ts view <flow>` prints a flow's source, `llm4ts ask "<prompt>"` streams
-a one-shot prompt to your coding agent (Claude Code, Codex, Gemini CLI, and
-friends), and `llm4ts doctor` reports which connectors and credentials are
-available on your machine — including per-connector prerequisites a run needs
-before it starts, such as the Google Cloud project the Gemini CLI resolves at
-auth setup. `llm4ts --help` shows all options.
-
-Your coding agent can delegate work to llm4ts too: the
-[using-llm4ts skill](skills/using-llm4ts/README.md) teaches Claude Code, Pi,
-OpenCode, and Codex when and how to hand a task to `llm4ts run`. Two more
-skills teach the agent to write for llm4ts:
-[authoring-llm4ts-flows](skills/authoring-llm4ts-flows/README.md) (a flow
-under `.llm4ts/flows/`) and
-[authoring-llm4ts-packs](skills/authoring-llm4ts-packs/README.md) (a
-modernization pack, checked without an LLM).
-
-## Author a flow in TypeScript
-
-`runNode` wires every Node boundary (HTTP, processes, temp files, persistence,
-connector registry) for you — you never assemble Effect layers:
-
-```ts
-import { runNode } from "@llm4ts/runner/FlowRunner"
-import { ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
-import { ConnectorIds } from "@llm4ts/core/Models"
-import { collect } from "@llm4ts/core/Streaming"
-
-const program = runNode(
-  {
-    workDir: process.cwd(),
-    workspace: process.cwd(),
-    userPrompt: "Draft a small implementation plan",
-    coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock })
-  },
-  (context) => collect(context.coder.executeStream(context.userPrompt))
-)
-```
-
-From there the [examples](examples/README.md) and [flows](flows/README.md)
-form a ladder: mock completion → HTTP provider → CLI coding agent →
-persistent resumable plan → issue-to-PR → spec-driven development.
-`examples/seed.sh implement` seeds a disposable
-repository so you can watch a full plan/implement/review flow safely:
-
-```sh
-examples/seed.sh implement
-LLM4TS_CODER=codex examples/seed.sh implement --run
-```
+Three skills teach Claude Code, Pi, OpenCode, and Codex to work with
+llm4ts: [using-llm4ts](skills/using-llm4ts/README.md) hands a task to
+`llm4ts run`, [authoring-llm4ts-flows](skills/authoring-llm4ts-flows/README.md)
+writes and forks flows, and
+[authoring-llm4ts-packs](skills/authoring-llm4ts-packs/README.md) writes
+packs and checks them. Install from this repository's plugin marketplace or
+by copying a skill directory.
 
 ## Packages
 
-| Package          | Purpose                                                   |
-| ---------------- | --------------------------------------------------------- |
-| `@llm4ts/js`     | Promise-based client — the fastest way to try llm4ts      |
-| `@llm4ts/shell`  | `llm4ts` CLI and interactive menu over discovered flows   |
-| `@llm4ts/runner` | Node runner, terminal rendering, MCP stdio                |
-| `@llm4ts/flow`   | Plans, events, persistence, repositories, review, replay  |
-| `@llm4ts/core`   | Models, connectors, providers, tools, eval, observability |
+| Package          | Purpose                                                     |
+| ---------------- | ----------------------------------------------------------- |
+| `@llm4ts/shell`  | `llm4ts` CLI and menu over discovered flows and kits        |
+| `@llm4ts/runner` | Node runner; its root export is the flow author's barrel    |
+| `@llm4ts/flow`   | Plans, events, persistence, repositories, review, packs     |
+| `@llm4ts/core`   | Models, connectors, providers, tools, eval, observability   |
+| `@llm4ts/js`     | Promise-based client for calling an LLM from any JS program |
 
 ## Configuration
 
@@ -108,7 +170,8 @@ Everything is environment-driven; nothing is required for the mock provider.
 | Variable                                                | Effect                                                                                         |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `LLM4TS_CODER`                                          | Coding agent: `claude` (default), `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, `opencode` |
-| `LLM4TS_PROVIDER` / `LLM4TS_MODEL`                      | API provider and model for provider-driven entry points                                        |
+| `LLM4TS_PROVIDER` / `LLM4TS_MODEL`                      | API provider and model for provider-driven flows such as `hello`                               |
+| `LLM4TS_PACK`                                           | Pack for the modernization flows, also `llm4ts run --pack`                                     |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` | Provider credentials, applied automatically                                                    |
 | `LLM4TS_VERBOSITY`                                      | Terminal verbosity                                                                             |
 
@@ -123,35 +186,33 @@ pnpm build
 node scripts/pack-smoke.mjs   # verifies the published artifacts
 ```
 
-Run the credential-free example from the workspace (requires `pnpm build`
-first, since examples resolve the built package exports):
-
-```sh
-pnpm --filter @llm4ts/examples basic -- "Draft a small implementation plan"
-```
-
-Releases are tag-driven: bump all package versions to `X.Y.Z`, tag `vX.Y.Z`,
-and push — the release workflow verifies, builds, smoke-tests the packed
-tarballs, and publishes with provenance.
+Layout: `packages/` (the library), `flows/` (the engine flows the shell
+ships), `kits/` (the built-in kits), `examples/` (embedding scripts and
+starters), `docs/`, `skills/`, `specs/` (the work queue), `tools/` (the
+autonomous loop). Releases are tag-driven: bump every package to `X.Y.Z`,
+tag `vX.Y.Z`, push, and the release workflow verifies, builds, smoke-tests
+the packed tarballs, and publishes with provenance.
 
 ## Documentation
 
-- [Getting started guide](docs/guide/README.md) — install, run a flow, write
-  your own, fork a built-in, write a pack
+- [Getting started guide](docs/guide/README.md)
 - [Flow authoring guide](docs/flow-authoring.md)
 - [API guide](docs/api.md)
 - [Architecture](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [Provider capability matrix](docs/provider-capabilities.md)
 - [Migration from llm4zio](docs/migration-from-llm4zio.md)
+- [Kits](kits/README.md), [flows](flows/README.md), [examples](examples/README.md)
 
 Internal engineering references: [source parity ledger](docs/parity.md),
+[architecture decision records](docs/adr/),
 [Clean Specification Pack](docs/csp/00-overview.md), [plan](plan.md).
 
 ## Status
 
-Initial `0.1.0` release. The implementation targets the owned `llm4zio` v4.2.0
-behavior and uses Effect 4 (beta line). Public subpath exports are intentional;
-importing package-private files is unsupported.
+Actively developed on the 0.x line; see [CHANGELOG.md](CHANGELOG.md). The
+implementation tracks the owned `llm4zio` v4.3.0 behaviour and uses Effect 4
+(beta line, pinned exactly). Public subpath exports and the `@llm4ts/runner`
+root barrel are the contract; importing package-private files is unsupported.
 
 Licensed under MIT.

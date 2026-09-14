@@ -19,3 +19,6 @@ repos/
 .llm4ts/
 packages/shell/flows/
 packages/shell/kits/
+
+# Autonomous loop state (tools/ralph)
+progress-auto.txt

@@ -210,6 +210,11 @@ prompt-and-response to a persisted, multi-task plan.
 
 ## Rung 2: a persisted-plan flow
 
+The shipped flows import everything from the `@llm4ts/runner` root, the
+flow author's barrel; this guide names the subpath each export comes from,
+because that is where its documentation and its neighbours live. Either
+import form works.
+
 This is `flows/implement.ts` verbatim. Unlike rung 1, it needs a real
 coding-agent CLI (`claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`,
 or `opencode`) authenticated on your machine, and it writes to Git — it

@@ -23,7 +23,8 @@ modernization pack). Install it into your harness:
 - **Codex**: copy/symlink to `~/.agents/skills/authoring-llm4ts-flows`
   (personal) or `<project>/.agents/skills/authoring-llm4ts-flows` (project).
 
-The hello flow inside the skill is the same text as chapter 3 of the
-[getting started guide](../../docs/guide/03-your-first-flow.md); a
-repository test runs it against the mock provider so the skill cannot
-drift from the API.
+The hello flow inside the skill is the shell's built-in `flows/hello.ts`,
+the same text chapter 3 of the
+[getting started guide](../../docs/guide/03-your-first-flow.md) shows; a
+repository test pins all three to that file and runs it against the mock
+provider so the skill cannot drift from the API.

@@ -27,5 +27,5 @@ documentation lives elsewhere and always takes precedence:
 - Specs are read-only for agents (ADR 0004): checkbox state is written only
   by deterministic harness code, design decisions land in `docs/adr/`, and
   only the user amends spec text or moves a spec to `completed/`.
-- Run `./ralph-auto.sh "<focus>"` to work a spec autonomously; the script owns
+- Run `tools/ralph/ralph-auto.sh "<focus>"` to work a spec autonomously; the script owns
   git commits and enforces the verification chain.

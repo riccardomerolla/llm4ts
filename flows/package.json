@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "hello": "node --experimental-strip-types hello.ts",
     "implement": "node --experimental-strip-types implement.ts",
     "epic-stories": "node --experimental-strip-types epic-stories.ts",
     "issue-pr": "node --experimental-strip-types issue-pr.ts",

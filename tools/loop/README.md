@@ -5,7 +5,7 @@ it at one spec and it plans the work, then implements each task under
 runtime-owned git with a review-and-fix cycle gated on CI.
 
 The loop is a **forcing function**, not a replacement: every friction point it
-surfaces becomes a new spec in `specs/pending/`. `ralph-auto.sh` stays the
+surfaces becomes a new spec in `specs/pending/`. `tools/ralph/ralph-auto.sh` stays the
 fallback until the loop has completed three specs end-to-end unattended (the
 **trust bar** below).
 
@@ -83,7 +83,7 @@ are explicit non-goals for v1 (see `specs/pending/dogfood-loop.md`).
 ## Trust bar
 
 Three specs completed end-to-end **unattended** before the loop takes over any
-of `ralph-auto.sh`'s duties. Until then, run it as a forcing function and file
+of `tools/ralph/ralph-auto.sh`'s duties. Until then, run it as a forcing function and file
 every gap it exposes as a spec in `specs/pending/`.
 
 ## Develop

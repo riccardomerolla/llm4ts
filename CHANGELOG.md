@@ -24,6 +24,13 @@
   over artifact checkpoints and markdown approval gates). The npm package is
   deprecated in favour of `@llm4ts/flow`.
 
+### Changed
+
+- The autonomous loop moved to `tools/ralph/` (`ralph-auto.sh`,
+  `RALPH_AUTO_PROMPT.md`); its progress file is no longer tracked.
+  `examples/` keeps the embedding scripts and starters; the demo-bank
+  fixture lives with its kit.
+
 ### Added
 
 - `@llm4ts/runner` gained a root export, the flow author's barrel: the
@@ -34,6 +41,14 @@
   `planFrom`, `defaultPlanPath`, events, errors) re-exported so a script
   needs one import line. Re-exports only; the subpaths stay the contract.
   Every shipped flow now imports from it.
+- A built-in `hello` flow: one prompt to the configured provider, mock by
+  default, so `npx -y @llm4ts/shell run hello` is a zero-setup first run and
+  `llm4ts view hello` is the template a project flow starts from. The
+  README, the guide's chapter 3, and the flow-authoring skill all carry
+  that file verbatim, pinned by the sync tests.
+- The README is chapter zero of the guide: try it, do real work, write a
+  flow, fork a built-in, kits, embed it — each the first screen of a
+  chapter — followed by the packages, configuration, and reference links.
 - Kit discovery in `@llm4ts/runner/Kits` across the project
   (`.llm4ts/kits/`), global (`~/.config/llm4ts/kits/`), and built-in tiers,
   with project > global > builtin shadowing by kit name and an error naming

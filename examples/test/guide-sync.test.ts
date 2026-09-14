@@ -3,13 +3,16 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { completeAndPublish } from "@llm4ts/flow/Flow"
-import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
-import { loadPack } from "@llm4ts/flow/Pack"
 import { makeMemoryWorkspace } from "@llm4ts/flow/Workspace"
-import { apiConnectorFromEnvironment } from "@llm4ts/runner/Connectors"
-import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
-import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
+import {
+  apiConnectorFromEnvironment,
+  completeAndPublish,
+  loadPack,
+  resolveFlowInput,
+  runFlowMain,
+  runNode,
+  type FlowContextShape
+} from "@llm4ts/runner"
 
 /**
  * docs/guide/ is the newcomer's on-ramp; its code blocks are copied, not
@@ -91,25 +94,29 @@ describe("docs/guide stays in sync with the codebase", () => {
     assert.strictEqual(block, readRepoFile("flows/implement.ts").trimEnd())
   })
 
-  it("chapter 3's hello flow names exports that exist, with the documented shapes", () => {
+  it("chapter 3's hello flow is flows/hello.ts verbatim", () => {
     const block = codeBlockUnderHeading(
       readRepoFile("docs/guide/03-your-first-flow.md"),
-      "## Write it",
+      "## Copy it into your project",
       "ts"
     )
-    assert.match(block, /^\/\/ Hello: /, "the first line must be the flow's description")
-    for (const [modulePath, exportName] of [
-      ["packages/runner/src/FlowArgs.ts", "resolveFlowInput"],
-      ["packages/runner/src/Connectors.ts", "apiConnectorFromEnvironment"],
-      ["packages/runner/src/Connectors.ts", "coderFromEnv"],
-      ["packages/runner/src/FlowRunner.ts", "runFlowMain"],
-      ["packages/runner/src/FlowRunner.ts", "runNode"],
-      ["packages/flow/src/Flow.ts", "completeAndPublish"]
+    assert.strictEqual(block, readRepoFile("flows/hello.ts").trimEnd())
+  })
+
+  it("the names the hello flow imports are on the @llm4ts/runner barrel, with the documented shapes", () => {
+    const barrel = readRepoFile("packages/runner/src/index.ts")
+    for (const name of [
+      "apiConnectorFromEnvironment",
+      "coderFromEnv",
+      "completeAndPublish",
+      "resolveFlowInput",
+      "runFlowMain",
+      "runNode"
     ]) {
       assert.match(
-        readRepoFile(modulePath),
-        new RegExp(`export const ${exportName}\\b`),
-        `${modulePath} no longer exports ${exportName}, used by docs/guide/03-your-first-flow.md`
+        barrel,
+        new RegExp(`\\b${name}\\b`),
+        `@llm4ts/runner no longer re-exports ${name}, used by docs/guide/03-your-first-flow.md`
       )
     }
     // Compile-time half: the hello flow's call shapes, as the chapter shows them.
@@ -162,10 +169,11 @@ describe("docs/guide stays in sync with the codebase", () => {
 
   it("the commands the guide names exist", () => {
     assert.isTrue(existsSync(join(repositoryRoot, "flows", "modernize-pack-check.ts")))
+    assert.isTrue(existsSync(join(repositoryRoot, "flows", "hello.ts")))
     assert.isTrue(existsSync(join(repositoryRoot, "flows", "sdd.ts")))
     assert.isTrue(existsSync(join(repositoryRoot, "examples", "seed.sh")))
     const cli = readRepoFile("packages/shell/src/Cli.ts")
-    for (const command of ['"run"', '"list"', '"view"', '"ask"', '"doctor"']) {
+    for (const command of ['"run"', '"list"', '"kits"', '"view"', '"ask"', '"doctor"']) {
       assert.include(cli, command, `the shell no longer defines ${command}`)
     }
   })

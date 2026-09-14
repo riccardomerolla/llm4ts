@@ -44,6 +44,15 @@ Every API provider except `mock` needs a model name. Set both variables:
 LLM4TS_PROVIDER=openai LLM4TS_MODEL=gpt-4.1-mini llm4ts run hello "..."
 ```
 
+## `pack 'x' not found: no kit ships it (known packs: ...)`
+
+`--pack` or `LLM4TS_PACK` names a pack no discovered kit ships. The message
+lists every `kit/pack` the shell can see; `llm4ts kits` shows the same with
+the tier each kit came from. A pack you are still writing is passed as a
+directory holding `pack.md`, relative to where you launch. "Shipped by more
+than one kit" means two kits of the same tier carry the name: pick one with
+`kit/pack`.
+
 ## `unknown flow 'x' (known flows: ...)`
 
 `llm4ts list` shows what was discovered. A project flow must be under

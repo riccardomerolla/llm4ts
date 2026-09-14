@@ -1,22 +1,46 @@
 # 3. Your first flow
 
-A flow is one TypeScript file in `.llm4ts/flows/` of any directory. The
-shell discovers it by name, runs it with Node's type stripping, and resolves
-its imports from the shell's own installation, so this chapter installs
-nothing.
+A flow is one TypeScript file. The shell ships one that needs nothing at
+all, `hello`, and the shortest path to your own flow is to copy it.
 
-## Write it
+## Run the built-in
 
-Create `.llm4ts/flows/hello.ts` in an empty directory:
+```bash
+llm4ts run hello "What is llm4ts?"
+```
+
+`LLM4TS_PROVIDER` is unset, so the flow picks the mock provider and prints
+canned text. That is the point: the run loop, the terminal rendering, and
+the cost summary are proven before any key or agent is involved.
+
+## Copy it into your project
+
+A flow in `.llm4ts/flows/` of the directory you launch from is discovered
+by name, runs with Node's type stripping, and resolves its imports from the
+shell's own installation, so this step installs nothing:
+
+```bash
+mkdir -p .llm4ts/flows
+llm4ts view hello > .llm4ts/flows/hello.ts
+llm4ts list          # hello  [project shadows builtin]  Hello: send one prompt ...
+```
+
+Your copy now shadows the built-in of the same name. Rename the file, or
+change its first comment line, and it is your flow. `view` prints the
+shipped JavaScript build of the flow, which is valid in a `.ts` file; this
+is the same program as it reads in the source:
 
 <!-- prettier-ignore -->
 ```ts
 // Hello: send one prompt to the configured provider and print the answer.
 import * as Effect from "effect/Effect"
-import { completeAndPublish } from "@llm4ts/flow/Flow"
-import { apiConnectorFromEnvironment } from "@llm4ts/runner/Connectors"
-import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
-import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
+import {
+  apiConnectorFromEnvironment,
+  completeAndPublish,
+  resolveFlowInput,
+  runFlowMain,
+  runNode
+} from "@llm4ts/runner"
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Say hello and name one thing you can do.")
@@ -36,21 +60,13 @@ const program = Effect.gen(function* () {
 runFlowMain(program)
 ```
 
-## Run it offline
-
-```bash
-llm4ts list          # hello  [project]  Hello: send one prompt ...
-llm4ts run hello "What is llm4ts?"
-```
-
-`LLM4TS_PROVIDER` is unset, so `apiConnectorFromEnvironment` picks the mock
-provider and the answer is canned text. That is the point: the flow, its
-discovery, and the run loop are proven before any key or agent is involved.
-
 ## Every line, once
 
 - **The first `//` line** is the description `llm4ts list` shows. It must
   be the first non-blank line.
+- **`@llm4ts/runner`** is the one import a flow needs: it re-exports the
+  runner and flow verbs a script uses. Everything else stays reachable on
+  the package subpaths the [API guide](../api.md) lists.
 - **`resolveFlowInput(default)`** parses the arguments `llm4ts run` forwards:
   the task text, or `default` when there is none, and `--repo`. It returns
   `prompt`, `workDir` (the target repository) and `workspace` (where you
@@ -80,11 +96,11 @@ flowchart LR
 
 ## Point it at your coding agent
 
-Replace one line, and add one import:
+Replace one line, and add one name to the import:
 
 <!-- prettier-ignore -->
 ```ts
-import { coderFromEnv } from "@llm4ts/runner/Connectors"
+import { coderFromEnv /* , ... */ } from "@llm4ts/runner"
 // ...
   const coder = coderFromEnv(process.env)
 ```

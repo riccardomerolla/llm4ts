@@ -17,6 +17,7 @@
     "paths": {
       "@llm4ts/core/*": ["../core/src/*"],
       "@llm4ts/flow/*": ["../flow/src/*"],
+      "@llm4ts/runner": ["../runner/src/index.ts"],
       "@llm4ts/runner/*": ["../runner/src/*"],
       "@llm4ts/shell/*": ["./src/*"]
     }

@@ -8,6 +8,7 @@ one-line description. These scripts double as the built-in flows of the
 
 | Flow                      | What it does                                                  | Requirements               |
 | ------------------------- | ------------------------------------------------------------- | -------------------------- |
+| `hello.ts`                | One prompt to the configured provider, mock by default        | none                       |
 | `implement.ts`            | Persistent plan, branch, task review/fix, and commits         | selected CLI + Git         |
 | `epic-stories.ts`         | Epic → story DAG → parallel coders in worktrees → epic branch | reasoner CLI + pi + Git    |
 | `issue-pr.ts`             | GitHub issue assessment through pushed pull request           | selected CLI + GitHub      |

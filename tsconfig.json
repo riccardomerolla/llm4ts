@@ -5,6 +5,7 @@
     "paths": {
       "@llm4ts/core/*": ["./packages/core/src/*"],
       "@llm4ts/flow/*": ["./packages/flow/src/*"],
+      "@llm4ts/runner": ["./packages/runner/src/index.ts"],
       "@llm4ts/runner/*": ["./packages/runner/src/*"],
       "@llm4ts/js/*": ["./packages/js/src/*"],
       "@llm4ts/shell/*": ["./packages/shell/src/*"]

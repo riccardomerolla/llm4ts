@@ -84,8 +84,8 @@ the checked-out versions and pushes the matching `vX.Y.Z` tag itself.
 
 ## Autonomous Loop (Ralph)
 
-`./ralph-auto.sh "<focus prompt>"` runs an autonomous agent loop against the
+`tools/ralph/ralph-auto.sh "<focus prompt>"` runs an autonomous agent loop against the
 work queue in `specs/` (see `specs/README.md`). The script owns git commits
 and enforces the verification chain; the agent prompt template is
-`RALPH_AUTO_PROMPT.md`. Specs in `specs/pending/` are only moved to
+`tools/ralph/RALPH_AUTO_PROMPT.md`. Specs in `specs/pending/` are only moved to
 `specs/completed/` by the user.

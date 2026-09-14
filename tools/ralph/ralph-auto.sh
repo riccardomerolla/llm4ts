@@ -5,7 +5,7 @@
 # This script runs an autonomous agent to implement a specific task.
 # A focus prompt is REQUIRED - the agent will only do what you ask.
 #
-# Usage: ./ralph-auto.sh <focus prompt> [options]
+# Usage: tools/ralph/ralph-auto.sh <focus prompt> [options]
 #
 # Options:
 #   --pack-smoke             Run the packed-tarball smoke test as part of CI checks
@@ -13,10 +13,10 @@
 #   --max-iterations <n>     Stop after n iterations (default: unlimited)
 #
 # Examples:
-#   ./ralph-auto.sh "Implement the pending review-cache spec"
-#   ./ralph-auto.sh "Deepen the Ollama connector to the makeApiConnector seam" --max-iterations 5
-#   ./ralph-auto.sh "Harden the release pipeline" --pack-smoke
-#   ./ralph-auto.sh "Quick experiment" --skip-checks
+#   tools/ralph/ralph-auto.sh "Implement the pending review-cache spec"
+#   tools/ralph/ralph-auto.sh "Deepen the Ollama connector to the makeApiConnector seam" --max-iterations 5
+#   tools/ralph/ralph-auto.sh "Harden the release pipeline" --pack-smoke
+#   tools/ralph/ralph-auto.sh "Quick experiment" --skip-checks
 #
 # The loop continues until the task is complete (TASK_COMPLETE signal)
 # COMMITS ARE HANDLED BY THIS SCRIPT, NOT THE AGENT.
@@ -61,10 +61,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h               Show this help message"
             echo ""
             echo "Examples:"
-            echo "  ./ralph-auto.sh \"Implement the pending review-cache spec\""
-            echo "  ./ralph-auto.sh \"Deepen the Ollama connector\" --max-iterations 5"
-            echo "  ./ralph-auto.sh \"Harden the release pipeline\" --pack-smoke"
-            echo "  ./ralph-auto.sh \"Quick fix\" --skip-checks"
+            echo "  tools/ralph/ralph-auto.sh \"Implement the pending review-cache spec\""
+            echo "  tools/ralph/ralph-auto.sh \"Deepen the Ollama connector\" --max-iterations 5"
+            echo "  tools/ralph/ralph-auto.sh \"Harden the release pipeline\" --pack-smoke"
+            echo "  tools/ralph/ralph-auto.sh \"Quick fix\" --skip-checks"
             exit 0
             ;;
         -*)
@@ -92,16 +92,19 @@ if [[ -z "$FOCUS_PROMPT" ]]; then
     echo "Usage: ./ralph-auto.sh <focus prompt> [options]"
     echo ""
     echo "Examples:"
-    echo "  ./ralph-auto.sh \"Implement the pending review-cache spec\""
-    echo "  ./ralph-auto.sh \"Deepen the Ollama connector\""
+    echo "  tools/ralph/ralph-auto.sh \"Implement the pending review-cache spec\""
+    echo "  tools/ralph/ralph-auto.sh \"Deepen the Ollama connector\""
     echo ""
     echo "Use --help for more information"
     exit 1
 fi
 
-# Configuration
-PROGRESS_FILE="progress-auto.txt"
-PROMPT_TEMPLATE="RALPH_AUTO_PROMPT.md"
+# Configuration — the script lives in tools/ralph/ and runs at the repo root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
+PROGRESS_FILE="$SCRIPT_DIR/progress-auto.txt"
+PROMPT_TEMPLATE="$SCRIPT_DIR/RALPH_AUTO_PROMPT.md"
 COMPLETE_MARKER="NOTHING_LEFT_TO_DO"
 OUTPUT_DIR=".ralph-auto"
 AGENT_CMD="claude --dangerously-skip-permissions --verbose --model opus"
