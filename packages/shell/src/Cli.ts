@@ -9,6 +9,7 @@ import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
 import { makeCliProgram } from "@llm4ts/runner/Cli"
 import { makeDoctorProgram } from "@llm4ts/runner/Doctor"
+import { builtinKitsDir, discoverKits, kitTierPaths, type DiscoveredKit } from "@llm4ts/runner/Kits"
 import {
   defaultTierPaths,
   discoverFlows,
@@ -32,17 +33,61 @@ export const builtinFlowsDir = (): string => fileURLToPath(new URL("../flows", i
 export const shellTierPaths = (options?: {
   readonly cwd?: string
   readonly environment?: Readonly<Record<string, string | undefined>>
-}): FlowTierPaths =>
-  defaultTierPaths({
-    cwd: options?.cwd ?? process.cwd(),
-    homeDir: homedir(),
-    environment: options?.environment ?? process.env,
-    builtinDir: builtinFlowsDir()
-  })
+}): FlowTierPaths => {
+  const cwd = options?.cwd ?? process.cwd()
+  const environment = options?.environment ?? process.env
+  const builtinKits = builtinKitsDir(builtinFlowsDir())
+  return {
+    ...defaultTierPaths({ cwd, homeDir: homedir(), environment, builtinDir: builtinFlowsDir() }),
+    kits: kitTierPaths({
+      cwd,
+      homeDir: homedir(),
+      environment,
+      ...(builtinKits === undefined ? {} : { builtinDir: builtinKits })
+    })
+  }
+}
 
 const tierLabel = (flow: DiscoveredFlow): string => {
+  const kit = flow.kit === undefined ? "" : ` kit:${flow.kit}`
   const shadows = flow.shadows.length === 0 ? "" : ` shadows ${flow.shadows.join(", ")}`
-  return `[${flow.tier}${shadows}]`
+  return `[${flow.tier}${kit}${shadows}]`
+}
+
+export const renderKitList = (
+  kits: ReadonlyArray<DiscoveredKit>,
+  options?: { readonly json?: boolean }
+): string => {
+  if (options?.json === true) {
+    return JSON.stringify(
+      kits.map((kit) => ({
+        name: kit.name,
+        tier: kit.tier,
+        path: kit.root,
+        ...(kit.description === undefined ? {} : { description: kit.description }),
+        packs: kit.packs,
+        flows: kit.flows,
+        shadows: kit.shadows
+      })),
+      undefined,
+      2
+    )
+  }
+  const nameWidth = kits.reduce((width, kit) => Math.max(width, kit.name.length), 0)
+  return kits
+    .flatMap((kit) => {
+      const shadows = kit.shadows.length === 0 ? "" : ` shadows ${kit.shadows.join(", ")}`
+      return [
+        [
+          kit.name.padEnd(nameWidth),
+          `[${kit.tier}${shadows}]`,
+          ...(kit.description === undefined ? [] : [kit.description])
+        ].join("  "),
+        ...(kit.packs.length === 0 ? [] : [`  packs: ${kit.packs.join(", ")}`]),
+        ...(kit.flows.length === 0 ? [] : [`  flows: ${kit.flows.join(", ")}`])
+      ]
+    })
+    .join("\n")
 }
 
 export const renderFlowList = (
@@ -55,6 +100,7 @@ export const renderFlowList = (
         name: flow.name,
         tier: flow.tier,
         path: flow.path,
+        ...(flow.kit === undefined ? {} : { kit: flow.kit }),
         ...(flow.description === undefined ? {} : { description: flow.description }),
         shadows: flow.shadows
       })),
@@ -121,6 +167,12 @@ const runCommand = Command.make(
         "Repository to run against, forwarded to the flow as --repo (defaults to the current directory)"
       )
     ),
+    pack: Flag.string("pack").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Pack for the modernization flows, forwarded as LLM4TS_PACK: a kit pack name from `llm4ts kits`, kit/pack, or a directory holding pack.md"
+      )
+    ),
     verbose: Flag.boolean("verbose").pipe(Flag.withDescription("Stream verbose flow output"))
   },
   (config) =>
@@ -130,6 +182,9 @@ const runCommand = Command.make(
       const environment: Record<string, string | undefined> = { ...process.env }
       if (config.verbose) {
         environment.LLM4TS_VERBOSITY = "verbose"
+      }
+      if (config.pack._tag === "Some") {
+        environment.LLM4TS_PACK = config.pack.value
       }
       const exitCode = yield* launchFlow({
         flowPath,
@@ -160,6 +215,27 @@ const listCommand = Command.make(
       yield* Console.log(renderFlowList(flows, { json: config.json }))
     })
 ).pipe(Command.withDescription("List flows across the project, global, and built-in tiers"))
+
+const kitsCommand = Command.make(
+  "kits",
+  {
+    json: Flag.boolean("json").pipe(Flag.withDescription("Emit the listing as JSON"))
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const tiers = shellTierPaths()
+      const kits = tiers.kits === undefined ? [] : discoverKits(tiers.kits)
+      if (kits.length === 0 && !config.json) {
+        yield* Console.error("no kits discovered — add kit directories under .llm4ts/kits/")
+        return
+      }
+      yield* Console.log(renderKitList(kits, { json: config.json }))
+    })
+).pipe(
+  Command.withDescription(
+    "List kits — packs, scaffolds, pattern cards, and flows — across the project, global, and built-in tiers"
+  )
+)
 
 const viewCommand = Command.make(
   "view",
@@ -230,7 +306,14 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
   Command.withDescription(
     "Interactive shell and CLI for llm4ts flows: discover, inspect, and run them."
   ),
-  Command.withSubcommands([runCommand, listCommand, viewCommand, askCommand, doctorCommand])
+  Command.withSubcommands([
+    runCommand,
+    listCommand,
+    kitsCommand,
+    viewCommand,
+    askCommand,
+    doctorCommand
+  ])
 )
 
 export const runShellCommand = (

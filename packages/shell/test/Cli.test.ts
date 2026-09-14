@@ -5,7 +5,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as Effect from "effect/Effect"
 import type { FileSystem } from "effect/FileSystem"
-import { renderFlowList, resolveFlow } from "@llm4ts/shell/Cli"
+import { renderFlowList, renderKitList, resolveFlow } from "@llm4ts/shell/Cli"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
 
 const flows: ReadonlyArray<DiscoveredFlow> = [
@@ -50,6 +50,54 @@ describe("renderFlowList", () => {
 
   it("renders an empty JSON array when nothing is discovered", () => {
     assert.strictEqual(renderFlowList([], { json: true }), "[]")
+  })
+})
+
+describe("renderKitList", () => {
+  it("renders one row per kit with its packs and flows indented", () => {
+    assert.strictEqual(
+      renderKitList([
+        {
+          name: "mainframe-java",
+          root: "/shell/kits/mainframe-java",
+          tier: "builtin",
+          description: "COBOL to Spring Boot.",
+          packs: ["ace-kafka", "cobol-springboot"],
+          flows: [],
+          shadows: []
+        },
+        {
+          name: "web",
+          root: "/work/.llm4ts/kits/web",
+          tier: "project",
+          packs: ["jsp-nextjs"],
+          flows: ["convert-page"],
+          shadows: ["builtin"]
+        }
+      ]),
+      [
+        "mainframe-java  [builtin]  COBOL to Spring Boot.",
+        "  packs: ace-kafka, cobol-springboot",
+        "web             [project shadows builtin]",
+        "  packs: jsp-nextjs",
+        "  flows: convert-page"
+      ].join("\n")
+    )
+  })
+
+  it("renders a kit flow's tier label with the kit name", () => {
+    assert.strictEqual(
+      renderFlowList([
+        {
+          name: "convert-page",
+          path: "/shell/kits/web/flows/convert-page.js",
+          tier: "builtin",
+          kit: "web",
+          shadows: []
+        }
+      ]),
+      "convert-page  [builtin kit:web]"
+    )
   })
 })
 

@@ -1,0 +1,16 @@
+{
+  "name": "@llm4ts/kits",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "convert-page": "node --experimental-strip-types j2ee-nextjs/flows/convert-page.ts",
+    "convert-all": "node --experimental-strip-types j2ee-nextjs/flows/convert-all.ts"
+  },
+  "dependencies": {
+    "@llm4ts/core": "workspace:*",
+    "@llm4ts/flow": "workspace:*",
+    "@llm4ts/runner": "workspace:*",
+    "effect": "4.0.0-beta.102"
+  }
+}

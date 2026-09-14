@@ -18,8 +18,8 @@
 // flow halts for human triage. Even a clean pack only gets an unchecked
 // `- [ ] Approved` marker in `docs/modernization/README.md`.
 //
-// Pack: LLM4TS_PACK=<dir> (default packs/cobol-springboot, resolved against the
-// launch dir, then against the flow's own directory — the built-in packs).
+// Pack: LLM4TS_PACK=<name|kit/name|dir> (default cobol-springboot, resolved across
+// the project, global, and built-in kits, or a directory holding pack.md).
 // LLM4TS_WAVE=<name> scopes the run to one wave of the approved plan. Judge
 // context is bounded by LLM4TS_CONTEXT_BUDGET (chars;
 // LLM4TS_JUDGE_SOURCES_LIMIT is the deprecated alias). The analyst is bounded
@@ -61,7 +61,7 @@ import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { reviewFingerprint } from "@llm4ts/runner/ReviewFingerprint"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
-import { loadUniversalPatternCards, openPack } from "@llm4ts/runner/Packs"
+import { loadKitPatternCards, openPack } from "@llm4ts/runner/Packs"
 
 const ModDir = "docs/modernization"
 const MaxRounds = 3
@@ -316,7 +316,7 @@ const program = Effect.gen(function* () {
         // the model: implementation later injects exactly the cards cited here.
         const cards = [
           ...(yield* loadPatternCards(opened.workspace, `${opened.dir}/patterns`)),
-          ...(yield* loadUniversalPatternCards([input.workspace, import.meta.dirname]))
+          ...(yield* loadKitPatternCards(opened))
         ]
 
         // The dependency graph the analysts' include closures are resolved

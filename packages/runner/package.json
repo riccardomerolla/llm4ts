@@ -19,6 +19,7 @@
     "./Doctor": "./dist/Doctor.js",
     "./FlowArgs": "./dist/FlowArgs.js",
     "./FlowRunner": "./dist/FlowRunner.js",
+    "./Kits": "./dist/Kits.js",
     "./McpStdio": "./dist/McpStdio.js",
     "./NodeHttpClient": "./dist/NodeHttpClient.js",
     "./NodeGeminiCliExecutor": "./dist/NodeGeminiCliExecutor.js",

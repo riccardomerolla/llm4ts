@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { FileSystem } from "effect/FileSystem"
+import { discoverKits, type KitTierPaths } from "@llm4ts/runner/Kits"
 
 export type FlowTier = "project" | "global" | "builtin"
 
@@ -8,12 +9,16 @@ export interface FlowTierPaths {
   readonly project?: string
   readonly global?: string
   readonly builtin?: string
+  /** Kit tiers whose `flows/` join the listing under the kit's tier (ADR 0014). */
+  readonly kits?: KitTierPaths
 }
 
 export interface DiscoveredFlow {
   readonly name: string
   readonly path: string
   readonly tier: FlowTier
+  /** The kit the flow ships in, when it is a kit flow rather than a tier's own. */
+  readonly kit?: string
   readonly description?: string
   readonly shadows: ReadonlyArray<FlowTier>
 }
@@ -69,7 +74,8 @@ const flowExtension = (entry: string): string | undefined =>
 
 const listTier = Effect.fn("@llm4ts/shell/FlowCatalog.listTier")(function* (
   tier: FlowTier,
-  directory: string
+  directory: string,
+  kit?: string
 ) {
   const fs = yield* FileSystem
   const entries = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed(() => []))
@@ -86,6 +92,7 @@ const listTier = Effect.fn("@llm4ts/shell/FlowCatalog.listTier")(function* (
       name: entry.slice(0, -extension.length),
       path,
       tier,
+      ...(kit === undefined ? {} : { kit }),
       ...(description === undefined ? {} : { description })
     })
   }
@@ -93,10 +100,11 @@ const listTier = Effect.fn("@llm4ts/shell/FlowCatalog.listTier")(function* (
 })
 
 /**
- * Discovers flows across the project, global, and built-in tiers. Precedence
- * is project > global > builtin, keyed by flow name; a shadowed tier is
- * recorded on the winning flow's `shadows` list. Missing or unreadable
- * directories contribute nothing.
+ * Discovers flows across the project, global, and built-in tiers, each tier's
+ * own `flows/` first and then the `flows/` of the kits discovered in that
+ * tier. Precedence is project > global > builtin, keyed by flow name; a
+ * shadowed tier is recorded on the winning flow's `shadows` list. Missing or
+ * unreadable directories contribute nothing.
  */
 export const discoverFlows = Effect.fn("@llm4ts/shell/FlowCatalog.discoverFlows")(function* (
   tiers: FlowTierPaths
@@ -105,17 +113,25 @@ export const discoverFlows = Effect.fn("@llm4ts/shell/FlowCatalog.discoverFlows"
     string,
     { flow: Omit<DiscoveredFlow, "shadows">; shadows: Array<FlowTier> }
   >()
+  const kits = tiers.kits === undefined ? [] : discoverKits(tiers.kits)
+  const record = (flow: Omit<DiscoveredFlow, "shadows">): void => {
+    const existing = byName.get(flow.name)
+    if (existing === undefined) {
+      byName.set(flow.name, { flow, shadows: [] })
+    } else {
+      existing.shadows.push(flow.tier)
+    }
+  }
   for (const tier of tierOrder) {
     const directory = tiers[tier]
-    if (directory === undefined) {
-      continue
+    if (directory !== undefined) {
+      for (const flow of yield* listTier(tier, directory)) {
+        record(flow)
+      }
     }
-    for (const flow of yield* listTier(tier, directory)) {
-      const existing = byName.get(flow.name)
-      if (existing === undefined) {
-        byName.set(flow.name, { flow, shadows: [] })
-      } else {
-        existing.shadows.push(tier)
+    for (const kit of kits.filter((candidate) => candidate.tier === tier)) {
+      for (const flow of yield* listTier(tier, join(kit.root, "flows"), kit.name)) {
+        record(flow)
       }
     }
   }

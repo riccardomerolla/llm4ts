@@ -18,3 +18,4 @@ repos/
 .ralph-auto/
 .llm4ts/
 packages/shell/flows/
+packages/shell/kits/

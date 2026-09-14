@@ -223,7 +223,7 @@ const makeJ2eeEstate = (): Estate => {
   return { root, binDir }
 }
 
-const runSurvey = (estate: Estate, cwd: string = flowsRoot, pack = "packs/cobol-springboot") =>
+const runSurvey = (estate: Estate, cwd: string = flowsRoot, pack = "cobol-springboot") =>
   spawnSync(
     process.execPath,
     [
@@ -329,7 +329,7 @@ describe("modernize-survey end to end (model stubbed)", () => {
     }
   })
 
-  // The launch directory has no packs/ at all — the pack must come from the
+  // The launch directory has no kits at all — the pack must come from the
   // flow script's own directory, the layout `llm4ts run modernize-survey`
   // launches with from an arbitrary cwd.
   it("finds the built-in pack when launched outside the llm4ts workspace", () => {
@@ -356,7 +356,7 @@ describe("modernize-survey over a J2EE estate (model stubbed)", () => {
   it("survives a large build tree, resolves fragment includes, and prompts in J2EE terms", () => {
     const estate = makeJ2eeEstate()
     try {
-      const result = runSurvey(estate, estate.root, "packs/j2ee-nextjs-spa")
+      const result = runSurvey(estate, estate.root, "j2ee-nextjs-spa")
       assert.strictEqual(
         result.status,
         0,

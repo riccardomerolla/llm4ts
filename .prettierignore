@@ -10,14 +10,13 @@ docs/CSP_STATUS.md
 # Ported modernization data: pack manifests carry regexes whose exact text is
 # load-bearing, pattern cards embed COBOL fragments, and the scaffold is a
 # target-project template — none of it is llm4ts source to restyle.
-flows/packs
-flows/patterns
 flows/fixtures
+kits/*/packs
+kits/*/patterns
+kits/*/scaffolds
+kits/*/fixtures
 packages/shell/flows
-
-# Demo-bank fixture repos: standalone toolchains with their own style; the
-# legacy tree is deliberately period-styled J2EE content.
-examples/demo-bank
+packages/shell/kits
 
 # Internet-banking portal fixture: a standalone Vite/React toolchain with its
 # own style, seeded into a working copy by the epic-stories runbook.

@@ -231,17 +231,19 @@ exist) as warnings. It makes no model call, so it is the place to iterate on
 a new pack's regexes before spending a survey run:
 
 ```sh
-LLM4TS_PACK=packs/my-pack llm4ts run modernize-pack-check --repo /path/to/legacy-estate
+llm4ts run modernize-pack-check --pack packs/my-pack --repo /path/to/legacy-estate
 ```
 
 Every phase reads a modernization **pack** (`@llm4ts/flow/Pack`): a directory
 with a `pack.md` manifest (sources/programs regexes, an optional `exclude:`
 regex, gates, judge rubric, `## Coverage:` unit rules, `## Survey:` edge
-rules, equivalence policy) plus `prompts/` and `reviewers/` sidecars. `LLM4TS_PACK` selects one (default
-`packs/cobol-springboot`), resolved against the launch directory first, then
-against the flow script's own directory — so the built-in packs shipped with
-`@llm4ts/shell` are found even when a flow is launched from an unrelated
-directory. An absolute `LLM4TS_PACK` is used as-is.
+rules, equivalence policy) plus `prompts/` and `reviewers/` sidecars. Packs
+ship in **kits** (ADR 0014), the directories under [`kits/`](../kits/README.md)
+that bundle them with their scaffolds and pattern cards. `--pack` on
+`llm4ts run`, or `LLM4TS_PACK`, selects one (default `cobol-springboot`): a
+bare pack name resolved across the kits in the project, global, and built-in
+tiers, `kit/pack` to name one kit, or a directory holding `pack.md` for a
+pack still being written. `llm4ts kits` lists what is available.
 
 The estate-reading phases (survey, extract, bench) read legacy sources with
 an 8 MiB per-file cap — legacy estates routinely carry multi-megabyte
@@ -268,30 +270,23 @@ talks about web.xml mappings, includes, forwards, and ajax targets), and the
 graph's provenance is stated from the pack's own `## Survey:` rule names. A
 pack without the sidecars gets a neutral default.
 
-Six reference packs ship, each pairing a legacy source technology with a
-target stack, plus the [scaffold](fixtures/scaffolds/) that seeds an empty
-target repository:
-
-| Pack                                                 | Legacy → target                   | Scaffold                | Replay |
-| ---------------------------------------------------- | --------------------------------- | ----------------------- | ------ |
-| [`cobol-springboot`](packs/cobol-springboot/pack.md) | COBOL/JCL → Spring Boot service   | `spring-boot-service`   | yes    |
-| [`cobol-kafka`](packs/cobol-kafka/pack.md)           | COBOL/JCL → Kafka Streams service | `kafka-streams-service` | yes    |
-| [`ace-integration`](packs/ace-integration/pack.md)   | ACE msgflow/ESQL → Spring Boot    | `spring-boot-service`   | no     |
-| [`ace-kafka`](packs/ace-kafka/pack.md)               | ACE msgflow/ESQL → Kafka Streams  | `kafka-streams-service` | yes    |
-| [`jsp-bff-nextjs`](packs/jsp-bff-nextjs/pack.md)     | JSP/Java → Spring BFF + Next.js   | `spring-bff`            | no     |
-| [`jsp-nextjs`](packs/jsp-nextjs/pack.md)             | JSP/Java → Next.js SPA            | `nextjs-spa`            | no     |
+Seven reference packs ship in the two built-in kits,
+[`mainframe-java`](../kits/mainframe-java/README.md) (COBOL/JCL and ACE to
+Spring Boot and Kafka Streams) and
+[`j2ee-nextjs`](../kits/j2ee-nextjs/README.md) (JSP to Next.js, which also
+ships the `convert-page` and `convert-all` flows). Each kit README lists its
+packs, scaffolds, and replay support.
 
 Packs without a `replay:` command run phases 0–3 and 5; phase 4 needs a
 replay harness in the target repository to drive equivalence vectors.
 
-Universal translation [pattern cards](patterns/) sit beside the packs and
-apply to every run; a pack may add its own under `<pack>/patterns/` (as
-`cobol-kafka` does for event-streaming idioms). Extraction tags each
-program's traceability fragment with the cards its source matches, and
-implementation injects exactly those cards.
+Translation pattern cards come from two decks: the kit's `patterns/` and the
+pack's own `<pack>/patterns/` (as `cobol-kafka` adds for event-streaming
+idioms). Extraction tags each program's traceability fragment with the cards
+its source matches, and implementation injects exactly those cards.
 
 Copy a pack and edit it for your estate — the manifest is the whole contract,
-and `flows/test/pack.test.ts` shows what the flows require of it.
+and `kits/test/packs.test.ts` shows what the flows require of it.
 
 ### Phase 0 — survey
 

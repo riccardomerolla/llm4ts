@@ -50,6 +50,57 @@ describe("defaultTierPaths", () => {
   })
 })
 
+describe("discoverFlows with kits", () => {
+  it("lists kit flows under the kit's tier, labelled with the kit, after the tier's own flows", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "llm4ts-shell-kits-"))
+    try {
+      mkdirSync(join(dir, "builtin"), { recursive: true })
+      writeFileSync(join(dir, "builtin", "implement.js"), "// Engine implement\n")
+      mkdirSync(join(dir, "kits", "web", "flows", "lib"), { recursive: true })
+      writeFileSync(join(dir, "kits", "web", "flows", "convert-page.js"), "// Convert a page\n")
+      writeFileSync(join(dir, "kits", "web", "flows", "lib", "helper.js"), "export const x = 1\n")
+      mkdirSync(join(dir, "project"), { recursive: true })
+      writeFileSync(join(dir, "project", "convert-page.ts"), "// My convert\n")
+
+      const flows = await Effect.runPromise(
+        discoverFlows({
+          project: join(dir, "project"),
+          builtin: join(dir, "builtin"),
+          kits: { builtin: join(dir, "kits") }
+        }).pipe(Effect.provide(NodeFileSystem.layer))
+      )
+      assert.deepStrictEqual(
+        flows.map((flow) => [flow.name, flow.tier, flow.kit, flow.description, flow.shadows]),
+        [
+          ["convert-page", "project", undefined, "My convert", ["builtin"]],
+          ["implement", "builtin", undefined, "Engine implement", []]
+        ]
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("labels a kit flow with its kit when nothing shadows it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "llm4ts-shell-kits-"))
+    try {
+      mkdirSync(join(dir, "kits", "web", "flows"), { recursive: true })
+      writeFileSync(join(dir, "kits", "web", "flows", "convert-page.js"), "// Convert a page\n")
+      const flows = await Effect.runPromise(
+        discoverFlows({ kits: { global: join(dir, "kits") } }).pipe(
+          Effect.provide(NodeFileSystem.layer)
+        )
+      )
+      assert.deepStrictEqual(
+        flows.map((flow) => [flow.name, flow.tier, flow.kit]),
+        [["convert-page", "global", "web"]]
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe("discoverFlows", () => {
   const withTempDir = <A>(use: (dir: string) => Promise<A>): Promise<A> => {
     const dir = mkdtempSync(join(tmpdir(), "llm4ts-shell-test-"))

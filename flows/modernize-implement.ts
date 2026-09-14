@@ -49,7 +49,7 @@ import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
-import { loadUniversalPatternCards, openPack } from "@llm4ts/runner/Packs"
+import { loadKitPatternCards, openPack } from "@llm4ts/runner/Packs"
 
 const ModDir = "docs/modernization"
 
@@ -272,7 +272,7 @@ const program = Effect.gen(function* () {
         const specText = yield* gatherSpecs(target, pack.specsDir)
         const cards = [
           ...(yield* loadPatternCards(opened.workspace, `${opened.dir}/patterns`)),
-          ...(yield* loadUniversalPatternCards([input.workspace, import.meta.dirname]))
+          ...(yield* loadKitPatternCards(opened))
         ]
         const cited = new Set(taggedPatternIds(specText))
         const playbook = cards.filter((card) => cited.has(card.id))

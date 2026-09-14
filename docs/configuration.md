@@ -43,6 +43,21 @@ Explicit `baseUrl` and redacted `apiKey` values always win. LM Studio and Ollama
 use their local default endpoints and require no credential. See the
 [real examples](../examples/README.md) for runnable commands.
 
+## Kits and packs
+
+The modernization and conversion flows read a pack selected by `LLM4TS_PACK`
+(or `llm4ts run --pack`; default `cobol-springboot`): a bare pack name
+resolved across the kits discovered in the project (`./.llm4ts/kits/`),
+global (`~/.config/llm4ts/kits/`, honouring `XDG_CONFIG_HOME`), and built-in
+tiers; `kit/pack` to name one kit; or a directory holding `pack.md`, relative
+to the launch directory or absolute, for a pack not yet in a kit. Two kits of
+one tier shipping the same pack name is an error naming both. `llm4ts kits`
+lists the kits with their packs and flows (ADR 0014).
+
+Estate reading is bounded by `LLM4TS_MAX_READ_BYTES` (per file, 8 MiB in the
+estate-reading phases), `LLM4TS_MAX_DISCOVER_RESULTS` (20 000 there, 1 000
+elsewhere), and `LLM4TS_EXCLUDE_DIRS` (replaces the pruned directory list).
+
 ## Capabilities
 
 Filesystem, process, network, Git, and forge operations require explicit

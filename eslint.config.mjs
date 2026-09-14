@@ -70,13 +70,15 @@ export default [
       // Ported modernization data: pack manifests, pattern cards, and the
       // target-project scaffolds a seeded repository receives. None of it is
       // llm4ts source, and the scaffolds carry other stacks' syntax (JSX).
-      "flows/packs/**",
-      "flows/patterns/**",
       "flows/fixtures/**",
+      "kits/*/packs/**",
+      "kits/*/patterns/**",
+      "kits/*/scaffolds/**",
       "packages/shell/flows/**",
+      "packages/shell/kits/**",
       // Demo-bank fixture repos: standalone toolchains (the Next.js fixture
       // lints itself) and deliberately legacy-styled J2EE content.
-      "examples/demo-bank/**",
+      "kits/*/fixtures/**",
       // Internet-banking portal fixture: a standalone Vite/React toolchain
       // that lints itself (ADR 0013).
       "examples/internet-banking/portal/**"
@@ -84,7 +86,7 @@ export default [
   },
   js.configs.recommended,
   {
-    files: ["packages/**/*.ts", "examples/**/*.ts", "flows/**/*.ts"],
+    files: ["packages/**/*.ts", "examples/**/*.ts", "flows/**/*.ts", "kits/**/*.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {

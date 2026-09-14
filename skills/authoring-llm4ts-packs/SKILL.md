@@ -7,9 +7,10 @@ description: Use when asked to create, extend, or fix a modernization pack for l
 
 The `modernize-*` flows (survey, extract, seed, implement, verify, review)
 read everything stack-specific from a **pack**: a directory with a `pack.md`
-manifest and Markdown sidecars. `LLM4TS_PACK=<dir>` selects it, resolved
-against the launch directory first, then against the built-in packs the
-shell ships. Writing a pack is the whole job of supporting a new legacy
+manifest and Markdown sidecars. `--pack` (or `LLM4TS_PACK`) selects it: a
+directory holding `pack.md` while you write it, or a pack name once it is
+in a kit — the directory that bundles packs with scaffolds and pattern
+cards, discovered in the project, global, and built-in tiers. Writing a pack is the whole job of supporting a new legacy
 source or target.
 
 ## When to use
@@ -48,14 +49,16 @@ part:
 - `scaffold:` in the manifest points at a pack-relative directory copied
   into an empty target by seed.
 
-Copy from the shipped packs when in doubt: `cobol-springboot`,
-`jsp-nextjs`, `j2ee-nextjs-spa`, `ace-kafka`, and others live under
-`flows/packs/` in the repository and inside the installed shell package.
+Copy from the shipped packs when in doubt: `npx -y @llm4ts/shell kits`
+lists the built-in kits (`mainframe-java`, `j2ee-nextjs`) with their packs;
+they live under `kits/<kit>/packs/` in the repository and inside the
+installed shell package. A finished pack joins a kit: a directory under
+`.llm4ts/kits/<kit>/packs/` of the project, or `~/.config/llm4ts/kits/`.
 
 ## Step 3: check without an LLM, then iterate
 
 ```bash
-LLM4TS_PACK=packs/<name> npx -y @llm4ts/shell run modernize-pack-check --repo <estate>
+npx -y @llm4ts/shell run modernize-pack-check --pack packs/<name> --repo <estate>
 ```
 
 The check loads the pack exactly as survey and extract do, then prints the

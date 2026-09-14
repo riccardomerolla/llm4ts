@@ -48,6 +48,9 @@ as `key: value` lines until the first `## ` section.
 
 ## Resolution
 
-`LLM4TS_PACK` (default `packs/cobol-springboot`) is resolved against the
-launch directory, then against the flow script's directory where the shell
-ships the built-in packs. An absolute path is used as-is.
+`LLM4TS_PACK` (or `llm4ts run --pack`; default `cobol-springboot`) is a
+bare pack name resolved across the kits in the project (`.llm4ts/kits/`),
+global (`~/.config/llm4ts/kits/`), and built-in tiers, `kit/pack` to name
+one kit, or a path holding `pack.md` (relative to the launch directory, or
+absolute) for a pack not yet in a kit. Two kits of one tier shipping the
+same name is an error naming both.

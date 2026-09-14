@@ -25,7 +25,7 @@ import ts from "typescript"
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const sourceDir = path.join(repoRoot, "flows")
 const targetDir = path.join(repoRoot, "packages", "shell", "flows")
-const resourceDirs = ["packs", "patterns", "fixtures"]
+const resourceDirs = ["fixtures"]
 
 rmSync(targetDir, { recursive: true, force: true })
 mkdirSync(targetDir, { recursive: true })
@@ -82,6 +82,73 @@ for (const name of resourceDirs) {
     cpSync(source, path.join(targetDir, name), { recursive: true })
   }
 }
+
+/**
+ * Kits ship beside the engine flows as packages/shell/kits/<kit>/ (ADR 0014):
+ * kit flows transpiled to .js like the engine's, and the packs, scaffolds,
+ * pattern cards, fixtures, and README copied as data. Untracked build litter
+ * inside a fixture (node_modules, dist, .next, .llm4ts) never ships.
+ */
+const kitsSourceDir = path.join(repoRoot, "kits")
+const kitsTargetDir = path.join(repoRoot, "packages", "shell", "kits")
+const litter = new Set(["node_modules", "dist", ".next", ".llm4ts", ".tsbuildinfo", "coverage"])
+const copyData = (source, target) =>
+  cpSync(source, target, {
+    recursive: true,
+    filter: (candidate) => !litter.has(path.basename(candidate))
+  })
+const transpileTree = (source, target) => {
+  let count = 0
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    if (entry.name === "test") {
+      continue
+    }
+    const from = path.join(source, entry.name)
+    if (entry.isDirectory()) {
+      count += transpileTree(from, path.join(target, entry.name))
+    } else if (entry.name.endsWith(".ts")) {
+      mkdirSync(target, { recursive: true })
+      writeFileSync(
+        path.join(target, entry.name.replace(/\.ts$/, ".js")),
+        transpile(readFileSync(from, "utf8"), entry.name)
+      )
+      count += 1
+    }
+  }
+  return count
+}
+rmSync(kitsTargetDir, { recursive: true, force: true })
+let kitFlows = 0
+// A kit is a directory holding packs/ or flows/ (ADR 0014); the workspace
+// package's own dist, node_modules, and test directories are not kits.
+const kitNames = existsSync(kitsSourceDir)
+  ? readdirSync(kitsSourceDir, { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isDirectory() &&
+          !litter.has(entry.name) &&
+          (existsSync(path.join(kitsSourceDir, entry.name, "packs")) ||
+            existsSync(path.join(kitsSourceDir, entry.name, "flows")))
+      )
+      .map((entry) => entry.name)
+  : []
+for (const kit of kitNames) {
+  const kitSource = path.join(kitsSourceDir, kit)
+  const kitTarget = path.join(kitsTargetDir, kit)
+  mkdirSync(kitTarget, { recursive: true })
+  for (const name of ["packs", "scaffolds", "patterns", "fixtures"]) {
+    if (existsSync(path.join(kitSource, name))) {
+      copyData(path.join(kitSource, name), path.join(kitTarget, name))
+    }
+  }
+  if (existsSync(path.join(kitSource, "README.md"))) {
+    cpSync(path.join(kitSource, "README.md"), path.join(kitTarget, "README.md"))
+  }
+  if (existsSync(path.join(kitSource, "flows"))) {
+    kitFlows += transpileTree(path.join(kitSource, "flows"), path.join(kitTarget, "flows"))
+  }
+}
 console.log(
-  `sync-shell-flows: copied ${copied} flow(s) and ${resourceDirs.join("/")} into packages/shell/flows`
+  `sync-shell-flows: copied ${copied} flow(s) and ${resourceDirs.join("/")} into packages/shell/flows, ` +
+    `${kitNames.length} kit(s) with ${kitFlows} flow file(s) into packages/shell/kits`
 )

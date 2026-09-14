@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- Packs, scaffolds, and pattern cards moved out of `flows/` into two
+  **kits** under `kits/` (ADR 0014): `mainframe-java` (COBOL/JCL and ACE
+  packs, Spring Boot and Kafka Streams scaffolds, the COBOL pattern deck)
+  and `j2ee-nextjs` (JSP packs, Next.js and Spring BFF scaffolds, the
+  `convert-page`/`convert-all` flows, the demo-bank fixture). `LLM4TS_PACK`
+  now takes a bare pack name (`cobol-springboot`, the default), `kit/pack`,
+  or a directory holding `pack.md`; the old `packs/<name>` relative form
+  only resolves when such a directory exists under the launch directory.
+  `@llm4ts/runner/Packs` lost `loadUniversalPatternCards` (use
+  `loadKitPatternCards(opened)`) and `locatePack` takes the discovered kits
+  instead of root directories. `node_modules/@llm4ts/shell/flows/packs` no
+  longer exists; the shipped kits are at `node_modules/@llm4ts/shell/kits`.
+
+### Added
+
+- Kit discovery in `@llm4ts/runner/Kits` across the project
+  (`.llm4ts/kits/`), global (`~/.config/llm4ts/kits/`), and built-in tiers,
+  with project > global > builtin shadowing by kit name and an error naming
+  the candidates when two kits of one tier ship the same pack.
+- `llm4ts kits` lists the discovered kits with their packs and flows;
+  `llm4ts run --pack <ref>` forwards a pack reference as `LLM4TS_PACK`; a
+  kit's flows join `llm4ts list` labelled `[<tier> kit:<name>]`.
+- Kit READMEs, `kits/README.md`, and ADR 0014 document the layout and the
+  resolution rules; the guide, skills, and flows README now point at kits.
+
 ## 0.17.0
 
 - Getting started guide under `docs/guide/`: seven one-screen chapters for

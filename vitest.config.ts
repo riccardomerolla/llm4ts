@@ -19,7 +19,8 @@ export default defineConfig({
     include: [
       "packages/**/test/**/*.test.ts",
       "examples/test/**/*.test.ts",
-      "flows/test/**/*.test.ts"
+      "flows/test/**/*.test.ts",
+      "kits/**/test/**/*.test.ts"
     ],
     exclude: [".repos/**", "repos/**", "**/node_modules/**"],
     passWithNoTests: true,

@@ -95,14 +95,20 @@ Sidecars next to the manifest: `prompts/<phase>.md` (`analysis`, `spec`,
 `survey-triage`) carry the stack-specific paragraph each phase's prompt
 includes; `reviewers/<lens>.md` is a review lens with an optional
 `files:` front-matter regex; `lessons.md` is appended by the review phase.
-The six shipped packs under [flows/packs](../../flows/packs) are complete
-examples to copy from.
+The seven shipped packs live in the two built-in kits under
+[kits/](../../kits/README.md) and are complete examples to copy from; a
+kit is the directory that bundles packs with their scaffolds and pattern
+cards, and `llm4ts kits` lists the ones your shell can see.
 
 ## Check it without an LLM
 
 ```bash
-LLM4TS_PACK=packs/my-pack llm4ts run modernize-pack-check --repo /path/to/legacy-estate
+llm4ts run modernize-pack-check --pack packs/my-pack --repo /path/to/legacy-estate
 ```
+
+`--pack` takes a directory holding `pack.md` while you write it, or a pack
+name from `llm4ts kits` once it lives in a kit; `LLM4TS_PACK` is the same
+setting as an environment variable.
 
 ```text
   · pack 'my-pack' (source: jsp) at /work/packs/my-pack
@@ -127,7 +133,7 @@ it runs in milliseconds and costs nothing.
 ## Then run the pipeline
 
 ```bash
-LLM4TS_PACK=packs/my-pack llm4ts run modernize-survey --repo /path/to/legacy-estate
+llm4ts run modernize-survey --pack packs/my-pack --repo /path/to/legacy-estate
 ```
 
 Survey ends by asking you to approve its wave plan; extract ends by asking

@@ -20,6 +20,7 @@
     { "path": "./packages/js" },
     { "path": "./packages/shell" },
     { "path": "./examples" },
-    { "path": "./flows" }
+    { "path": "./flows" },
+    { "path": "./kits" }
   ]
 }
