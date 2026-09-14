@@ -38,56 +38,119 @@ export const matchingFiles = (
     })
     .pipe(Effect.map((paths) => [...paths].sort()))
 
-export const coverageUnits = Effect.fn("@llm4ts/flow/SpecChecks.coverageUnits")(function* (
+/** A unit a coverage rule captured, with every file it was captured from. */
+export interface CapturedUnit {
+  readonly rule: string
+  readonly unit: string
+  readonly paths: ReadonlyArray<string>
+}
+
+/**
+ * Every unit each rule captures across the workspace, in first-seen order
+ * per rule, each with the files it was found in — the provenance a
+ * wave-scoped gate needs to tell a unit of this wave from one of another.
+ */
+export const capturedUnits = Effect.fn("@llm4ts/flow/SpecChecks.capturedUnits")(function* (
   workspace: WorkspaceShape,
   rules: ReadonlyArray<CoverageRule>
-): Effect.fn.Return<Readonly<Record<string, ReadonlyArray<string>>>, WorkspaceError> {
+): Effect.fn.Return<ReadonlyArray<CapturedUnit>, WorkspaceError> {
   const paths = yield* workspace.discover()
-  const result: Record<string, ReadonlyArray<string>> = {}
+  const result: Array<{ rule: string; unit: string; paths: Array<string> }> = []
   for (const rule of rules) {
     const filePattern = new RegExp(rule.files)
     const unitPattern = new RegExp(rule.unit)
-    const units: Array<string> = []
     for (const path of paths.filter((path) => filePattern.test(path))) {
       const contents = yield* workspace.read(path)
       for (const line of contents.split(/\r?\n/)) {
         for (const unit of capture(unitPattern, line)) {
-          if (!units.includes(unit)) {
-            units.push(unit)
+          const existing = result.find((entry) => entry.rule === rule.name && entry.unit === unit)
+          if (existing === undefined) {
+            result.push({ rule: rule.name, unit, paths: [path] })
+          } else if (!existing.paths.includes(path)) {
+            existing.paths.push(path)
           }
         }
       }
     }
-    result[rule.name] = units
   }
   return result
+})
+
+export const coverageUnits = Effect.fn("@llm4ts/flow/SpecChecks.coverageUnits")(function* (
+  workspace: WorkspaceShape,
+  rules: ReadonlyArray<CoverageRule>
+): Effect.fn.Return<Readonly<Record<string, ReadonlyArray<string>>>, WorkspaceError> {
+  const captured = yield* capturedUnits(workspace, rules)
+  const result: Record<string, ReadonlyArray<string>> = {}
+  for (const rule of rules) {
+    result[rule.name] = captured
+      .filter((entry) => entry.rule === rule.name)
+      .map((entry) => entry.unit)
+  }
+  return result
+})
+
+export interface CoverageOptions {
+  /**
+   * Restricts the gate to units captured from at least one file this
+   * predicate accepts. A wave-scoped extraction passes the wave's program
+   * files here: a unit that lives only in another wave's sources (or in an
+   * estate-wide descriptor such as web.xml) is reported in `outOfScope`
+   * rather than failing this wave's gate. Absent: every unit gates.
+   */
+  readonly inScope?: (path: string) => boolean
+}
+
+export interface CoverageReport {
+  readonly result: ReviewResult
+  /** Uncovered units the scope excluded from the gate, as `rule: unit`. */
+  readonly outOfScope: ReadonlyArray<string>
+}
+
+const uncoveredIssue = (rule: string, unit: string): ReviewIssue =>
+  ReviewIssue.make({
+    severity: "Critical",
+    title: `uncovered ${rule}: ${unit}`,
+    description:
+      `'${unit}' exists in the legacy source but does not ` + "appear in the traceability matrix."
+  })
+
+/** Coverage with the scope split: what gates, and what was left to a later wave. */
+export const coverageReport = Effect.fn("@llm4ts/flow/SpecChecks.coverageReport")(function* (
+  workspace: WorkspaceShape,
+  rules: ReadonlyArray<CoverageRule>,
+  traceability: string,
+  options: CoverageOptions = {}
+): Effect.fn.Return<CoverageReport, WorkspaceError> {
+  const captured = yield* capturedUnits(workspace, rules)
+  const issues: Array<ReviewIssue> = []
+  const outOfScope: Array<string> = []
+  for (const entry of captured) {
+    if (traceability.includes(entry.unit)) {
+      continue
+    }
+    if (options.inScope === undefined || entry.paths.some(options.inScope)) {
+      issues.push(uncoveredIssue(entry.rule, entry.unit))
+    } else {
+      outOfScope.push(`${entry.rule}: ${entry.unit}`)
+    }
+  }
+  return {
+    result: ReviewResult.make({
+      issues,
+      summary: issues.length === 0 ? "coverage complete" : `${issues.length} unit(s) uncovered`
+    }),
+    outOfScope
+  }
 })
 
 export const coverage = Effect.fn("@llm4ts/flow/SpecChecks.coverage")(function* (
   workspace: WorkspaceShape,
   rules: ReadonlyArray<CoverageRule>,
-  traceability: string
+  traceability: string,
+  options: CoverageOptions = {}
 ): Effect.fn.Return<ReviewResult, WorkspaceError> {
-  const units = yield* coverageUnits(workspace, rules)
-  const issues = rules.flatMap((rule) =>
-    (units[rule.name] ?? []).flatMap((unit) =>
-      traceability.includes(unit)
-        ? []
-        : [
-            ReviewIssue.make({
-              severity: "Critical",
-              title: `uncovered ${rule.name}: ${unit}`,
-              description:
-                `'${unit}' exists in the legacy source but does not ` +
-                "appear in the traceability matrix."
-            })
-          ]
-    )
-  )
-  return ReviewResult.make({
-    issues,
-    summary: issues.length === 0 ? "coverage complete" : `${issues.length} unit(s) uncovered`
-  })
+  return (yield* coverageReport(workspace, rules, traceability, options)).result
 })
 
 const featureIssue = (path: string, contents: string): ReviewIssue | undefined => {

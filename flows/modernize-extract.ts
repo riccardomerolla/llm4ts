@@ -65,7 +65,7 @@ import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import { cachedReview } from "@llm4ts/flow/ReviewCache"
-import { coverage, coverageUnits, features, matchingFiles } from "@llm4ts/flow/SpecChecks"
+import { coverageReport, coverageUnits, features, matchingFiles } from "@llm4ts/flow/SpecChecks"
 import { SurveyGraph, closureFor, surveyGraph } from "@llm4ts/flow/Survey"
 import { withDraftApproval, requireApproval } from "@llm4ts/flow/Approval"
 import {
@@ -319,6 +319,13 @@ const program = Effect.gen(function* () {
             message: `no source units matched the pack's programs/sources regex under ${input.workDir}`
           })
         }
+        const waveScope =
+          wave === undefined || wave.length === 0
+            ? undefined
+            : ((): ((path: string) => boolean) => {
+                const names = new Set(programs.map(programName))
+                return (path) => names.has(programName(path))
+              })()
 
         const units = programs.map((rel) =>
           ProgramUnit.make({ name: programName(rel), sourcePath: rel })
@@ -587,7 +594,24 @@ const program = Effect.gen(function* () {
             ],
             summary: "docs"
           })
-          const covered = yield* coverage(repo, pack.coverage, trace)
+          // A wave-scoped run gates only the units its own programs' files
+          // capture; units of other waves (and of estate-wide descriptors such
+          // as web.xml) are left to the run without LLM4TS_WAVE that closes
+          // the estate — otherwise no wave but the last could ever clear.
+          const scoped = yield* coverageReport(repo, pack.coverage, trace, {
+            ...(waveScope === undefined ? {} : { inScope: waveScope })
+          })
+          if (scoped.outOfScope.length > 0) {
+            yield* context.events.publish(
+              Info.make({
+                message:
+                  `${scoped.outOfScope.length} uncovered unit(s) belong to other waves and do not gate ` +
+                  `'${wave}' (${scoped.outOfScope.slice(0, 5).join(", ")}${scoped.outOfScope.length > 5 ? ", …" : ""}); ` +
+                  "run modernize-extract without LLM4TS_WAVE after the last wave to enforce estate-wide coverage"
+              })
+            )
+          }
+          const covered = scoped.result
           const wellFormed = yield* features(repo, join(ModDir, "features"))
           // Verdicts are per program and cached per program, so they judge
           // under the same bound as extraction; the merge is order-stable.

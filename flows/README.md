@@ -314,6 +314,13 @@ feature, traceability, and mapping fragments, then a layered gate
 `gate/` and re-judged only when content changes) must clear before the pack
 gets its unchecked approval marker.
 
+With `LLM4TS_WAVE` set, the coverage half of that gate is scoped to the
+wave: only units the wave's own program files capture must appear in the
+traceability matrix, and units captured elsewhere (another wave's programs,
+an estate-wide descriptor such as `web.xml`) are listed as not gating this
+wave. Once every wave is extracted, one more run without `LLM4TS_WAVE`
+resumes instantly and enforces coverage across the whole estate.
+
 The programs of a wave are independent — each analyst reads its own source
 and resolved closure and writes its own four files — so
 `LLM4TS_EXTRACT_CONCURRENCY=<n>` extracts and judges `n` at once (default 1).

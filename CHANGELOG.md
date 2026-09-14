@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- A wave-scoped extraction (`LLM4TS_WAVE`) can now clear its gate: the
+  coverage check gates only units captured from the wave's own program
+  files and reports the others as belonging to later waves, with a closing
+  run without `LLM4TS_WAVE` enforcing estate-wide coverage. Before, every
+  wave but the last failed on units it could not cover and burned its three
+  fix rounds on them — found in the first live rehearsal of the workshop
+  runbook. `SpecChecks` gained `capturedUnits` (units with their source
+  files) and `coverageReport` (the gated result plus the out-of-scope list);
+  `coverage` accepts an `inScope` option.
+
 ## 0.18.0
 
 ### Breaking

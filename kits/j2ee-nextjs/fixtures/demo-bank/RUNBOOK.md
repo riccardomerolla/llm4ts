@@ -106,6 +106,19 @@ this beat).
 LLM4TS_WAVE=wave-1 llm4ts run modernize-extract --repo ~/demo/legacy-j2ee
 ```
 
+Act 2 opens with `accountOverview`, and the survey's plan puts that page in
+**wave-2** (wave-1 is the navigation shell: login, header, footer, nav,
+dashboard, profile, settings, messages, help), so extract wave-2 as well
+before Act 2 — it is one page plus its servlet and DTO, minutes not tens of
+minutes. Each wave gates only its own units; the pages of later waves are
+listed as "not gating" — say so when the line scrolls past, and mention the
+closing run without `LLM4TS_WAVE` that enforces coverage over the whole
+estate once every wave is in.
+
+```bash
+LLM4TS_WAVE=wave-2 llm4ts run modernize-extract --repo ~/demo/legacy-j2ee
+```
+
 Extraction runs three pages at once (`LLM4TS_EXTRACT_CONCURRENCY=3` from Act
 0): the pages of a wave are independent, each lands in its own commit holding
 only its four files, and the log interleaves — say so before it starts, then
