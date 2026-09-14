@@ -314,6 +314,11 @@ feature, traceability, and mapping fragments, then a layered gate
 `gate/` and re-judged only when content changes) must clear before the pack
 gets its unchecked approval marker.
 
+A pack that declares `spec-schema: pagespec` (the J2EE packs do) has every
+program spec's ```json pagespec block decoded by the gate before any judge
+runs; an undecodable block is a per-program finding the fix turn repairs,
+so the converter never meets one.
+
 With `LLM4TS_WAVE` set, the coverage half of that gate is scoped to the
 wave: only units the wave's own program files capture must appear in the
 traceability matrix, and units captured elsewhere (another wave's programs,

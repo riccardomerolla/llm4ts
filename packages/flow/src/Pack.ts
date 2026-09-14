@@ -41,6 +41,12 @@ export interface Pack {
   // paths), `<NAME>` substituted with the program name. The seam that makes
   // per-program judging possible.
   readonly programFiles: string | undefined
+  /**
+   * The schema every program spec must embed, validated deterministically
+   * by the extraction gate: `pagespec` (a ```json pagespec block decodable
+   * as `PageSpec`) is the only one today; absent means prose-only specs.
+   */
+  readonly specSchema: string | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
   readonly prompt: (name: string) => string | undefined
@@ -206,6 +212,12 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
       message: `pack manifest 'programFiles:' is not a valid regex template: ${programFiles}`
     })
   }
+  const specSchema = fields["spec-schema"]
+  if (specSchema !== undefined && specSchema !== "pagespec") {
+    return yield* PlanParseError.make({
+      message: `pack manifest 'spec-schema:' must be 'pagespec' when set, got: ${specSchema}`
+    })
+  }
   const exclude = fields.exclude
   if (exclude !== undefined && !isValidRegExp(exclude)) {
     return yield* PlanParseError.make({
@@ -239,6 +251,7 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     lenses,
     lessons: lessons === undefined || lessons.length === 0 ? undefined : lessons,
     programFiles,
+    specSchema,
     dir: directory,
     gate: (name) => gates[name],
     prompt: (name) => prompts[name],

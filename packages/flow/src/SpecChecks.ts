@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { parsePageSpec } from "./PageSpec.ts"
 import { ReviewIssue, ReviewResult } from "./Review.ts"
 import type { WorkspaceError, WorkspaceShape } from "./Workspace.ts"
 
@@ -209,4 +210,42 @@ export const features = Effect.fn("@llm4ts/flow/SpecChecks.features")(function* 
     issues,
     summary: issues.length === 0 ? "features well-formed" : `${issues.length} malformed`
   })
+})
+
+/**
+ * Deterministic schema check of the specs a pack declares `spec-schema:`
+ * for: each program's spec must embed a block the schema decodes. A failure
+ * is a per-program Critical finding (titled like a judge finding, so the
+ * extraction gate's fix turn repairs that program), never a guess in a
+ * later phase — convert-page would otherwise be the first to notice.
+ */
+export const specSchemaIssues = Effect.fn("@llm4ts/flow/SpecChecks.specSchemaIssues")(function* (
+  schema: string | undefined,
+  specs: ReadonlyArray<{ readonly name: string; readonly markdown: string | undefined }>
+): Effect.fn.Return<ReadonlyArray<ReviewIssue>, never> {
+  if (schema !== "pagespec") {
+    return []
+  }
+  const issues: Array<ReviewIssue> = []
+  for (const spec of specs) {
+    const problem =
+      spec.markdown === undefined
+        ? "spec file is missing"
+        : yield* parsePageSpec(spec.markdown).pipe(
+            Effect.map(() => undefined),
+            Effect.catch((error) => Effect.succeed(error.message))
+          )
+    if (problem !== undefined) {
+      issues.push(
+        ReviewIssue.make({
+          severity: "Critical",
+          title: `judge[${spec.name}]: invalid pagespec block`,
+          description:
+            `${problem} — the spec must embed exactly one \`\`\`json pagespec block that ` +
+            "decodes as a PageSpec (forms, dtos, apiCalls, navigation as objects, not prose)."
+        })
+      )
+    }
+  }
+  return issues
 })

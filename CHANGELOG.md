@@ -11,6 +11,12 @@
   runbook. `SpecChecks` gained `capturedUnits` (units with their source
   files) and `coverageReport` (the gated result plus the out-of-scope list);
   `coverage` accepts an `inScope` option.
+- Packs can declare `spec-schema: pagespec` (the three J2EE packs now do):
+  the extraction gate then decodes every program spec's ```json pagespec
+block by code, before the judge, and reports an undecodable one as a
+per-program Critical finding the fix turn repairs. Found in the same
+rehearsal, where a spec written by an estate-wide fix round carried a
+prose `apiCalls`entry and`convert-page` was the first to reject it.
 
 ## 0.18.0
 

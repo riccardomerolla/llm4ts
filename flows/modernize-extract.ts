@@ -65,7 +65,13 @@ import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import { cachedReview } from "@llm4ts/flow/ReviewCache"
-import { coverageReport, coverageUnits, features, matchingFiles } from "@llm4ts/flow/SpecChecks"
+import {
+  coverageReport,
+  coverageUnits,
+  features,
+  matchingFiles,
+  specSchemaIssues
+} from "@llm4ts/flow/SpecChecks"
 import { SurveyGraph, closureFor, surveyGraph } from "@llm4ts/flow/Survey"
 import { withDraftApproval, requireApproval } from "@llm4ts/flow/Approval"
 import {
@@ -571,8 +577,21 @@ const program = Effect.gen(function* () {
           yield* rebuildIndexes
           const trace = (yield* files.read(join(modDirAbs, "traceability.md"))) ?? ""
           const mapping = (yield* files.read(join(modDirAbs, "mapping.md"))) ?? ""
+          // The pack's declared spec schema is checked by code, per program,
+          // before any judge runs: a pagespec block the converter could not
+          // decode is an incomplete extraction, not a page to guess at.
+          const schemaIssues = yield* specSchemaIssues(
+            pack.specSchema,
+            yield* Effect.forEach(units, (unit) =>
+              Effect.map(files.read(join(modDirAbs, "specs", `${unit.name}.md`)), (markdown) => ({
+                name: unit.name,
+                markdown
+              }))
+            )
+          )
           const docs = ReviewResult.make({
             issues: [
+              ...schemaIssues,
               ...(trace.trim().length === 0
                 ? [
                     ReviewIssue.make({

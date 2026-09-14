@@ -1,6 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { capturedUnits, coverage, coverageReport, CoverageRule } from "@llm4ts/flow/SpecChecks"
+import {
+  capturedUnits,
+  coverage,
+  coverageReport,
+  CoverageRule,
+  specSchemaIssues
+} from "@llm4ts/flow/SpecChecks"
 import { makeMemoryWorkspace } from "@llm4ts/flow/Workspace"
 
 const rules = [
@@ -64,6 +70,59 @@ describe("coverage", () => {
       })
       assert.lengthOf(cleared.result.issues, 0)
       assert.strictEqual(cleared.result.summary, "coverage complete")
+    })
+  )
+})
+
+describe("specSchemaIssues", () => {
+  const validBlock = [
+    "# accountOverview",
+    "",
+    "```json pagespec",
+    JSON.stringify({
+      page: "accountOverview",
+      route: "/accountOverview",
+      title: "Account Overview",
+      complexity: "low",
+      forms: [],
+      dtos: [],
+      apiCalls: [],
+      navigation: {},
+      sessionState: [],
+      openQuestions: []
+    }),
+    "```",
+    ""
+  ].join("\n")
+
+  it.effect("is silent for packs without a declared schema", () =>
+    Effect.gen(function* () {
+      const issues = yield* specSchemaIssues(undefined, [{ name: "x", markdown: "prose only" }])
+      assert.deepStrictEqual(issues, [])
+    })
+  )
+
+  it.effect("flags a missing, prose-only, or malformed pagespec block per program", () =>
+    Effect.gen(function* () {
+      const issues = yield* specSchemaIssues("pagespec", [
+        { name: "accountOverview", markdown: validBlock },
+        { name: "login", markdown: "# login\n\nNo block at all.\n" },
+        {
+          name: "transfer",
+          markdown:
+            '# transfer\n\n```json pagespec\n{"page":"transfer","apiCalls":["GET /transfer -> prose"]}\n```\n'
+        },
+        { name: "missing", markdown: undefined }
+      ])
+      assert.deepStrictEqual(
+        issues.map((issue) => [issue.title, issue.severity]),
+        [
+          ["judge[login]: invalid pagespec block", "Critical"],
+          ["judge[transfer]: invalid pagespec block", "Critical"],
+          ["judge[missing]: invalid pagespec block", "Critical"]
+        ]
+      )
+      assert.include(issues[1]?.description ?? "", "invalid page spec block")
     })
   )
 })

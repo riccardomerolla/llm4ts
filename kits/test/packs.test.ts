@@ -101,6 +101,13 @@ describe.each(packs)("kits/$kit/packs/$name", (expected) => {
       assert.doesNotThrow(() => new RegExp(pack.sources ?? ""))
       // modernize-seed scaffolds an empty target from the pack.
       assert.isDefined(pack.scaffold, "modernize-seed needs a scaffold")
+      // The J2EE packs embed a pagespec block the converter decodes; the
+      // extraction gate validates it deterministically per program.
+      assert.strictEqual(
+        pack.specSchema,
+        expected.source === "jsp" ? "pagespec" : undefined,
+        `${expected.name} spec-schema`
+      )
     })
   )
 

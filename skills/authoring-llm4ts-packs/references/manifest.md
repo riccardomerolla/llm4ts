@@ -5,17 +5,18 @@ as `key: value` lines until the first `## ` section.
 
 ## Header fields
 
-| Field          | Required | Default        | Meaning                                                                  |
-| -------------- | -------- | -------------- | ------------------------------------------------------------------------ |
-| `source`       | yes      |                | Legacy technology name used in prompts and reports                       |
-| `sources`      | no       | `.*`           | Regex over repo-relative paths: the files that make up the estate        |
-| `exclude`      | no       |                | Regex removing paths from `sources`                                      |
-| `programs`     | no       | every source   | Regex selecting the units extract writes one spec for                    |
-| `scaffold`     | no       |                | Pack-relative directory seed copies into an empty target                 |
-| `specs-dir`    | no       | `docs/specs`   | Target directory for specs                                               |
-| `features-dir` | no       | `features`     | Target directory for `.feature` files                                    |
-| `replay`       | no       |                | Command verify runs to replay equivalence vectors                        |
-| `programFiles` | no       | name substring | Regex template with `<NAME>` for the target files belonging to a program |
+| Field          | Required | Default        | Meaning                                                                                                      |
+| -------------- | -------- | -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `source`       | yes      |                | Legacy technology name used in prompts and reports                                                           |
+| `sources`      | no       | `.*`           | Regex over repo-relative paths: the files that make up the estate                                            |
+| `exclude`      | no       |                | Regex removing paths from `sources`                                                                          |
+| `programs`     | no       | every source   | Regex selecting the units extract writes one spec for                                                        |
+| `scaffold`     | no       |                | Pack-relative directory seed copies into an empty target                                                     |
+| `specs-dir`    | no       | `docs/specs`   | Target directory for specs                                                                                   |
+| `features-dir` | no       | `features`     | Target directory for `.feature` files                                                                        |
+| `replay`       | no       |                | Command verify runs to replay equivalence vectors                                                            |
+| `programFiles` | no       | name substring | Regex template with `<NAME>` for the target files belonging to a program                                     |
+| `spec-schema`  | no       |                | `pagespec`: every program spec must embed a decodable ```json pagespec block, checked by the extraction gate |
 
 ## Sections
 
