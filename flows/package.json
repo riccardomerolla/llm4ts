@@ -14,6 +14,7 @@
     "modernize-verify": "node --experimental-strip-types modernize-verify.ts",
     "modernize-review": "node --experimental-strip-types modernize-review.ts",
     "modernize-bench": "node --experimental-strip-types modernize-bench.ts",
+    "modernize-pack-check": "node --experimental-strip-types modernize-pack-check.ts",
     "judge-suite": "node --experimental-strip-types judge-suite.ts",
     "local": "node --experimental-strip-types local.ts",
     "sdd": "node --experimental-strip-types sdd.ts"

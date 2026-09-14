@@ -9,6 +9,16 @@
       "name": "using-llm4ts",
       "source": "./skills/using-llm4ts",
       "description": "Delegate a well-defined implementation task to llm4ts's autonomous plan-code-review flow."
+    },
+    {
+      "name": "authoring-llm4ts-flows",
+      "source": "./skills/authoring-llm4ts-flows",
+      "description": "Write, verify, and fork llm4ts flows under .llm4ts/flows/ for the llm4ts CLI."
+    },
+    {
+      "name": "authoring-llm4ts-packs",
+      "source": "./skills/authoring-llm4ts-packs",
+      "description": "Write a modernization pack for llm4ts's modernize-* flows and check it against an estate without an LLM."
     }
   ]
 }

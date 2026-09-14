@@ -5,6 +5,9 @@ and CLI coding agents, streaming, structured output, tools, plans and review
 loops, repository automation, trace replay, and a Node runner. `llm4ts` is the
 TypeScript implementation of [`llm4zio`](https://github.com/riccardomerolla/llm4zio).
 
+New to llm4ts and want to run and write flows? Start with the
+[getting started guide](docs/guide/README.md).
+
 ## Try it in one minute
 
 No Effect knowledge and no credentials required — the built-in mock provider
@@ -48,7 +51,12 @@ auth setup. `llm4ts --help` shows all options.
 
 Your coding agent can delegate work to llm4ts too: the
 [using-llm4ts skill](skills/using-llm4ts/README.md) teaches Claude Code, Pi,
-OpenCode, and Codex when and how to hand a task to `llm4ts run`.
+OpenCode, and Codex when and how to hand a task to `llm4ts run`. Two more
+skills teach the agent to write for llm4ts:
+[authoring-llm4ts-flows](skills/authoring-llm4ts-flows/README.md) (a flow
+under `.llm4ts/flows/`) and
+[authoring-llm4ts-packs](skills/authoring-llm4ts-packs/README.md) (a
+modernization pack, checked without an LLM).
 
 ## Author a flow in TypeScript
 
@@ -129,6 +137,8 @@ tarballs, and publishes with provenance.
 
 ## Documentation
 
+- [Getting started guide](docs/guide/README.md) — install, run a flow, write
+  your own, fork a built-in, write a pack
 - [Flow authoring guide](docs/flow-authoring.md)
 - [API guide](docs/api.md)
 - [Architecture](docs/architecture.md)

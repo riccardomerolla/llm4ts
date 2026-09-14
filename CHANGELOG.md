@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+- Getting started guide under `docs/guide/`: seven one-screen chapters for
+  a developer with a coding agent installed — install and `doctor`, run
+  `implement` on a throwaway repo, write a zero-install hello flow under
+  `.llm4ts/flows/`, fork a built-in with `llm4ts view`, write a
+  modernization pack, troubleshoot the five first-run errors — with six
+  Mermaid diagrams (the ladder, flow discovery and launch, the implement
+  loop, what `runNode` wires, the modernization phases with their human
+  gates, and a spec-driven TDD phase over a pack). `docs/flow-authoring.md`
+  stays the deep reference the guide hands over to.
+- `modernize-pack-check`, the phase before the first paid one: loads a pack
+  exactly as survey and extract do, matches `sources:`, `programs:`, and
+  every `## Coverage:` and `## Survey:` rule against the estate at `--repo`,
+  prints a sample of each rule's units, and lists likely mistakes as
+  warnings. No model call; a `sources:` or `programs:` regex that matches
+  nothing fails the check.
+- Two agent skills beside `using-llm4ts`: `authoring-llm4ts-flows` (write,
+  verify offline, and fork a flow) and `authoring-llm4ts-packs` (write a
+  pack and check it). Their embedded templates are the same text as guide
+  chapters 3 and 5, and `examples/test/skills-sync.test.ts` runs the hello
+  template through the shell's resolve fallback against the mock provider
+  and loads the pack template with the real loader, so neither can drift
+  from the API.
+
 ## 0.16.2
 
 - Portal fixture: eslint ignores `.llm4ts/` and any nested `dist/`. The

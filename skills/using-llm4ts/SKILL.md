@@ -17,6 +17,8 @@ better.
   review flow.
 - NOT for exploratory/interactive work, or edits small enough to just make
   yourself.
+- NOT for writing a new flow or a modernization pack: those are the
+  `authoring-llm4ts-flows` and `authoring-llm4ts-packs` skills.
 
 ## How
 

@@ -8,7 +8,9 @@ directly against `runNode` — publishing your own events, reaching the
 connector's raw streaming API, or composing more than one prompt in a single
 Effect program. This guide assumes no prior Effect experience but does assume
 you're comfortable reading TypeScript; each call in the walkthrough below is
-explained as it appears.
+explained as it appears. If you have not run a flow yet, the shorter
+[getting started guide](guide/README.md) comes first; its chapters 3 and 4
+are the on-ramp to this one.
 
 This is example-driven, not a reference. For the full list of exports per
 package, see the [API guide](api.md); for how the packages depend on each

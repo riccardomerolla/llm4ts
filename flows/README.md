@@ -6,21 +6,22 @@ a single self-contained script: it imports only `@llm4ts/*`, `effect`, and
 one-line description. These scripts double as the built-in flows of the
 `llm4ts` shell.
 
-| Flow                     | What it does                                                  | Requirements               |
-| ------------------------ | ------------------------------------------------------------- | -------------------------- |
-| `implement.ts`           | Persistent plan, branch, task review/fix, and commits         | selected CLI + Git         |
-| `epic-stories.ts`        | Epic → story DAG → parallel coders in worktrees → epic branch | reasoner CLI + pi + Git    |
-| `issue-pr.ts`            | GitHub issue assessment through pushed pull request           | selected CLI + GitHub      |
-| `sdd.ts`                 | Spec → red tests → implementation → green verification        | selected CLI + Maven       |
-| `local.ts`               | LM Studio reasoning followed by a local pi coding agent       | LM Studio + pi             |
-| `judge-suite.ts`         | Three-run LLM-as-a-Judge evaluation with variance reporting   | selected CLI               |
-| `modernize-survey.ts`    | Phase 0 — inventory, dependency graph, triage, wave plan      | selected CLI + Git + pack  |
-| `modernize-extract.ts`   | Phase 1 — legacy estate → judged, approved spec pack          | selected CLI + Git + pack  |
-| `modernize-seed.ts`      | Phase 2 — seed the target from the approved pack (no LLM)     | Git + pack + legacy repo   |
-| `modernize-implement.ts` | Phase 3 — implement the plan behind the pack's gates          | selected CLI + Git + build |
-| `modernize-verify.ts`    | Phase 4 — equivalence vectors, replay, rule coverage          | selected CLI + replay cmd  |
-| `modernize-review.ts`    | Phase 5 — lens review, fix specs, distilled pack lessons      | selected CLI + Git + pack  |
-| `modernize-bench.ts`     | Measure an extraction run; report and project wave cost       | selected CLI + pack        |
+| Flow                      | What it does                                                  | Requirements               |
+| ------------------------- | ------------------------------------------------------------- | -------------------------- |
+| `implement.ts`            | Persistent plan, branch, task review/fix, and commits         | selected CLI + Git         |
+| `epic-stories.ts`         | Epic → story DAG → parallel coders in worktrees → epic branch | reasoner CLI + pi + Git    |
+| `issue-pr.ts`             | GitHub issue assessment through pushed pull request           | selected CLI + GitHub      |
+| `sdd.ts`                  | Spec → red tests → implementation → green verification        | selected CLI + Maven       |
+| `local.ts`                | LM Studio reasoning followed by a local pi coding agent       | LM Studio + pi             |
+| `judge-suite.ts`          | Three-run LLM-as-a-Judge evaluation with variance reporting   | selected CLI               |
+| `modernize-survey.ts`     | Phase 0 — inventory, dependency graph, triage, wave plan      | selected CLI + Git + pack  |
+| `modernize-extract.ts`    | Phase 1 — legacy estate → judged, approved spec pack          | selected CLI + Git + pack  |
+| `modernize-seed.ts`       | Phase 2 — seed the target from the approved pack (no LLM)     | Git + pack + legacy repo   |
+| `modernize-implement.ts`  | Phase 3 — implement the plan behind the pack's gates          | selected CLI + Git + build |
+| `modernize-verify.ts`     | Phase 4 — equivalence vectors, replay, rule coverage          | selected CLI + replay cmd  |
+| `modernize-review.ts`     | Phase 5 — lens review, fix specs, distilled pack lessons      | selected CLI + Git + pack  |
+| `modernize-bench.ts`      | Measure an extraction run; report and project wave cost       | selected CLI + pack        |
+| `modernize-pack-check.ts` | Phase -1 — load a pack, match its rules against an estate     | pack + estate (no LLM)     |
 
 These flows deliberately invoke real providers or installed coding CLIs and
 are not part of the default test suite. Build the packages once before
@@ -217,8 +218,20 @@ run rooted at the **target** repository, behind an enforced clean-room wall
 that refuses to start if any legacy source is reachable there.
 
 ```text
-survey → [human approves waves] → extract → [human approves the pack]
-       → seed → implement → verify → review ⤴ (fix tasks re-enter implement)
+pack-check → survey → [human approves waves] → extract → [human approves the pack]
+           → seed → implement → verify → review ⤴ (fix tasks re-enter implement)
+```
+
+`modernize-pack-check` is the phase before the first paid one: it loads the
+pack exactly as survey and extract do, matches every `sources:`, `programs:`,
+`## Coverage:` and `## Survey:` rule against the estate at `--repo`, prints a
+sample of the units each rule captured, and lists likely mistakes (a rule
+capturing nothing, a missing prompt sidecar, a scaffold path that does not
+exist) as warnings. It makes no model call, so it is the place to iterate on
+a new pack's regexes before spending a survey run:
+
+```sh
+LLM4TS_PACK=packs/my-pack llm4ts run modernize-pack-check --repo /path/to/legacy-estate
 ```
 
 Every phase reads a modernization **pack** (`@llm4ts/flow/Pack`): a directory
