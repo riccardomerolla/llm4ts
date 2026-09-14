@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.17.0
 
 - Getting started guide under `docs/guide/`: seven one-screen chapters for
   a developer with a coding agent installed — install and `doctor`, run
