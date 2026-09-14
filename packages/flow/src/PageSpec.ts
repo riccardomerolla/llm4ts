@@ -140,7 +140,7 @@ export const pageSpecShapeHint =
   "The block must be exactly: { page, route, title, complexity: low|medium|high, " +
   "forms: [{ name, action, fields: [{ name, label, type, required?, validations: [{ rule, message?, enforcedAt: client|server|both }] }] }], " +
   "dtos: [{ legacyName, domainName, fields: [{ legacyName, domainName, type }] }], " +
-  "apiCalls: [{ operation, method, path, esbService?, request: [{ legacyName, domainName, type }], response: [{ legacyName, domainName, type }] }], " +
+  "apiCalls: [{ operation, method, path, esbService (the ESB service the legacy call goes through — omit only when there is none), request: [{ legacyName, domainName, type }], response: [{ legacyName, domainName, type }] }], " +
   "navigation: { inbound: [string], outbound: [string], steps: [string] }, sessionState: [string], openQuestions: [string] }. " +
   "No other keys (no id, url, queryParams, esbCall, trigger, serverController); every apiCalls entry is an object with operation/method/path; " +
   "put anything that does not fit into the prose sections or openQuestions."

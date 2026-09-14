@@ -187,5 +187,46 @@ export LLM4TS_ADO_PROJECT=<project>
 
 | Rehearsal | Date | Act 1 | Act 2/page | Full walk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 1 | | | | | |
+| 1 | 2026-09-14/15 | survey 5m47s ($1.08 est.); extract wave-1 (9 pages, concurrency 3): 11m06s extraction + 1m40s gate + fix rounds ≈ 30–45 min; extract wave-2 (1 page): 2m27s extraction + gate/fix rounds ≈ 16 min | accountOverview 44m29s: acl 12m36s, page 18m33s, tests 12m25s, verify 11s, judge 44s — judge NOT cleared | ≈ 2h30 of flow time, plus reruns | first live walk; 4 findings below, 3 fixed in 0.18.1; the demo estate was a scratch copy, the coder seat `claude` |
 | 2 | | | | | |
+
+### Rehearsal 1 findings (2026-09-14/15)
+
+1. **Act 2's first page is not in wave-1.** The survey puts `accountOverview`
+   in wave-2 (wave-1 is the navigation shell). Act 1 now extracts wave-2 as
+   well (see above). Runbook fixed.
+2. **A wave-scoped extraction could never clear its gate.** Coverage ran
+   over the whole estate, so wave-1 failed on `/accountOverview` and
+   `doTransfer` (wave-2/4 units) and burned three fix rounds — ~17 min per
+   attempt — trying to cover them. Fixed in 0.18.1: a wave gates only its
+   own units and lists the rest as not gating; one closing run without
+   `LLM4TS_WAVE` enforces estate-wide coverage.
+3. **A malformed `pagespec` block reached `convert-page`.** The old
+   estate-wide fix round had drafted `accountOverview.md` with `apiCalls`
+   as prose strings; the judge scored it, and `convert-page` was the first
+   to reject it (`invalid page spec block ... at ["apiCalls"][0]`). Fixed in
+   0.18.1: J2EE packs declare `spec-schema: pagespec`, the extraction gate
+   decodes every block by code before the judge, and the finding states the
+   exact shape the analyst must produce (the first fix round without that
+   hint failed twice; with it, one round).
+4. **The page spec cannot express a list response.** `apiCalls[].response`
+   is a flat list of field mappings, so the deterministic OpenAPI contract
+   flattened `accts[].curBal` into a single `currentBalance` scalar and the
+   coder built a one-balance page; the judge scored spec-compliance 0
+   against the spec's per-account table. OPEN: `PageSpec` needs a DTO
+   reference with a list/single shape on the response (and `openApiFor`
+   an array schema) before Act 2 can pass on `accountOverview`. Until then,
+   rehearse Act 2 on a single-object page, or accept the judge failure as
+   the governance beat it is (the branch, contract, tests, and gates are all
+   there; only the judge verdict blocks).
+
+Also observed, not fixed: Claude's structured replies for page specs
+arrived with raw control characters inside JSON strings on three of nine
+wave-1 pages, each costing one repair retry (self-healed); the extraction
+judge's context is narrower than the analyst's closure, so it scored
+`faithfulness` 1 for facts the analyst legitimately read from the servlet
+and ESB sources; `convert-page` places `layout.tsx`, `registry.ts`, and
+`components.css` edits outside the pack's `programFiles`, so the judge sees
+them only as a summary and returns three "cannot verify" findings. Cost
+figures were estimates throughout; the first wave-1 attempt alone reported
+$12.26 estimated before it was stopped.

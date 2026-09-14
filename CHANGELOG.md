@@ -16,7 +16,9 @@
 block by code, before the judge, and reports an undecodable one as a
 per-program Critical finding the fix turn repairs. Found in the same
 rehearsal, where a spec written by an estate-wide fix round carried a
-prose `apiCalls`entry and`convert-page` was the first to reject it.
+prose `apiCalls`entry and`convert-page` was the first to reject it. The
+finding states the exact block shape (`pageSpecShapeHint`), which turned
+  two failed fix rounds into one that passed.
 
 ## 0.18.0
 
