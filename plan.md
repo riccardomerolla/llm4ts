@@ -58,12 +58,13 @@ current source library:
       │
       ▼
 @llm4ts/runner
-   ┌──┴──────────┬─────────────┐
-   ▼             ▼             ▼
-@llm4ts/modernize  @llm4ts/js  @llm4ts/shell
+      ┌──┴──────────┐
+      ▼             ▼
+  @llm4ts/js   @llm4ts/shell
 ```
 
-`modernize` may also consume `flow` and `core` directly. `js` is a thin
+(`@llm4ts/modernize` was folded into `flow` in 0.18.0: its `Approval` and
+`Artifacts` modules moved, its unused state machine was removed.) `js` is a thin
 Promise/exception facade analogous to the source Java facade and must not become
 a second implementation. `shell` is the interactive terminal entry point and
 subcommand CLI (ADR 0006); the runner keeps zero knowledge of it.
@@ -94,7 +95,7 @@ subcommand CLI (ADR 0006); the runner keeps zero knowledge of it.
 - MCP/JSON-RPC server and CLI entry points.
 - Examples that exercise the public library rather than private internals.
 
-### `@llm4ts/modernize`
+### `@llm4ts/modernize` (retired in 0.18.0 — folded into `flow` and the `modernize-*` flows)
 
 - The source product's modernization workflow and its six phases.
 - Assessment artifacts, migration plans, execution, verification, and reporting.

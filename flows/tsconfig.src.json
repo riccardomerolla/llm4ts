@@ -4,8 +4,7 @@
   "references": [
     { "path": "../packages/core/tsconfig.src.json" },
     { "path": "../packages/flow/tsconfig.src.json" },
-    { "path": "../packages/runner/tsconfig.src.json" },
-    { "path": "../packages/modernize/tsconfig.src.json" }
+    { "path": "../packages/runner/tsconfig.src.json" }
   ],
   "compilerOptions": {
     "baseUrl": ".",
@@ -15,8 +14,7 @@
     "paths": {
       "@llm4ts/core/*": ["../packages/core/src/*"],
       "@llm4ts/flow/*": ["../packages/flow/src/*"],
-      "@llm4ts/runner/*": ["../packages/runner/src/*"],
-      "@llm4ts/modernize/*": ["../packages/modernize/src/*"]
+      "@llm4ts/runner/*": ["../packages/runner/src/*"]
     }
   }
 }

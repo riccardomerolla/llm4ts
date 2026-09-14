@@ -86,9 +86,20 @@ export list; the following modules are the main entry points.
 - `@llm4ts/flow/PrSummary`: structured pull-request titles and bodies.
 - `@llm4ts/flow/Replay`, `Equiv`, and `EquivReport`: offline replay and
   behavioral proof.
+- `@llm4ts/flow/Artifacts`: resumable per-program extraction and vector
+  generation; `@llm4ts/flow/Approval`: the draft marker and human gate the
+  modernization phases pause on (both moved here from the retired
+  `@llm4ts/modernize` package in 0.18.0).
 
 ## Runner
 
+- `@llm4ts/runner` (root): the flow author's barrel — `runNode`,
+  `runFlowMain`, `resolveFlowInput`, `coderFromEnv`,
+  `apiConnectorFromEnvironment`, `openPack`, and the flow verbs a script
+  calls (`completeAndPublish`, `implementPlanFlow`, `stage`,
+  `implementTaskLoop`, `reviewAndFixLoop`, `lintCommand`, `makePlanStore`,
+  `planFrom`, `defaultPlanPath`, events, errors). Re-exports only; the
+  subpaths below remain the contract.
 - `@llm4ts/runner/FlowRunner`: `runEmbedded`, `runNode`, and Node dependency
   presets. The flow context carries `contextFor(workDir)`: the same seats
   rebound to another directory (a story worktree), sharing the run's events
@@ -96,17 +107,11 @@ export list; the following modules are the main entry points.
   part in parallel story execution.
 - `@llm4ts/runner/Connectors`: API presets, source-compatible environment
   enrichment, immutable configuration transforms, and edit-capable CLI presets.
+- `@llm4ts/runner/Kits` and `Packs`: kit discovery across the project,
+  global, and built-in tiers, pack name resolution, `openPack`, and the
+  kit's pattern deck (ADR 0014).
 - `@llm4ts/runner/Cli`: command-line composition.
 - `@llm4ts/runner/McpStdio`: JSON-RPC MCP stdio transport.
-
-## Modernize
-
-- `@llm4ts/modernize/Modernize`: six-phase state machine and approval
-  composition.
-- `@llm4ts/modernize/Model`: phase, checkpoint, outcome, and error schemas.
-- `@llm4ts/modernize/Artifacts`: resumable per-program extraction and vector
-  generation.
-- `@llm4ts/modernize/Approval`: draft marker and human gate.
 
 ## JavaScript
 

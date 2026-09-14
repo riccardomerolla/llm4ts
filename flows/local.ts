@@ -1,10 +1,15 @@
 // Local-first flow: an LM Studio reasoner drafts the plan, a local pi agent implements it.
 import * as Effect from "effect/Effect"
-import { completeAndPublish } from "@llm4ts/flow/Flow"
-import { AssistantMessage, Info } from "@llm4ts/flow/FlowEvents"
-import { lmStudio, pi, withModel, withTimeoutSeconds } from "@llm4ts/runner/Connectors"
-import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
-import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
+import {
+  AssistantMessage,
+  Info,
+  completeAndPublish,
+  resolveFlowInput,
+  runFlowMain,
+  runNode,
+  withModel
+} from "@llm4ts/runner"
+import { lmStudio, pi, withTimeoutSeconds } from "@llm4ts/runner/Connectors"
 
 const reasoningModel = process.env.LLM4TS_REASONING_MODEL ?? "qwen/qwen3-coder-30b"
 const coderModel = process.env.LLM4TS_CODER_MODEL ?? reasoningModel

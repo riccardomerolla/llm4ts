@@ -2,8 +2,8 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import type { FlowError } from "@llm4ts/flow/FlowError"
-import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import type { FlowError } from "./FlowError.ts"
+import type { PlainFileStoreShape } from "./Persistence.ts"
 
 export class ProgramUnit extends Schema.Class<ProgramUnit>("ProgramUnit")({
   name: Schema.String,
@@ -67,7 +67,7 @@ type Outcome = "created" | "skipped" | "not-started"
  * death costs only the programs it interrupted, and a rerun resumes the rest.
  */
 export const extractProgramsResumably = Effect.fn(
-  "@llm4ts/modernize/Artifacts.extractProgramsResumably"
+  "@llm4ts/flow/Artifacts.extractProgramsResumably"
 )(function* <E, R, E2 = never, R2 = never>(
   files: PlainFileStoreShape,
   units: ReadonlyArray<ProgramUnit>,
@@ -139,7 +139,7 @@ export const extractProgramsResumably = Effect.fn(
 })
 
 export const generateVectorsResumably = Effect.fn(
-  "@llm4ts/modernize/Artifacts.generateVectorsResumably"
+  "@llm4ts/flow/Artifacts.generateVectorsResumably"
 )(function* <E, R>(
   files: PlainFileStoreShape,
   programs: ReadonlyArray<string>,

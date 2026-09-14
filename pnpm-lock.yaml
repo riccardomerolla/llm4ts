@@ -74,9 +74,6 @@ importers:
       '@llm4ts/flow':
         specifier: workspace:*
         version: link:../packages/flow
-      '@llm4ts/modernize':
-        specifier: workspace:*
-        version: link:../packages/modernize
       '@llm4ts/runner':
         specifier: workspace:*
         version: link:../packages/runner
@@ -131,22 +128,6 @@ importers:
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
 
-  packages/modernize:
-    dependencies:
-      '@llm4ts/core':
-        specifier: workspace:*
-        version: link:../core
-      '@llm4ts/flow':
-        specifier: workspace:*
-        version: link:../flow
-      '@llm4ts/runner':
-        specifier: workspace:*
-        version: link:../runner
-    devDependencies:
-      effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
-
   packages/runner:
     dependencies:
       '@llm4ts/core':
@@ -174,9 +155,6 @@ importers:
       '@llm4ts/flow':
         specifier: workspace:*
         version: link:../flow
-      '@llm4ts/modernize':
-        specifier: workspace:*
-        version: link:../modernize
       '@llm4ts/runner':
         specifier: workspace:*
         version: link:../runner

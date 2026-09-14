@@ -13,6 +13,7 @@
     "src"
   ],
   "exports": {
+    ".": "./dist/index.js",
     "./Cli": "./dist/Cli.js",
     "./CoderPolicy": "./dist/CoderPolicy.js",
     "./Connectors": "./dist/Connectors.js",

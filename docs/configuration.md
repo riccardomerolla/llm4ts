@@ -67,12 +67,12 @@ separate checks.
 
 ## Modernization
 
-The default checkpoint is `docs/modernization/state.json`. The source-compatible
-approval marker is `- [x] Approved`:
+The phases persist their own artifacts under `docs/modernization/` of the
+repository they run in. The source-compatible approval marker is
+`- [x] Approved`:
 
 - approve `docs/modernization/wave-plan.md` before extraction;
 - approve `docs/modernization/README.md` before seeding.
 
 Phase bodies receive their LLM, repository, workspace, and forge dependencies
-through public Effect composition. No provider is selected inside the
-modernization state machine.
+through `runNode`; no provider is selected inside the flow package.

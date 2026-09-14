@@ -21,17 +21,20 @@
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import { FlowAborted } from "@llm4ts/flow/FlowError"
-import { Info } from "@llm4ts/flow/FlowEvents"
-import { stage } from "@llm4ts/flow/PlanExecution"
+import {
+  FlowAborted,
+  Info,
+  makeNodeWorkspace,
+  mock,
+  openPack,
+  resolveFlowInput,
+  runFlowMain,
+  runNode,
+  stage
+} from "@llm4ts/runner"
 import { coverageUnits, matchingFiles } from "@llm4ts/flow/SpecChecks"
 import type { CoverageRule } from "@llm4ts/flow/SpecChecks"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
-import { mock } from "@llm4ts/runner/Connectors"
-import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
-import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
-import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
-import { openPack } from "@llm4ts/runner/Packs"
 
 /** Prompt sidecars the modernization phases read, with the phase that reads each. */
 const phasePrompts: ReadonlyArray<readonly [name: string, phase: string]> = [

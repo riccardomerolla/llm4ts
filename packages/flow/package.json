@@ -13,6 +13,8 @@
     "src"
   ],
   "exports": {
+    "./Approval": "./dist/Approval.js",
+    "./Artifacts": "./dist/Artifacts.js",
     "./package.json": "./package.json",
     "./Activity": "./dist/Activity.js",
     "./AzureDevOpsTool": "./dist/AzureDevOpsTool.js",

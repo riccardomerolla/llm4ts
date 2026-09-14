@@ -10,7 +10,6 @@ export default defineConfig({
       "@llm4ts/core": path.resolve(repositoryRoot, "packages/core/src"),
       "@llm4ts/flow": path.resolve(repositoryRoot, "packages/flow/src"),
       "@llm4ts/runner": path.resolve(repositoryRoot, "packages/runner/src"),
-      "@llm4ts/modernize": path.resolve(repositoryRoot, "packages/modernize/src"),
       "@llm4ts/js": path.resolve(repositoryRoot, "packages/js/src"),
       "@llm4ts/shell": path.resolve(repositoryRoot, "packages/shell/src")
     }

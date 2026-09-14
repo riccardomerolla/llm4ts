@@ -4,11 +4,13 @@ The workspace follows one dependency direction:
 
 ```text
 core → flow → runner → js
-          └────→ modernize
+                 └────→ shell
 ```
 
-`modernize` also consumes `core` and `runner` through their exported subpaths.
-No package imports another package's `src` directory.
+No package imports another package's `src` directory. `@llm4ts/runner`'s
+root export is the flow author's barrel: re-exports of the runner and flow
+verbs a flow script uses, with the subpath exports staying the contract for
+everything else.
 
 ## Core
 
@@ -30,20 +32,30 @@ process effects remain injected.
 implementations, connector registration, scoped terminal/trace/cost consumers,
 CLI parsing, and MCP stdio. Protocol stdout is isolated from terminal output.
 
-## Modernize
+## Modernization phases and kits
 
-`@llm4ts/modernize` orchestrates six ordered phases:
+The six modernization phases are the `modernize-*` flow scripts shipped in
+the shell's built-in tier, each resumable on its own artifacts:
 
 ```text
-survey → extract → seed → implement → verify → review
+pack-check → survey → extract → seed → implement → verify → review
 ```
 
-The state document is versioned and written after each transition. Completed
-predecessors are not repeated after failure or interruption. Existing program
-specifications and verification vectors are artifact-level checkpoints, while
-implementation reuses the flow package's task-level plan persistence.
-Extraction requires an approved wave plan; seeding requires an approved
-specification pack.
+Existing program specifications and verification vectors are artifact-level
+checkpoints (`@llm4ts/flow/Artifacts`), implementation reuses the task-level
+plan persistence, and the human gates are markdown approval markers
+(`@llm4ts/flow/Approval`): extraction requires an approved wave plan, seeding
+an approved specification pack. Everything stack-specific — pack manifests,
+scaffolds, pattern cards, and stack-only flows — comes from a kit (ADR 0014),
+discovered in the project, global, and built-in tiers and shipped beside the
+engine flows.
+
+## Shell
+
+`@llm4ts/shell` is the `llm4ts` CLI and interactive menu (ADR 0006): it
+discovers flows and kits across the three tiers and launches a flow as a
+child `node` process with type stripping, resolving `@llm4ts/*` from its own
+installation when the project pins none.
 
 ## JavaScript facade
 

@@ -15,13 +15,13 @@
 
 ```text
 core → flow → runner → js
-                 ├────→ modernize
                  └────→ shell
 ```
 
-`modernize` may also depend directly on `core` and `flow`. `shell` is the
-interactive terminal entry point and `llm4ts` CLI (ADR 0006); the runner
-keeps zero knowledge of it.
+`shell` is the interactive terminal entry point and `llm4ts` CLI (ADR 0006);
+the runner keeps zero knowledge of it. Stack-specific material (packs,
+scaffolds, pattern cards, kit flows) lives in `kits/` (ADR 0014), not in a
+package.
 
 ## Non-Negotiable Rules
 

@@ -11,7 +11,7 @@ import {
   programArtifactPaths,
   ProgramArtifacts,
   ProgramUnit
-} from "@llm4ts/modernize/Artifacts"
+} from "@llm4ts/flow/Artifacts"
 
 const memoryFiles = (state: Ref.Ref<Readonly<Record<string, string>>>): PlainFileStoreShape => ({
   read: (path) => Ref.get(state).pipe(Effect.map((files) => files[path])),

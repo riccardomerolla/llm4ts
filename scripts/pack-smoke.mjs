@@ -11,7 +11,7 @@ import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-const packages = ["core", "flow", "runner", "modernize", "js", "shell"]
+const packages = ["core", "flow", "runner", "js", "shell"]
 
 const run = (command, args, options = {}) =>
   execFileSync(command, args, {
@@ -59,12 +59,16 @@ import { collect } from "@llm4ts/core/Streaming"
 import { FlowContext } from "@llm4ts/flow/FlowContext"
 import { AssistantMessage } from "@llm4ts/flow/FlowEvents"
 import { runNode } from "@llm4ts/runner/FlowRunner"
-import { makeModernize } from "@llm4ts/modernize/Modernize"
+import { runFlowMain, resolveFlowInput, completeAndPublish } from "@llm4ts/runner"
+import { requireApproval } from "@llm4ts/flow/Approval"
 import { createClient } from "@llm4ts/js"
 import { parseFlowDescription } from "@llm4ts/shell/FlowCatalog"
 
 assert.equal(typeof runNode, "function")
-assert.equal(typeof makeModernize, "function")
+assert.equal(typeof runFlowMain, "function")
+assert.equal(typeof resolveFlowInput, "function")
+assert.equal(typeof completeAndPublish, "function")
+assert.equal(typeof requireApproval, "function")
 assert.equal(parseFlowDescription("// a demo flow\\n"), "a demo flow")
 assert.equal(typeof collect, "function")
 assert.ok(ConnectorIds.Mock)

@@ -93,14 +93,13 @@ LLM4TS_CODER=codex examples/seed.sh implement --run
 
 ## Packages
 
-| Package             | Purpose                                                       |
-| ------------------- | ------------------------------------------------------------- |
-| `@llm4ts/js`        | Promise-based client — the fastest way to try llm4ts          |
-| `@llm4ts/shell`     | `llm4ts` CLI and interactive menu over discovered flows       |
-| `@llm4ts/runner`    | Node runner, terminal rendering, MCP stdio                    |
-| `@llm4ts/flow`      | Plans, events, persistence, repositories, review, replay      |
-| `@llm4ts/core`      | Models, connectors, providers, tools, eval, observability     |
-| `@llm4ts/modernize` | Resumable survey/extract/seed/implement/verify/review product |
+| Package          | Purpose                                                   |
+| ---------------- | --------------------------------------------------------- |
+| `@llm4ts/js`     | Promise-based client — the fastest way to try llm4ts      |
+| `@llm4ts/shell`  | `llm4ts` CLI and interactive menu over discovered flows   |
+| `@llm4ts/runner` | Node runner, terminal rendering, MCP stdio                |
+| `@llm4ts/flow`   | Plans, events, persistence, repositories, review, replay  |
+| `@llm4ts/core`   | Models, connectors, providers, tools, eval, observability |
 
 ## Configuration
 

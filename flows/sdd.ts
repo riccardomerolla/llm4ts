@@ -1,23 +1,31 @@
 // Spec-driven development: write a specification, encode it as red tests, implement to green.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import { makeChat } from "@llm4ts/flow/Chat"
-import { FlowAborted } from "@llm4ts/flow/FlowError"
-import { Plan, defaultPlanPath } from "@llm4ts/flow/Plan"
-import { implementTaskLoop, stage } from "@llm4ts/flow/PlanExecution"
-import { defaultPlanInstructions, planFrom, writeBrief } from "@llm4ts/flow/Planner"
-import { makePlanStore } from "@llm4ts/flow/Persistence"
 import {
+  FlowAborted,
+  Plan,
+  asReadOnly,
+  coderFromEnv,
+  defaultPlanInstructions,
+  defaultPlanPath,
+  implementTaskLoop,
   lintCommand,
+  makeChat,
+  makePlanStore,
   minimalReviewers,
+  nodePlainFileStore,
+  nodeProcessExecutor,
+  planFrom,
+  resolveFlowInput,
   reviewAndFixLoop,
-  type ReviewResult
-} from "@llm4ts/flow/Review"
-import { asReadOnly, coderFromEnv, gemini, withModel } from "@llm4ts/runner/Connectors"
-import { resolveFlowInput } from "@llm4ts/runner/FlowArgs"
-import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
-import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
-import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
+  runFlowMain,
+  runNode,
+  stage,
+  withModel,
+  writeBrief
+} from "@llm4ts/runner"
+import type { ReviewResult } from "@llm4ts/runner"
+import { gemini } from "@llm4ts/runner/Connectors"
 
 const proModel = process.env.LLM4TS_REASONING_MODEL ?? "gemini-3-pro-preview"
 const flashModel = process.env.LLM4TS_CODER_MODEL ?? "gemini-2.5-flash"

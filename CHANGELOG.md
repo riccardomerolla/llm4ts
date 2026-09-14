@@ -17,8 +17,23 @@
   instead of root directories. `node_modules/@llm4ts/shell/flows/packs` no
   longer exists; the shipped kits are at `node_modules/@llm4ts/shell/kits`.
 
+- `@llm4ts/modernize` is retired. `Approval` and `Artifacts` moved to
+  `@llm4ts/flow/Approval` and `@llm4ts/flow/Artifacts` unchanged; the
+  `Modernize`/`Model` state machine, which no flow ever called, is removed
+  (`docs/parity.md` records the divergence: phases run as resumable scripts
+  over artifact checkpoints and markdown approval gates). The npm package is
+  deprecated in favour of `@llm4ts/flow`.
+
 ### Added
 
+- `@llm4ts/runner` gained a root export, the flow author's barrel: the
+  runner and flow verbs a flow script uses (`runNode`, `runFlowMain`,
+  `resolveFlowInput`, `coderFromEnv`, `apiConnectorFromEnvironment`,
+  `openPack`, `completeAndPublish`, `implementPlanFlow`, `stage`,
+  `implementTaskLoop`, `reviewAndFixLoop`, `lintCommand`, `makePlanStore`,
+  `planFrom`, `defaultPlanPath`, events, errors) re-exported so a script
+  needs one import line. Re-exports only; the subpaths stay the contract.
+  Every shipped flow now imports from it.
 - Kit discovery in `@llm4ts/runner/Kits` across the project
   (`.llm4ts/kits/`), global (`~/.config/llm4ts/kits/`), and built-in tiers,
   with project > global > builtin shadowing by kit name and an error naming

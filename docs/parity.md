@@ -428,6 +428,11 @@ reference release.
     source's `LLM4ZIO_*` pair), `LLM4TS_ANALYST_TURNS`,
     `LLM4TS_MAX_CLOSURE_FILES`. Node has no system-property channel, so the
     source's `llm4zio.<NAME>` property fallback has no counterpart.
+  - The source's `Modernize` state machine (versioned `state.json`, ordered
+    phase handlers) has no counterpart since 0.18.0: llm4ts runs each phase
+    as its own resumable script over artifact-level checkpoints
+    (`@llm4ts/flow/Artifacts`) and markdown approval gates
+    (`@llm4ts/flow/Approval`); the `@llm4ts/modernize` package is retired.
   - `ProgramJudge` lives in `@llm4ts/flow`, not the modernize package:
     llm4ts phase logic runs in `flows/*.ts` scripts, so shared seams must
     sit in the flow package to be testable and reusable. It takes its
