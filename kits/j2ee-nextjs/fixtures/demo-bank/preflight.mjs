@@ -26,6 +26,14 @@ tool("git available", "git", ["--version"])
 tool("node >= 20", "node", ["--version"])
 tool("pnpm available", "pnpm", ["--version"])
 tool("claude CLI available (the coder seat)", "claude", ["--version"])
+check("llm4ts CLI available", () => execFileSync("llm4ts", ["--version"], { stdio: "pipe" }))
+check("llm4ts kits ships j2ee-nextjs/j2ee-nextjs-spa (ADR 0014)", () => {
+  const kits = JSON.parse(execFileSync("llm4ts", ["kits", "--json"], { encoding: "utf8" }))
+  const kit = kits.find((candidate) => candidate.name === "j2ee-nextjs")
+  if (kit === undefined || !kit.packs.includes("j2ee-nextjs-spa")) {
+    throw new Error("the j2ee-nextjs kit or its j2ee-nextjs-spa pack is missing — upgrade @llm4ts/shell to 0.18.0+")
+  }
+})
 
 check("legacy fixture seeds + smoke", () =>
   execFileSync("node", [join(here, "smoke-legacy-j2ee.mjs")], { stdio: "pipe" })

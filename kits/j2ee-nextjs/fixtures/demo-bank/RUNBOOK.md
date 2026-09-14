@@ -18,9 +18,10 @@ node kits/j2ee-nextjs/fixtures/demo-bank/preflight.mjs
 ```
 
 Preflight seeds both fixtures into a temp dir, runs their smoke checks, and
-verifies git, pnpm, and the `claude` CLI are present. Fix anything red before
-continuing. Then materialize the demo estate (pick a short path you can type
-on stage):
+verifies git, pnpm, the `claude` CLI, and that the installed `llm4ts` ships
+the `j2ee-nextjs` kit with its `j2ee-nextjs-spa` pack (`@llm4ts/shell`
+0.18.0 or newer). Fix anything red before continuing. Then materialize the
+demo estate (pick a short path you can type on stage):
 
 ```bash
 node kits/j2ee-nextjs/fixtures/demo-bank/reset-demo.mjs ~/demo
@@ -43,11 +44,26 @@ export LLM4TS_EXTRACT_CONCURRENCY=3 # pages extracted and judged at once (measur
 
 `LLM4TS_PACK` is the one that matters for Act 1: it is what makes the survey
 reason in J2EE terms (web.xml mappings, includes, forwards, ajax targets)
-instead of the default COBOL pack's. Discovery needs nothing extra for the
-fixture or for a typical client estate — only files the pack's `sources:`
-regex matches count, and `.git`, `node_modules`, `target`, `build`, `dist`
-are never entered. Keep these two in your back pocket for a real estate with
-an unusual layout, never set them on stage without a reason:
+instead of the default COBOL pack's. It is a bare pack name, resolved across
+the kits `llm4ts kits` lists — the `j2ee-nextjs` kit ships it — and every
+`llm4ts run` below accepts the same value as `--pack j2ee-nextjs-spa` if you
+would rather have it visible in the command on stage. Prove the whole
+selection before anyone is watching, with no model call and no cost:
+
+```bash
+llm4ts kits
+llm4ts run modernize-pack-check --pack j2ee-nextjs-spa --repo ~/demo/legacy-j2ee
+```
+
+The check must end `check passed with 1 warning`: 34 source files, 18 JSP
+programs, the servlet, form, ajax, include, and servlet-class rules each
+capturing real units, and the one expected warning — the pack ships no
+`vectors` prompt because it runs no replay phase. If it says `not found: no kit ships it`, the installed shell is
+older than 0.18.0. Discovery needs nothing extra for the fixture or for a
+typical client estate — only files the pack's `sources:` regex matches
+count, and `.git`, `node_modules`, `target`, `build`, `dist` are never
+entered. Keep these two in your back pocket for a real estate with an
+unusual layout, never set them on stage without a reason:
 
 ```bash
 export LLM4TS_EXCLUDE_DIRS=.git,node_modules,target,generated   # replaces the pruned list
@@ -78,10 +94,13 @@ triaged out, waves proposed. Three beats, in the order the artifacts land:
    then the session-backed transfer stepper last.
 
 Say once that the prompts behind beats 2 and 3 are the pack's
-(`kits/j2ee-nextjs/packs/j2ee-nextjs-spa/prompts/survey-*.md`), not the tool's: a client with
-a different stack edits two markdown files, not the pipeline. Review the plan
-WITH the audience, flip `- [x] Approved` (the human gate is the point — banks
-like this beat).
+(`kits/j2ee-nextjs/packs/j2ee-nextjs-spa/prompts/survey-*.md`), not the
+tool's, and that the pack travels in a **kit** with its scaffold and
+review lenses: a client with a different stack copies the kit into
+`.llm4ts/kits/<client>/`, edits markdown, and runs `modernize-pack-check`
+until it passes — the pipeline is untouched. Review the plan WITH the
+audience, flip `- [x] Approved` (the human gate is the point — banks like
+this beat).
 
 ```bash
 LLM4TS_WAVE=wave-1 llm4ts run modernize-extract --repo ~/demo/legacy-j2ee
@@ -124,6 +143,8 @@ Open `docs/conversion/migration-report.md`: per-page estimates, the remaining
 estate, and the projection — then scale the projection aloud to the client's
 real page count. Close on governance: branches await human review (no
 auto-merge), every page has a spec, a contract, a judge verdict, and a report.
+The kit is the deliverable the client keeps: their packs, scaffold, lenses,
+and the lessons the review phase appends, in one directory they own.
 
 Optional ADO mirror (decide before the workshop, never set it up live):
 
@@ -145,6 +166,7 @@ export LLM4TS_ADO_PROJECT=<project>
 | Judge keeps rejecting | `LLM4TS_JUDGE_ROUNDS=1` already bounds it; the failure lands on the board with its reason — governance beat, not a crash. |
 | `⟳ flaky … (fresh retry)` lines scrolling past — Gemini CLI's `Loop detected` / `A potential loop was detected`, an empty response, a malformed tool call | Nothing to do: the seat restarts the turn in a fresh process, up to 6 times, and the flow carries on. Say it out loud: the turn was lost, the quota and the prompt were not. Only if all 6 fail does the stage abort — rerun, it resumes. |
 | `⟳ structured output (repair retry)` lines — `Failed to parse response as structured output` | Nothing to do: the model gets its own parse failure quoted back and is asked for the JSON alone, up to 2 more times. If the third reply still does not parse the stage aborts with the reason — rerun resumes; a schema the model can never satisfy is a pack bug, not a stage bug. |
+| `pack 'j2ee-nextjs-spa' not found: no kit ships it` | The shell predates kits (0.18.0) or `LLM4TS_PACK` was overwritten with a path: `llm4ts kits` shows what it sees; `npm i -g @llm4ts/shell@latest`; re-export the bare name. Never happens after a green Act 0. |
 | Survey aborts with `discovery stopped at N matching files` (a client's real estate, never the fixture) | The abort names the knobs: tighten the pack's `sources:`/`exclude:`, prune more with `LLM4TS_EXCLUDE_DIRS=.git,node_modules,generated`, or raise `LLM4TS_MAX_DISCOVER_RESULTS`. Rerun. |
 | Everything is on fire | `node kits/j2ee-nextjs/fixtures/demo-bank/reset-demo.mjs ~/demo` and restart the act; Act 1 re-runs in minutes. |
 
