@@ -22,7 +22,7 @@ The expected split of the demo epic against the internet-banking portal fixture 
     {
       "id": "accounts-contract",
       "title": "Accounts domain contract and fake routes",
-      "description": "Declare the Accounts HttpApi in src/contracts/accounts.ts: list the customer's current accounts (id, IBAN, label, balance in cents, available balance), one account's detail, and its movements as a cursor-paged list (date, description, amount in cents, running balance, category). Implement src/contracts/accounts.fake.ts with deterministic fixture data for customer C-000123 (two accounts, at least 30 movements on the first), a reset function, and the exported accountsDomain. Run pnpm openapi and commit contracts/openapi/accounts.json. Follow src/contracts/profile.ts and profile.fake.ts exactly. Add src/contracts/accounts.test.ts covering the fake routes through the typed client: list, detail, and a page of movements.",
+      "description": "Declare the Accounts HttpApi in src/contracts/accounts.ts: list the customer's current accounts (id, IBAN, label, balance in cents, available balance), one account's detail, and its movements as a cursor-paged list (date, description, amount in cents, running balance, category) whose optional cursor is the endpoint's `query` schema (HttpApiEndpoint's query option, called as client.accounts.movements({ params: { accountId }, query: { cursor } })); the fake reads it from the request query string. Implement src/contracts/accounts.fake.ts with deterministic fixture data for customer C-000123 (two accounts, at least 30 movements on the first), a reset function, and the exported accountsDomain. Run pnpm openapi and commit contracts/openapi/accounts.json. Follow src/contracts/profile.ts and profile.fake.ts exactly. Add src/contracts/accounts.test.ts covering the fake routes through the typed client: list, detail, and a page of movements.",
       "dependsOn": [],
       "owned": [
         "src/contracts/accounts.ts",
@@ -40,7 +40,7 @@ The expected split of the demo epic against the internet-banking portal fixture 
         "accountsDomain from src/contracts/accounts.fake.ts",
         "client.accounts.list()",
         "client.accounts.get({ params: { accountId } })",
-        "client.accounts.movements({ params: { accountId }, urlParams: { cursor } })",
+        "client.accounts.movements({ params: { accountId }, query: { cursor } })",
         "src/contracts/accounts.test.ts"
       ]
     },
