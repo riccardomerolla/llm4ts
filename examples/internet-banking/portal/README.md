@@ -16,9 +16,12 @@ Standalone package — not part of the llm4ts pnpm workspace, so install with
 the workspace ignored (the `.npmrc` already says so):
 
 ```bash
-pnpm install
+pnpm install --ignore-workspace
 pnpm dev        # http://127.0.0.1:5180
 ```
+
+Pass `--ignore-workspace` to `pnpm add` as well: the `.npmrc` here does not
+stop `pnpm add` from resolving against the llm4ts workspace lockfile.
 
 Gates (the flow's hard gates — all must pass):
 

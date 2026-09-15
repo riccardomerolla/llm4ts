@@ -19,7 +19,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CustomerProfileJsonEncoding"
+                  "$ref": "#/components/schemas/CustomerProfileEncoded"
                 }
               }
             }
@@ -29,7 +29,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/effect_HttpApiError_NotFoundJsonEncoding"
+                  "$ref": "#/components/schemas/effect_HttpApiError_NotFoundEncoded"
                 }
               }
             }
@@ -51,7 +51,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CustomerProfileJsonEncoding"
+                  "$ref": "#/components/schemas/CustomerProfileEncoded"
                 }
               }
             }
@@ -61,7 +61,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/effect_HttpApiError_NotFoundJsonEncoding"
+                  "$ref": "#/components/schemas/effect_HttpApiError_NotFoundEncoded"
                 }
               }
             }
@@ -71,7 +71,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/effect_HttpApiError_UnprocessableEntityJsonEncoding"
+                  "$ref": "#/components/schemas/effect_HttpApiError_UnprocessableEntityEncoded"
                 }
               }
             }
@@ -81,7 +81,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ContactUpdateJsonEncoding"
+                "$ref": "#/components/schemas/ContactUpdateEncoded"
               }
             }
           },
@@ -92,7 +92,7 @@
   },
   "components": {
     "schemas": {
-      "AddressJsonEncoding": {
+      "AddressEncoded": {
         "type": "object",
         "properties": {
           "street": {
@@ -120,7 +120,7 @@
         ],
         "additionalProperties": false
       },
-      "CustomerProfileJsonEncoding": {
+      "CustomerProfileEncoded": {
         "type": "object",
         "properties": {
           "customerId": {
@@ -142,7 +142,7 @@
             "type": "string"
           },
           "address": {
-            "$ref": "#/components/schemas/AddressJsonEncoding"
+            "$ref": "#/components/schemas/AddressEncoded"
           },
           "customerSince": {
             "type": "string"
@@ -160,7 +160,7 @@
         ],
         "additionalProperties": false
       },
-      "effect_HttpApiError_NotFoundJsonEncoding": {
+      "effect_HttpApiError_NotFoundEncoded": {
         "type": "object",
         "properties": {
           "_tag": {
@@ -175,7 +175,7 @@
         ],
         "additionalProperties": false
       },
-      "ContactUpdateJsonEncoding": {
+      "ContactUpdateEncoded": {
         "type": "object",
         "properties": {
           "email": {
@@ -191,7 +191,7 @@
         ],
         "additionalProperties": false
       },
-      "effect_HttpApiError_UnprocessableEntityJsonEncoding": {
+      "effect_HttpApiError_UnprocessableEntityEncoded": {
         "type": "object",
         "properties": {
           "_tag": {

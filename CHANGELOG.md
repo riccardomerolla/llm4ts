@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Internet-banking portal fixture on `effect@4.0.0-rc.115`, the engine's
+  own pin, with no source change: the kit's HttpApi contracts, the fake
+  transport, and the hooks compile and pass their gates unchanged. Install
+  it with `pnpm install --ignore-workspace` (and `pnpm add … --ignore-workspace`):
+  the fixture's `.npmrc` alone does not stop `pnpm add` from writing the
+  workspace's lockfile.
+
 ## 2.0.0
 
 ### Breaking
