@@ -207,3 +207,32 @@ describe("list responses", () => {
     assert.notInclude(yaml, "type: array")
   })
 })
+
+describe("calls sharing a method and path", () => {
+  it("emits one operation per method and names the variants it stands for", () => {
+    const spec = PageSpec.make({
+      page: "accountOverview",
+      route: "/accountOverview",
+      title: "Account Overview",
+      complexity: "medium",
+      apiCalls: [
+        PageApiCall.make({
+          operation: "loadAccountOverview",
+          method: "GET",
+          path: "/accountOverview"
+        }),
+        PageApiCall.make({
+          operation: "refreshAccountBalances",
+          method: "GET",
+          path: "/accountOverview",
+          esbService: "ESB_ACCT_LIST"
+        })
+      ]
+    })
+    const yaml = openApiFor(spec)
+    assert.strictEqual((yaml.match(/^ {4}get:$/gm) ?? []).length, 1, "a path item holds one get")
+    assert.include(yaml, "operationId: loadAccountOverview")
+    assert.include(yaml, 'description: "also serves: refreshAccountBalances"')
+    assert.include(yaml, "LoadAccountOverviewResponse:")
+  })
+})

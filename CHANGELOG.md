@@ -26,6 +26,10 @@ finding states the exact block shape (`pageSpecShapeHint`), which turned
   are always rooted. Found in the rehearsal's Act 2: with only flat field
   mappings the contract turned `accts[].curBal` into a scalar and the
   converter built a single-balance page the judge rejected.
+- `openApiFor` emits one operation per method under a path: calls sharing
+  a method and path (a page load and its JSON refresh on the same GET)
+  collapse into the first, whose description names the variants, instead
+  of a duplicate YAML key.
 
 ## 0.18.0
 

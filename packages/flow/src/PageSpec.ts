@@ -271,12 +271,33 @@ export const openApiFor = (spec: PageSpec): string => {
   }
   for (const [path, calls] of paths) {
     lines.push(`  ${path.startsWith("/") ? path : `/${path}`}:`)
-    for (const call of [...calls].sort((a, b) => a.method.localeCompare(b.method))) {
+    // One operation per method: an OpenAPI path item cannot repeat a method,
+    // so calls that share one (a page load and its JSON refresh on the same
+    // GET) collapse into the first, which names the variants it stands for.
+    const byMethod = new Map<string, Array<PageApiCall>>()
+    for (const call of calls) {
       const method = call.method.toLowerCase()
+      byMethod.set(method, [...(byMethod.get(method) ?? []), call])
+    }
+    for (const [method, variants] of [...byMethod.entries()].sort(([a], [b]) =>
+      a.localeCompare(b)
+    )) {
+      const call = variants[0]!
       lines.push(`    ${method}:`)
       lines.push(`      operationId: ${call.operation}`)
-      if (call.esbService !== undefined) {
-        lines.push(`      description: ${yamlText(`backed by ESB service ${call.esbService}`)}`)
+      const notes = [
+        ...(call.esbService === undefined ? [] : [`backed by ESB service ${call.esbService}`]),
+        ...(variants.length > 1
+          ? [
+              `also serves: ${variants
+                .slice(1)
+                .map((variant) => variant.operation)
+                .join(", ")}`
+            ]
+          : [])
+      ]
+      if (notes.length > 0) {
+        lines.push(`      description: ${yamlText(notes.join("; "))}`)
       }
       if (call.request.length > 0 && method === "get") {
         lines.push("      parameters:")
