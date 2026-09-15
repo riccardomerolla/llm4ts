@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.0.0
+
+No code changes over 0.18.1. This release declares the public surface
+stable, now that it has been exercised by a live rehearsal without needing
+to change:
+
+- **Package subpath exports** of `@llm4ts/core`, `@llm4ts/flow`,
+  `@llm4ts/runner`, `@llm4ts/shell`, and `@llm4ts/js`, plus the
+  `@llm4ts/runner` root barrel for flow authors. Importing package-private
+  files remains unsupported.
+- **Flows**: one TypeScript file, the first `//` line its description,
+  discovered in the project (`.llm4ts/flows/`), global
+  (`~/.config/llm4ts/flows/`), and built-in tiers with that precedence, run
+  by `llm4ts run` with `--repo`, `--pack`, and `--verbose`, resumable from
+  `.llm4ts/` in the target repository.
+- **Kits** (ADR 0014): the directory layout `packs/`, `scaffolds/`,
+  `patterns/`, `flows/`, `fixtures/`, `README.md`, discovered in the same
+  three tiers, and pack selection by bare name, `kit/pack`, or a directory
+  holding `pack.md`.
+- **Pack manifests**: the header fields and sections documented in
+  `kits/README.md` and the guide, including `spec-schema`.
+- **Environment**: the `LLM4TS_*` variables listed in
+  `docs/configuration.md`; secrets never appear in arguments, logs,
+  traces, or errors.
+
+Behaviour of the modernization and conversion flows keeps evolving with
+the rehearsals; those changes stay additive within 1.x. The pinned
+reference is llm4zio v4.3.0.
+
 ## 0.18.1
 
 - A wave-scoped extraction (`LLM4TS_WAVE`) can now clear its gate: the
