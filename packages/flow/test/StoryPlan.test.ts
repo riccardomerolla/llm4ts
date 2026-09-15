@@ -103,12 +103,12 @@ describe("StoryPlan", () => {
     })
   )
 
-  it("readyStories honours done, running, failed and skipped", () => {
+  it("readyStories honours done, running, failed and waiting", () => {
     const none = new Set<string>()
     const initial = readyStories(demoPlan, {
       done: none,
       failed: none,
-      skipped: none,
+      waiting: none,
       running: none
     })
     assert.deepStrictEqual(
@@ -118,7 +118,7 @@ describe("StoryPlan", () => {
     const later = readyStories(demoPlan, {
       done: new Set(["accounts-contract", "payments-contract"]),
       failed: new Set(["iban-field"]),
-      skipped: none,
+      waiting: none,
       running: new Set(["conto-overview"])
     })
     // bonifico-form waits on the failed iban-field; conto-overview is running.

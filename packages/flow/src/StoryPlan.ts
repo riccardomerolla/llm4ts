@@ -182,7 +182,8 @@ export const topologicalWaves = (plan: StoryPlan): ReadonlyArray<ReadonlyArray<s
 export interface StoryProgress {
   readonly done: ReadonlySet<string>
   readonly failed: ReadonlySet<string>
-  readonly skipped: ReadonlySet<string>
+  /** On hold behind a failed predecessor. */
+  readonly waiting: ReadonlySet<string>
   readonly running: ReadonlySet<string>
 }
 
@@ -192,7 +193,7 @@ export const readyStories = (plan: StoryPlan, progress: StoryProgress): Readonly
     (story) =>
       !progress.done.has(story.id) &&
       !progress.failed.has(story.id) &&
-      !progress.skipped.has(story.id) &&
+      !progress.waiting.has(story.id) &&
       !progress.running.has(story.id) &&
       story.dependsOn.every((dependency) => progress.done.has(dependency))
   )

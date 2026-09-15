@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Dependents of a failed story are `waiting`, not `skipped`: the board and
+  `BoardSync` gain a `wait` transition and a `waiting` status ("on hold
+  until the predecessor is fixed and rerun"), rendered under **Waiting**
+  with `waiting for <story>`; `skipped` stays what it was, the final
+  disposition of an item deliberately left out (a page triaged as dead).
+  `StoryProgress.skipped` is now `StoryProgress.waiting` and story outcomes
+  say `waiting` — a rename inside a module released four days ago, called
+  out here rather than hidden.
+
 - **Fixed**: a story restarted because its plan entry changed kept the old
   branch's task checkpoint, so the fresh branch inherited "every task
   complete", ran no coder, and went straight to the judge with an empty

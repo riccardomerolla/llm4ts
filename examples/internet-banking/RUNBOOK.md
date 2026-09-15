@@ -68,7 +68,7 @@ llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 3 \
 What to show while it runs:
 
 - `~/demo/portal/.llm4ts/epics/<epic-id>/board.md` — planned, active,
-  done, failed, skipped. Wave 1 (two contracts and the IBAN field) runs
+  waiting, done, failed. Wave 1 (two contracts and the IBAN field) runs
   three at once; the four screens follow under the cap; `home` waits for
   all of them.
 - `git -C ~/demo/portal worktree list` — one worktree per active story.
@@ -96,5 +96,6 @@ verdict, and the estimated tokens and cost, labelled as estimates.
 Interrupt the run during wave 2 and rerun the same command. Merged stories
 are skipped ("already merged"), the interrupted ones resume from their task
 checkpoint in their worktree, and a story whose plan entry you edited in
-between starts over on a fresh branch. A failed story's dependents are
-skipped with the reason on the board; fix the plan or the story and rerun.
+between starts over on a fresh branch. A failed story's dependents go on
+hold — `waiting for <story>` on the board; fix the plan or the story and
+rerun, and they start as soon as it merges.

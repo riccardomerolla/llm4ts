@@ -50,8 +50,9 @@ most fragile one to build.
    tracker. Scheduling, gating, resume, and failure policy live in
    `@llm4ts/flow` (`StoryPlan`, `Perimeter`, `Stories`); the runner stays
    thin.
-5. **Continue on failure, skip transitively, resume by hash.** A failed
-   story marks its transitive dependents skipped with the reason and lets
+5. **Continue on failure, hold dependents, resume by hash.** A failed
+   story puts its transitive dependents on hold (`waiting`, with what they
+   wait for) and lets
    independent stories finish (fail-fast is an option). A rerun skips merged
    stories, resumes a failed one from its worktree checkpoint, and recreates
    the branch when the story's plan entry changed.

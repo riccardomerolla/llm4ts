@@ -73,6 +73,24 @@ describe("BoardSync local adapter", () => {
     })
   )
 
+  it.effect("wait puts an item on hold and a later start lifts it", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      const board = makeLocalBoardSync(memory.store, ".llm4ts", "board")
+      yield* board.plan([planned("a", "A"), planned("b", "B")])
+      yield* board.fail("a", "gates red")
+      yield* board.wait("b", "waiting for a")
+      const held = yield* board.snapshot
+      assert.strictEqual(held.items[1]?.status, "waiting")
+      assert.strictEqual(held.items[1]?.detail, "waiting for a")
+      const files = yield* memory.files
+      assert.include(files[".llm4ts/board.md"] ?? "", "## Waiting")
+      yield* board.start("b")
+      const resumed = yield* board.snapshot
+      assert.strictEqual(resumed.items[1]?.status, "active")
+    })
+  )
+
   it.effect("re-planning never demotes lived state, and unknown ids fail typed", () =>
     Effect.gen(function* () {
       const memory = yield* makeMemoryPlainFileStore()

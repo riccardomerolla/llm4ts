@@ -171,7 +171,7 @@ const program = Effect.gen(function* () {
         )
         yield* events.publish(
           Info.make({
-            message: `epic ${report.epicId}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("skipped")} skipped — report at ${join(stateDir, "report.md")} (usage figures estimated)`
+            message: `epic ${report.epicId}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("waiting")} waiting — report at ${join(stateDir, "report.md")} (usage figures estimated)`
           })
         )
       })

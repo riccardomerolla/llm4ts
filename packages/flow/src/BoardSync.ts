@@ -7,7 +7,7 @@ import { FlowAborted, type FlowError } from "./FlowError.ts"
 import { loadVersioned, saveVersioned, type PlainFileStoreShape } from "./Persistence.ts"
 
 // The progress board of the conversion scenario: a port with the work-item
-// lifecycle (plan → start → complete/fail/skip) and two adapters — a local
+// lifecycle (plan → start → complete/fail/wait/skip) and two adapters — a local
 // file board (the default, fully offline: board.json + rendered board.md)
 // and an Azure DevOps adapter (the stretch goal) mapping the same lifecycle
 // onto work items. Flows depend only on the port; which board the client
@@ -15,7 +15,14 @@ import { loadVersioned, saveVersioned, type PlainFileStoreShape } from "./Persis
 
 export const BoardVersion = 1
 
-export const BoardStatus = Schema.Literals(["planned", "active", "done", "failed", "skipped"])
+export const BoardStatus = Schema.Literals([
+  "planned",
+  "active",
+  "waiting",
+  "done",
+  "failed",
+  "skipped"
+])
 export type BoardStatus = typeof BoardStatus.Type
 
 export class BoardItem extends Schema.Class<BoardItem>("BoardItem")({
@@ -25,7 +32,7 @@ export class BoardItem extends Schema.Class<BoardItem>("BoardItem")({
   status: BoardStatus,
   branch: Schema.optionalKey(Schema.String),
   reportPath: Schema.optionalKey(Schema.String),
-  /** Free-form note: a failure reason, a skip rationale, a triage disposition. */
+  /** Free-form note: a failure reason, what an item waits for, a triage disposition. */
   detail: Schema.optionalKey(Schema.String),
   /** ESTIMATES, never measurements — see EstimatedUsage (ADR 0012). */
   estimatedTokens: Schema.optionalKey(Schema.Int),
@@ -51,13 +58,20 @@ export interface BoardSyncShape {
   readonly start: (id: string) => Effect.Effect<void, FlowError>
   readonly complete: (id: string, result: BoardItemResult) => Effect.Effect<void, FlowError>
   readonly fail: (id: string, reason: string) => Effect.Effect<void, FlowError>
+  /** Final: the item is deliberately left out (a page triaged as dead, say). */
   readonly skip: (id: string, reason: string) => Effect.Effect<void, FlowError>
+  /**
+   * On hold: the item waits for something that failed (a predecessor story)
+   * and runs once that is fixed — unlike `skip`, it is not final.
+   */
+  readonly wait: (id: string, reason: string) => Effect.Effect<void, FlowError>
   readonly snapshot: Effect.Effect<Board, FlowError>
 }
 
 const sectionOrder: ReadonlyArray<readonly [BoardStatus, string]> = [
   ["active", "Active"],
   ["planned", "Planned"],
+  ["waiting", "Waiting"],
   ["done", "Done"],
   ["failed", "Failed"],
   ["skipped", "Skipped"]
@@ -193,6 +207,8 @@ export const makeLocalBoardSync = (
       update(id, (item) => BoardItem.make({ ...item, status: "failed", detail: reason })),
     skip: (id, reason) =>
       update(id, (item) => BoardItem.make({ ...item, status: "skipped", detail: reason })),
+    wait: (id, reason) =>
+      update(id, (item) => BoardItem.make({ ...item, status: "waiting", detail: reason })),
     snapshot: load
   }
 }
@@ -213,6 +229,7 @@ export const composeBoardSync = (boards: ReadonlyArray<BoardSyncShape>): BoardSy
     complete: (id, result) => each((board) => board.complete(id, result)),
     fail: (id, reason) => each((board) => board.fail(id, reason)),
     skip: (id, reason) => each((board) => board.skip(id, reason)),
+    wait: (id, reason) => each((board) => board.wait(id, reason)),
     snapshot:
       first === undefined
         ? Effect.succeed(Board.make({ title: "empty", items: [] }))
@@ -242,8 +259,9 @@ const markerQuery = (tag: string, id: string): string =>
  * The stretch adapter (ADR 0012): the same lifecycle mapped onto Azure DevOps
  * work items through the az-CLI AzureDevOpsTool (ADR 0011). Idempotent by
  * title marker — `[<id>]` plus the board tag — so a re-run finds its items
- * instead of duplicating them. Failure and skip are tags plus a comment,
- * never invented states.
+ * instead of duplicating them. Failure, waiting and skip are tags plus a
+ * comment, never invented states; a waiting tag is lifted when the item is
+ * started again.
  */
 export const makeAdoBoardSync = Effect.fn("@llm4ts/flow/BoardSync.makeAdo")(function* (
   ado: AzureDevOpsToolShape,
@@ -334,6 +352,12 @@ export const makeAdoBoardSync = Effect.fn("@llm4ts/flow/BoardSync.makeAdo")(func
         yield* ado.editTags(workItem, [`${tag}-skipped`], [])
         yield* ado.writeComment(workItem, `SKIPPED: ${reason}`)
       }),
+    wait: (id, reason) =>
+      Effect.gen(function* () {
+        const workItem = yield* lookup(id)
+        yield* ado.editTags(workItem, [`${tag}-waiting`], [])
+        yield* ado.writeComment(workItem, `WAITING: ${reason}`)
+      }),
     snapshot: Effect.gen(function* () {
       const found = yield* ado.wiqlIds(
         `SELECT [System.Id] FROM WorkItems WHERE [System.Tags] CONTAINS ${quoteWiql(tag)}`
@@ -344,6 +368,9 @@ export const makeAdoBoardSync = Effect.fn("@llm4ts/flow/BoardSync.makeAdo")(func
         const match = /^\[([^\]]+)\] (.*)$/.exec(workItem.title)
         const failed = workItem.tags.includes(`${tag}-failed`)
         const skipped = workItem.tags.includes(`${tag}-skipped`)
+        const waiting = workItem.tags.includes(`${tag}-waiting`)
+        // A live state outranks a waiting tag: an item started again after
+        // its predecessor was fixed is active, whatever tag it still carries.
         const status: BoardStatus = failed
           ? "failed"
           : skipped
@@ -352,7 +379,9 @@ export const makeAdoBoardSync = Effect.fn("@llm4ts/flow/BoardSync.makeAdo")(func
               ? "done"
               : workItem.state === states.active
                 ? "active"
-                : "planned"
+                : waiting
+                  ? "waiting"
+                  : "planned"
         items.push(
           BoardItem.make({
             id: match?.[1] ?? String(workItemId),

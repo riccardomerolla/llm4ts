@@ -133,8 +133,8 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   and stops. An existing plan file always wins over regeneration: editing
   it is the approval and the re-plan path.
 - `--concurrency <n>` (default 3) caps the stories implemented at once;
-  `--fail-fast` stops at the first failed story instead of skipping its
-  dependents.
+  `--fail-fast` stops at the first failed story instead of putting its
+  dependents on hold (`waiting` on the board until it is fixed and rerun).
 - `LLM4TS_REASONER` (default `claude`, or `gemini`) splits, reviews every
   task and judges every story; `LLM4TS_CODER` (default `pi`) implements.
   `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi

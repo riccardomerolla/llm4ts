@@ -412,32 +412,34 @@ describe("Stories executor", () => {
       )
   )
 
-  it.effect("a failed story skips its transitive dependents and independent stories finish", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness({ redGates: ["/repo/.llm4ts/worktrees/a"] })
-      const context = yield* makeContext(harness)
-      const options = yield* makeOptions(harness, diamond, context)
+  it.effect(
+    "a failed story puts its transitive dependents on hold and independent stories finish",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({ redGates: ["/repo/.llm4ts/worktrees/a"] })
+        const context = yield* makeContext(harness)
+        const options = yield* makeOptions(harness, diamond, context)
 
-      const report = yield* implementStoriesFlow(context, options)
+        const report = yield* implementStoriesFlow(context, options)
 
-      assert.deepStrictEqual(
-        report.stories.map((outcome) => [outcome.id, outcome.status]),
-        [
-          ["a", "failed"],
-          ["b", "done"],
-          ["c", "skipped"],
-          ["d", "skipped"]
-        ]
-      )
-      assert.include(report.stories[0]?.reason ?? "", "gates failed in /repo/.llm4ts/worktrees/a")
-      assert.strictEqual(report.stories[2]?.reason, "blocked by a")
-      const statuses = yield* statusOf(options)
-      assert.strictEqual(statuses.get("c"), "skipped")
-      assert.strictEqual(statuses.get("b"), "done")
-      const log = yield* Ref.get(harness.log)
-      assert.notInclude(log, "merge:story/diamond/a")
-      assert.include(log, "merge:story/diamond/b")
-    })
+        assert.deepStrictEqual(
+          report.stories.map((outcome) => [outcome.id, outcome.status]),
+          [
+            ["a", "failed"],
+            ["b", "done"],
+            ["c", "waiting"],
+            ["d", "waiting"]
+          ]
+        )
+        assert.include(report.stories[0]?.reason ?? "", "gates failed in /repo/.llm4ts/worktrees/a")
+        assert.strictEqual(report.stories[2]?.reason, "waiting for a")
+        const statuses = yield* statusOf(options)
+        assert.strictEqual(statuses.get("c"), "waiting")
+        assert.strictEqual(statuses.get("b"), "done")
+        const log = yield* Ref.get(harness.log)
+        assert.notInclude(log, "merge:story/diamond/a")
+        assert.include(log, "merge:story/diamond/b")
+      })
   )
 
   it.effect("fail-fast stops the epic with a typed StoryFailed", () =>
@@ -463,7 +465,7 @@ describe("Stories executor", () => {
       const b = report.stories.find((outcome) => outcome.id === "b")
       assert.strictEqual(b?.status, "failed")
       assert.include(b?.reason ?? "", "conflicted: src/App.tsx")
-      assert.strictEqual(report.stories.find((outcome) => outcome.id === "d")?.status, "skipped")
+      assert.strictEqual(report.stories.find((outcome) => outcome.id === "d")?.status, "waiting")
     })
   )
 
@@ -675,7 +677,7 @@ describe("Stories executor", () => {
         assert.strictEqual(b?.status, "failed")
         assert.include(b?.reason ?? "", "worktree setup failed")
         assert.notInclude(log, "seats:b")
-        assert.strictEqual(report.stories.find((outcome) => outcome.id === "d")?.status, "skipped")
+        assert.strictEqual(report.stories.find((outcome) => outcome.id === "d")?.status, "waiting")
       })
   )
 

@@ -73,7 +73,8 @@ export class StoryState extends Schema.Class<StoryState>("StoryState")({
 
 export const EpicReportVersion = 1
 
-export const OutcomeStatus = Schema.Literals(["done", "failed", "skipped"])
+/** `waiting`: on hold behind a failed predecessor, runs once that is fixed. */
+export const OutcomeStatus = Schema.Literals(["done", "failed", "waiting"])
 export type OutcomeStatus = typeof OutcomeStatus.Type
 
 export class StoryOutcome extends Schema.Class<StoryOutcome>("StoryOutcome")({
@@ -81,7 +82,7 @@ export class StoryOutcome extends Schema.Class<StoryOutcome>("StoryOutcome")({
   title: Schema.String,
   status: OutcomeStatus,
   branch: Schema.optionalKey(Schema.String),
-  /** Failure or skip reason. */
+  /** Failure reason, or what a waiting story waits for. */
   reason: Schema.optionalKey(Schema.String),
   judge: Schema.optionalKey(Schema.String),
   /** ESTIMATES, never measurements (ADR 0012). */
@@ -111,7 +112,7 @@ export const renderEpicReport = (report: EpicReport): string => {
     "> the CLI seats report no usage. They are not measurements.",
     "",
     `- Epic branch: \`${report.epicBranch}\``,
-    `- Stories: ${report.stories.length} (done ${report.count("done")}, failed ${report.count("failed")}, skipped ${report.count("skipped")})`,
+    `- Stories: ${report.stories.length} (done ${report.count("done")}, failed ${report.count("failed")}, waiting ${report.count("waiting")})`,
     "",
     "| Story | Status | Branch | Est. tokens | Est. cost | Note |",
     "| --- | --- | --- | --- | --- | --- |"
@@ -610,7 +611,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     return {
       done: byStatus("done"),
       failed: byStatus("failed"),
-      skipped: byStatus("skipped"),
+      waiting: byStatus("waiting"),
       running: yield* Ref.get(running)
     }
   })
@@ -618,7 +619,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const record = (outcome: StoryOutcome): Effect.Effect<void> =>
     Ref.update(outcomes, (current) => [...current, outcome])
 
-  const skipDependents = (story: Story): Effect.Effect<void, FlowError> =>
+  /** Dependents of a failed story go on hold: they run once it is fixed and rerun. */
+  const holdDependents = (story: Story): Effect.Effect<void, FlowError> =>
     Effect.gen(function* () {
       const current = yield* progress
       for (const id of dependentsOf(plan, story.id)) {
@@ -627,13 +629,13 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           dependent === undefined ||
           current.done.has(id) ||
           current.failed.has(id) ||
-          current.skipped.has(id)
+          current.waiting.has(id)
         ) {
           continue
         }
-        const reason = `blocked by ${story.id}`
-        yield* record(StoryOutcome.make({ id, title: dependent.title, status: "skipped", reason }))
-        yield* board.skip(id, reason)
+        const reason = `waiting for ${story.id}`
+        yield* record(StoryOutcome.make({ id, title: dependent.title, status: "waiting", reason }))
+        yield* board.wait(id, reason)
       }
     })
 
@@ -681,7 +683,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
               reason: outcome.reason ?? "failed"
             })
           }
-          yield* skipDependents(completion.story)
+          yield* holdDependents(completion.story)
         }
       }
     })
