@@ -231,13 +231,10 @@ export const restricted =
       Effect.provideService(effect, CurrentGrants, intersectGrants(current, grants))
     )
 
-export class CapabilityDenied extends Schema.TaggedError<CapabilityDenied>()(
-  "CapabilityDenied",
-  {
-    required: Schema.Array(Capability),
-    granted: Grants
-  }
-) {
+export class CapabilityDenied extends Schema.TaggedError<CapabilityDenied>()("CapabilityDenied", {
+  required: Schema.Array(Capability),
+  granted: Grants
+}) {
   get message(): string {
     const names = this.required.map((capability) =>
       capability._tag === "Exec" ? `Exec(${capability.command})` : capability._tag

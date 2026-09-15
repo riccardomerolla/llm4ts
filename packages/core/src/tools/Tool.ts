@@ -10,12 +10,9 @@ import {
   type JsonValue
 } from "../providers/CliSupport.ts"
 
-export class InvalidToolSchema extends Schema.TaggedError<InvalidToolSchema>()(
-  "InvalidSchema",
-  {
-    message: Schema.String
-  }
-) {}
+export class InvalidToolSchema extends Schema.TaggedError<InvalidToolSchema>()("InvalidSchema", {
+  message: Schema.String
+}) {}
 
 export class InvalidToolParameters extends Schema.TaggedError<InvalidToolParameters>()(
   "InvalidParameters",

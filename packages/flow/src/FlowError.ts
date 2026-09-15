@@ -24,13 +24,10 @@ export class UnsupportedSchemaVersion extends Schema.TaggedError<UnsupportedSche
   }
 }
 
-export class WorkspacePathError extends Schema.TaggedError<WorkspacePathError>()(
-  "WorkspacePath",
-  {
-    path: Schema.String,
-    message: Schema.String
-  }
-) {}
+export class WorkspacePathError extends Schema.TaggedError<WorkspacePathError>()("WorkspacePath", {
+  path: Schema.String,
+  message: Schema.String
+}) {}
 
 export class WorkspaceLimitError extends Schema.TaggedError<WorkspaceLimitError>()(
   "WorkspaceLimit",
@@ -125,12 +122,9 @@ export class BudgetExceeded extends Schema.TaggedError<BudgetExceeded>()("Budget
 }
 
 /** A story plan that failed deterministic validation — every violation, not the first (ADR 0013). */
-export class StoryPlanInvalid extends Schema.TaggedError<StoryPlanInvalid>()(
-  "StoryPlanInvalid",
-  {
-    violations: Schema.Array(Schema.String)
-  }
-) {
+export class StoryPlanInvalid extends Schema.TaggedError<StoryPlanInvalid>()("StoryPlanInvalid", {
+  violations: Schema.Array(Schema.String)
+}) {
   get message(): string {
     return `story plan invalid:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
   }

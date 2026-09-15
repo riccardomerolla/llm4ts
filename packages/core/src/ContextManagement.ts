@@ -5,19 +5,13 @@ import * as Schema from "effect/Schema"
 import { ConversationMessage, type PromptRole } from "./Conversation.ts"
 import type { LlmProvider } from "./Models.ts"
 
-export class ContextInvalidInput extends Schema.TaggedError<ContextInvalidInput>()(
-  "InvalidInput",
-  {
-    message: Schema.String
-  }
-) {}
+export class ContextInvalidInput extends Schema.TaggedError<ContextInvalidInput>()("InvalidInput", {
+  message: Schema.String
+}) {}
 
-export class ContextParseFailed extends Schema.TaggedError<ContextParseFailed>()(
-  "ParseFailed",
-  {
-    message: Schema.String
-  }
-) {}
+export class ContextParseFailed extends Schema.TaggedError<ContextParseFailed>()("ParseFailed", {
+  message: Schema.String
+}) {}
 
 export class ContextSummarizationFailed extends Schema.TaggedError<ContextSummarizationFailed>()(
   "SummarizationFailed",
