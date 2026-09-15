@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.1
 
 - A wave-scoped extraction (`LLM4TS_WAVE`) can now clear its gate: the
   coverage check gates only units captured from the wave's own program
