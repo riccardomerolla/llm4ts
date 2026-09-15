@@ -5,13 +5,17 @@
  * of the workspace src aliases used by tests. Run after `pnpm build`.
  */
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const packages = ["core", "flow", "runner", "js", "shell"]
+// The consumer installs the same exact effect the packages were built against.
+const effectPin = JSON.parse(
+  readFileSync(path.join(repoRoot, "packages", "core", "package.json"), "utf8")
+).peerDependencies.effect
 
 const run = (command, args, options = {}) =>
   execFileSync(command, args, {
@@ -41,7 +45,7 @@ try {
         name: "llm4ts-pack-smoke",
         private: true,
         type: "module",
-        dependencies: { ...fileDeps, effect: "4.0.0-beta.102" },
+        dependencies: { ...fileDeps, effect: effectPin },
         overrides: fileDeps
       },
       null,

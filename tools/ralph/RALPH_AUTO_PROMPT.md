@@ -39,7 +39,7 @@ CSP contracts).
 6. **NEVER MOVE SPECS OUT OF PENDING**: Only the user decides when a spec is complete.
 7. **LIBRARY RULES ARE NON-NEGOTIABLE** (from `CLAUDE.md`):
    - Effect 4 services and layers for replaceable dependencies; schemas at external and persistence boundaries.
-   - Expected failures stay typed (`Schema.TaggedErrorClass`); never `any`, unchecked casts, namespaces, unmanaged promises, or global `Error` as a domain error.
+   - Expected failures stay typed (`Schema.TaggedError`); never `any`, unchecked casts, namespaces, unmanaged promises, or global `Error` as a domain error.
    - Explicit package subpath exports; `.ts` extensions on relative imports.
    - Secrets never appear in argv, logs, traces, persisted plans, or error messages.
    - Deterministic `@effect/vitest` tests; default CI needs no network, provider credentials, or installed provider CLIs.

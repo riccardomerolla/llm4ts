@@ -80,7 +80,7 @@ unit: CALL '([^']+)'
         `# Pack: cobol-springboot
 
 source: cobol
-programFiles: src/main/java/.*<NAME>.*\\.java
+program-files: src/main/java/.*<NAME>.*\\.java
 `
       )
       const pack = yield* loadPack(workspace, "pack")
@@ -130,6 +130,21 @@ exclude: ^(vendor|generated)/
       const error = yield* Effect.flip(loadPack(workspace, "broken"))
       assert.strictEqual(error._tag, "PlanParse")
       assert.include(error.message, "exclude")
+    })
+  )
+})
+
+describe("2.0 manifest keys", () => {
+  it.effect("refuses the pre-2.0 'programFiles:' spelling with the migration hint", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "packs/old/pack.md",
+        "# Pack: old\n\nsource: cobol\nprogramFiles: src/.*<NAME>.*\n"
+      )
+      const error = yield* loadPack(workspace, "packs/old").pipe(Effect.flip)
+      assert.strictEqual(error._tag, "PlanParse")
+      assert.include(error.message, "renamed 'program-files:' in llm4ts 2.0")
     })
   )
 })

@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import type { SchemaError } from "effect/SchemaError"
+import type { SchemaError } from "effect/Schema"
 import { ParseError, ProviderError, type LlmError } from "./Errors.ts"
 import type { JsonSchema } from "./Models.ts"
 

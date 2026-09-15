@@ -20,11 +20,11 @@ import { launchFlow } from "./FlowLaunch.ts"
 import { mainMenu } from "./Menu.ts"
 import { packageVersion } from "./Package.ts"
 
-export class ShellUsageError extends Schema.TaggedErrorClass<ShellUsageError>()("ShellUsage", {
+export class ShellUsageError extends Schema.TaggedError<ShellUsageError>()("ShellUsage", {
   message: Schema.String
 }) {}
 
-export class ShellActionError extends Schema.TaggedErrorClass<ShellActionError>()("ShellAction", {
+export class ShellActionError extends Schema.TaggedError<ShellActionError>()("ShellAction", {
   message: Schema.String
 }) {}
 
@@ -154,26 +154,29 @@ export const resolveFlow = Effect.fn("@llm4ts/shell/Cli.resolveFlow")(function* 
 const runCommand = Command.make(
   "run",
   {
-    flow: Argument.string("flow").pipe(
+    flow: Argument.String("flow").pipe(
       Argument.withDescription("Flow name from `llm4ts list`, or a path to a flow script")
     ),
-    task: Argument.string("task").pipe(
+    task: Argument.String("task").pipe(
       Argument.variadic(),
       Argument.withDescription("Task text passed to the flow")
     ),
-    repo: Flag.string("repo").pipe(
+    repo: Flag.String("repo").pipe(
       Flag.optional,
       Flag.withDescription(
         "Repository to run against, forwarded to the flow as --repo (defaults to the current directory)"
       )
     ),
-    pack: Flag.string("pack").pipe(
+    pack: Flag.String("pack").pipe(
       Flag.optional,
       Flag.withDescription(
         "Pack for the modernization flows, forwarded as LLM4TS_PACK: a kit pack name from `llm4ts kits`, kit/pack, or a directory holding pack.md"
       )
     ),
-    verbose: Flag.boolean("verbose").pipe(Flag.withDescription("Stream verbose flow output"))
+    verbose: Flag.Boolean("verbose").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Stream verbose flow output")
+    )
   },
   (config) =>
     Effect.gen(function* () {
@@ -203,7 +206,10 @@ const runCommand = Command.make(
 const listCommand = Command.make(
   "list",
   {
-    json: Flag.boolean("json").pipe(Flag.withDescription("Emit the listing as JSON"))
+    json: Flag.Boolean("json").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Emit the listing as JSON")
+    )
   },
   (config) =>
     Effect.gen(function* () {
@@ -219,7 +225,10 @@ const listCommand = Command.make(
 const kitsCommand = Command.make(
   "kits",
   {
-    json: Flag.boolean("json").pipe(Flag.withDescription("Emit the listing as JSON"))
+    json: Flag.Boolean("json").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Emit the listing as JSON")
+    )
   },
   (config) =>
     Effect.gen(function* () {
@@ -240,7 +249,7 @@ const kitsCommand = Command.make(
 const viewCommand = Command.make(
   "view",
   {
-    flow: Argument.string("flow").pipe(
+    flow: Argument.String("flow").pipe(
       Argument.withDescription("Flow name from `llm4ts list`, or a path to a flow script")
     )
   },
@@ -258,11 +267,11 @@ const viewCommand = Command.make(
 const askCommand = Command.make(
   "ask",
   {
-    prompt: Argument.string("prompt").pipe(
+    prompt: Argument.String("prompt").pipe(
       Argument.variadic(),
       Argument.withDescription("Prompt streamed once to the selected coding agent")
     ),
-    repo: Flag.string("repo").pipe(
+    repo: Flag.String("repo").pipe(
       Flag.optional,
       Flag.withDescription("Repository to run against (defaults to the current directory)")
     )

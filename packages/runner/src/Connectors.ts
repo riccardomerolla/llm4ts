@@ -234,7 +234,7 @@ export const coderFor = (name: string): CliConnectorConfig | undefined =>
 export const coderFromEnv = (
   env: Readonly<Record<string, string | undefined>> = process.env
 ): CliConnectorConfig => {
-  const requested = (env.LLM4TS_CODER ?? env.LLM4ZIO_CODER ?? "").trim()
+  const requested = (env.LLM4TS_CODER ?? "").trim()
   return (requested.length === 0 ? claude : coderFor(requested)) ?? claude
 }
 
@@ -245,7 +245,7 @@ export const coderFromEnvironment = Effect.fn("@llm4ts/runner/Connectors.coderFr
   function* (
     environment: Readonly<Record<string, string | undefined>> = process.env
   ): Effect.fn.Return<CliConnectorConfig, ScriptUsage> {
-    const requested = (environment.LLM4TS_CODER ?? environment.LLM4ZIO_CODER ?? "").trim()
+    const requested = (environment.LLM4TS_CODER ?? "").trim()
     if (requested.length === 0) {
       return claude
     }

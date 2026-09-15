@@ -44,14 +44,11 @@ export const cap = (text: string, limit: number): CappedText => {
 
 export const defaultContextBudget = 400_000
 
-/**
- * The default character budget: `LLM4TS_CONTEXT_BUDGET`, else the deprecated
- * `LLM4TS_JUDGE_SOURCES_LIMIT`, else 400_000.
- */
+/** The default character budget: `LLM4TS_CONTEXT_BUDGET`, else 400_000. */
 export const budget = (
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): number => {
-  const raw = environment["LLM4TS_CONTEXT_BUDGET"] ?? environment["LLM4TS_JUDGE_SOURCES_LIMIT"]
+  const raw = environment["LLM4TS_CONTEXT_BUDGET"]
   if (raw === undefined) {
     return defaultContextBudget
   }

@@ -22,7 +22,7 @@
 // the project, global, and built-in kits, or a directory holding pack.md).
 // LLM4TS_WAVE=<name> scopes the run to one wave of the approved plan. Judge
 // context is bounded by LLM4TS_CONTEXT_BUDGET (chars;
-// LLM4TS_JUDGE_SOURCES_LIMIT is the deprecated alias). The analyst is bounded
+// The analyst is bounded
 // by LLM4TS_ANALYST_TURNS and LLM4TS_MAX_CLOSURE_FILES.
 // LLM4TS_EXTRACT_CONCURRENCY=<n> extracts and judges n programs at once (default
 // 1): the programs of a wave are independent, each gets a commit scoped to its

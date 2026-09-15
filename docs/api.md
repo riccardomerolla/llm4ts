@@ -54,8 +54,7 @@ export list; the following modules are the main entry points.
   additionally publishes a `FlowEvent` and records the truncation;
   `withShrink(label, f)` runs `f` at the budget and retries prompt-too-large
   failures at ½ then ¼ before failing with a message naming
-  `LLM4TS_CONTEXT_BUDGET` (`LLM4TS_JUDGE_SOURCES_LIMIT` is the deprecated
-  alias; default 400_000). `truncations` reads back what this run shortened —
+  `LLM4TS_CONTEXT_BUDGET` (default 400_000). `truncations` reads back what this run shortened —
   flows append it to `provenance.json` — and `isolateTruncations` scopes a
   private log.
 - `@llm4ts/flow/ProgramJudge`: per-program spec-compliance judging.

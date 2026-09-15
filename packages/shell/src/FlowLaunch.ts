@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-export class FlowLaunchError extends Schema.TaggedErrorClass<FlowLaunchError>()("FlowLaunch", {
+export class FlowLaunchError extends Schema.TaggedError<FlowLaunchError>()("FlowLaunch", {
   message: Schema.String
 }) {}
 

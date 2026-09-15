@@ -231,7 +231,7 @@ export const restricted =
       Effect.provideService(effect, CurrentGrants, intersectGrants(current, grants))
     )
 
-export class CapabilityDenied extends Schema.TaggedErrorClass<CapabilityDenied>()(
+export class CapabilityDenied extends Schema.TaggedError<CapabilityDenied>()(
   "CapabilityDenied",
   {
     required: Schema.Array(Capability),

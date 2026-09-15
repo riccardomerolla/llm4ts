@@ -65,18 +65,18 @@ unit: <jsp:include page="([^"]+)"
 
 Header fields, one per line under the `# Pack:` title:
 
-| Field          | Required | Meaning                                                                          |
-| -------------- | -------- | -------------------------------------------------------------------------------- |
-| `source`       | yes      | The legacy technology name, used in prompts and reports                          |
-| `sources`      | no       | Regex over repo-relative paths: the files the estate consists of (default: all)  |
-| `exclude`      | no       | Regex removing paths from `sources`                                              |
-| `programs`     | no       | Regex selecting the units extract writes one spec for (default: every source)    |
-| `scaffold`     | no       | Pack-relative directory copied into an empty target by seed                      |
-| `specs-dir`    | no       | Where specs land in the target (default `docs/specs`)                            |
-| `features-dir` | no       | Where `.feature` files land (default `features`)                                 |
-| `replay`       | no       | Command verify runs to replay equivalence vectors                                |
-| `programFiles` | no       | Regex template with `<NAME>` for the target files that belong to one program     |
-| `spec-schema`  | no       | `pagespec` makes the extraction gate validate each spec's ```json pagespec block |
+| Field           | Required | Meaning                                                                          |
+| --------------- | -------- | -------------------------------------------------------------------------------- |
+| `source`        | yes      | The legacy technology name, used in prompts and reports                          |
+| `sources`       | no       | Regex over repo-relative paths: the files the estate consists of (default: all)  |
+| `exclude`       | no       | Regex removing paths from `sources`                                              |
+| `programs`      | no       | Regex selecting the units extract writes one spec for (default: every source)    |
+| `scaffold`      | no       | Pack-relative directory copied into an empty target by seed                      |
+| `specs-dir`     | no       | Where specs land in the target (default `docs/specs`)                            |
+| `features-dir`  | no       | Where `.feature` files land (default `features`)                                 |
+| `replay`        | no       | Command verify runs to replay equivalence vectors                                |
+| `program-files` | no       | Regex template with `<NAME>` for the target files that belong to one program     |
+| `spec-schema`   | no       | `pagespec` makes the extraction gate validate each spec's ```json pagespec block |
 
 Sections:
 

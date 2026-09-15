@@ -129,7 +129,7 @@ resumes unchecked tasks. A modernization flow reads its pack through
   `runFlowMain` is the only edge.
 - Name the flow file so it does not shadow a built-in unless shadowing is
   the intent (`llm4ts list` shows shadows).
-- Editor types are optional: `npm i -D @llm4ts/runner @llm4ts/flow @llm4ts/core effect@beta`,
+- Editor types are optional: `npm i -D @llm4ts/runner @llm4ts/flow @llm4ts/core effect@rc`,
   all `@llm4ts/*` on the shell's version and `effect` pinned exactly.
 - Exit codes: 0 done, 1 a stage failed, 2 usage error. `unknown flow` means
   the file is not under `.llm4ts/flows/` of the launch directory or has no

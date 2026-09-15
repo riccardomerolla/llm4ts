@@ -110,7 +110,7 @@ pnpm --filter @llm4ts/flows implement -- \
 ```
 
 Accepted values are `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`,
-`cursor`, and `opencode`. The inherited `LLM4ZIO_CODER` name remains supported
+`cursor`, and `opencode`. The inherited `LLM4ZIO_CODER` name is no longer read
 for migration.
 
 ## Parallel stories from an epic

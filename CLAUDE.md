@@ -27,7 +27,7 @@ package.
 
 - Use Effect 4 services and layers for replaceable dependencies.
 - Use schemas at external and persistence boundaries.
-- Keep expected failures typed with `Schema.TaggedErrorClass`.
+- Keep expected failures typed with `Schema.TaggedError`.
 - Do not use `any`, unchecked type assertions, namespaces, unmanaged promises,
   or global `Error` as a domain error.
 - Use explicit package subpath exports and `.ts` extensions for relative imports.

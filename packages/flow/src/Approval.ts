@@ -8,7 +8,7 @@ import type { PlainFileStoreShape } from "./Persistence.ts"
  * with a draft marker the flow writes, and the next phase refuses to start
  * until a person has ticked it. (Moved from `@llm4ts/modernize` in 0.18.0.)
  */
-export class ApprovalRequired extends Schema.TaggedErrorClass<ApprovalRequired>()(
+export class ApprovalRequired extends Schema.TaggedError<ApprovalRequired>()(
   "ApprovalRequired",
   {
     path: Schema.String,
@@ -20,7 +20,7 @@ export class ApprovalRequired extends Schema.TaggedErrorClass<ApprovalRequired>(
   }
 }
 
-export class MissingModernizeArtifact extends Schema.TaggedErrorClass<MissingModernizeArtifact>()(
+export class MissingModernizeArtifact extends Schema.TaggedError<MissingModernizeArtifact>()(
   "MissingModernizeArtifact",
   {
     path: Schema.String,

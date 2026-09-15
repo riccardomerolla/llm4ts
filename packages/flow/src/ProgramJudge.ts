@@ -101,7 +101,7 @@ const issues = (
  * A spec'd program with NO matching changed file is a deterministic gate
  * failure, not a silent pass. Skipping it would let the branch clear a bar the
  * old whole-branch judge would have failed. It also surfaces a mis-set
- * `programFiles:` immediately — the top documented risk of the per-program
+ * `program-files:` immediately — the top documented risk of the per-program
  * design — instead of quietly degrading coverage.
  */
 export const unimplemented = (programs: ReadonlyArray<string>): ReviewResult =>
@@ -112,8 +112,8 @@ export const unimplemented = (programs: ReadonlyArray<string>): ReviewResult =>
         title: `judge[${program}]: spec'd but no implementation files changed`,
         description:
           `${program} has a committed spec but no file on this branch matches the pack's ` +
-          "programFiles regex for it. Either the program is unimplemented, or the pack's " +
-          "`programFiles:` template does not match this repo's layout — check that before " +
+          "program-files regex for it. Either the program is unimplemented, or the pack's " +
+          "`program-files:` template does not match this repo's layout — check that before " +
           "assuming the former."
       })
     ),

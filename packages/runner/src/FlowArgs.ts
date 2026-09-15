@@ -38,7 +38,7 @@ environment:
 A trace of each run is written under .llm4ts/ in the target repository.
 `
 
-export class ScriptUsage extends Schema.TaggedErrorClass<ScriptUsage>()("ScriptUsage", {
+export class ScriptUsage extends Schema.TaggedError<ScriptUsage>()("ScriptUsage", {
   message: Schema.String
 }) {}
 

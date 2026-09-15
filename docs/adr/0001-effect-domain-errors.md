@@ -8,12 +8,12 @@ Accepted.
 
 The Scala source models `LlmError` as a pure ADT that does not extend
 `Throwable`. Effect's idiomatic schema-backed expected error is
-`Schema.TaggedErrorClass`, which is yieldable in `Effect.gen`, serializable, and
+`Schema.TaggedError`, which is yieldable in `Effect.gen`, serializable, and
 represented as an Error-like JavaScript value.
 
 ## Decision
 
-Use `Schema.TaggedErrorClass` for serializable expected failures. Preserve source
+Use `Schema.TaggedError` for serializable expected failures. Preserve source
 tags, fields, stable messages, and typed error channels. Do not use the global
 `Error` type as a public expected-error contract.
 

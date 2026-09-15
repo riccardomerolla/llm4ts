@@ -96,7 +96,7 @@ const wrap = (text: string, width: number, indent: string): ReadonlyArray<string
 }
 
 const selectedCoder = (environment: Readonly<Record<string, string | undefined>>): string =>
-  environment.LLM4TS_CODER ?? environment.LLM4ZIO_CODER ?? "claude (default)"
+  environment.LLM4TS_CODER ?? "claude (default)"
 
 export const makeDoctorProgram = (
   registry: ConnectorRegistryShape = nodeFlowRunnerDependencies().registry,

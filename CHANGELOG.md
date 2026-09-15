@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.0.0
+
+### Breaking
+
+Four cleanups the 1.x contract could not carry. Each has a one-line
+migration.
+
+- `LLM4ZIO_CODER` is no longer read; `LLM4TS_CODER` is the only coder
+  selector. Migration: rename the variable.
+- `LLM4TS_JUDGE_SOURCES_LIMIT` is no longer read; `LLM4TS_CONTEXT_BUDGET`
+  is the only context budget. Migration: rename the variable.
+- The pack manifest field `programFiles:` is now `program-files:`, matching
+  the other multi-word header fields (`specs-dir`, `features-dir`,
+  `spec-schema`). A manifest with the old spelling fails to load with the
+  rename spelled out. Migration: rename the field; the value is unchanged.
+  The `Pack.programFiles` property in TypeScript keeps its name.
+- A page spec's `apiCalls[].esbService` must be an identifier
+  (`ESB_ACCT_LIST`); a spec that carries prose there no longer decodes.
+  Found in the second rehearsal, where the analyst wrote its uncertainty
+  into the field and the contract published it as the service name.
+  Migration: omit the field when the service is unknown; the prompt now
+  says so.
+
+- Effect moves from `4.0.0-beta.102` to `4.0.0-rc.115` (`effect`,
+  `@effect/platform-node`, `@effect/platform-node-shared`, `@effect/vitest`,
+  all pinned exactly). Exported types now come from the release-candidate
+  line; a consumer's own `effect` must match. Inside, the beta's
+  `Schema.TaggedErrorClass` is the RC's `Schema.TaggedError`, the CLI
+  constructors are capitalised (`Argument.String`, `Flag.Boolean`,
+  `Prompt.Select`), and `SchemaError` lives in `effect/Schema` — none of
+  which is llm4ts API, but anyone extending its error classes sees the
+  rename. Migration: `npm i effect@4.0.0-rc.115` (or `effect@rc`).
+
+Nothing else changed: the subpath exports, the runner barrel, the flow and
+kit layouts, the three discovery tiers, and the remaining `LLM4TS_*`
+variables are as in 1.0.0.
+
 ## 1.0.0
 
 No code changes over 0.18.1. This release declares the public surface

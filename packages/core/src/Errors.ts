@@ -1,37 +1,37 @@
 import * as Duration from "effect/Duration"
 import * as Schema from "effect/Schema"
 
-export class ProviderError extends Schema.TaggedErrorClass<ProviderError>()("ProviderError", {
+export class ProviderError extends Schema.TaggedError<ProviderError>()("ProviderError", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
 
-export class UsageLimitError extends Schema.TaggedErrorClass<UsageLimitError>()("UsageLimitError", {
+export class UsageLimitError extends Schema.TaggedError<UsageLimitError>()("UsageLimitError", {
   resetAt: Schema.optionalKey(Schema.DateTimeUtc),
   provider: Schema.String,
   message: Schema.String
 }) {}
 
-export class AuthenticationError extends Schema.TaggedErrorClass<AuthenticationError>()(
+export class AuthenticationError extends Schema.TaggedError<AuthenticationError>()(
   "AuthenticationError",
   {
     message: Schema.String
   }
 ) {}
 
-export class InvalidRequestError extends Schema.TaggedErrorClass<InvalidRequestError>()(
+export class InvalidRequestError extends Schema.TaggedError<InvalidRequestError>()(
   "InvalidRequestError",
   {
     message: Schema.String
   }
 ) {}
 
-export class ParseError extends Schema.TaggedErrorClass<ParseError>()("ParseError", {
+export class ParseError extends Schema.TaggedError<ParseError>()("ParseError", {
   message: Schema.String,
   raw: Schema.String
 }) {}
 
-export class ToolError extends Schema.TaggedErrorClass<ToolError>()("ToolError", {
+export class ToolError extends Schema.TaggedError<ToolError>()("ToolError", {
   toolName: Schema.String,
   detail: Schema.String
 }) {
@@ -40,11 +40,11 @@ export class ToolError extends Schema.TaggedErrorClass<ToolError>()("ToolError",
   }
 }
 
-export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()("ConfigError", {
+export class ConfigError extends Schema.TaggedError<ConfigError>()("ConfigError", {
   message: Schema.String
 }) {}
 
-export class RateLimitError extends Schema.TaggedErrorClass<RateLimitError>()("RateLimitError", {
+export class RateLimitError extends Schema.TaggedError<RateLimitError>()("RateLimitError", {
   retryAfter: Schema.optionalKey(Schema.Duration)
 }) {
   get message(): string {
@@ -54,7 +54,7 @@ export class RateLimitError extends Schema.TaggedErrorClass<RateLimitError>()("R
   }
 }
 
-export class TimeoutError extends Schema.TaggedErrorClass<TimeoutError>()("TimeoutError", {
+export class TimeoutError extends Schema.TaggedError<TimeoutError>()("TimeoutError", {
   duration: Schema.Duration
 }) {
   get message(): string {
@@ -62,7 +62,7 @@ export class TimeoutError extends Schema.TaggedErrorClass<TimeoutError>()("Timeo
   }
 }
 
-export class TurnLimitError extends Schema.TaggedErrorClass<TurnLimitError>()("TurnLimitError", {
+export class TurnLimitError extends Schema.TaggedError<TurnLimitError>()("TurnLimitError", {
   limit: Schema.optionalKey(Schema.Int)
 }) {
   get message(): string {

@@ -68,7 +68,8 @@ export class PageApiCall extends Schema.Class<PageApiCall>("PageApiCall")({
   method: Schema.String,
   path: Schema.String,
   /** The ESB service behind the legacy endpoint, when known. */
-  esbService: Schema.optionalKey(Schema.String),
+  /** An ESB service identifier (`ESB_ACCT_LIST`), never prose: unknown means omit. */
+  esbService: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.:/-]+$/))),
   request: Schema.Array(FieldMapping).pipe(
     Schema.withConstructorDefault(Effect.succeed(emptyMappings)),
     Schema.withDecodingDefaultKey(Effect.succeed(emptyMappings))
@@ -154,7 +155,7 @@ export const pageSpecShapeHint =
   "The block must be exactly: { page, route, title, complexity: low|medium|high, " +
   "forms: [{ name, action, fields: [{ name, label, type, required?, validations: [{ rule, message?, enforcedAt: client|server|both }] }] }], " +
   "dtos: [{ legacyName, domainName, fields: [{ legacyName, domainName, type }] }], " +
-  "apiCalls: [{ operation, method, path, esbService (the ESB service the legacy call goes through — omit only when there is none), request: [{ legacyName, domainName, type }], response: [{ legacyName, domainName, type }] for an ad-hoc object, or responseDto: <domainName of one of the dtos> with responseShape: single|list when the endpoint returns that DTO or a list of it (a table screen is a list) }], " +
+  "apiCalls: [{ operation, method, path, esbService (the identifier of the ESB service the legacy call goes through, such as ESB_ACCT_LIST — omit it when unknown or absent; never a sentence), request: [{ legacyName, domainName, type }], response: [{ legacyName, domainName, type }] for an ad-hoc object, or responseDto: <domainName of one of the dtos> with responseShape: single|list when the endpoint returns that DTO or a list of it (a table screen is a list) }], " +
   "navigation: { inbound: [string], outbound: [string], steps: [string] }, sessionState: [string], openQuestions: [string] }. " +
   "No other keys (no id, url, queryParams, esbCall, trigger, serverController); every apiCalls entry is an object with operation/method/path; " +
   "put anything that does not fit into the prose sections or openQuestions."

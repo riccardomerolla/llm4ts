@@ -202,7 +202,14 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, text]) => parseReviewer(name, text))
   const fields = manifest.fields
-  const programFiles = fields["programFiles"]
+  if (fields["programFiles"] !== undefined) {
+    return yield* PlanParseError.make({
+      message:
+        "pack manifest 'programFiles:' was renamed 'program-files:' in llm4ts 2.0 — " +
+        "rename the field (the value is unchanged)"
+    })
+  }
+  const programFiles = fields["program-files"]
   // Validated at load so a mis-typed template fails the pack, not a later
   // phase; substitution cannot introduce invalid syntax because the fallback
   // probe uses an alphanumeric stand-in and real substitutions are escaped

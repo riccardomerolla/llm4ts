@@ -236,3 +236,26 @@ describe("calls sharing a method and path", () => {
     assert.include(yaml, "LoadAccountOverviewResponse:")
   })
 })
+
+describe("esbService", () => {
+  it.effect("accepts an identifier and rejects prose", () =>
+    Effect.gen(function* () {
+      const block = (esbService: string): string =>
+        "# p\n\n```json pagespec\n" +
+        JSON.stringify({
+          page: "p",
+          route: "/p",
+          title: "P",
+          complexity: "low",
+          apiCalls: [{ operation: "load", method: "GET", path: "/p", esbService }]
+        }) +
+        "\n```\n"
+      const ok = yield* parsePageSpec(block("ESB_ACCT_LIST"))
+      assert.strictEqual(ok.apiCalls[0]?.esbService, "ESB_ACCT_LIST")
+      const error = yield* parsePageSpec(
+        block("UNKNOWN — called inside the servlet, out of scope")
+      ).pipe(Effect.flip)
+      assert.strictEqual(error._tag, "PlanParse")
+    })
+  )
+})

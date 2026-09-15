@@ -2,16 +2,16 @@ import * as Schema from "effect/Schema"
 import { Capability } from "@llm4ts/core/Capability"
 import { LlmError } from "@llm4ts/core/Errors"
 
-export class PersistenceError extends Schema.TaggedErrorClass<PersistenceError>()("Persistence", {
+export class PersistenceError extends Schema.TaggedError<PersistenceError>()("Persistence", {
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
 
-export class PlanParseError extends Schema.TaggedErrorClass<PlanParseError>()("PlanParse", {
+export class PlanParseError extends Schema.TaggedError<PlanParseError>()("PlanParse", {
   message: Schema.String
 }) {}
 
-export class UnsupportedSchemaVersion extends Schema.TaggedErrorClass<UnsupportedSchemaVersion>()(
+export class UnsupportedSchemaVersion extends Schema.TaggedError<UnsupportedSchemaVersion>()(
   "UnsupportedSchemaVersion",
   {
     path: Schema.String,
@@ -24,7 +24,7 @@ export class UnsupportedSchemaVersion extends Schema.TaggedErrorClass<Unsupporte
   }
 }
 
-export class WorkspacePathError extends Schema.TaggedErrorClass<WorkspacePathError>()(
+export class WorkspacePathError extends Schema.TaggedError<WorkspacePathError>()(
   "WorkspacePath",
   {
     path: Schema.String,
@@ -32,7 +32,7 @@ export class WorkspacePathError extends Schema.TaggedErrorClass<WorkspacePathErr
   }
 ) {}
 
-export class WorkspaceLimitError extends Schema.TaggedErrorClass<WorkspaceLimitError>()(
+export class WorkspaceLimitError extends Schema.TaggedError<WorkspaceLimitError>()(
   "WorkspaceLimit",
   {
     operation: Schema.String,
@@ -47,18 +47,18 @@ export class WorkspaceLimitError extends Schema.TaggedErrorClass<WorkspaceLimitE
   }
 }
 
-export class WorkspaceIoError extends Schema.TaggedErrorClass<WorkspaceIoError>()("WorkspaceIo", {
+export class WorkspaceIoError extends Schema.TaggedError<WorkspaceIoError>()("WorkspaceIo", {
   operation: Schema.String,
   path: Schema.String,
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
 
-export class FlowAborted extends Schema.TaggedErrorClass<FlowAborted>()("Aborted", {
+export class FlowAborted extends Schema.TaggedError<FlowAborted>()("Aborted", {
   message: Schema.String
 }) {}
 
-export class ProcessError extends Schema.TaggedErrorClass<ProcessError>()("Process", {
+export class ProcessError extends Schema.TaggedError<ProcessError>()("Process", {
   message: Schema.String,
   detail: Schema.String
 }) {}
@@ -80,7 +80,7 @@ export const describeFlowError = (error: unknown): string => {
   return detail.length === 0 || base.includes(detail) ? base : `${base}: ${detail}`
 }
 
-export class FlowLlmError extends Schema.TaggedErrorClass<FlowLlmError>()("Llm", {
+export class FlowLlmError extends Schema.TaggedError<FlowLlmError>()("Llm", {
   message: Schema.String,
   cause: Schema.optionalKey(LlmError)
 }) {
@@ -91,7 +91,7 @@ export class FlowLlmError extends Schema.TaggedErrorClass<FlowLlmError>()("Llm",
     })
 }
 
-export class FlowCapabilityDenied extends Schema.TaggedErrorClass<FlowCapabilityDenied>()(
+export class FlowCapabilityDenied extends Schema.TaggedError<FlowCapabilityDenied>()(
   "CapabilityDenied",
   {
     capability: Capability,
@@ -105,7 +105,7 @@ export class FlowCapabilityDenied extends Schema.TaggedErrorClass<FlowCapability
   }
 }
 
-export class ColumnNotFound extends Schema.TaggedErrorClass<ColumnNotFound>()("ColumnNotFound", {
+export class ColumnNotFound extends Schema.TaggedError<ColumnNotFound>()("ColumnNotFound", {
   title: Schema.String,
   available: Schema.Array(Schema.String)
 }) {
@@ -114,7 +114,7 @@ export class ColumnNotFound extends Schema.TaggedErrorClass<ColumnNotFound>()("C
   }
 }
 
-export class BudgetExceeded extends Schema.TaggedErrorClass<BudgetExceeded>()("BudgetExceeded", {
+export class BudgetExceeded extends Schema.TaggedError<BudgetExceeded>()("BudgetExceeded", {
   metric: Schema.Literals(["tokens", "costUsd"]),
   limit: Schema.Number,
   actual: Schema.Number
@@ -125,7 +125,7 @@ export class BudgetExceeded extends Schema.TaggedErrorClass<BudgetExceeded>()("B
 }
 
 /** A story plan that failed deterministic validation — every violation, not the first (ADR 0013). */
-export class StoryPlanInvalid extends Schema.TaggedErrorClass<StoryPlanInvalid>()(
+export class StoryPlanInvalid extends Schema.TaggedError<StoryPlanInvalid>()(
   "StoryPlanInvalid",
   {
     violations: Schema.Array(Schema.String)
@@ -137,7 +137,7 @@ export class StoryPlanInvalid extends Schema.TaggedErrorClass<StoryPlanInvalid>(
 }
 
 /** A story branch changed paths outside the story's declared `owned` set. */
-export class PerimeterViolation extends Schema.TaggedErrorClass<PerimeterViolation>()(
+export class PerimeterViolation extends Schema.TaggedError<PerimeterViolation>()(
   "PerimeterViolation",
   {
     story: Schema.String,
@@ -158,7 +158,7 @@ export class PerimeterViolation extends Schema.TaggedErrorClass<PerimeterViolati
 }
 
 /** The coder ended a story with `BLOCKED_ON:` — unplanned work belongs to another story. */
-export class MissingDependency extends Schema.TaggedErrorClass<MissingDependency>()(
+export class MissingDependency extends Schema.TaggedError<MissingDependency>()(
   "MissingDependency",
   {
     story: Schema.String,
@@ -171,7 +171,7 @@ export class MissingDependency extends Schema.TaggedErrorClass<MissingDependency
 }
 
 /** A story branch did not merge cleanly into the epic branch; the merge was aborted. */
-export class MergeConflict extends Schema.TaggedErrorClass<MergeConflict>()("MergeConflict", {
+export class MergeConflict extends Schema.TaggedError<MergeConflict>()("MergeConflict", {
   branch: Schema.String,
   into: Schema.String,
   paths: Schema.Array(Schema.String)
@@ -183,7 +183,7 @@ export class MergeConflict extends Schema.TaggedErrorClass<MergeConflict>()("Mer
 }
 
 /** One story failed; carries the story id so a fail-fast run names its cause. */
-export class StoryFailed extends Schema.TaggedErrorClass<StoryFailed>()("StoryFailed", {
+export class StoryFailed extends Schema.TaggedError<StoryFailed>()("StoryFailed", {
   story: Schema.String,
   reason: Schema.String
 }) {

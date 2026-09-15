@@ -7,14 +7,14 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type { LlmConfig } from "./Models.ts"
 
-export class RateLimiterAcquireTimeout extends Schema.TaggedErrorClass<RateLimiterAcquireTimeout>()(
+export class RateLimiterAcquireTimeout extends Schema.TaggedError<RateLimiterAcquireTimeout>()(
   "AcquireTimeout",
   {
     timeout: Schema.Duration
   }
 ) {}
 
-export class RateLimiterInvalidConfig extends Schema.TaggedErrorClass<RateLimiterInvalidConfig>()(
+export class RateLimiterInvalidConfig extends Schema.TaggedError<RateLimiterInvalidConfig>()(
   "InvalidConfig",
   {
     details: Schema.String

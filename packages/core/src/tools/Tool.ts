@@ -10,21 +10,21 @@ import {
   type JsonValue
 } from "../providers/CliSupport.ts"
 
-export class InvalidToolSchema extends Schema.TaggedErrorClass<InvalidToolSchema>()(
+export class InvalidToolSchema extends Schema.TaggedError<InvalidToolSchema>()(
   "InvalidSchema",
   {
     message: Schema.String
   }
 ) {}
 
-export class InvalidToolParameters extends Schema.TaggedErrorClass<InvalidToolParameters>()(
+export class InvalidToolParameters extends Schema.TaggedError<InvalidToolParameters>()(
   "InvalidParameters",
   {
     message: Schema.String
   }
 ) {}
 
-export class DuplicateToolName extends Schema.TaggedErrorClass<DuplicateToolName>()(
+export class DuplicateToolName extends Schema.TaggedError<DuplicateToolName>()(
   "DuplicateToolName",
   {
     name: Schema.String
@@ -35,21 +35,21 @@ export class DuplicateToolName extends Schema.TaggedErrorClass<DuplicateToolName
   }
 }
 
-export class ToolSandboxViolation extends Schema.TaggedErrorClass<ToolSandboxViolation>()(
+export class ToolSandboxViolation extends Schema.TaggedError<ToolSandboxViolation>()(
   "SandboxViolation",
   {
     message: Schema.String
   }
 ) {}
 
-export class ToolExecutionFailed extends Schema.TaggedErrorClass<ToolExecutionFailed>()(
+export class ToolExecutionFailed extends Schema.TaggedError<ToolExecutionFailed>()(
   "ExecutionFailed",
   {
     message: Schema.String
   }
 ) {}
 
-export class ToolSchemaGenerationFailed extends Schema.TaggedErrorClass<ToolSchemaGenerationFailed>()(
+export class ToolSchemaGenerationFailed extends Schema.TaggedError<ToolSchemaGenerationFailed>()(
   "SchemaGenerationFailed",
   {
     message: Schema.String

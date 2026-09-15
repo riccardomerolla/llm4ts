@@ -53,7 +53,8 @@ describe("Context.budget", () => {
       budget({ LLM4TS_CONTEXT_BUDGET: "1000", LLM4TS_JUDGE_SOURCES_LIMIT: "2000" }),
       1000
     )
-    assert.strictEqual(budget({ LLM4TS_JUDGE_SOURCES_LIMIT: "2000" }), 2000)
+    // 2.0: the deprecated alias is no longer read.
+    assert.strictEqual(budget({ LLM4TS_JUDGE_SOURCES_LIMIT: "2000" }), 400_000)
     assert.strictEqual(budget({}), defaultContextBudget)
   })
 

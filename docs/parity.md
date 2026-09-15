@@ -424,8 +424,8 @@ reference release.
 - v4.3.0 bounded-context adoption (2026-08-07) — Effect-native renames and
   divergences, behavior contract unchanged:
   - Env knobs are `LLM4TS_*`: `LLM4TS_CONTEXT_BUDGET` (with
-    `LLM4TS_JUDGE_SOURCES_LIMIT` as the deprecated alias, mirroring the
-    source's `LLM4ZIO_*` pair), `LLM4TS_ANALYST_TURNS`,
+    — the `LLM4TS_JUDGE_SOURCES_LIMIT` alias that mirrored the source's
+    `LLM4ZIO_*` pair was removed in 2.0), `LLM4TS_ANALYST_TURNS`,
     `LLM4TS_MAX_CLOSURE_FILES`. Node has no system-property channel, so the
     source's `llm4zio.<NAME>` property fallback has no counterpart.
   - The source's `Modernize` state machine (versioned `state.json`, ordered
@@ -446,7 +446,7 @@ reference release.
     `GitRead` guard so denials still audit.
   - `Pack.filesFor` returns a compiled `RegExp`, not a pattern string:
     JavaScript has no inline `(?i)` flag, so the case-insensitive fallback
-    carries the `i` flag while a `programFiles:` template is compiled
+    carries the `i` flag while a `program-files:` template is compiled
     anchored (`^(?:…)$`) to mirror Scala's full-string `matches`. Invalid
     templates fail at pack load as `PlanParseError`.
   - `Context.withShrink` drops the typed cause on terminal failure exactly

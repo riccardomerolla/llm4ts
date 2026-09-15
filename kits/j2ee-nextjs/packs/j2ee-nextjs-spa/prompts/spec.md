@@ -22,7 +22,7 @@ The spec markdown for a page has two mandatory parts:
      "dtos": [{ "legacyName", "domainName", "fields": [{ "legacyName",
        "domainName", "type" }] }],
      "apiCalls": [{ "operation": "<domain verb, e.g. listAccounts>",
-       "method", "path", "esbService", "request": [{ "legacyName",
+       "method", "path", "esbService" (an identifier such as ESB_ACCT_LIST, or omit — never prose), "request": [{ "legacyName",
        "domainName", "type" }],
        "response": [{ "legacyName", "domainName", "type" }]   // ad-hoc object, OR
        "responseDto": "<domainName of one of the dtos>",       // the DTO returned,

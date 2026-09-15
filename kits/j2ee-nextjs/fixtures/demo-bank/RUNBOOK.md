@@ -226,7 +226,7 @@ wave-1 pages, each costing one repair retry (self-healed); the extraction
 judge's context is narrower than the analyst's closure, so it scored
 `faithfulness` 1 for facts the analyst legitimately read from the servlet
 and ESB sources; `convert-page` places `layout.tsx`, `registry.ts`, and
-`components.css` edits outside the pack's `programFiles`, so the judge sees
+`components.css` edits outside the pack's `program-files`, so the judge sees
 them only as a summary and returns three "cannot verify" findings. Cost
 figures were estimates throughout; the first wave-1 attempt alone reported
 $12.26 estimated before it was stopped.

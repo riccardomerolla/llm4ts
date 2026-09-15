@@ -123,7 +123,7 @@ describe("skills stay in sync with the guide and the codebase", () => {
       "specs-dir",
       "features-dir",
       "replay",
-      "programFiles"
+      "program-files"
     ]) {
       assert.include(reference, `\`${field}\``, `manifest.md no longer documents ${field}`)
       assert.include(

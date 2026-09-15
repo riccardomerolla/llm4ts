@@ -210,11 +210,11 @@ Internal engineering references: [source parity ledger](docs/parity.md),
 
 ## Status
 
-1.0 since 2026-09-15; see [CHANGELOG.md](CHANGELOG.md) for what the 1.x
-line holds stable: the package subpath exports, the `@llm4ts/runner` root
+2.0 since 2026-09-15; see [CHANGELOG.md](CHANGELOG.md) for what the line
+holds stable and for the four renames 2.0 made: the package subpath exports, the `@llm4ts/runner` root
 barrel, the flow and kit layouts and their three discovery tiers, the pack
 manifest, and the `LLM4TS_*` environment. Importing package-private files is
 unsupported. The implementation tracks the owned `llm4zio` v4.3.0 behaviour
-and uses Effect 4 (beta line, pinned exactly).
+and uses Effect 4 (release-candidate line, pinned exactly).
 
 Licensed under MIT.

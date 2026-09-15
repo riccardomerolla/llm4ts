@@ -53,6 +53,6 @@ export const findOnPath = (
 export const resolvedCoderToken = (
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): string => {
-  const token = environment.LLM4TS_CODER ?? environment.LLM4ZIO_CODER ?? "claude"
+  const token = environment.LLM4TS_CODER ?? "claude"
   return coderChoices.some((choice) => choice.token === token) ? token : "claude"
 }

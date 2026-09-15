@@ -293,7 +293,7 @@ pnpm --filter @llm4ts/flows implement -- \
   blob.
 
 - **`coderFromEnv(process.env)`** — from `@llm4ts/runner/Connectors`, reads
-  `LLM4TS_CODER` (or the legacy `LLM4ZIO_CODER`) and returns the matching CLI
+  `LLM4TS_CODER` and returns the matching CLI
   connector config (`claude` by default). This is the same `coder` slot rung
   1 filled with `ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock })`
   — here it resolves to a CLI coding agent instead of an HTTP provider.

@@ -7,7 +7,7 @@ spec-schema: pagespec
 programs: .*\.jsp
 specs-dir: docs/modernization/specs
 features-dir: docs/modernization/features
-programFiles: (?:src/app/<NAME>(?:/.*)?|src/services/<NAME>(?:/.*)?|contracts/<NAME>\.openapi\.yaml|tests/<NAME>\..*)
+program-files: (?:src/app/<NAME>(?:/.*)?|src/services/<NAME>(?:/.*)?|contracts/<NAME>\.openapi\.yaml|tests/<NAME>\..*)
 
 ## Gates
 

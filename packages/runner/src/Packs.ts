@@ -32,7 +32,7 @@ import { makeNodeWorkspace } from "./NodeWorkspace.ts"
  * work from any directory instead of only from a checkout.
  */
 
-export class PackNotFound extends Schema.TaggedErrorClass<PackNotFound>()("PackNotFound", {
+export class PackNotFound extends Schema.TaggedError<PackNotFound>()("PackNotFound", {
   message: Schema.String
 }) {}
 

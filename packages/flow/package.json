@@ -98,9 +98,9 @@
     "@llm4ts/core": "workspace:*"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.102"
+    "effect": "4.0.0-rc.115"
   },
   "devDependencies": {
-    "effect": "4.0.0-beta.102"
+    "effect": "4.0.0-rc.115"
   }
 }

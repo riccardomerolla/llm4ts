@@ -52,7 +52,7 @@ describe("convert lib", () => {
     assert.include(report, "| oldTransfer | skipped")
   })
 
-  it.effect("the j2ee pack's programFiles slices target files per page precisely", () =>
+  it.effect("the j2ee pack's program-files slices target files per page precisely", () =>
     Effect.gen(function* () {
       const workspace = yield* makeNodeWorkspace(flowsRoot)
       const pack = yield* loadPack(workspace, "packs/j2ee-nextjs-spa")

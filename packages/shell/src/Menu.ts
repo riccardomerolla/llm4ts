@@ -24,7 +24,7 @@ const selectFlow = Effect.fn("@llm4ts/shell/Menu.selectFlow")(function* (tiers: 
     return undefined
   }
   return yield* Prompt.run(
-    Prompt.select({
+    Prompt.Select({
       message: "Which flow?",
       choices: flows.map(flowChoice)
     })
@@ -51,7 +51,7 @@ const selectCoder = Effect.fn("@llm4ts/shell/Menu.selectCoder")(function* (
       })
     )
   ]
-  return yield* Prompt.run(Prompt.select({ message: "Which coding agent?", choices }))
+  return yield* Prompt.run(Prompt.Select({ message: "Which coding agent?", choices }))
 })
 
 const runFlowInteractive = Effect.fn("@llm4ts/shell/Menu.runFlowInteractive")(function* (
@@ -65,7 +65,7 @@ const runFlowInteractive = Effect.fn("@llm4ts/shell/Menu.runFlowInteractive")(fu
     yield* Console.log(`${flow.name}: ${flow.description}`)
   }
   const task = yield* Prompt.run(
-    Prompt.text({ message: "Task text (empty uses the flow's default)" })
+    Prompt.String({ message: "Task text (empty uses the flow's default)" })
   )
   const coder = yield* selectCoder(process.env)
   const exitCode = yield* launchFlow({
@@ -97,7 +97,7 @@ const viewFlowInteractive = Effect.fn("@llm4ts/shell/Menu.viewFlowInteractive")(
 export const mainMenu = Effect.fn("@llm4ts/shell/Menu.mainMenu")(function* (tiers: FlowTierPaths) {
   while (true) {
     const action = yield* Prompt.run(
-      Prompt.select<MenuAction>({
+      Prompt.Select<MenuAction>({
         message: "llm4ts shell",
         choices: [
           { title: "Run a flow", value: "run" },

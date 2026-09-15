@@ -22,8 +22,7 @@ arguments, events, or persisted flow artifacts.
 The Node runner exports presets for Claude, Codex, Gemini, Pi, Antigravity, Grok,
 Cursor, and OpenCode. Their native CLIs own authentication. `LLM4TS_CODER`
 selects `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, or
-`opencode`. The source-compatible `LLM4ZIO_CODER` name remains a lower-priority
-fallback.
+`opencode`. The llm4zio-era `LLM4ZIO_CODER` name is no longer read (2.0).
 
 `LLM4TS_VERBOSITY` accepts `quiet`, `normal`, `verbose`, or `debug`.
 
