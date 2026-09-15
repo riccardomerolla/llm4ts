@@ -49,6 +49,24 @@ Key flags:
 Don't pre-create a branch: the flow creates its own epic branch and commits
 each reviewed task on it.
 
+## Modernization flows and kits
+
+The `modernize-*` flows (survey, extract, seed, implement, verify, review)
+and the kit flows (`convert-page`, `convert-all`) read a **pack** from a
+**kit**. `npx -y @llm4ts/shell kits` lists the kits the shell can see with
+their packs; pass the pack with `--pack <name>` (a bare pack name,
+`kit/pack`, or a directory holding `pack.md` for a draft), which the shell
+forwards as `LLM4TS_PACK`. Before spending a model run on a new estate or
+pack, dry-run it — no model call:
+
+```bash
+npx -y @llm4ts/shell run modernize-pack-check --pack <pack> --repo <estate>
+```
+
+Extraction of one wave (`LLM4TS_WAVE=<wave>`) gates only that wave's units;
+a closing `modernize-extract` run without `LLM4TS_WAVE` enforces estate-wide
+coverage. Writing a pack or a kit is the `authoring-llm4ts-packs` skill.
+
 ## After it runs
 
 Exit codes: 0 success, 1 action failure, 2 usage error — `llm4ts run`
