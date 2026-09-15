@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.1.0
 
 - Dependents of a failed story are `waiting`, not `skipped`: the board and
   `BoardSync` gain a `wait` transition and a `waiting` status ("on hold
