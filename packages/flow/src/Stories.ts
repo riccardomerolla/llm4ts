@@ -393,6 +393,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       if (yield* context.git.branchExists(stored.branch)) {
         yield* context.git.deleteBranch(stored.branch)
       }
+      // The task checkpoint belongs to the old branch: left in place, the
+      // fresh branch would inherit "every task complete" and skip the coder.
+      yield* files.remove(planPath(story))
       stored = undefined
     }
     if (stored !== undefined && stored.status === "merged") {
@@ -477,6 +480,11 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       const judge = options.judge
       for (let round = 1; round <= judgeRounds; round += 1) {
         const diff = yield* storyContext.git.diffVsBase(epicBranch)
+        if (diff.trim().length === 0) {
+          // Nothing to judge is a deterministic failure, not a model call:
+          // a model asked to score an empty diff scores the prompt instead.
+          return yield* failed(story, "the story branch has no changes against the epic branch")
+        }
         const verdict = yield* judge(story, diff)
         if (verdict.isClean) {
           judgeNote = `judge cleared (round ${round})`

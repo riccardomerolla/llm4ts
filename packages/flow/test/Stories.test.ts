@@ -178,6 +178,10 @@ const storyOf = (plan: StoryPlan, workDir: string): Story => {
   return found
 }
 
+const memories = new WeakMap<StoriesOptions, Effect.Effect<Readonly<Record<string, string>>>>()
+const memoryFilesOf = (options: StoriesOptions): Effect.Effect<Readonly<Record<string, string>>> =>
+  memories.get(options) ?? Effect.succeed({})
+
 const makeOptions = (
   harness: Harness,
   plan: StoryPlan,
@@ -186,7 +190,7 @@ const makeOptions = (
 ): Effect.Effect<StoriesOptions> =>
   Effect.gen(function* () {
     const memory = yield* makeMemoryPlainFileStore()
-    return {
+    const built: StoriesOptions = {
       plan,
       files: memory.store,
       stateDir: "/repo/.llm4ts/epics/" + plan.epicId,
@@ -226,6 +230,8 @@ const makeOptions = (
         ),
       ...overrides
     }
+    memories.set(built, memory.files)
+    return built
   })
 
 const makeHarness = (
@@ -620,6 +626,10 @@ describe("Stories executor", () => {
         })
       )
       yield* Ref.set(harness.branches, new Set(["story/diamond/c"]))
+      yield* options.files.writeAtomic(
+        `${options.stateDir}/stories/c.plan.md`,
+        "# Plan: c\n\n## [x] c task\nstale"
+      )
 
       const report = yield* implementStoriesFlow(context, options)
       assert.strictEqual(report.count("done"), 4)
@@ -630,6 +640,11 @@ describe("Stories executor", () => {
       assert.notInclude(log, "worktree-existing:story/diamond/b->/repo/.llm4ts/worktrees/b")
       assert.include(log, "seats:b")
       assert.include(log, "worktree-remove:/repo/.llm4ts/worktrees/c:force")
+      // The old task checkpoint went with the old branch; the fresh run wrote its own.
+      const filesAfter = yield* memoryFilesOf(options)
+      const checkpoint = filesAfter[`${options.stateDir}/stories/c.plan.md`] ?? ""
+      assert.notInclude(checkpoint, "stale")
+      assert.include(checkpoint, "[x] c task")
       assert.include(log, "branch-delete:story/diamond/c")
       assert.include(log, "worktree-new:story/diamond/c@epic/diamond->/repo/.llm4ts/worktrees/c")
       assert.strictEqual(report.stories[0]?.judge, "merged on a previous run")
@@ -662,6 +677,40 @@ describe("Stories executor", () => {
         assert.notInclude(log, "seats:b")
         assert.strictEqual(report.stories.find((outcome) => outcome.id === "d")?.status, "skipped")
       })
+  )
+
+  it.effect("a story whose branch has no changes fails before the judge is asked", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const asked = yield* Ref.make(0)
+      const options = yield* makeOptions(harness, diamond, context, {
+        concurrency: 1,
+        judge: () => Ref.update(asked, (n) => n + 1).pipe(Effect.as(clean)),
+        contextFor: (workDir) =>
+          Effect.gen(function* () {
+            const story = storyOf(diamond, workDir)
+            const seats: StorySeats = {
+              context: {
+                ...context,
+                coder: coder("done"),
+                git: {
+                  ...worktreeGit(harness, workDir, story),
+                  diffVsBase: () => Effect.succeed(story.id === "a" ? "" : "diff --git a/f b/f\n+x")
+                },
+                workDir
+              }
+            }
+            return seats
+          })
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      const a = report.stories.find((outcome) => outcome.id === "a")
+      assert.strictEqual(a?.status, "failed")
+      assert.include(a?.reason ?? "", "no changes against the epic branch")
+      assert.strictEqual(report.stories.find((outcome) => outcome.id === "b")?.status, "done")
+      assert.strictEqual(yield* Ref.get(asked), 1)
+    })
   )
 
   it.effect("an invalid plan fails typed before any branch is touched", () =>

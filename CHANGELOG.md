@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Fixed**: a story restarted because its plan entry changed kept the old
+  branch's task checkpoint, so the fresh branch inherited "every task
+  complete", ran no coder, and went straight to the judge with an empty
+  diff — which the judge then scored on the prompt. The restart clears the
+  checkpoint, and a story branch with no changes against the epic branch
+  fails deterministically before any judge call.
+
 - Internet-banking portal fixture on `effect@4.0.0-rc.115`, the engine's
   own pin, with no source change: the kit's HttpApi contracts, the fake
   transport, and the hooks compile and pass their gates unchanged. Install
