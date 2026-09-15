@@ -301,7 +301,7 @@ const specPrograms = Effect.fn("modernize-verify.specPrograms")(function* (
   const paths = yield* matchingFiles(target, `^${specsDir}/[^/]+\\.md$`).pipe(
     Effect.orElseSucceed(() => [])
   )
-  const excluded = new Set(["traceability", "mapping", "README"])
+  const excluded = new Set(["traceability", "mapping", "README", "decisions", "domains"])
   return paths
     .map((path) => (path.split("/").at(-1) ?? path).replace(/\.md$/, ""))
     .filter((name) => !excluded.has(name))
@@ -362,10 +362,22 @@ const program = Effect.gen(function* () {
         )
 
         const rulesText = (yield* files.read(join(input.workDir, pack.specsDir, "rules.txt"))) ?? ""
-        const universe = rulesText
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter((line) => line.length > 0)
+        // Everything above `# waived` is the universe; the units below it were
+        // waived by a decision (ADR 0015) and are neither expected nor flagged.
+        const rulesLines = rulesText.split(/\r?\n/).map((line) => line.trim())
+        const waivedAt = rulesLines.indexOf("# waived")
+        const universe = (waivedAt < 0 ? rulesLines : rulesLines.slice(0, waivedAt)).filter(
+          (line) => line.length > 0
+        )
+        const waived =
+          waivedAt < 0 ? [] : rulesLines.slice(waivedAt + 1).filter((l) => l.length > 0)
+        if (waived.length > 0) {
+          yield* context.events.publish(
+            Info.make({
+              message: `${waived.length} rule(s) waived by decision are left out of the universe`
+            })
+          )
+        }
         if (universe.length === 0) {
           yield* context.events.publish(
             Info.make({

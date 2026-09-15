@@ -40,6 +40,7 @@ import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
 import { matchingFiles } from "@llm4ts/flow/SpecChecks"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
 import { requireApproval } from "@llm4ts/flow/Approval"
+import { Decisions, filterFeature, parseDecisions } from "@llm4ts/flow/Decisions"
 
 const ModDir = "docs/modernization"
 const skipped = new Set([".git", "target", "node_modules", "dist"])
@@ -123,11 +124,25 @@ const program = Effect.gen(function* () {
         const pack = opened.pack
         const specPackRoot = join(legacyRepo, ModDir)
 
+        // The README always; each refinement overlay when it exists (ADR 0015):
+        // a pack refined after its gate passed is seeded only as approved.
         yield* stage(
           context.events,
           "approval",
-          requireApproval(files, join(specPackRoot, "README.md"))
+          Effect.gen(function* () {
+            yield* requireApproval(files, join(specPackRoot, "README.md"))
+            for (const overlay of ["decisions.md", "domains.md"]) {
+              if ((yield* files.read(join(specPackRoot, overlay))) !== undefined) {
+                yield* requireApproval(files, join(specPackRoot, overlay))
+              }
+            }
+          })
         )
+        const decisionsText = yield* files.read(join(specPackRoot, "decisions.md"))
+        const decisions =
+          decisionsText === undefined
+            ? Decisions.empty()
+            : yield* parseDecisions(decisionsText, `${ModDir}/decisions.md`)
 
         yield* stage(
           context.events,
@@ -175,8 +190,44 @@ const program = Effect.gen(function* () {
                   "check LLM4TS_LEGACY_REPO and that extraction wrote its spec pack"
               })
             }
+            // The projection (ADR 0015): a feature file reaches the target
+            // with only its surviving scenarios, so the coder never sees a
+            // scenario it must not encode; a program disposed as a whole
+            // ships no feature file at all. Specs are copied unchanged, with
+            // the overlays beside them for the judges.
             const features = yield* copyTree(legacy, target, `${ModDir}/features`, pack.featuresDir)
-            for (const index of ["traceability.md", "mapping.md", "rules.txt"]) {
+            let projected = 0
+            if (!decisions.isEmpty) {
+              const featurePaths = yield* target
+                .discover(`${pack.featuresDir}/**`)
+                .pipe(Effect.orElseSucceed(() => []))
+              for (const path of featurePaths) {
+                const stem = (path.split("/").at(-1) ?? "").replace(/\.feature$/, "").toLowerCase()
+                const program = [...decisions.programs, ...decisions.scenarios]
+                  .map((entry) => entry.program)
+                  .find((name) => name.toLowerCase() === stem)
+                if (program === undefined) {
+                  continue
+                }
+                projected += 1
+                if (decisions.programDecision(program) !== undefined) {
+                  yield* target.write(path, "")
+                  continue
+                }
+                const text = yield* target.read(path)
+                yield* target.write(path, filterFeature(text, decisions.disposedScenarios(program)))
+              }
+              yield* context.events.publish(
+                Info.make({ message: `projected decisions onto ${projected} feature file(s)` })
+              )
+            }
+            for (const index of [
+              "traceability.md",
+              "mapping.md",
+              "rules.txt",
+              "decisions.md",
+              "domains.md"
+            ]) {
               yield* copyFile(legacy, target, `${ModDir}/${index}`, join(pack.specsDir, index))
             }
             return specs + features

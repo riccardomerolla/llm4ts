@@ -82,7 +82,7 @@ const packs = [
     specsDir: "docs/modernization/specs",
     featuresDir: "docs/modernization/features",
     coverage: ["servlet-url", "jsp-form", "jsp-ajax"],
-    survey: ["jsp-include", "servlet-class"],
+    survey: ["jsp-include", "servlet-class", "jsp-form-action", "jsp-ajax-target"],
     replay: false
   }
 ] as const

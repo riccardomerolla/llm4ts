@@ -92,7 +92,10 @@ const smokePack = [
   "",
   "files: .*\\.(cbl|CBL)",
   "unit: CALL '([A-Z0-9]+)'",
-  ""
+  "",
+  "## Consolidate",
+  "",
+  "- cluster: calls"
 ].join("\n")
 
 export const makeFixture = (): Fixture => {
@@ -107,7 +110,17 @@ export const makeFixture = (): Fixture => {
   mkdirSync(fixture.binDir, { recursive: true })
 
   write(root, "packs/smoke/pack.md", smokePack)
-  for (const prompt of ["analysis", "spec", "bdd", "plan", "implement", "review", "vectors"]) {
+  for (const prompt of [
+    "analysis",
+    "spec",
+    "bdd",
+    "plan",
+    "implement",
+    "review",
+    "vectors",
+    "refine-propose",
+    "consolidate"
+  ]) {
     write(root, `packs/smoke/prompts/${prompt}.md`, `Smoke ${prompt} guidance.\n`)
   }
   write(root, "packs/smoke/lessons.md", "# Lessons\n\n")

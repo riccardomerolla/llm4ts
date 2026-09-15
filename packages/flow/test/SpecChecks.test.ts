@@ -49,6 +49,21 @@ describe("coverage", () => {
     })
   )
 
+  it.effect("a waived unit never gates and is reported apart from out-of-scope ones", () =>
+    Effect.gen(function* () {
+      const report = yield* coverageReport(yield* estate, rules, "| 0100-COMPUTE-FEE | FEECALC |", {
+        waived: new Set(["0200-POST"]),
+        inScope: (path) => !path.endsWith(".jcl")
+      })
+      assert.deepStrictEqual(
+        report.result.issues.map((issue) => issue.title),
+        ["uncovered paragraph: 0100-VALIDATE"]
+      )
+      assert.deepStrictEqual(report.waived, ["paragraph: 0200-POST"])
+      assert.deepStrictEqual(report.outOfScope, ["step: STEP1"])
+    })
+  )
+
   it.effect("a wave scope gates only units captured from the wave's own files", () =>
     Effect.gen(function* () {
       // wave-1 = FEECALC only: ACCTXFR's paragraphs and the JCL step belong to

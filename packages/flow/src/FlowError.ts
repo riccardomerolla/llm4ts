@@ -186,6 +186,43 @@ export class StoryFailed extends Schema.TaggedError<StoryFailed>()("StoryFailed"
   }
 }
 
+/** A decisions or domains overlay that failed to parse or validate — every violation, not the first (ADR 0015). */
+export class DecisionsInvalid extends Schema.TaggedError<DecisionsInvalid>()("DecisionsInvalid", {
+  path: Schema.optionalKey(Schema.String),
+  violations: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const where = this.path === undefined ? "" : ` in ${this.path}`
+    return `decisions invalid${where}:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** A refinement halted on questions only a human can answer; answer them in the file and rerun. */
+export class OpenPointsPending extends Schema.TaggedError<OpenPointsPending>()(
+  "OpenPointsPending",
+  {
+    path: Schema.String,
+    points: Schema.Array(Schema.String)
+  }
+) {
+  get message(): string {
+    return (
+      `${this.points.length} open point(s) in ${this.path} — answer them under '## Open points' and rerun:\n` +
+      this.points.map((point) => `- ${point}`).join("\n")
+    )
+  }
+}
+
+/** Two page specs of one domain feature disagree on an API operation — never merged silently (ADR 0012 addendum). */
+export class ContractConflict extends Schema.TaggedError<ContractConflict>()("ContractConflict", {
+  feature: Schema.String,
+  conflicts: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    return `feature '${this.feature}' has conflicting API contracts:\n${this.conflicts.map((c) => `- ${c}`).join("\n")}`
+  }
+}
+
 export const FlowError = Schema.Union([
   PersistenceError,
   PlanParseError,
@@ -203,6 +240,9 @@ export const FlowError = Schema.Union([
   PerimeterViolation,
   MissingDependency,
   MergeConflict,
-  StoryFailed
+  StoryFailed,
+  DecisionsInvalid,
+  OpenPointsPending,
+  ContractConflict
 ])
 export type FlowError = typeof FlowError.Type

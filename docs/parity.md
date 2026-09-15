@@ -481,3 +481,11 @@ reference release.
   `epic-stories` flow. Every llm4zio flow runs one coder at a time; this
   runs several, each confined to a declared story in its own worktree.
   Additive; back-porting is out of scope.
+- Refinement overlays beyond the pinned source (ADR 0015, 2026-09-15):
+  the `modernize-refine` flow and `llm4ts refine` verb, the `Decisions`
+  and `Domains` flow modules, the pack `## Consolidate` section with its
+  `refine-propose`/`consolidate` sidecars, the seed projection (filtered
+  features, `# waived` coverage units, overlay hashes in provenance), and
+  the feature-level `convert-feature` flow with its multi-spec contract
+  union (ADR 0012 addendum). llm4zio has no refinement phase between
+  extract and seed. Additive; back-porting is out of scope.

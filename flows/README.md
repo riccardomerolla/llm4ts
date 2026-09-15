@@ -17,6 +17,7 @@ one-line description. These scripts double as the built-in flows of the
 | `judge-suite.ts`          | Three-run LLM-as-a-Judge evaluation with variance reporting   | selected CLI               |
 | `modernize-survey.ts`     | Phase 0 — inventory, dependency graph, triage, wave plan      | selected CLI + Git + pack  |
 | `modernize-extract.ts`    | Phase 1 — legacy estate → judged, approved spec pack          | selected CLI + Git + pack  |
+| `modernize-refine.ts`     | Phase 1.5 (optional) — prune, deepen, consolidate the pack    | selected CLI + Git + pack  |
 | `modernize-seed.ts`       | Phase 2 — seed the target from the approved pack (no LLM)     | Git + pack + legacy repo   |
 | `modernize-implement.ts`  | Phase 3 — implement the plan behind the pack's gates          | selected CLI + Git + build |
 | `modernize-verify.ts`     | Phase 4 — equivalence vectors, replay, rule coverage          | selected CLI + replay cmd  |

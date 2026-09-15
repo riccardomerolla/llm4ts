@@ -56,6 +56,8 @@ import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
 import { loadPatternCards, taggedPatternIds } from "@llm4ts/flow/Patterns"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import { checkWall, wallBreachMessage } from "@llm4ts/flow/Wall"
+import { parseDecisions } from "@llm4ts/flow/Decisions"
+import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
 
 const ModDir = "docs/modernization"
@@ -108,8 +110,41 @@ const specPrograms = Effect.fn("modernize-implement.specPrograms")(function* (
     .map((path) => path.split("/").at(-1) ?? path)
     .filter((name) => name.endsWith(".md"))
     .map((name) => name.slice(0, -".md".length))
-    .filter((name) => !["traceability", "mapping", "README"].includes(name))
+    .filter((name) => !["traceability", "mapping", "README", "decisions", "domains"].includes(name))
     .sort()
+})
+
+/**
+ * The decisions overlay seeded beside the specs (ADR 0015), rendered for a
+ * brief: what is out of scope and must not be built or scored, and which
+ * target capability a `provided` entry points at.
+ */
+const decisionsBrief = Effect.fn("modernize-implement.decisionsBrief")(function* (
+  files: PlainFileStoreShape,
+  specsDirAbs: string
+) {
+  const text = yield* files.read(join(specsDirAbs, "decisions.md"))
+  if (text === undefined) {
+    return undefined
+  }
+  const decisions = yield* parseDecisions(text, "decisions.md")
+  const lines = [
+    ...decisions.programs.map(
+      (entry) =>
+        `- ${entry.program} (whole program): ${entry.disposition} — ${entry.reason}` +
+        (entry.pointer === undefined ? "" : ` [provided by ${entry.pointer}]`)
+    ),
+    ...decisions.scenarios.map(
+      (entry) =>
+        `- ${entry.program} / ${entry.scenario}: ${entry.disposition} — ${entry.reason}` +
+        (entry.pointer === undefined ? "" : ` [provided by ${entry.pointer}]`)
+    )
+  ]
+  return lines.length === 0
+    ? undefined
+    : "Out of scope by decision (do not implement, do not test, do not score their absence; " +
+        "use the target capability a `provided` entry points at instead of rebuilding it):\n" +
+        lines.join("\n")
 })
 
 /**
@@ -283,8 +318,10 @@ const program = Effect.gen(function* () {
         ]
         const cited = new Set(taggedPatternIds(specText))
         const playbook = cards.filter((card) => cited.has(card.id))
+        const scope = yield* decisionsBrief(files, join(input.workDir, pack.specsDir))
         const system = [
           pack.prompt("implement"),
+          scope,
           pack.lessons === undefined
             ? undefined
             : `Lessons from previous modernization runs — apply them:\n${pack.lessons}`,
@@ -393,7 +430,11 @@ const program = Effect.gen(function* () {
                 specFor: (program) =>
                   files
                     .read(join(specsDirAbs, `${program}.md`))
-                    .pipe(Effect.map((text) => text ?? "")),
+                    .pipe(
+                      Effect.map((text) =>
+                        scope === undefined ? (text ?? "") : `${text ?? ""}\n\n${scope}`
+                      )
+                    ),
                 query: input.prompt,
                 fingerprint: reviewFingerprint
               })

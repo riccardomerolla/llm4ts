@@ -44,7 +44,9 @@ const phasePrompts: ReadonlyArray<readonly [name: string, phase: string]> = [
   ["plan", "extract"],
   ["implement", "implement"],
   ["review", "review"],
-  ["vectors", "verify"]
+  ["vectors", "verify"],
+  ["refine-propose", "refine"],
+  ["consolidate", "refine"]
 ]
 
 const sampleSize = 5
@@ -143,6 +145,12 @@ const program = Effect.gen(function* () {
             if (pack.lenses.length === 0) {
               warnings.push("no reviewers/*.md sidecar — review runs without pack lenses")
             }
+            yield* say(
+              pack.consolidate === undefined
+                ? "consolidate: (none — refine treats every program as its own domain feature)"
+                : `consolidate: cluster on ${pack.consolidate.cluster.join(", ") || "(nothing)"} · ` +
+                    `context via ${pack.consolidate.context.join(", ") || "(nothing)"}`
+            )
             yield* say(`lessons: ${pack.lessons === undefined ? "(none yet)" : "present"}`)
           })
         )

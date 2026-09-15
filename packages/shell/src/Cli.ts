@@ -1,4 +1,5 @@
 import { homedir } from "node:os"
+import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
@@ -18,6 +19,7 @@ import {
 } from "./FlowCatalog.ts"
 import { launchFlow } from "./FlowLaunch.ts"
 import { mainMenu } from "./Menu.ts"
+import { ModDir, refineSession } from "./Refine.ts"
 import { packageVersion } from "./Package.ts"
 
 export class ShellUsageError extends Schema.TaggedError<ShellUsageError>()("ShellUsage", {
@@ -295,6 +297,60 @@ const askCommand = Command.make(
     })
 ).pipe(Command.withDescription("Stream a one-shot prompt to the selected coding agent"))
 
+const refineCommand = Command.make(
+  "refine",
+  {
+    repo: Flag.String("repo").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "The LEGACY repository holding the extracted spec pack (defaults to the current directory)"
+      )
+    ),
+    pack: Flag.String("pack").pipe(
+      Flag.optional,
+      Flag.withDescription("Pack forwarded as LLM4TS_PACK, as for `llm4ts run`")
+    ),
+    target: Flag.String("target").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "The target repository, mounted read-only so the proposal can claim what it already provides (LLM4TS_TARGET_REPO)"
+      )
+    )
+  },
+  (config) =>
+    Effect.gen(function* () {
+      if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        return yield* new ShellUsageError({
+          message:
+            "refine is interactive; off a terminal edit docs/modernization/decisions.md and run `llm4ts run modernize-refine`"
+        })
+      }
+      const repo = resolve(config.repo._tag === "Some" ? config.repo.value : process.cwd())
+      const flowPath = yield* resolveFlow("modernize-refine", shellTierPaths())
+      const environment: Record<string, string | undefined> = { ...process.env }
+      if (config.pack._tag === "Some") {
+        environment.LLM4TS_PACK = config.pack.value
+      }
+      if (config.target._tag === "Some") {
+        environment.LLM4TS_TARGET_REPO = resolve(config.target.value)
+      }
+      yield* refineSession({
+        modDir: join(repo, ModDir),
+        environment,
+        launch: (extra) =>
+          launchFlow({
+            flowPath,
+            taskArgs: ["--repo", repo],
+            environment: { ...environment, ...extra }
+          }).pipe(Effect.catch((error) => Console.error(error.message).pipe(Effect.as(1))))
+      })
+    })
+).pipe(
+  Command.withDescription(
+    "Interactively mark, deepen, and consolidate an extracted spec pack, then run modernize-refine on it (ADR 0015)"
+  )
+)
+
 const doctorCommand = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const report = yield* makeDoctorProgram()
@@ -321,6 +377,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     kitsCommand,
     viewCommand,
     askCommand,
+    refineCommand,
     doctorCommand
   ])
 )

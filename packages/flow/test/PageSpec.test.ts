@@ -1,8 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import {
+  ContractConflict,
   FieldMapping,
   openApiFor,
+  openApiForFeature,
   PageApiCall,
   PageDto,
   PageForm,
@@ -257,5 +259,94 @@ describe("esbService", () => {
       ).pipe(Effect.flip)
       assert.strictEqual(error._tag, "PlanParse")
     })
+  )
+})
+
+describe("feature contracts (ADR 0012 addendum)", () => {
+  const listCall = PageApiCall.make({
+    operation: "listBeneficiaries",
+    method: "GET",
+    path: "/beneficiaries",
+    esbService: "ESB_BENF_LIST",
+    request: [],
+    response: [],
+    responseDto: "Beneficiary",
+    responseShape: "list"
+  })
+  const beneficiary = PageDto.make({
+    legacyName: "BenfDTO",
+    domainName: "Beneficiary",
+    fields: [FieldMapping.make({ legacyName: "BENF_ID", domainName: "id", type: "string" })]
+  })
+  const page = (name: string, calls: ReadonlyArray<PageApiCall>, dtos = [beneficiary]) =>
+    PageSpec.make({
+      page: name,
+      route: `/${name}`,
+      title: name,
+      complexity: "low",
+      forms: [],
+      apiCalls: calls,
+      dtos,
+      navigation: { inbound: [], outbound: [], steps: [] },
+      sessionState: [],
+      openQuestions: []
+    })
+
+  it.effect("unions identical operations across pages and records their origin", () =>
+    Effect.gen(function* () {
+      const save = PageApiCall.make({
+        operation: "saveBeneficiary",
+        method: "POST",
+        path: "/beneficiaries",
+        request: [FieldMapping.make({ legacyName: "BENF_NM", domainName: "name", type: "string" })],
+        response: [],
+        responseDto: "Beneficiary",
+        responseShape: "single"
+      })
+      const contract = yield* openApiForFeature(
+        { id: "beneficiary-maintenance", name: "Beneficiary maintenance" },
+        [page("beneficiaryList", [listCall]), page("beneficiaryEdit", [listCall, save])]
+      )
+      assert.deepStrictEqual(contract.operations, [
+        { key: "GET /beneficiaries", pages: ["beneficiaryList", "beneficiaryEdit"] },
+        { key: "POST /beneficiaries", pages: ["beneficiaryEdit"] }
+      ])
+      assert.include(contract.yaml, "Beneficiary maintenance service contract")
+      assert.include(
+        contract.yaml,
+        "domain feature beneficiary-maintenance — pages beneficiaryList, beneficiaryEdit"
+      )
+      assert.include(contract.yaml, "declared by pages beneficiaryList, beneficiaryEdit")
+      assert.include(contract.yaml, "declared by page beneficiaryEdit")
+      assert.strictEqual((contract.yaml.match(/operationId: listBeneficiaries/g) ?? []).length, 1)
+      assert.include(contract.yaml, "    Beneficiary:")
+    })
+  )
+
+  it.effect(
+    "the same path with a different shape, or the same DTO with different fields, is a conflict",
+    () =>
+      Effect.gen(function* () {
+        const otherShape = PageApiCall.make({ ...listCall, responseShape: "single" })
+        const otherDto = PageDto.make({
+          ...beneficiary,
+          fields: [
+            FieldMapping.make({
+              legacyName: "BENF_ID",
+              domainName: "beneficiaryId",
+              type: "string"
+            })
+          ]
+        })
+        const failure = yield* openApiForFeature({ id: "f", name: "F" }, [
+          page("a", [listCall]),
+          page("b", [otherShape], [otherDto])
+        ]).pipe(Effect.flip)
+        assert.instanceOf(failure, ContractConflict)
+        assert.deepStrictEqual(failure.conflicts, [
+          "GET /beneficiaries differs between a (listBeneficiaries) and b (listBeneficiaries)",
+          "DTO 'Beneficiary' has different fields in a and b"
+        ])
+      })
   )
 })

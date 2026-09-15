@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/flow",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Effect-native LLM workflow, persistence, review, and repository automation",
   "license": "MIT",
   "type": "module",
@@ -28,6 +28,8 @@
     "./Context": "./dist/Context.js",
     "./CostLedger": "./dist/CostLedger.js",
     "./CostTracker": "./dist/CostTracker.js",
+    "./Decisions": "./dist/Decisions.js",
+    "./Domains": "./dist/Domains.js",
     "./Equiv": "./dist/Equiv.js",
     "./EquivReport": "./dist/EquivReport.js",
     "./EstimatedUsage": "./dist/EstimatedUsage.js",

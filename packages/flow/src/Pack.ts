@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { Dimension } from "@llm4ts/core/eval/Eval"
+import type { ConsolidateRules } from "./Domains.ts"
 import { PlanParseError } from "./FlowError.ts"
 import { parseReviewer, type Reviewer } from "./Reviewer.ts"
 import { CoverageRule } from "./SpecChecks.ts"
@@ -42,11 +43,24 @@ export interface Pack {
   // per-program judging possible.
   readonly programFiles: string | undefined
   /**
+   * Regex template locating a DOMAIN FEATURE's target files (ADR 0012
+   * addendum): `<NAME>` is the feature id, `<PAGES>` an alternation of its
+   * page names. A feature's scope is this template plus every page's own
+   * `program-files` scope.
+   */
+  readonly featureFiles: string | undefined
+  /**
    * The schema every program spec must embed, validated deterministically
    * by the extraction gate: `pagespec` (a ```json pagespec block decodable
    * as `PageSpec`) is the only one today; absent means prose-only specs.
    */
   readonly specSchema: string | undefined
+  /**
+   * The `## Consolidate` section (ADR 0015): which survey edge kinds put two
+   * units in one domain feature (`cluster:`) and which only attach a shared
+   * fragment as context (`context:`). Absent: every program is its own feature.
+   */
+  readonly consolidate: ConsolidateRules | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
   readonly prompt: (name: string) => string | undefined
@@ -54,6 +68,8 @@ export interface Pack {
   // template with `<NAME>` substituted, or a case-insensitive "path contains
   // the program name" fallback.
   readonly filesFor: (program: string) => RegExp
+  /** The regex for a feature's files: its template (when set) or any of its pages' scopes. */
+  readonly filesForFeature: (feature: string, pages: ReadonlyArray<string>) => RegExp
 }
 
 interface ParsedManifest {
@@ -152,6 +168,12 @@ const dimensions = (body: string | undefined): ReadonlyArray<Dimension> =>
       : [Dimension.make({ name, rubric, maxScore })]
   })
 
+const commaList = (value: string | undefined): ReadonlyArray<string> =>
+  (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 const isValidRegExp = (source: string): boolean => {
@@ -219,11 +241,47 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
       message: `pack manifest 'programFiles:' is not a valid regex template: ${programFiles}`
     })
   }
+  const featureFiles = fields["feature-files"]
+  if (
+    featureFiles !== undefined &&
+    !isValidRegExp(featureFiles.replaceAll("<NAME>", "PROBE").replaceAll("<PAGES>", "PROBE"))
+  ) {
+    return yield* PlanParseError.make({
+      message: `pack manifest 'feature-files:' is not a valid regex template: ${featureFiles}`
+    })
+  }
   const specSchema = fields["spec-schema"]
   if (specSchema !== undefined && specSchema !== "pagespec") {
     return yield* PlanParseError.make({
       message: `pack manifest 'spec-schema:' must be 'pagespec' when set, got: ${specSchema}`
     })
+  }
+  const consolidateValues = namedItems(section(manifest.sections, "Consolidate"))
+  const consolidate: ConsolidateRules | undefined =
+    section(manifest.sections, "Consolidate") === undefined
+      ? undefined
+      : {
+          cluster: commaList(consolidateValues.cluster),
+          context: commaList(consolidateValues.context)
+        }
+  if (consolidate !== undefined) {
+    const surveyNames = new Set(rules(manifest.sections, "## Survey: ").map((rule) => rule.name))
+    const unknown = [...consolidate.cluster, ...consolidate.context].filter(
+      (kind) => !surveyNames.has(kind) && !kind.startsWith("llm-") && !kind.endsWith("*")
+    )
+    if (unknown.length > 0) {
+      return yield* PlanParseError.make({
+        message:
+          `pack manifest '## Consolidate' names edge kinds no '## Survey:' rule produces: ${unknown.join(", ")} ` +
+          `(known: ${[...surveyNames].join(", ") || "none"}; 'llm-*' matches refined edges)`
+      })
+    }
+    const both = consolidate.cluster.filter((kind) => consolidate.context.includes(kind))
+    if (both.length > 0) {
+      return yield* PlanParseError.make({
+        message: `pack manifest '## Consolidate' lists ${both.join(", ")} as both cluster and context`
+      })
+    }
   }
   const exclude = fields.exclude
   if (exclude !== undefined && !isValidRegExp(exclude)) {
@@ -258,7 +316,9 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     lenses,
     lessons: lessons === undefined || lessons.length === 0 ? undefined : lessons,
     programFiles,
+    featureFiles,
     specSchema,
+    consolidate,
     dir: directory,
     gate: (name) => gates[name],
     prompt: (name) => prompts[name],
@@ -267,7 +327,25 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     filesFor: (program) =>
       programFiles === undefined
         ? new RegExp(escapeRegExp(program), "i")
-        : new RegExp(`^(?:${programFiles.replaceAll("<NAME>", program)})$`)
+        : new RegExp(`^(?:${programFiles.replaceAll("<NAME>", program)})$`),
+    filesForFeature: (feature, pages) => {
+      const pageScopes =
+        programFiles === undefined
+          ? pages.map((page) => escapeRegExp(page))
+          : pages.map((page) => programFiles.replaceAll("<NAME>", page))
+      const own =
+        featureFiles === undefined
+          ? []
+          : [
+              featureFiles
+                .replaceAll("<NAME>", feature)
+                .replaceAll("<PAGES>", pages.map(escapeRegExp).join("|") || "PROBE")
+            ]
+      const alternatives = [...own, ...pageScopes]
+      return programFiles === undefined && featureFiles === undefined
+        ? new RegExp(alternatives.join("|"), "i")
+        : new RegExp(`^(?:${alternatives.join("|")})$`)
+    }
   }
   return pack
 })

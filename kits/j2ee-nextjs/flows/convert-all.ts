@@ -1,4 +1,4 @@
-// Convert the whole legacy estate: walk the survey inventory in wave order, one branch per page, progress board, estimated-cost migration report.
+// Convert the whole legacy estate: walk the approved domain map (one branch per feature) or the survey inventory (one branch per page) in wave order, progress board, estimated-cost migration report.
 //
 // Runs rooted at the TARGET repository (`--repo <nextjs>`), with
 // LLM4TS_LEGACY_REPO pointing at the extracted legacy repository:
@@ -42,11 +42,15 @@ import {
 } from "@llm4ts/runner"
 import {
   conversionInventory,
+  convertFeature,
   convertPage,
+  featureInventory,
   migrationReport,
   setupConversion,
+  type ConvertOutcome,
   type MigrationRow
 } from "./lib/convert.ts"
+import type { FlowError } from "@llm4ts/flow/FlowError"
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Convert the legacy estate into the destination SPA")
@@ -93,12 +97,65 @@ const program = Effect.gen(function* () {
         }
         const board = composeBoardSync(boards)
 
-        const inventory = yield* stage(
+        // ADR 0012 addendum: an approved domain map makes the feature the
+        // unit of delivery; without one the walk is per page as before.
+        const features = yield* stage(
           context.events,
           "inventory",
-          conversionInventory(files, deps.legacy, deps.legacyDir, deps.pack)
+          featureInventory(files, deps.legacy, deps.legacyDir, deps.pack)
         )
-        if (inventory.length === 0) {
+        interface WalkItem {
+          readonly id: string
+          readonly title: string
+          readonly wave?: string
+          readonly detail?: string
+          /** Listed on the board with this reason, never converted. */
+          readonly skip?: string
+          readonly convert: Effect.Effect<ConvertOutcome, FlowError>
+        }
+        let items: ReadonlyArray<WalkItem>
+        if (features !== undefined) {
+          yield* context.events.publish(
+            Info.make({
+              message: `approved domain map: converting ${features.length} feature(s), one branch each`
+            })
+          )
+          items = features.map((entry) => ({
+            id: entry.feature.id,
+            title: entry.feature.name,
+            ...(entry.wave === undefined ? {} : { wave: entry.wave }),
+            detail: `pages: ${entry.feature.programs.join(", ")}`,
+            ...(entry.disposed ? { skip: "every page disposed by decision" } : {}),
+            convert: convertFeature(deps, entry.feature.id)
+          }))
+        } else {
+          const inventory = yield* conversionInventory(
+            files,
+            deps.legacy,
+            deps.legacyDir,
+            deps.pack
+          )
+          items = yield* Effect.forEach(inventory, ({ page, wave, disposition }) =>
+            Effect.gen(function* () {
+              const specPath = join(deps.legacyDir, deps.pack.specsDir, `${page}.md`)
+              const missing = (yield* files.read(specPath)) === undefined
+              return {
+                id: page,
+                title: page,
+                ...(wave === undefined ? {} : { wave }),
+                // A page the decisions overlay disposed of as a whole (ADR 0015)
+                // is listed with its disposition, like a page triaged dead.
+                ...(disposition !== undefined
+                  ? { skip: `${disposition} by decision` }
+                  : missing
+                    ? { skip: "no extracted spec" }
+                    : {}),
+                convert: convertPage(deps, page)
+              } satisfies WalkItem
+            })
+          )
+        }
+        if (items.length === 0) {
           yield* context.events.publish(
             Info.make({ message: "inventory is empty — extract the legacy estate first" })
           )
@@ -110,12 +167,13 @@ const program = Effect.gen(function* () {
           context.events,
           "board",
           board.plan(
-            inventory.map(({ page, wave }) =>
+            items.map((item) =>
               BoardItem.make({
-                id: page,
-                title: page,
+                id: item.id,
+                title: item.title,
                 status: "planned",
-                ...(wave === undefined ? {} : { wave })
+                ...(item.wave === undefined ? {} : { wave: item.wave }),
+                ...(item.detail === undefined ? {} : { detail: item.detail })
               })
             )
           )
@@ -124,26 +182,25 @@ const program = Effect.gen(function* () {
         const baseBranch = yield* context.git.currentBranch
         const failFast = process.env.LLM4TS_FAIL_FAST === "1"
 
-        for (const { page } of inventory) {
+        for (const item of items) {
           const snapshot = yield* board.snapshot
-          const known = snapshot.items.find((item) => item.id === page)
+          const known = snapshot.items.find((candidate) => candidate.id === item.id)
           if (known !== undefined && known.status !== "planned" && known.status !== "failed") {
             yield* context.events.publish(
-              Info.make({ message: `resume: ${page} is already ${known.status} — skipping` })
+              Info.make({ message: `resume: ${item.id} is already ${known.status} — skipping` })
             )
             continue
           }
-          const specPath = join(deps.legacyDir, deps.pack.specsDir, `${page}.md`)
-          if ((yield* files.read(specPath)) === undefined) {
-            yield* board.skip(page, "no extracted spec")
+          if (item.skip !== undefined) {
+            yield* board.skip(item.id, item.skip)
             continue
           }
           const checkpoint = yield* context.git.checkpoint
-          yield* board.start(page)
-          const result = yield* Effect.result(convertPage(deps, page))
+          yield* board.start(item.id)
+          const result = yield* Effect.result(item.convert)
           if (result._tag === "Success") {
             const outcome = result.success
-            yield* board.complete(page, {
+            yield* board.complete(item.id, {
               branch: outcome.branch,
               reportPath: outcome.reportPath,
               ...(outcome.estimatedTokens === undefined
@@ -156,16 +213,16 @@ const program = Effect.gen(function* () {
             yield* context.git.checkout(baseBranch)
           } else {
             const reason = describeFlowError(result.failure)
-            // A stuck page must not sink the walk: reset the working tree,
+            // A stuck unit must not sink the walk: reset the working tree,
             // mark the failure, keep going (LLM4TS_FAIL_FAST=1 to stop).
             yield* context.git.rollback(checkpoint)
             yield* context.git.checkout(baseBranch)
-            yield* board.fail(page, reason)
+            yield* board.fail(item.id, reason)
             if (failFast) {
               return yield* Effect.fromResult(result)
             }
             yield* context.events.publish(
-              Info.make({ message: `page ${page} failed — continuing: ${reason}` })
+              Info.make({ message: `${item.id} failed — continuing: ${reason}` })
             )
           }
         }

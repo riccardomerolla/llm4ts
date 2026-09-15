@@ -1,5 +1,58 @@
 # Changelog
 
+## 2.2.0
+
+Additive: no breaking change. Every addition is opt-in by the presence of a
+file or a pack section; an estate that never runs refine behaves as in 2.1.0.
+
+- **`modernize-refine`** (ADR 0015): an optional phase between extract and
+  seed, rooted at the legacy repository, driven by two human-owned overlays
+  under `docs/modernization/`. `decisions.md` records what the extracted pack
+  should become — `drop`, `provided` (with a verified target pointer),
+  `defer`, `wrap`, per program or Gherkin scenario, plus `?` marks the model
+  resolves in an agent session on the read-only target
+  (`LLM4TS_TARGET_REPO`), `## Deepen` marks that re-extract one program with
+  a mandatory focus, and `## Open points` the questions a proposal could not
+  settle. `domains.md` groups the surviving scenarios into domain features,
+  seeded deterministically from the survey graph by the pack's new
+  `## Consolidate` section, named by the model, every scenario exactly once.
+  `plan.md` is regenerated per domain feature, `rules.txt` gains a
+  `# waived` section, every refine write resets the README approval, and the
+  flow halts with a typed `OpenPointsPending` until the files answer.
+- **`llm4ts refine`**: the interactive front of the same files — mark
+  programs and scenarios, deepen, run the flow, answer its open points,
+  regroup, approve. Nothing it does is unreachable by editing the files and
+  running `llm4ts run modernize-refine`.
+- `modernize-seed` projects the overlays: feature files reach the target
+  with only their surviving scenarios, the overlays are copied and hashed
+  into provenance, and seeding refuses an unapproved overlay.
+  `modernize-implement` briefs the coder and the compliance judge with the
+  decisions; `modernize-verify` leaves waived rules out of the universe;
+  `convert-all` lists a disposed page with its disposition instead of
+  converting it, and `convert-page` scopes the coder and the judge.
+- Packs: `## Consolidate` (`cluster:` / `context:` edge kinds, validated
+  against the pack's survey rules), the optional `refine-propose` and
+  `consolidate` prompt sidecars (pack-check warns when missing), and for
+  `j2ee-nextjs-spa` two survey rules (`jsp-form-action`, `jsp-ajax-target`)
+  that make the demo estate cluster into its hero features. The
+  `j2ee-nextjs-spa` plan prompt now derives tasks per domain feature.
+- **`convert-feature`** (ADR 0012 addendum): once refine has produced an
+  approved `domains.md`, the unit of delivery in the `j2ee-nextjs` kit is
+  the domain feature — one `convert/<feature>` branch, one
+  `contracts/<feature>.openapi.yaml` that is the deterministic union of the
+  pages' API sections (`openApiForFeature`; a disagreement is a typed
+  `ContractConflict`, never a silent merge), one port, then each page with
+  its tests in navigation order (`navigationOrder` over the pack's cluster
+  edges). The judge scores every page against its spec and the feature
+  against its contract of record, through the pack's new `feature-files:`
+  template. `convert-all` walks the features by earliest wave when the map
+  is approved and falls back to the per-page walk otherwise; the board
+  item's detail lists the pages.
+- New flow modules `@llm4ts/flow/Decisions` and `@llm4ts/flow/Domains`;
+  `coverageReport` accepts a waived set; the extraction phase's per-program
+  analyst and judge moved to `flows/lib/modernize-extract.ts`, shared by
+  extract and refine.
+
 ## 2.1.0
 
 - Dependents of a failed story are `waiting`, not `skipped`: the board and

@@ -1,6 +1,8 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { PlanParseError } from "./FlowError.ts"
+import { ContractConflict, PlanParseError } from "./FlowError.ts"
+
+export { ContractConflict } from "./FlowError.ts"
 
 // The Page Spec is the per-page contract of the J2EE→SPA conversion scenario
 // (ADR 0012): extraction embeds it in the spec markdown as a ```json pagespec
@@ -251,9 +253,20 @@ const propertyLines = (
  * future B4F implement. Emitted by code, not by a model: the contract must
  * be a projection of the reviewed page spec, never an invention.
  */
-export const openApiFor = (spec: PageSpec): string => {
+interface ContractInfo {
+  readonly title: string
+  readonly description: string
+}
+
+/** The YAML writer shared by the per-page and the per-feature contracts. */
+const renderOpenApi = (
+  info: ContractInfo,
+  apiCalls: ReadonlyArray<PageApiCall>,
+  dtos: ReadonlyArray<PageDto>,
+  origins?: ReadonlyMap<string, ReadonlyArray<string>>
+): string => {
   const byPath = new Map<string, Array<PageApiCall>>()
-  for (const call of spec.apiCalls) {
+  for (const call of apiCalls) {
     const bucket = byPath.get(call.path) ?? []
     bucket.push(call)
     byPath.set(call.path, bucket)
@@ -262,8 +275,8 @@ export const openApiFor = (spec: PageSpec): string => {
   const lines: Array<string> = [
     "openapi: 3.0.3",
     "info:",
-    `  title: ${yamlText(`${spec.title} service contract`)}`,
-    `  description: ${yamlText(`Anti-corruption contract for page ${spec.page} (${spec.route})`)}`,
+    `  title: ${yamlText(info.title)}`,
+    `  description: ${yamlText(info.description)}`,
     "  version: 0.1.0",
     "paths:"
   ]
@@ -286,8 +299,12 @@ export const openApiFor = (spec: PageSpec): string => {
       const call = variants[0]!
       lines.push(`    ${method}:`)
       lines.push(`      operationId: ${call.operation}`)
+      const origin = origins?.get(`${call.method.toUpperCase()} ${call.path}`)
       const notes = [
         ...(call.esbService === undefined ? [] : [`backed by ESB service ${call.esbService}`]),
+        ...(origin === undefined
+          ? []
+          : [`declared by page${origin.length > 1 ? "s" : ""} ${origin.join(", ")}`]),
         ...(variants.length > 1
           ? [
               `also serves: ${variants
@@ -342,14 +359,14 @@ export const openApiFor = (spec: PageSpec): string => {
   }
   lines.push("components:")
   lines.push("  schemas:")
-  const schemaCalls = [...spec.apiCalls].sort((a, b) => a.operation.localeCompare(b.operation))
+  const schemaCalls = [...apiCalls].sort((a, b) => a.operation.localeCompare(b.operation))
   let wroteSchema = false
   // Every DTO a response names becomes a component the calls reference —
   // one schema per domain entity, shared by every endpoint returning it.
   const referencedDtos = new Set(
-    spec.apiCalls.flatMap((call) => (call.responseDto === undefined ? [] : [call.responseDto]))
+    apiCalls.flatMap((call) => (call.responseDto === undefined ? [] : [call.responseDto]))
   )
-  for (const dto of [...spec.dtos].sort((a, b) => a.domainName.localeCompare(b.domainName))) {
+  for (const dto of [...dtos].sort((a, b) => a.domainName.localeCompare(b.domainName))) {
     if (!referencedDtos.has(dto.domainName)) {
       continue
     }
@@ -386,6 +403,113 @@ export const openApiFor = (spec: PageSpec): string => {
     lines[lines.length - 1] = "  schemas: {}"
   }
   return lines.join("\n") + "\n"
+}
+
+export const openApiFor = (spec: PageSpec): string =>
+  renderOpenApi(
+    {
+      title: `${spec.title} service contract`,
+      description: `Anti-corruption contract for page ${spec.page} (${spec.route})`
+    },
+    spec.apiCalls,
+    spec.dtos
+  )
+
+const sameFields = (
+  left: ReadonlyArray<FieldMapping>,
+  right: ReadonlyArray<FieldMapping>
+): boolean =>
+  left.length === right.length &&
+  left.every(
+    (field, index) =>
+      field.legacyName === right[index]?.legacyName &&
+      field.domainName === right[index]?.domainName &&
+      field.type === right[index]?.type
+  )
+
+const sameCall = (left: PageApiCall, right: PageApiCall): boolean =>
+  left.operation === right.operation &&
+  left.responseDto === right.responseDto &&
+  left.responseShape === right.responseShape &&
+  sameFields(left.request, right.request) &&
+  sameFields(left.response, right.response)
+
+export interface FeatureContract {
+  readonly yaml: string
+  /** `<method> <path>` of every operation and the pages that declare it. */
+  readonly operations: ReadonlyArray<{
+    readonly key: string
+    readonly pages: ReadonlyArray<string>
+  }>
+}
+
+/**
+ * ONE contract for a domain feature (ADR 0012 addendum): the union of its
+ * pages' API sections by method + path, DTOs by domain name. Two pages that
+ * declare the same method + path (or the same operation name) with different
+ * shapes, or the same DTO with different fields, are a `ContractConflict`
+ * listing every disagreement — never a silent merge. The page each
+ * operation came from is recorded in its description.
+ */
+export const openApiForFeature = (
+  feature: { readonly id: string; readonly name: string },
+  specs: ReadonlyArray<PageSpec>
+): Effect.Effect<FeatureContract, ContractConflict> => {
+  const conflicts: Array<string> = []
+  const calls = new Map<string, { call: PageApiCall; pages: Array<string> }>()
+  const byOperation = new Map<string, string>()
+  for (const spec of specs) {
+    for (const call of spec.apiCalls) {
+      const key = `${call.method.toUpperCase()} ${call.path}`
+      const existing = calls.get(key)
+      if (existing === undefined) {
+        const owner = byOperation.get(call.operation)
+        if (owner !== undefined && owner !== key) {
+          conflicts.push(
+            `operation '${call.operation}' is declared on ${owner} and on ${key} (${spec.page})`
+          )
+          continue
+        }
+        byOperation.set(call.operation, key)
+        calls.set(key, { call, pages: [spec.page] })
+      } else if (sameCall(existing.call, call)) {
+        existing.pages.push(spec.page)
+      } else {
+        conflicts.push(
+          `${key} differs between ${existing.pages.join(", ")} (${existing.call.operation}) and ${spec.page} (${call.operation})`
+        )
+      }
+    }
+  }
+  const dtos = new Map<string, { dto: PageDto; page: string }>()
+  for (const spec of specs) {
+    for (const dto of spec.dtos) {
+      const existing = dtos.get(dto.domainName)
+      if (existing === undefined) {
+        dtos.set(dto.domainName, { dto, page: spec.page })
+      } else if (!sameFields(existing.dto.fields, dto.fields)) {
+        conflicts.push(
+          `DTO '${dto.domainName}' has different fields in ${existing.page} and ${spec.page}`
+        )
+      }
+    }
+  }
+  if (conflicts.length > 0) {
+    return Effect.fail(ContractConflict.make({ feature: feature.id, conflicts }))
+  }
+  const operations = [...calls.entries()].map(([key, { pages }]) => ({ key, pages }))
+  const yaml = renderOpenApi(
+    {
+      title: `${feature.name} service contract`,
+      description:
+        `Anti-corruption contract for domain feature ${feature.id} — pages ` +
+        specs.map((spec) => spec.page).join(", ")
+    },
+    [...calls.values()].map(({ call }) => call),
+    [...dtos.values()].map(({ dto }) => dto),
+    new Map(operations.map(({ key, pages }) => [key, pages]))
+  )
+  return Effect.succeed({ yaml, operations })
 }
 
 /** Human-readable summary — the review surface next to the JSON contract. */

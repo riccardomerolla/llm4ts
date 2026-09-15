@@ -383,8 +383,13 @@ describe("modernize-survey over a J2EE estate (model stubbed)", () => {
       assert.deepStrictEqual(
         graph.edges.map((edge) => `${edge.from}->${edge.to} (${edge.kind})`).sort(),
         [
+          // The form target `/login` resolves onto the unit whose file name
+          // matches — the page itself here; a target no file matches stays as
+          // captured, which is what clusters two pages posting to one servlet
+          // into a domain feature (ADR 0015).
           "login->footer (jsp-include)",
           "login->header (jsp-include)",
+          "login->login (jsp-form-action)",
           "web->LoginServlet (servlet-class)"
         ]
       )
@@ -403,7 +408,7 @@ describe("modernize-survey over a J2EE estate (model stubbed)", () => {
       assert.isDefined(refine)
       assert.isDefined(triage)
       for (const prompt of [refine ?? "", triage ?? ""]) {
-        assert.include(prompt, "jsp-include, servlet-class")
+        assert.include(prompt, "jsp-include, servlet-class, jsp-form-action, jsp-ajax-target")
         assert.include(prompt, "web.xml")
         assert.notMatch(prompt, /COBOL|JCL|COPY|EXEC PGM/)
       }

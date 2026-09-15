@@ -84,6 +84,16 @@ Sections:
   after every task and feed failures back to the coder.
 - **`## Judge`**: `- name (0..max): rubric` lines. Extract scores every spec
   on these before the human sees it.
+- **`## Consolidate`** (optional, ADR 0015): `- cluster: <edge kinds>` names the
+  survey edge kinds that put two units in one domain feature (pages sharing a
+  form target, the steps of one wizard; `llm-*` matches the refined edges) and
+  `- context: <edge kinds>` the kinds whose target only attaches as a shared
+  fragment (an include, a copybook). `modernize-refine` seeds its domain map
+  from these; without the section every program is its own feature. The two
+  optional sidecars `prompts/refine-propose.md` (what the target usually
+  provides, what is usually deprecated) and `prompts/consolidate.md` (what a
+  domain feature is in this stack) carry the stack-specific paragraph of that
+  phase; `modernize-pack-check` warns when they are missing.
 - **`## Coverage: <name>`** and **`## Survey: <name>`**: a `files:` regex and
   a `unit:` regex with one capture group. Coverage units must all appear in
   the traceability matrix; survey units are the edges of the dependency

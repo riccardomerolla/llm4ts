@@ -147,4 +147,87 @@ describe("2.0 manifest keys", () => {
       assert.include(error.message, "renamed 'program-files:' in llm4ts 2.0")
     })
   )
+
+  it.effect("reads '## Consolidate' cluster and context kinds and rejects unknown ones", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      const manifest = (consolidate: string): string =>
+        `# Pack: jsp
+
+source: jsp
+
+## Survey: jsp-include
+
+files: .*\\.jsp
+unit: <jsp:include page="([^"]+)"
+
+## Survey: jsp-form-action
+
+files: .*\\.jsp
+unit: action="([^"]+)"
+
+## Consolidate
+
+${consolidate}
+`
+      yield* workspace.write(
+        "pack/pack.md",
+        manifest("- cluster: jsp-form-action, llm-*\n- context: jsp-include")
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      assert.deepStrictEqual(pack.consolidate, {
+        cluster: ["jsp-form-action", "llm-*"],
+        context: ["jsp-include"]
+      })
+
+      yield* workspace.write("pack/pack.md", manifest("- cluster: servlet-class"))
+      const unknown = yield* loadPack(workspace, "pack").pipe(Effect.flip)
+      assert.include(
+        unknown.message,
+        "names edge kinds no '## Survey:' rule produces: servlet-class"
+      )
+
+      yield* workspace.write(
+        "pack/pack.md",
+        manifest("- cluster: jsp-include\n- context: jsp-include")
+      )
+      const both = yield* loadPack(workspace, "pack").pipe(Effect.flip)
+      assert.include(both.message, "as both cluster and context")
+
+      yield* workspace.write("pack/pack.md", "# Pack: bare\n\nsource: jsp\n")
+      assert.strictEqual((yield* loadPack(workspace, "pack")).consolidate, undefined)
+    })
+  )
+
+  it.effect("feature-files scopes a domain feature to its own paths plus its pages' scopes", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "pack/pack.md",
+        [
+          "# Pack: jsp",
+          "",
+          "source: jsp",
+          "program-files: (?:src/app/<NAME>(?:/.*)?|tests/<NAME>\\..*)",
+          "feature-files: (?:src/services/<NAME>(?:/.*)?|contracts/<NAME>\\.openapi\\.yaml)",
+          ""
+        ].join("\n")
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      const files = pack.filesForFeature("beneficiary-maintenance", [
+        "beneficiaryList",
+        "beneficiaryEdit"
+      ])
+      assert.isTrue(files.test("src/services/beneficiary-maintenance/port.ts"))
+      assert.isTrue(files.test("contracts/beneficiary-maintenance.openapi.yaml"))
+      assert.isTrue(files.test("src/app/beneficiaryEdit/page.tsx"))
+      assert.isTrue(files.test("tests/beneficiaryList.page.test.tsx"))
+      assert.isFalse(files.test("src/services/accounts/port.ts"))
+      assert.isFalse(files.test("src/app/accountOverview/page.tsx"))
+
+      yield* workspace.write("pack/pack.md", "# Pack: bad\n\nsource: jsp\nfeature-files: (<NAME>\n")
+      const failure = yield* loadPack(workspace, "pack").pipe(Effect.flip)
+      assert.include(failure.message, "'feature-files:' is not a valid regex template")
+    })
+  )
 })

@@ -40,7 +40,7 @@ describe("modernize-pack-check", () => {
     assert.strictEqual(result.status, 0, failureReport("pack-check", result))
     assert.include(output, "pack 'smoke' (source: cobol)")
     assert.include(output, "gates: build → sh scripts/build.sh")
-    assert.include(output, "prompts: 7/7 phase sidecars")
+    assert.include(output, "prompts: 9/9 phase sidecars")
     assert.include(output, "reviewers: 1 lens — smoke-lens")
     assert.include(output, "sources: 3 files match")
     assert.include(output, "coverage 'cobol-paragraph': 3 units")
@@ -91,7 +91,7 @@ describe("modernize-pack-check", () => {
     assert.include(output, "warning: survey rule 'copybooks' captured no unit")
     assert.include(output, "warning: prompts/analysis.md not found (read by extract)")
     assert.include(output, "warning: no reviewers/*.md sidecar")
-    assert.include(output, "check passed with 9 warnings")
+    assert.include(output, "check passed with 11 warnings")
   })
 
   it("fails when the sources regex matches nothing in the estate", () => {

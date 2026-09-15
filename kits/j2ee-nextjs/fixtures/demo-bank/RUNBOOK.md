@@ -119,6 +119,49 @@ estate once every wave is in.
 LLM4TS_WAVE=wave-2 llm4ts run modernize-extract --repo ~/demo/legacy-j2ee
 ```
 
+### Refine — the pack becomes what the client wants built (optional beat)
+
+Extraction says what the legacy does. Refinement (ADR 0015) says what the
+target should become, in two files the audience can read on screen:
+
+```bash
+llm4ts refine --repo ~/demo/legacy-j2ee --target ~/demo/nextjs
+```
+
+Three marks, then run:
+
+1. **Mark programs** — `promoQ3`, `oldTransfer`, `testHarness`: `drop`
+   ("dead, nothing links here"); `login`: `?` with the note "the target has
+   an AuthProvider". The proposal reads `~/demo/nextjs` read-only and comes
+   back with `provided — src/auth/AuthProvider.tsx`, or an open point if it
+   could not find the proof. Say that `defer` is never proposed by the model.
+2. **Deepen a program** — `accountOverview` with the focus "the date-range
+   filter on movements is missing; check AccountOverviewServlet". Watch the
+   analyst revise the spec (own commit, `deepen accountOverview`), the judge
+   score the focus, and the mark stamp `[done <commit>]`.
+3. **Run modernize-refine** — the map lands at
+   `docs/modernization/domains.md`: `beneficiaryList` + `beneficiaryEdit`
+   become "Beneficiary maintenance" (they share the `/beneficiary` form
+   target), the three transfer steps "Wire transfer", header/nav/footer the
+   shell; the filler pages are folded only if the model proposed it with
+   evidence. `plan.md` is regenerated per feature and `rules.txt` gains a
+   `# waived` section listing the dropped pages' units. Answer any open
+   point in the menu, rerun, then **Approve the overlays** — and point out
+   that the README went back to `- [ ] Approved` the moment refine wrote
+   anything.
+
+Off stage the same beat is: edit `decisions.md` by hand (its header explains
+the vocabulary) and `LLM4TS_TARGET_REPO=~/demo/nextjs llm4ts run
+modernize-refine --repo ~/demo/legacy-j2ee`. Skip the beat entirely and the
+pipeline behaves exactly as before.
+
+Once `domains.md` is approved, Act 2 may convert **one feature instead of
+two pages**: `llm4ts run convert-feature --repo ~/demo/nextjs
+beneficiary-maintenance` lands `beneficiaryList` and `beneficiaryEdit` on one
+`convert/beneficiary-maintenance` branch behind one merged contract, and
+`convert-all` walks the features rather than the pages. Rehearse the timing
+before choosing it on stage: it is the two pages' cost in one run.
+
 Extraction runs three pages at once (`LLM4TS_EXTRACT_CONCURRENCY=3` from Act
 0): the pages of a wave are independent, each lands in its own commit holding
 only its four files, and the log interleaves — say so before it starts, then

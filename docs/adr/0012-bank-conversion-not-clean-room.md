@@ -57,3 +57,19 @@ prose.
   estimate does not deserve that machinery. If the projection ever needs
   provider spread, revisit with real Bench records.
 - Back-porting to llm4zio is out of scope for the PoC.
+
+## Addendum (2026-09-15): one domain feature is one branch when a map exists
+
+Decision 5 fixed one page = one `convert/<page>` branch. Once
+`modernize-refine` (ADR 0015) has produced an approved
+`docs/modernization/domains.md`, the unit of delivery becomes the domain
+feature: `convert-feature` converts a feature's pages on one
+`convert/<feature>` branch with ONE anti-corruption contract
+(`contracts/<feature>.openapi.yaml`, a deterministic union of the pages'
+API sections; conflicts are open points in the map, never silent merges),
+one board item whose detail lists the pages, and one report with a section
+per page. Page components and tests stay per page; only the service layer
+is feature-owned. `convert-all` walks features by earliest wave when the
+map exists and falls back to the per-page walk otherwise, so decision 5
+still describes an estate that was never refined. See
+`specs/pending/convert-feature.md`.

@@ -100,12 +100,20 @@ export interface CoverageOptions {
    * rather than failing this wave's gate. Absent: every unit gates.
    */
   readonly inScope?: (path: string) => boolean
+  /**
+   * Units a decisions overlay waives (ADR 0015): the legacy has them, a
+   * human decided not to carry them, so they never gate and are reported
+   * as waived rather than uncovered.
+   */
+  readonly waived?: ReadonlySet<string>
 }
 
 export interface CoverageReport {
   readonly result: ReviewResult
   /** Uncovered units the scope excluded from the gate, as `rule: unit`. */
   readonly outOfScope: ReadonlyArray<string>
+  /** Uncovered units a decision waived, as `rule: unit`. */
+  readonly waived: ReadonlyArray<string>
 }
 
 const uncoveredIssue = (rule: string, unit: string): ReviewIssue =>
@@ -126,8 +134,13 @@ export const coverageReport = Effect.fn("@llm4ts/flow/SpecChecks.coverageReport"
   const captured = yield* capturedUnits(workspace, rules)
   const issues: Array<ReviewIssue> = []
   const outOfScope: Array<string> = []
+  const waived: Array<string> = []
   for (const entry of captured) {
     if (traceability.includes(entry.unit)) {
+      continue
+    }
+    if (options.waived?.has(entry.unit) === true) {
+      waived.push(`${entry.rule}: ${entry.unit}`)
       continue
     }
     if (options.inScope === undefined || entry.paths.some(options.inScope)) {
@@ -141,7 +154,8 @@ export const coverageReport = Effect.fn("@llm4ts/flow/SpecChecks.coverageReport"
       issues,
       summary: issues.length === 0 ? "coverage complete" : `${issues.length} unit(s) uncovered`
     }),
-    outOfScope
+    outOfScope,
+    waived
   }
 })
 

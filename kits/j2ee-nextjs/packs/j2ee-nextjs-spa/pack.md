@@ -8,6 +8,7 @@ programs: .*\.jsp
 specs-dir: docs/modernization/specs
 features-dir: docs/modernization/features
 program-files: (?:src/app/<NAME>(?:/.*)?|src/services/<NAME>(?:/.*)?|contracts/<NAME>\.openapi\.yaml|tests/<NAME>\..*)
+feature-files: (?:src/services/<NAME>(?:/.*)?|contracts/<NAME>\.openapi\.yaml)
 
 ## Gates
 
@@ -47,3 +48,18 @@ unit: <jsp:include page="([^"]+)"
 
 files: .*web\.xml
 unit: <servlet-class>[a-z.]*\.([A-Za-z0-9]+)</servlet-class>
+
+## Survey: jsp-form-action
+
+files: .*\.jsp
+unit: action="([^"]+)"
+
+## Survey: jsp-ajax-target
+
+files: .*\.jsp
+unit: url:\s*['"]([^'"?]+)
+
+## Consolidate
+
+- cluster: jsp-form-action, jsp-ajax-target
+- context: jsp-include

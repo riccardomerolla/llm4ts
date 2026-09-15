@@ -65,3 +65,29 @@ anti-corruption renaming in a Page Spec has something to bite on.
 
 All data is fictional: EUR accounts, fake IBAN-like numbers in the form
 `IT00 DEMO 0000 ...`, customer "MARIO BIANCHI" / customer id `CUST0042`.
+
+## Refinement answer key (ADR 0015)
+
+What `modernize-refine` should produce on this estate once the three dead
+pages are marked `drop` and `login` resolves to `provided` by the target's
+AuthProvider:
+
+| Domain feature (deterministic cluster)                       | Programs                                                  | Why they cluster                              |
+| ------------------------------------------------------------ | --------------------------------------------------------- | --------------------------------------------- |
+| Portal shell                                                 | `header.jsp`, `nav.jsp`, `footer.jsp`                     | fragments: targets of `jsp-include` edges     |
+| Account overview                                             | `accountOverview.jsp`                                     | its ajax target names no other page           |
+| Beneficiary maintenance                                      | `beneficiaryList.jsp`, `beneficiaryEdit.jsp`              | both post to `/beneficiary` (`jsp-form-action`) |
+| Wire transfer                                                | `transferStep1.jsp`, `transferStep2.jsp`, `transferConfirm.jsp` | all post to `/transfer`                  |
+| one singleton each (fold into the shell only by proposal)    | `dashboard.jsp`, `settings.jsp`, `profile.jsp`, `messages.jsp`, `help.jsp` | no shared form or ajax target |
+
+Waived coverage units after the drops: every `url-pattern`, form action, and
+ajax url captured only from `oldTransfer.jsp`, `promoQ3.jsp`, and
+`testHarness.jsp`; `login.jsp`'s form action once it is `provided`.
+
+Feature contracts `convert-feature` writes once the map above is approved:
+`contracts/beneficiary-maintenance.openapi.yaml` unions `GET /beneficiary`
+(list, both pages), `GET /beneficiary?action=edit` and `POST /beneficiary`
+(edit) over the shared `Beneficiary` DTO; `contracts/wire-transfer.openapi.yaml`
+unions the three `POST /transfer` steps — same path, one operation per
+`step`, so the pages must agree on the `TransferDraft` DTO or the map gets a
+conflict open point.

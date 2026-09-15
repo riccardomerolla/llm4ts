@@ -15,10 +15,11 @@ target) the [workshop runbook](fixtures/demo-bank/RUNBOOK.md) rehearses on.
 | [`jsp-nextjs`](packs/jsp-nextjs/pack.md)           | JSP/Java → Next.js SPA           | `nextjs-spa` | no     |
 | [`jsp-bff-nextjs`](packs/jsp-bff-nextjs/pack.md)   | JSP/Java → Spring BFF + Next.js  | `spring-bff` | no     |
 
-| Flow           | What it does                                                           |
-| -------------- | ---------------------------------------------------------------------- |
-| `convert-page` | Convert ONE extracted page into the Next.js target on its own branch   |
-| `convert-all`  | Walk the survey inventory in wave order, one branch per page, a report |
+| Flow              | What it does                                                                             |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| `convert-page`    | Convert ONE extracted page into the Next.js target on its own branch                     |
+| `convert-feature` | Convert ONE domain feature of the approved `domains.md`: one branch, one merged contract |
+| `convert-all`     | Walk the approved domain map (features) or the survey inventory (pages), one branch each |
 
 ```sh
 llm4ts run modernize-pack-check --pack j2ee-nextjs-spa --repo /path/to/legacy-estate

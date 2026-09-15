@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/shell",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Interactive shell and CLI for llm4ts: flow discovery, run-a-flow, and view",
   "license": "MIT",
   "type": "module",
@@ -23,6 +23,7 @@
     "./FlowCatalog": "./dist/FlowCatalog.js",
     "./FlowLaunch": "./dist/FlowLaunch.js",
     "./Menu": "./dist/Menu.js",
+    "./Refine": "./dist/Refine.js",
     "./Package": "./dist/Package.js",
     "./package.json": "./package.json"
   },

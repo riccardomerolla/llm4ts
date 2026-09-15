@@ -49,3 +49,8 @@ unit: ^ {6}[ ]*COPY +([A-Z0-9]+)
 
 files: .*\.(jcl|JCL)
 unit: EXEC +PGM=([A-Z0-9]+)
+
+## Consolidate
+
+- cluster: calls, exec-pgm
+- context: copies

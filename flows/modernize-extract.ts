@@ -31,40 +31,31 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
-import { Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
-import { judge } from "@llm4ts/core/eval/Judge"
-import type { JsonSchema } from "@llm4ts/core/Models"
-import { budget, capped, withShrink } from "@llm4ts/flow/Context"
-import { type FlowError } from "@llm4ts/flow/FlowError"
+import { budget, capped } from "@llm4ts/flow/Context"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { FlowEvents } from "@llm4ts/flow/FlowEvents"
 import {
   FlowAborted,
-  FlowLlmError,
   Info,
   ReviewResult,
   asReadOnly,
   coderFromEnv,
   defaultPlanInstructions,
   loadKitPatternCards,
-  makeChat,
   makeNodeWorkspace,
   mergeReviewResults,
   nodePlainFileStore,
   openPack,
   planFrom,
   resolveFlowInput,
-  reviewFingerprint,
   runFlowMain,
   runNode,
   stage,
   withTurnLimit
 } from "@llm4ts/runner"
-import type { Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import { ReviewIssue } from "@llm4ts/flow/Review"
-import { cachedReview } from "@llm4ts/flow/ReviewCache"
 import {
   coverageReport,
   coverageUnits,
@@ -80,23 +71,25 @@ import {
   extractProgramsResumably,
   programArtifactPaths
 } from "@llm4ts/flow/Artifacts"
+import {
+  ModDir,
+  analystSystem,
+  analystTurns,
+  fixTurn,
+  globalFixAsk,
+  judgeIssueProgram,
+  makeProgramJudge,
+  maxClosureFiles,
+  positiveEnvInt,
+  programArtifactsJsonSchema,
+  programAsk,
+  programFixAsk,
+  programName,
+  readmeFor,
+  wavePrograms
+} from "./lib/modernize-extract.ts"
 
-const ModDir = "docs/modernization"
 const MaxRounds = 3
-
-const positiveEnvInt = (name: string, fallback: number): number => {
-  const raw = Number.parseInt(process.env[name] ?? "", 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : fallback
-}
-
-// Per-program turn budget — bounds a wedged agent, generous for real work.
-const analystTurns = (): number => positiveEnvInt("LLM4TS_ANALYST_TURNS", 48)
-
-/**
- * Max files named in one program's include closure. A program pulling more
- * than this gets a bounded, visible subset rather than an unbounded read.
- */
-const maxClosureFiles = (): number => positiveEnvInt("LLM4TS_MAX_CLOSURE_FILES", 40)
 
 /**
  * Programs extracted (and judged) at once. The programs of a wave are
@@ -106,147 +99,6 @@ const maxClosureFiles = (): number => positiveEnvInt("LLM4TS_MAX_CLOSURE_FILES",
  * narration; the bound is about the coder seat's quota, not correctness.
  */
 const extractConcurrency = (): number => positiveEnvInt("LLM4TS_EXTRACT_CONCURRENCY", 1)
-
-/** `cobol/ACCTXFR.cbl` → `ACCTXFR`: the program name keying every per-program artifact. */
-const programName = (relativePath: string): string => {
-  const base = relativePath.slice(relativePath.lastIndexOf("/") + 1)
-  const dot = base.lastIndexOf(".")
-  return dot > 0 ? base.slice(0, dot) : base
-}
-
-/** The `- PROG` entries of `## Wave: <name>` in the survey's wave plan. */
-const wavePrograms = (planText: string, wave: string): ReadonlyArray<string> => {
-  const lines = planText.split(/\r?\n/)
-  const start = lines.findIndex((line) => line.trim() === `## Wave: ${wave}`)
-  if (start < 0) {
-    return []
-  }
-  const section: Array<string> = []
-  for (const line of lines.slice(start + 1)) {
-    if (line.trim().startsWith("## ")) {
-      break
-    }
-    if (line.trim().startsWith("- ")) {
-      section.push(line.trim().slice(2).trim())
-    }
-  }
-  return section
-}
-
-const programArtifactsJsonSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    spec: { type: "string" },
-    feature: { type: "string" },
-    traceability: { type: "string" },
-    mapping: { type: "string" }
-  },
-  required: ["spec", "feature", "traceability", "mapping"]
-}
-
-// The analyst gets a deterministically resolved include closure, not an open
-// "read anything it references" instruction: told to chase references itself,
-// the coding agent pulls files into its own context inside a single turn —
-// which is how extract blew a 1M-token window while its own cap sat untouched.
-const programAsk = (pack: Pack, relativePath: string, closure: ReadonlyArray<string>): string =>
-  [
-    `Extract the behavioural spec for ONE source unit of this repository: ${relativePath}`,
-    "",
-    ...(closure.length === 0
-      ? [`Read ${relativePath}. It has no resolved dependencies.`]
-      : [
-          `Read ${relativePath} and EXACTLY these resolved dependencies — do not go looking for others:`,
-          ...closure.map((file) => `- ${file}`)
-        ]),
-    `Spec ONLY ${relativePath} and do not modify legacy sources.`,
-    "",
-    'Respond only with JSON: {"spec":"…","feature":"…","traceability":"…","mapping":"…"} where:',
-    "",
-    `- "spec" — the behavioural spec for ${relativePath}, as Markdown.`,
-    pack.prompt("spec") ?? "",
-    "",
-    `- "feature" — BDD scenarios encoding that spec, as a well-formed Gherkin .feature file`,
-    "  (Feature: header, Scenario: blocks, Given/When/Then steps).",
-    pack.prompt("bdd") ?? "",
-    "",
-    `- "traceability" — EVERY source unit of ${relativePath} (each COBOL paragraph, each JCL`,
-    "  step) on its own line, mapped to the spec rules/scenarios that cover it:",
-    "  `<UNIT-NAME> — <refs>`. Unit names verbatim as they appear in the source.",
-    "",
-    `- "mapping" — data & interface mapping for ${relativePath}: tables/record layouts → target`,
-    "  entities; files/screens/queues → target service contracts."
-  ].join("\n")
-
-/** Sub-bar judge dimensions as Critical review issues, titled with their program. */
-const judgeIssues = (
-  pack: Pack,
-  scored: {
-    readonly scores: ReadonlyArray<{
-      readonly name: string
-      readonly score: number
-      readonly reasoning: string
-    }>
-  },
-  program: string
-): ReviewResult => {
-  const issues = scored.scores.flatMap((score) => {
-    const maxScore = pack.judgeDimensions.find((d) => d.name === score.name)?.maxScore ?? 2
-    return score.score < maxScore
-      ? [
-          ReviewIssue.make({
-            severity: "Critical",
-            title: `judge[${program}]: ${score.name} scored ${score.score}`,
-            description: score.reasoning
-          })
-        ]
-      : []
-  })
-  return ReviewResult.make({ issues, summary: `judge:${program}` })
-}
-
-const judgeIssueProgram = (issue: ReviewIssue): string | undefined =>
-  /^judge\[([^\]]+)\]: /.exec(issue.title)?.[1]
-
-const issueLines = (issues: ReadonlyArray<ReviewIssue>): string =>
-  issues.map((issue) => `- [${issue.severity}] ${issue.title}: ${issue.description}`).join("\n")
-
-const programFixAsk = (
-  name: string,
-  relativePath: string,
-  issues: ReadonlyArray<ReviewIssue>
-): string =>
-  [
-    `The spec pack for ONE program did not clear its quality gate: ${name} (source: ${relativePath}).`,
-    `Fix these findings by editing ONLY this program's files — ${ModDir}/specs/${name}.md,`,
-    `${ModDir}/features/${name.toLowerCase()}.feature, ${ModDir}/traceability/${name}.md,`,
-    `${ModDir}/mapping/${name}.md — against the source at ${relativePath}. Then stop:`,
-    issueLines(issues)
-  ].join("\n")
-
-const globalFixAsk = (issues: ReadonlyArray<ReviewIssue>): string =>
-  [
-    "The spec pack did not clear its estate-wide quality gate. Fix these findings by editing the",
-    `per-program files under ${ModDir}/ (specs/, features/, traceability/<PROGRAM>.md,`,
-    `mapping/<PROGRAM>.md). ${ModDir}/traceability.md and ${ModDir}/mapping.md are REGENERATED`,
-    "from the fragments — do not edit them directly. Fix the findings in place, then stop:",
-    issueLines(issues)
-  ].join("\n")
-
-const readmeFor = (pack: Pack, verdict: string): string =>
-  [
-    `# Modernization spec pack — ${pack.name}`,
-    "",
-    `Extracted by the modernize-extract flow. Gate verdict: ${verdict}.`,
-    "",
-    "- specs/ — behavioural specs, one per program",
-    "- features/ — BDD acceptance scenarios",
-    "- traceability.md — source-unit → spec coverage matrix (generated from traceability/)",
-    "- mapping.md — data & interface mapping (generated from mapping/)",
-    "- rules.txt — every coverage unit, one per line (the rule universe verification reports against)",
-    "- plan.md — proposed implementation tasks",
-    "",
-    "Review everything, then flip the marker below and run the seed phase."
-  ].join("\n")
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
@@ -286,14 +138,7 @@ const program = Effect.gen(function* () {
           "branch",
           context.git.checkoutOrCreate("modernize/spec-pack").pipe(Effect.asVoid)
         )
-        const system = [
-          pack.prompt("analysis"),
-          pack.lessons === undefined
-            ? undefined
-            : `Lessons from previous modernization runs — apply them:\n${pack.lessons}`
-        ]
-          .filter((part) => part !== undefined)
-          .join("\n\n")
+        const system = analystSystem(pack)
 
         const all = yield* stage(
           context.events,
@@ -517,61 +362,15 @@ const program = Effect.gen(function* () {
           )
         )
 
-        const packJudge = judge(context.reasoning, pack.judgeDimensions)
         const limit = budget()
-
-        // The shared Context ladder: an oversized prompt retries at half, then
-        // quarter budget (repeating it identically cannot succeed), and every
-        // cap or shrink is recorded and published.
-        const judgeWithShrink = (
-          name: string,
-          spec: string,
-          feature: string,
-          source: string
-        ): Effect.Effect<EvalResult, FlowError> =>
-          withShrink(
-            `judge[${name}]`,
-            (cap) =>
-              Effect.gen(function* () {
-                const response = yield* capped(`spec[${name}]`, `${spec}\n\n${feature}`, cap)
-                const source_ = yield* capped(`source[${name}]`, source, cap)
-                return yield* packJudge
-                  .evaluate(Sample.make({ response, context: source_, query: input.prompt }))
-                  .pipe(Effect.mapError(FlowLlmError.from))
-              }),
-            { start: limit }
-          ).pipe(Effect.provideService(FlowEvents, context.events))
-
-        /**
-         * Judging is resumable per program: the verdict persists under
-         * `gate/<NAME>.json`, fingerprinted over the source, spec, feature, and
-         * rubric it judged. Unchanged content reuses the stored verdict with NO
-         * model call, so a crash or quota death re-judges only what changed.
-         * Delete `gate/` to force a full re-judge.
-         */
-        const judgeProgram = (unit: ProgramUnit) =>
-          Effect.gen(function* () {
-            const spec = (yield* files.read(join(modDirAbs, "specs", `${unit.name}.md`))) ?? ""
-            const feature =
-              (yield* files.read(
-                join(modDirAbs, "features", `${unit.name.toLowerCase()}.feature`)
-              )) ?? ""
-            const source = (yield* files.read(join(input.workDir, unit.sourcePath))) ?? ""
-            const rubric = pack.judgeDimensions
-              .map(
-                (dimension) => `${dimension.name} (0..${dimension.maxScore}): ${dimension.rubric}`
-              )
-              .join("\n")
-            return yield* cachedReview(
-              files,
-              join(modDirAbs, "gate", `${unit.name}.json`),
-              reviewFingerprint(source, spec, feature, rubric),
-              context.events.publish(Info.make({ message: `judging ${unit.name}` })).pipe(
-                Effect.andThen(judgeWithShrink(unit.name, spec, feature, source)),
-                Effect.map((scored) => judgeIssues(pack, scored, unit.name))
-              )
-            )
-          })
+        const judgeProgram = makeProgramJudge({
+          context,
+          files,
+          pack,
+          modDirAbs,
+          workDir: input.workDir,
+          limit
+        })
 
         const gateEvaluate = Effect.gen(function* () {
           yield* rebuildIndexes
@@ -634,7 +433,7 @@ const program = Effect.gen(function* () {
           const wellFormed = yield* features(repo, join(ModDir, "features"))
           // Verdicts are per program and cached per program, so they judge
           // under the same bound as extraction; the merge is order-stable.
-          const judged = yield* Effect.forEach(units, judgeProgram, { concurrency })
+          const judged = yield* Effect.forEach(units, (unit) => judgeProgram(unit), { concurrency })
           return mergeReviewResults([covered, wellFormed, docs, ...judged])
         })
 
@@ -656,25 +455,7 @@ const program = Effect.gen(function* () {
               }
             }
             const turn = (ask: string, commitMessage: string) =>
-              Effect.gen(function* () {
-                const chat = yield* makeChat(context.coder, { system })
-                yield* chat.ask(ask).pipe(
-                  Effect.asVoid,
-                  // A wedged agent that trips its turn limit mid-fix still wrote
-                  // something; re-evaluate what landed instead of failing.
-                  Effect.catchIf(
-                    (error) => error._tag === "Llm" && error.cause?._tag === "TurnLimitError",
-                    () =>
-                      context.events.publish(
-                        Info.make({
-                          message:
-                            "turn limit hit during a fix turn — re-evaluating what was written"
-                        })
-                      )
-                  )
-                )
-                yield* context.git.commitAll(commitMessage).pipe(Effect.asVoid)
-              })
+              fixTurn(context, system, ask, commitMessage)
             for (const [name, issues] of [...scoped.entries()].sort()) {
               yield* context.events.publish(
                 Info.make({ message: `fixing ${name} — ${issues.length} finding(s)` })
