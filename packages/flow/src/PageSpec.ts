@@ -59,6 +59,9 @@ export class PageDto extends Schema.Class<PageDto>("PageDto")({
   fields: Schema.Array(FieldMapping)
 }) {}
 
+export const ResponseShape = Schema.Literals(["single", "list"])
+export type ResponseShape = typeof ResponseShape.Type
+
 export class PageApiCall extends Schema.Class<PageApiCall>("PageApiCall")({
   /** Domain operation id, e.g. `listAccounts` — becomes the OpenAPI operationId. */
   operation: Schema.String,
@@ -70,9 +73,20 @@ export class PageApiCall extends Schema.Class<PageApiCall>("PageApiCall")({
     Schema.withConstructorDefault(Effect.succeed(emptyMappings)),
     Schema.withDecodingDefaultKey(Effect.succeed(emptyMappings))
   ),
+  /**
+   * The response's fields when it is an ad-hoc object. A response that is
+   * one of the page's DTOs names it with `responseDto` instead — the
+   * `domainName` of an entry in `dtos` — and `responseShape` says whether
+   * the endpoint returns one of them or a list; a table screen is a list.
+   */
   response: Schema.Array(FieldMapping).pipe(
     Schema.withConstructorDefault(Effect.succeed(emptyMappings)),
     Schema.withDecodingDefaultKey(Effect.succeed(emptyMappings))
+  ),
+  responseDto: Schema.optionalKey(Schema.String),
+  responseShape: ResponseShape.pipe(
+    Schema.withConstructorDefault(Effect.succeed("single" as const)),
+    Schema.withDecodingDefaultKey(Effect.succeed("single" as const))
   )
 }) {}
 
@@ -140,7 +154,7 @@ export const pageSpecShapeHint =
   "The block must be exactly: { page, route, title, complexity: low|medium|high, " +
   "forms: [{ name, action, fields: [{ name, label, type, required?, validations: [{ rule, message?, enforcedAt: client|server|both }] }] }], " +
   "dtos: [{ legacyName, domainName, fields: [{ legacyName, domainName, type }] }], " +
-  "apiCalls: [{ operation, method, path, esbService (the ESB service the legacy call goes through — omit only when there is none), request: [{ legacyName, domainName, type }], response: [{ legacyName, domainName, type }] }], " +
+  "apiCalls: [{ operation, method, path, esbService (the ESB service the legacy call goes through — omit only when there is none), request: [{ legacyName, domainName, type }], response: [{ legacyName, domainName, type }] for an ad-hoc object, or responseDto: <domainName of one of the dtos> with responseShape: single|list when the endpoint returns that DTO or a list of it (a table screen is a list) }], " +
   "navigation: { inbound: [string], outbound: [string], steps: [string] }, sessionState: [string], openQuestions: [string] }. " +
   "No other keys (no id, url, queryParams, esbCall, trigger, serverController); every apiCalls entry is an object with operation/method/path; " +
   "put anything that does not fit into the prose sections or openQuestions."
@@ -213,6 +227,9 @@ const yamlText = (value: string): string => JSON.stringify(value)
 const schemaName = (operation: string, side: "Request" | "Response"): string =>
   `${operation.charAt(0).toUpperCase()}${operation.slice(1)}${side}`
 
+const dtoSchemaName = (domainName: string): string =>
+  domainName.replace(/[^A-Za-z0-9]+/g, "") || "Dto"
+
 const propertyLines = (
   fields: ReadonlyArray<FieldMapping>,
   indent: string
@@ -253,7 +270,7 @@ export const openApiFor = (spec: PageSpec): string => {
     lines[lines.length - 1] = "paths: {}"
   }
   for (const [path, calls] of paths) {
-    lines.push(`  ${path}:`)
+    lines.push(`  ${path.startsWith("/") ? path : `/${path}`}:`)
     for (const call of [...calls].sort((a, b) => a.method.localeCompare(b.method))) {
       const method = call.method.toLowerCase()
       lines.push(`    ${method}:`)
@@ -287,21 +304,49 @@ export const openApiFor = (spec: PageSpec): string => {
       lines.push("          content:")
       lines.push("            application/json:")
       lines.push("              schema:")
-      lines.push(
-        `                $ref: "#/components/schemas/${schemaName(call.operation, "Response")}"`
-      )
+      const responseRef = `"#/components/schemas/${
+        call.responseDto === undefined
+          ? schemaName(call.operation, "Response")
+          : dtoSchemaName(call.responseDto)
+      }"`
+      if (call.responseShape === "list") {
+        lines.push("                type: array")
+        lines.push("                items:")
+        lines.push(`                  $ref: ${responseRef}`)
+      } else {
+        lines.push(`                $ref: ${responseRef}`)
+      }
     }
   }
   lines.push("components:")
   lines.push("  schemas:")
   const schemaCalls = [...spec.apiCalls].sort((a, b) => a.operation.localeCompare(b.operation))
   let wroteSchema = false
+  // Every DTO a response names becomes a component the calls reference —
+  // one schema per domain entity, shared by every endpoint returning it.
+  const referencedDtos = new Set(
+    spec.apiCalls.flatMap((call) => (call.responseDto === undefined ? [] : [call.responseDto]))
+  )
+  for (const dto of [...spec.dtos].sort((a, b) => a.domainName.localeCompare(b.domainName))) {
+    if (!referencedDtos.has(dto.domainName)) {
+      continue
+    }
+    wroteSchema = true
+    lines.push(`    ${dtoSchemaName(dto.domainName)}:`)
+    lines.push("      type: object")
+    lines.push(`      description: ${yamlText(`legacy: ${dto.legacyName}`)}`)
+    lines.push("      properties:")
+    lines.push(...propertyLines(dto.fields, "        "))
+  }
   for (const call of schemaCalls) {
     for (const [side, fields] of [
       ["Request", call.request],
       ["Response", call.response]
     ] as const) {
       if (side === "Request" && (fields.length === 0 || call.method.toLowerCase() === "get")) {
+        continue
+      }
+      if (side === "Response" && call.responseDto !== undefined) {
         continue
       }
       wroteSchema = true
@@ -346,7 +391,11 @@ export const renderPageSpec = (spec: PageSpec): string => {
     lines.push("", "## API calls")
     for (const call of spec.apiCalls) {
       const esb = call.esbService === undefined ? "" : ` — ESB ${call.esbService}`
-      lines.push(`- ${call.operation}: ${call.method} ${call.path}${esb}`)
+      const returns =
+        call.responseDto === undefined
+          ? ""
+          : ` → ${call.responseShape === "list" ? `list of ${call.responseDto}` : call.responseDto}`
+      lines.push(`- ${call.operation}: ${call.method} ${call.path}${esb}${returns}`)
     }
   }
   if (spec.dtos.length > 0) {

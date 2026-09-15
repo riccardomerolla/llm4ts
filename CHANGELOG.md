@@ -11,7 +11,7 @@
   runbook. `SpecChecks` gained `capturedUnits` (units with their source
   files) and `coverageReport` (the gated result plus the out-of-scope list);
   `coverage` accepts an `inScope` option.
-- Packs can declare `spec-schema: pagespec` (the three J2EE packs now do):
+- Packs can declare `spec-schema: pagespec` (the `j2ee-nextjs-spa` pack does):
   the extraction gate then decodes every program spec's ```json pagespec
 block by code, before the judge, and reports an undecodable one as a
 per-program Critical finding the fix turn repairs. Found in the same
@@ -19,6 +19,13 @@ rehearsal, where a spec written by an estate-wide fix round carried a
 prose `apiCalls`entry and`convert-page` was the first to reject it. The
 finding states the exact block shape (`pageSpecShapeHint`), which turned
   two failed fix rounds into one that passed.
+- A page spec's API call can now return one of the page's DTOs, or a list
+  of it: `apiCalls[].responseDto` names a `dtos` entry by domain name and
+  `responseShape` is `single` or `list`. `openApiFor` emits the DTO as a
+  shared component and wraps a list in an array schema, and contract paths
+  are always rooted. Found in the rehearsal's Act 2: with only flat field
+  mappings the contract turned `accts[].curBal` into a scalar and the
+  converter built a single-balance page the judge rejected.
 
 ## 0.18.0
 

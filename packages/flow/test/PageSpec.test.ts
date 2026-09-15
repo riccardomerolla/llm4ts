@@ -2,13 +2,14 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import {
   FieldMapping,
+  openApiFor,
   PageApiCall,
+  PageDto,
   PageForm,
   PageFormField,
   PageSpec,
-  PageValidation,
-  openApiFor,
   pageSpecBlock,
+  PageValidation,
   parsePageSpec,
   renderPageSpec,
   renderPageSpecBlock
@@ -119,5 +120,90 @@ describe("PageSpec", () => {
     assert.include(rendered, "validateTransfer: POST /transfers/validate — ESB ESB_TRF_VAL")
     assert.include(rendered, "## Session state")
     assert.include(rendered, "## Open questions")
+  })
+})
+
+describe("list responses", () => {
+  it("references the DTO as a component and wraps a list response in an array", () => {
+    const spec = PageSpec.make({
+      page: "accountOverview",
+      route: "/accountOverview",
+      title: "Account Overview",
+      complexity: "medium",
+      dtos: [
+        PageDto.make({
+          legacyName: "AcctOvwDTO",
+          domainName: "Account",
+          fields: [
+            FieldMapping.make({
+              legacyName: "acctNo",
+              domainName: "accountNumber",
+              type: "String"
+            }),
+            FieldMapping.make({
+              legacyName: "curBal",
+              domainName: "currentBalance",
+              type: "BigDecimal"
+            })
+          ]
+        })
+      ],
+      apiCalls: [
+        PageApiCall.make({
+          operation: "listAccounts",
+          method: "GET",
+          path: "accountOverview",
+          esbService: "ESB_ACCT_LIST",
+          responseDto: "Account",
+          responseShape: "list"
+        })
+      ]
+    })
+    const yaml = openApiFor(spec)
+    assert.include(
+      yaml,
+      "  /accountOverview:",
+      "paths are rooted even when the spec omits the slash"
+    )
+    assert.include(
+      yaml,
+      '                type: array\n                items:\n                  $ref: "#/components/schemas/Account"'
+    )
+    assert.include(
+      yaml,
+      '    Account:\n      type: object\n      description: "legacy: AcctOvwDTO"'
+    )
+    assert.include(yaml, "accountNumber:")
+    assert.notInclude(
+      yaml,
+      "ListAccountsResponse",
+      "a DTO-typed response has no ad-hoc response schema"
+    )
+    assert.include(
+      renderPageSpec(spec),
+      "listAccounts: GET accountOverview — ESB ESB_ACCT_LIST → list of Account"
+    )
+  })
+
+  it("defaults to a single ad-hoc object when no DTO is named", () => {
+    const spec = PageSpec.make({
+      page: "profile",
+      route: "/profile",
+      title: "Profile",
+      complexity: "low",
+      apiCalls: [
+        PageApiCall.make({
+          operation: "getProfile",
+          method: "GET",
+          path: "/profile",
+          response: [
+            FieldMapping.make({ legacyName: "custNm", domainName: "customerName", type: "String" })
+          ]
+        })
+      ]
+    })
+    const yaml = openApiFor(spec)
+    assert.include(yaml, '                $ref: "#/components/schemas/GetProfileResponse"')
+    assert.notInclude(yaml, "type: array")
   })
 })

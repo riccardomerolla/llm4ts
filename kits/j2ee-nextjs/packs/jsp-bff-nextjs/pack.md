@@ -3,7 +3,6 @@
 source: jsp
 scaffold: ../../scaffolds/spring-bff
 sources: .*\.(jsp|java|xml)
-spec-schema: pagespec
 programs: .*\.(jsp|java)
 specs-dir: docs/specs
 features-dir: src/test/resources/features

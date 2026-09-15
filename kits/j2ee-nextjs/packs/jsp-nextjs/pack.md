@@ -3,7 +3,6 @@
 source: jsp
 scaffold: ../../scaffolds/nextjs-spa
 sources: .*\.(jsp|java|xml)
-spec-schema: pagespec
 programs: .*\.(jsp|java)
 specs-dir: docs/specs
 features-dir: features

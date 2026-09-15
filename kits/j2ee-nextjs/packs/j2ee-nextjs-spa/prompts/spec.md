@@ -23,7 +23,11 @@ The spec markdown for a page has two mandatory parts:
        "domainName", "type" }] }],
      "apiCalls": [{ "operation": "<domain verb, e.g. listAccounts>",
        "method", "path", "esbService", "request": [{ "legacyName",
-       "domainName", "type" }], "response": [{ ... }] }],
+       "domainName", "type" }],
+       "response": [{ "legacyName", "domainName", "type" }]   // ad-hoc object, OR
+       "responseDto": "<domainName of one of the dtos>",       // the DTO returned,
+       "responseShape": "single" | "list"                     // a table screen is a list
+     }],
      "navigation": { "inbound": [], "outbound": [], "steps": [] },
      "sessionState": ["<what the session carries and why>"],
      "openQuestions": []

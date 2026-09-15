@@ -314,7 +314,7 @@ feature, traceability, and mapping fragments, then a layered gate
 `gate/` and re-judged only when content changes) must clear before the pack
 gets its unchecked approval marker.
 
-A pack that declares `spec-schema: pagespec` (the J2EE packs do) has every
+A pack that declares `spec-schema: pagespec` (`j2ee-nextjs-spa` does) has every
 program spec's ```json pagespec block decoded by the gate before any judge
 runs; an undecodable block is a per-program finding the fix turn repairs,
 so the converter never meets one.
