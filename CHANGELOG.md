@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.2.1
+
+- **`modernize-pack-upgrade`**: continue a modernization that an older
+  llm4ts extracted (say 0.16.2) with the current release. Deterministic, no
+  model call: it checks every program's artifacts against the current pack
+  rules and spec schema (a 0.16 pagespec with a prose `esbService` fails
+  2.x's identifier rule), regenerates the traceability and mapping indexes
+  and `rules.txt` under the current coverage rules, stamps the README with
+  the llm4ts version and resets its approval, and with
+  `LLM4TS_MARK_DEEPEN=1` writes a `## Deepen` mark per incompatible program
+  into `decisions.md` so `modernize-refine` re-extracts exactly those with
+  the current prompts. Every README writer now stamps `Written by llm4ts
+X.Y.Z`; a pack without the stamp is an older one. Guide chapter 7 is the
+  fork story.
+
 ## 2.2.0
 
 Additive: no breaking change. Every addition is opt-in by the presence of a

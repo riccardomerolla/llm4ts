@@ -17,6 +17,7 @@ import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import { cachedReview } from "@llm4ts/flow/ReviewCache"
 import { FlowLlmError, Info, ReviewResult, makeChat, reviewFingerprint } from "@llm4ts/runner"
+import { packageVersion } from "@llm4ts/flow/Package"
 
 export const ModDir = "docs/modernization"
 
@@ -204,12 +205,27 @@ export const globalFixAsk = (issues: ReadonlyArray<ReviewIssue>): string =>
     issueLines(issues)
   ].join("\n")
 
-/** The spec pack README; `notes` records what a refinement changed after the gate passed. */
-export const readmeFor = (pack: Pack, verdict: string, notes: ReadonlyArray<string> = []): string =>
+/** The `Written by llm4ts X.Y.Z` stamp of a README, or undefined for a pack older than the stamp. */
+export const readmeVersion = (readme: string): string | undefined =>
+  /^Written by llm4ts (\S+)\.$/m.exec(readme)?.[1]
+
+/**
+ * The spec pack README; `notes` records what a refinement or an upgrade
+ * changed after the gate passed. Every writer stamps the llm4ts version it
+ * ran as, so a pack extracted by an older release can be recognised and
+ * checked (`modernize-pack-upgrade`) before a newer release continues it.
+ */
+export const readmeFor = (
+  pack: Pack,
+  verdict: string,
+  notes: ReadonlyArray<string> = [],
+  version: string = packageVersion
+): string =>
   [
     `# Modernization spec pack — ${pack.name}`,
     "",
     `Extracted by the modernize-extract flow. Gate verdict: ${verdict}.`,
+    `Written by llm4ts ${version}.`,
     "",
     "- specs/ — behavioural specs, one per program",
     "- features/ — BDD acceptance scenarios",

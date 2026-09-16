@@ -11,6 +11,7 @@
     "modernize-survey": "node --experimental-strip-types modernize-survey.ts",
     "modernize-extract": "node --experimental-strip-types modernize-extract.ts",
     "modernize-refine": "node --experimental-strip-types modernize-refine.ts",
+    "modernize-pack-upgrade": "node --experimental-strip-types modernize-pack-upgrade.ts",
     "modernize-seed": "node --experimental-strip-types modernize-seed.ts",
     "modernize-implement": "node --experimental-strip-types modernize-implement.ts",
     "modernize-verify": "node --experimental-strip-types modernize-verify.ts",

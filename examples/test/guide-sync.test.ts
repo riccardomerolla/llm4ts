@@ -57,7 +57,7 @@ const codeBlockUnderHeading = (markdown: string, heading: string, language: stri
 const chapters = readdirSync(guideDir).filter((entry) => entry.endsWith(".md"))
 
 describe("docs/guide stays in sync with the codebase", () => {
-  it("ships the seven files the index promises", () => {
+  it("ships the eight files the index promises", () => {
     assert.deepStrictEqual(chapters.sort(), [
       "01-install.md",
       "02-run-a-flow.md",
@@ -65,6 +65,7 @@ describe("docs/guide stays in sync with the codebase", () => {
       "04-fork-a-built-in.md",
       "05-your-first-pack.md",
       "06-troubleshooting.md",
+      "07-upgrade-a-spec-pack.md",
       "README.md"
     ])
   })
