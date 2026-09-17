@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/core",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "Effect-native LLM contracts, providers, tools, evaluation, and observability",
   "license": "MIT",
   "type": "module",
@@ -46,6 +46,7 @@
     "./providers/ConnectorFactories": "./dist/providers/ConnectorFactories.js",
     "./providers/CopilotConnector": "./dist/providers/CopilotConnector.js",
     "./providers/CursorConnector": "./dist/providers/CursorConnector.js",
+    "./providers/GeminiAcpSession": "./dist/providers/GeminiAcpSession.js",
     "./providers/GeminiApiProvider": "./dist/providers/GeminiApiProvider.js",
     "./providers/GeminiCliProvider": "./dist/providers/GeminiCliProvider.js",
     "./providers/GeminiModels": "./dist/providers/GeminiModels.js",

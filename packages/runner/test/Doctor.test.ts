@@ -3,7 +3,13 @@ import * as Effect from "effect/Effect"
 import { InvalidRequestError } from "@llm4ts/core/Errors"
 import { ConnectorIds, HealthStatus } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
-import { geminiPrerequisites, makeDoctorProgram } from "@llm4ts/runner/Doctor"
+import {
+  geminiBridgePrerequisites,
+  geminiPrerequisites,
+  makeDoctorProgram
+} from "@llm4ts/runner/Doctor"
+
+const noModelsJson = (): string | undefined => undefined
 
 const unsupported = Effect.fail(InvalidRequestError.make({ message: "not supported in test" }))
 
@@ -51,6 +57,52 @@ describe("doctor", () => {
     Effect.gen(function* () {
       const report = yield* makeDoctorProgram(fakeRegistry, { LLM4TS_CODER: "codex" })
       assert.notInclude(report, "prerequisites:")
+    })
+  )
+
+  it.effect("stays quiet about the pi-gemini bridge when it wasn't asked for", () =>
+    Effect.gen(function* () {
+      const report = yield* makeDoctorProgram(fakeRegistry, {}, noModelsJson)
+      assert.notInclude(report, "pi-gemini-bridge")
+    })
+  )
+
+  it.effect("flags a missing pi models.json when the bridge is requested", () =>
+    Effect.gen(function* () {
+      const report = yield* makeDoctorProgram(
+        fakeRegistry,
+        { LLM4TS_GEMINI_BRIDGE: "1" },
+        noModelsJson
+      )
+      assert.include(report, "? pi-gemini-bridge: ~/.pi/agent/models.json not found")
+      assert.include(report, "http://127.0.0.1:8731")
+      assert.include(report, "ADR 0016")
+    })
+  )
+
+  it.effect("flags a models.json that doesn't point at the bridge port", () =>
+    Effect.gen(function* () {
+      const report = yield* makeDoctorProgram(fakeRegistry, { LLM4TS_GEMINI_BRIDGE: "1" }, () =>
+        JSON.stringify({ providers: { anthropic: { baseUrl: "https://api.anthropic.com" } } })
+      )
+      assert.include(report, "? pi-gemini-bridge: no provider in ~/.pi/agent/models.json")
+    })
+  )
+
+  it.effect("reports the bridge satisfied when a provider points at the configured port", () =>
+    Effect.gen(function* () {
+      const report = yield* makeDoctorProgram(
+        fakeRegistry,
+        { LLM4TS_GEMINI_BRIDGE: "1", LLM4TS_GEMINI_BRIDGE_PORT: "9000" },
+        () =>
+          JSON.stringify({
+            providers: { gemini: { baseUrl: "http://127.0.0.1:9000", api: "anthropic-messages" } }
+          })
+      )
+      assert.include(
+        report,
+        "✔ pi-gemini-bridge: a provider in ~/.pi/agent/models.json points at 127.0.0.1:9000"
+      )
     })
   )
 
@@ -134,5 +186,42 @@ describe("geminiPrerequisites", () => {
     const result = geminiPrerequisites({ GEMINI_API_KEY: "super-secret-value" })
     assert.notInclude(result.summary, "super-secret-value")
     assert.notInclude(result.hint ?? "", "super-secret-value")
+  })
+})
+
+describe("geminiBridgePrerequisites", () => {
+  it("does not apply when the bridge wasn't requested", () => {
+    assert.isUndefined(geminiBridgePrerequisites({}, undefined))
+  })
+
+  it("is unsatisfied when models.json is missing", () => {
+    const result = geminiBridgePrerequisites({ LLM4TS_GEMINI_BRIDGE: "true" }, undefined)
+    assert.isDefined(result)
+    assert.isFalse(result?.satisfied)
+    assert.include(result?.hint ?? "", "llm4ts never writes this file for you")
+  })
+
+  it("is unsatisfied when no provider baseUrl matches the port", () => {
+    const result = geminiBridgePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "yes" },
+      JSON.stringify({ providers: { other: { baseUrl: "http://127.0.0.1:9999" } } })
+    )
+    assert.isFalse(result?.satisfied)
+  })
+
+  it("is satisfied when a provider baseUrl matches the default port", () => {
+    const result = geminiBridgePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "1" },
+      JSON.stringify({ providers: { gemini: { baseUrl: "http://127.0.0.1:8731" } } })
+    )
+    assert.isTrue(result?.satisfied)
+  })
+
+  it("honors a custom LLM4TS_GEMINI_BRIDGE_PORT", () => {
+    const result = geminiBridgePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "1", LLM4TS_GEMINI_BRIDGE_PORT: "9000" },
+      JSON.stringify({ providers: { gemini: { baseUrl: "http://127.0.0.1:8731" } } })
+    )
+    assert.isFalse(result?.satisfied)
   })
 })

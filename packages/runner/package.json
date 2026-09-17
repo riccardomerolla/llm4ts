@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/runner",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "Node runner, CLI, terminal, and MCP composition for llm4ts",
   "license": "MIT",
   "type": "module",
@@ -22,6 +22,7 @@
     "./FlowRunner": "./dist/FlowRunner.js",
     "./Kits": "./dist/Kits.js",
     "./McpStdio": "./dist/McpStdio.js",
+    "./NodeGeminiAcpBridge": "./dist/NodeGeminiAcpBridge.js",
     "./NodeHttpClient": "./dist/NodeHttpClient.js",
     "./NodeGeminiCliExecutor": "./dist/NodeGeminiCliExecutor.js",
     "./NodePlainFileStore": "./dist/NodePlainFileStore.js",

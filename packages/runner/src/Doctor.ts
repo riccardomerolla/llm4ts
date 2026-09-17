@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import type { HealthStatus } from "@llm4ts/core/Models"
 import { ConnectorIds } from "@llm4ts/core/Models"
@@ -98,9 +101,60 @@ const wrap = (text: string, width: number, indent: string): ReadonlyArray<string
 const selectedCoder = (environment: Readonly<Record<string, string | undefined>>): string =>
   environment.LLM4TS_CODER ?? "claude (default)"
 
+export const defaultGeminiBridgePort = "8731"
+
+/**
+ * `~/.pi/agent/models.json` (ADR 0016). Read for reporting only — this file
+ * belongs to `pi`, outside llm4ts's package graph, and llm4ts never writes
+ * it. Missing is not an error here: the file simply doesn't exist yet.
+ */
+export const defaultReadPiModelsJson = (): string | undefined => {
+  try {
+    return readFileSync(join(homedir(), ".pi", "agent", "models.json"), "utf8")
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Whether pi's custom-provider config points at this machine's Gemini ACP
+ * bridge — detect-and-report only, never auto-fixed (ADR 0016). `undefined`
+ * means the check doesn't apply: nothing asked for the bridge.
+ */
+export const geminiBridgePrerequisites = (
+  environment: Readonly<Record<string, string | undefined>>,
+  modelsJson: string | undefined
+): PrerequisiteReport | undefined => {
+  if (!truthy(environment.LLM4TS_GEMINI_BRIDGE)) {
+    return undefined
+  }
+  const port = isSet(environment.LLM4TS_GEMINI_BRIDGE_PORT)
+    ? environment.LLM4TS_GEMINI_BRIDGE_PORT.trim()
+    : defaultGeminiBridgePort
+  const needle = `127.0.0.1:${port}`
+  const hint =
+    `add a custom provider to ~/.pi/agent/models.json with baseUrl ` +
+    `"http://${needle}" so pi draws inference from the gemini-cli bridge instead ` +
+    `of a model API key (ADR 0016) — llm4ts never writes this file for you.`
+  if (modelsJson === undefined) {
+    return { satisfied: false, summary: "~/.pi/agent/models.json not found", hint }
+  }
+  return modelsJson.includes(needle)
+    ? {
+        satisfied: true,
+        summary: `a provider in ~/.pi/agent/models.json points at ${needle}`
+      }
+    : {
+        satisfied: false,
+        summary: `no provider in ~/.pi/agent/models.json points at ${needle}`,
+        hint
+      }
+}
+
 export const makeDoctorProgram = (
   registry: ConnectorRegistryShape = nodeFlowRunnerDependencies().registry,
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  readPiModelsJson: () => string | undefined = defaultReadPiModelsJson
 ): Effect.Effect<string> =>
   Effect.map(registry.healthCheckAll, (statuses) => {
     const lines: Array<string> = []
@@ -128,13 +182,22 @@ export const makeDoctorProgram = (
         (id) =>
           id.value === ConnectorIds.GeminiCli.value || id.value === ConnectorIds.GeminiApi.value
       )
-    if (geminiRelevant) {
-      const gemini = geminiPrerequisites(environment)
+    const bridge = geminiBridgePrerequisites(environment, readPiModelsJson())
+    if (geminiRelevant || bridge !== undefined) {
       lines.push("")
       lines.push("prerequisites:")
-      lines.push(`  ${gemini.satisfied ? "✔" : "?"} gemini: ${gemini.summary}`)
-      if (gemini.hint !== undefined) {
-        lines.push(...wrap(gemini.hint, 78, "      "))
+      if (geminiRelevant) {
+        const gemini = geminiPrerequisites(environment)
+        lines.push(`  ${gemini.satisfied ? "✔" : "?"} gemini: ${gemini.summary}`)
+        if (gemini.hint !== undefined) {
+          lines.push(...wrap(gemini.hint, 78, "      "))
+        }
+      }
+      if (bridge !== undefined) {
+        lines.push(`  ${bridge.satisfied ? "✔" : "?"} pi-gemini-bridge: ${bridge.summary}`)
+        if (bridge.hint !== undefined) {
+          lines.push(...wrap(bridge.hint, 78, "      "))
+        }
       }
     }
 

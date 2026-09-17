@@ -26,6 +26,24 @@ selects `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, or
 
 `LLM4TS_VERBOSITY` accepts `quiet`, `normal`, `verbose`, or `debug`.
 
+### Gemini ACP bridge (for `pi` without a model credential)
+
+When `pi` is the coder and the only paid model access available is a
+`gemini-cli` OAuth subscription (no `GEMINI_API_KEY`, no Vertex key), a
+`pi`-coding flow run can start a local bridge that lets `pi` draw its
+inference from that subscription instead. Set `LLM4TS_GEMINI_BRIDGE` (any
+truthy value) to start it, scoped to that flow run; `LLM4TS_GEMINI_BRIDGE_PORT`
+overrides the fixed port (default `8731`) the bridge binds. Concurrent flow
+runs sharing one bridge are unsupported — a run that finds the port already
+bound fails fast rather than sharing an unowned server.
+
+The bridge does not configure `pi` for you: add a custom provider to
+`~/.pi/agent/models.json` with `baseUrl` set to `http://127.0.0.1:<port>`
+(`api: "anthropic-messages"`) once, outside any flow run — `llm4ts doctor`
+reports whether that file already points at the configured port but never
+writes it (that file belongs to `pi`, not llm4ts). See ADR 0016 for the
+full design.
+
 ## API connectors
 
 The runner exports `openAI`, `anthropic`, `geminiApi`, `lmStudio`, `ollama`, and

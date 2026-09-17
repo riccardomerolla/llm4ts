@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.3.0
+
+- **Gemini ACP bridge** (ADR 0016): lets `pi` draw its inference from a
+  `gemini-cli` OAuth subscription instead of a model API key or Vertex
+  credential, for accounts where that subscription is the only paid model
+  access available. `GeminiAcpSession` (`@llm4ts/core`) speaks ACP (`gemini
+--experimental-acp`, JSON-RPC 2.0 over stdio) rather than Google's A2A
+  protocol — official, no pinned third-party server package. A local bridge
+  (`@llm4ts/runner`'s `NodeGeminiAcpBridge`, `LLM4TS_GEMINI_BRIDGE`,
+  `LLM4TS_GEMINI_BRIDGE_PORT`) speaks the Anthropic Messages API on
+  `/v1/messages` (what `pi`'s `~/.pi/agent/models.json` custom-provider entry
+  points at) and MCP over HTTP on `/mcp`; gemini's own tool calls pause there
+  and resume from pi's own tool execution, so pi's tool loop — not gemini's —
+  drives every file edit. Additive: nothing about this is enabled unless
+  `LLM4TS_GEMINI_BRIDGE` is set. `llm4ts doctor` reports whether pi's config
+  points at the bridge but never writes that file. Plumbing only — no new
+  kit, no retuned prompts; existing packs run unchanged.
+
 ## 2.2.1
 
 - **`modernize-pack-upgrade`**: continue a modernization that an older
