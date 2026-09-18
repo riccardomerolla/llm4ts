@@ -128,13 +128,31 @@ export const geminiBridgePort = (
 /**
  * One value pi accepts for `--model`: `<provider>/<model>`, where the
  * provider is a key under `providers` in `~/.pi/agent/models.json` and the
- * model is an entry in that provider's `models`. `bridged` marks the pairs
- * whose provider points at this machine's ACP bridge — the ones that draw
- * inference from gemini's OAuth session instead of a model API key.
+ * model is a `models` entry's `id`. `bridged` marks the pairs whose provider
+ * points at this machine's ACP bridge — the ones that draw inference from
+ * gemini's OAuth session instead of a model API key.
+ *
+ * `authConfigured` tracks pi's availability rule rather than its schema: a
+ * provider with no `apiKey` still loads, but its models stay hidden from
+ * `--model` and `--list-models` until `/login`, `auth.json`, or `--api-key`
+ * supplies one. The bridge needs no real credential, so a placeholder is
+ * enough — but something must be there.
  */
 export interface PiModelRef {
   readonly ref: string
   readonly bridged: boolean
+  readonly authConfigured: boolean
+}
+
+/**
+ * What pi makes of `~/.pi/agent/models.json`. `problems` mirrors pi's own
+ * schema validation, and a non-empty list means pi loads *nothing* from the
+ * file — it reports "errors loading models.json" and falls back to built-in
+ * providers, so `refs` is what the file intended, not what pi will accept.
+ */
+export interface PiModelsConfig {
+  readonly refs: ReadonlyArray<PiModelRef>
+  readonly problems: ReadonlyArray<string>
 }
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -149,56 +167,78 @@ const parseJson = (raw: string): unknown => {
   }
 }
 
-/** A `models` entry is a bare id or an object carrying one; pi writes both. */
+/**
+ * pi's schema requires each `models` entry to be an object carrying a string
+ * `id`; a bare `"model-name"` string fails validation with
+ * `models.<i>: must be object` and takes the whole file down with it.
+ */
 const modelId = (entry: unknown): string | undefined => {
-  if (typeof entry === "string") {
-    return entry.length === 0 ? undefined : entry
-  }
   if (!isRecord(entry)) {
     return undefined
   }
-  const id = entry.id ?? entry.name
+  const id = entry.id
   return typeof id === "string" && id.length > 0 ? id : undefined
 }
 
 /**
- * Every `provider/model` pair pi could resolve from its own config, so a
- * caller can name one instead of guessing. Reporting only, and deliberately
- * total: an unreadable or malformed file yields no pairs rather than an
- * error, because this exists to explain a failure and must never cause one.
+ * Read pi's config the way pi reads it, so a report can say why a model is
+ * missing rather than only that it is. Deliberately total: an unreadable or
+ * malformed file yields problems, never a raised error, because this runs
+ * only to explain a failure and must never become one.
  */
-export const piModelRefs = (
-  modelsJson: string | undefined,
-  port: string
-): ReadonlyArray<PiModelRef> => {
+export const piModelsConfig = (modelsJson: string | undefined, port: string): PiModelsConfig => {
   if (modelsJson === undefined) {
-    return []
+    return { refs: [], problems: [] }
   }
   const parsed = parseJson(modelsJson)
+  if (parsed === undefined) {
+    return { refs: [], problems: ["models.json is not valid JSON"] }
+  }
   const providers = isRecord(parsed) ? parsed.providers : undefined
   if (!isRecord(providers)) {
-    return []
+    return { refs: [], problems: ["providers: must be an object"] }
   }
   const refs: Array<PiModelRef> = []
+  const problems: Array<string> = []
   for (const [provider, entry] of Object.entries(providers)) {
     if (!isRecord(entry)) {
+      problems.push(`providers.${provider}: must be an object`)
       continue
     }
     const baseUrl = entry.baseUrl
     const bridged = typeof baseUrl === "string" && baseUrl.includes(`127.0.0.1:${port}`)
+    // pi resolves `apiKey` from a literal, `$ENV`, or a `!command`; any of
+    // them counts as configured here, because presence is the availability
+    // rule and llm4ts must never resolve the value itself.
+    const authConfigured = typeof entry.apiKey === "string" && entry.apiKey.length > 0
     const models = entry.models
-    if (!Array.isArray(models)) {
+    if (models === undefined) {
       continue
     }
-    for (const model of models) {
-      const id = modelId(model)
-      if (id !== undefined) {
-        refs.push({ ref: `${provider}/${id}`, bridged })
-      }
+    if (!Array.isArray(models)) {
+      problems.push(`providers.${provider}.models: must be an array`)
+      continue
     }
+    if (typeof baseUrl !== "string" || baseUrl.length === 0) {
+      problems.push(`providers.${provider}.baseUrl: required for a provider with models`)
+    }
+    models.forEach((model, index) => {
+      const id = modelId(model)
+      if (id === undefined) {
+        problems.push(`providers.${provider}.models.${index}: must be an object with a string id`)
+        return
+      }
+      refs.push({ ref: `${provider}/${id}`, bridged, authConfigured })
+    })
   }
-  return refs
+  return { refs, problems }
 }
+
+/** Back-compat shape for callers that only want the pairs. */
+export const piModelRefs = (
+  modelsJson: string | undefined,
+  port: string
+): ReadonlyArray<PiModelRef> => piModelsConfig(modelsJson, port).refs
 
 /** The `provider/model` values that reach gemini through the bridge. */
 export const bridgeModelRefs = (
@@ -230,16 +270,45 @@ export const geminiBridgePrerequisites = (
   if (modelsJson === undefined) {
     return { satisfied: false, summary: "~/.pi/agent/models.json not found", hint }
   }
-  const refs = piModelRefs(modelsJson, port)
-  const bridged = refs.filter((entry) => entry.bridged).map((entry) => entry.ref)
-  if (bridged.length > 0) {
+  const { refs, problems } = piModelsConfig(modelsJson, port)
+  // pi rejects the whole file on any schema error, so a well-formed bridge
+  // entry sitting beside a bad one is still not loaded. Report that first:
+  // every model below would otherwise look available while pi sees none.
+  if (problems.length > 0) {
+    return {
+      satisfied: false,
+      summary: "~/.pi/agent/models.json fails pi's schema, so pi loads none of it",
+      hint:
+        `fix the errors below and re-check with \`pi --list-models\`. Each models ` +
+        `entry must be an object with a string id ({ "id": "gemini-2.5-pro" }), not ` +
+        `a bare string.`,
+      detail: problems.map((problem) => `  ${problem}`)
+    }
+  }
+  const bridged = refs.filter((entry) => entry.bridged)
+  const usable = bridged.filter((entry) => entry.authConfigured).map((entry) => entry.ref)
+  if (usable.length > 0) {
     return {
       satisfied: true,
       summary: `a provider in ~/.pi/agent/models.json points at ${needle}`,
       detail: [
         "bridge models — pass one as LLM4TS_GEMINI_BRIDGE_MODEL (pi's --model):",
-        ...bridged.map((ref) => `  ${ref}`)
+        ...usable.map((ref) => `  ${ref}`)
       ]
+    }
+  }
+  // Loaded but hidden: pi keeps a keyless provider's models out of `--model`
+  // and `--list-models`. The bridge authenticates as gemini, not as pi, so
+  // any placeholder satisfies this.
+  if (bridged.length > 0) {
+    return {
+      satisfied: false,
+      summary: `the provider pointing at ${needle} configures no apiKey, so pi hides its models`,
+      hint:
+        `give that provider any placeholder apiKey (the bridge never checks it — ` +
+        `gemini's own OAuth session supplies the credential), or run \`pi /login\` ` +
+        `for it.`,
+      detail: bridged.map((entry) => `  ${entry.ref}`)
     }
   }
   // A provider can point at the bridge and still list no models: pi resolves

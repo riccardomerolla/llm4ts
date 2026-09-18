@@ -34,7 +34,7 @@ import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { completeAndPublish } from "@llm4ts/flow/Flow"
 import { FlowLlmError } from "@llm4ts/flow/FlowError"
 import { pi, prepareConnector } from "@llm4ts/runner/Connectors"
-import { bridgeModelRefs, defaultReadPiModelsJson, geminiBridgePort } from "@llm4ts/runner/Doctor"
+import { defaultReadPiModelsJson, geminiBridgePort, piModelsConfig } from "@llm4ts/runner/Doctor"
 import { ScriptUsage, resolveFlowInput } from "@llm4ts/runner/FlowArgs"
 import { runFlowMain, runNode } from "@llm4ts/runner/FlowRunner"
 import { runGeminiAcpBridge } from "@llm4ts/runner/NodeGeminiAcpBridge"
@@ -44,9 +44,11 @@ const defaultPrompt =
   'Read package.json in this repository with your tools and reply with only its "name" field.'
 
 const setupHint = (port: string): string =>
-  `Add a provider to ~/.pi/agent/models.json with baseUrl "http://127.0.0.1:${port}" ` +
-  `and a models entry (see docs/configuration.md), then re-run. ` +
-  `\`LLM4TS_GEMINI_BRIDGE=1 llm4ts doctor\` lists what it resolves.`
+  `Add a provider to ~/.pi/agent/models.json with baseUrl "http://127.0.0.1:${port}", ` +
+  `any placeholder apiKey, and a models entry shaped { "id": "..." } ` +
+  `(see docs/configuration.md), then re-run. \`pi --list-models\` is the ` +
+  `final word on what pi accepts; \`LLM4TS_GEMINI_BRIDGE=1 llm4ts doctor\` ` +
+  `explains what it makes of the file.`
 
 /**
  * The bridge-backed `provider/model` pi should use. Resolved from pi's own
@@ -70,9 +72,9 @@ const resolveBridgeModel = (
     ScriptUsage.make({
       message:
         candidates.length === 0
-          ? `No bridge-backed model in ~/.pi/agent/models.json for port ${port}: either ` +
-            `no provider points at the bridge, or the one that does lists no models for ` +
-            `pi's --model to resolve. ${setupHint(port)}`
+          ? `No usable bridge model in ~/.pi/agent/models.json for port ${port}: the file ` +
+            `fails pi's schema, no provider points at the bridge, or the one that does ` +
+            `configures no apiKey (pi hides keyless providers). ${setupHint(port)}`
           : `Several bridge models are available; set LLM4TS_GEMINI_BRIDGE_MODEL to one of:\n` +
             candidates.map((ref) => `  ${ref}`).join("\n")
     })
@@ -82,11 +84,20 @@ const resolveBridgeModel = (
 const program = Effect.scoped(
   Effect.gen(function* () {
     const port = geminiBridgePort(process.env)
-    const candidates = bridgeModelRefs(defaultReadPiModelsJson(), port)
+    const { refs, problems } = piModelsConfig(defaultReadPiModelsJson(), port)
+    // pi rejects the whole file on any schema error, so a bridge entry that
+    // parses here is still invisible to pi. Say so rather than listing it.
+    const candidates =
+      problems.length > 0
+        ? []
+        : refs.filter((entry) => entry.bridged && entry.authConfigured).map((entry) => entry.ref)
     process.stderr.write(
-      candidates.length === 0
-        ? `No bridge models found in ~/.pi/agent/models.json for port ${port}.\n`
-        : `Bridge models available on port ${port}:\n` +
+      problems.length > 0
+        ? `~/.pi/agent/models.json fails pi's schema, so pi loads none of it:\n` +
+            `${problems.map((problem) => `  ${problem}`).join("\n")}\n`
+        : candidates.length === 0
+          ? `No usable bridge model in ~/.pi/agent/models.json for port ${port}.\n`
+          : `Bridge models available on port ${port}:\n` +
             `${candidates.map((ref) => `  ${ref}`).join("\n")}\n`
     )
     const bridgeModel = yield* resolveBridgeModel(

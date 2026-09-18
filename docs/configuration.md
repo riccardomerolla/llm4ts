@@ -49,11 +49,28 @@ writes it (that file belongs to `pi`, not llm4ts).
     "gemini-bridge": {
       "baseUrl": "http://127.0.0.1:8731",
       "api": "anthropic-messages",
-      "models": ["gemini-2.5-pro"]
+      "apiKey": "bridge-unused",
+      "models": [{ "id": "gemini-2.5-pro" }]
     }
   }
 }
 ```
+
+Two details pi enforces and llm4ts cannot relax:
+
+- Each `models` entry is an **object** carrying a string `id`, never a bare
+  `"gemini-2.5-pro"` string. A wrong entry fails validation with
+  `providers.<name>.models.0: must be object`, and pi then loads _nothing_
+  from the file — including providers that were fine.
+- `apiKey` must be present, though its value is never used. pi keeps a
+  provider's models out of `--model` and `--list-models` until auth is
+  configured, so a keyless bridge entry loads and stays invisible. Any
+  placeholder works; the real credential is gemini's own OAuth session,
+  which the bridge holds and pi never sees. (`pi /login` for that provider
+  does the same job.)
+
+`pi --list-models` is the final word on what pi accepts — check there when a
+`--model` value is rejected.
 
 Pointing that file at the bridge is necessary but not sufficient: `pi`
 selects a provider per invocation, so the run must also be told to use this
