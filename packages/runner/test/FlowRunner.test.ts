@@ -5,12 +5,13 @@ import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
-import { ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import { ApiConnectorConfig, CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { makeConnectorRegistry } from "@llm4ts/core/ConnectorRegistry"
 import { ProviderError } from "@llm4ts/core/Errors"
 import { ConnectorIds, LlmChunk, LlmConfig, TokenUsage } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
-import { makeFakeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
+import { makeFakeProcessExecutor, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
+import * as Queue from "effect/Queue"
 import { makeMockProvider } from "@llm4ts/core/providers/MockProvider"
 import { Info, StageCompleted, StageStarted, TokensUsed } from "@llm4ts/flow/FlowEvents"
 import { CostBudget } from "@llm4ts/flow/CostLedger"
@@ -273,6 +274,149 @@ describe("runner cost budget", () => {
 
         assert.strictEqual(error._tag, "BudgetExceeded")
         assert.isAbove(cells.length, 0)
+      })
+    )
+  )
+})
+
+describe("gemini ACP bridge wiring (ADR 0016)", () => {
+  const piModelsJson = JSON.stringify({
+    providers: {
+      "gemini-bridge": {
+        baseUrl: "http://127.0.0.1:0",
+        api: "anthropic-messages",
+        apiKey: "bridge-unused",
+        models: [{ id: "gemini-2.5-pro" }]
+      }
+    }
+  })
+
+  /** Records the config each seat was resolved with. */
+  const recordingDependencies = (
+    seen: Ref.Ref<ReadonlyArray<string | undefined>>,
+    state: Ref.Ref<Readonly<Record<string, string>>>,
+    stdin: Queue.Queue<string>,
+    readPiModelsJson: () => string | undefined
+  ) => ({
+    registry: makeConnectorRegistry([
+      {
+        connectorId: ConnectorIds.Pi,
+        kind: "Cli" as const,
+        create: (config: { readonly model?: string }) =>
+          Ref.update(seen, (current) => [...current, config.model]).pipe(
+            Effect.as(makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" })))
+          )
+      }
+    ]),
+    // The bridge spawns `gemini --experimental-acp` over this executor.
+    process: makeProcessExecutor({
+      run: () => Effect.die("not used"),
+      runStreaming: () => Stream.empty,
+      runBidirectional: () => Effect.succeed([stdin, Stream.never])
+    }),
+    files: files(state),
+    readPiModelsJson
+  })
+
+  const piCoder = CliConnectorConfig.make({ connectorId: ConnectorIds.Pi })
+
+  it.effect("leaves pi alone when the bridge was not requested", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const seen = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const stdin = yield* Queue.unbounded<string>()
+        yield* makeFlowRunnerContext(
+          {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "do it",
+            coder: piCoder,
+            environment: {}
+          },
+          recordingDependencies(seen, state, stdin, () => piModelsJson)
+        )
+        // No model injected, and nothing spawned.
+        assert.deepStrictEqual(yield* Ref.get(seen), [undefined, undefined])
+      })
+    )
+  )
+
+  it.effect("points every pi seat at the bridge model when opted in", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const seen = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const stdin = yield* Queue.unbounded<string>()
+        yield* makeFlowRunnerContext(
+          {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "do it",
+            coder: piCoder,
+            environment: { LLM4TS_GEMINI_BRIDGE: "1", LLM4TS_GEMINI_BRIDGE_PORT: "0" }
+          },
+          recordingDependencies(seen, state, stdin, () => piModelsJson)
+        )
+        // Coder and the reasoning seat that defaults to it.
+        assert.deepStrictEqual(yield* Ref.get(seen), [
+          "gemini-bridge/gemini-2.5-pro",
+          "gemini-bridge/gemini-2.5-pro"
+        ])
+      })
+    )
+  )
+
+  it.effect("keeps a model the caller chose explicitly", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const seen = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const stdin = yield* Queue.unbounded<string>()
+        yield* makeFlowRunnerContext(
+          {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "do it",
+            coder: CliConnectorConfig.make({
+              connectorId: ConnectorIds.Pi,
+              model: "chosen/by-hand"
+            }),
+            environment: { LLM4TS_GEMINI_BRIDGE: "1", LLM4TS_GEMINI_BRIDGE_PORT: "0" }
+          },
+          recordingDependencies(seen, state, stdin, () => piModelsJson)
+        )
+        assert.deepStrictEqual(yield* Ref.get(seen), ["chosen/by-hand", "chosen/by-hand"])
+      })
+    )
+  )
+
+  // Opting in and leaving pi unable to reach the bridge is the failure this
+  // whole feature exists to avoid, so it stops here rather than surfacing as
+  // pi's own "No API key found" several layers down.
+  it.effect("fails the run when no bridge model can be resolved", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const seen = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const stdin = yield* Queue.unbounded<string>()
+        const result = yield* makeFlowRunnerContext(
+          {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "do it",
+            coder: piCoder,
+            environment: { LLM4TS_GEMINI_BRIDGE: "1", LLM4TS_GEMINI_BRIDGE_PORT: "0" }
+          },
+          recordingDependencies(seen, state, stdin, () => undefined)
+        ).pipe(Effect.result)
+        assert.strictEqual(result._tag, "Failure")
+        assert.include(
+          result._tag === "Failure" ? String(result.failure) : "",
+          "No usable bridge model"
+        )
+        // Nothing was resolved, so no pi process could have been started.
+        assert.deepStrictEqual(yield* Ref.get(seen), [])
       })
     )
   )

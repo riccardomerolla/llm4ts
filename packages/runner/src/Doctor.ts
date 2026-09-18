@@ -1,11 +1,13 @@
-import { readFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import type { HealthStatus } from "@llm4ts/core/Models"
 import { ConnectorIds } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import { nodeFlowRunnerDependencies } from "./FlowRunner.ts"
+import {
+  defaultReadPiModelsJson as readPiModels,
+  geminiBridgePort as bridgePort,
+  piModelsConfig as parsePiModels
+} from "./PiModels.ts"
 
 const credentialKeys = [
   "OPENAI_API_KEY",
@@ -103,151 +105,22 @@ const wrap = (text: string, width: number, indent: string): ReadonlyArray<string
 const selectedCoder = (environment: Readonly<Record<string, string | undefined>>): string =>
   environment.LLM4TS_CODER ?? "claude (default)"
 
-export const defaultGeminiBridgePort = "8731"
-
-/**
- * `~/.pi/agent/models.json` (ADR 0016). Read for reporting only — this file
- * belongs to `pi`, outside llm4ts's package graph, and llm4ts never writes
- * it. Missing is not an error here: the file simply doesn't exist yet.
- */
-export const defaultReadPiModelsJson = (): string | undefined => {
-  try {
-    return readFileSync(join(homedir(), ".pi", "agent", "models.json"), "utf8")
-  } catch {
-    return undefined
-  }
-}
-
-export const geminiBridgePort = (
-  environment: Readonly<Record<string, string | undefined>>
-): string =>
-  isSet(environment.LLM4TS_GEMINI_BRIDGE_PORT)
-    ? environment.LLM4TS_GEMINI_BRIDGE_PORT.trim()
-    : defaultGeminiBridgePort
-
-/**
- * One value pi accepts for `--model`: `<provider>/<model>`, where the
- * provider is a key under `providers` in `~/.pi/agent/models.json` and the
- * model is a `models` entry's `id`. `bridged` marks the pairs whose provider
- * points at this machine's ACP bridge — the ones that draw inference from
- * gemini's OAuth session instead of a model API key.
- *
- * `authConfigured` tracks pi's availability rule rather than its schema: a
- * provider with no `apiKey` still loads, but its models stay hidden from
- * `--model` and `--list-models` until `/login`, `auth.json`, or `--api-key`
- * supplies one. The bridge needs no real credential, so a placeholder is
- * enough — but something must be there.
- */
-export interface PiModelRef {
-  readonly ref: string
-  readonly bridged: boolean
-  readonly authConfigured: boolean
-}
-
-/**
- * What pi makes of `~/.pi/agent/models.json`. `problems` mirrors pi's own
- * schema validation, and a non-empty list means pi loads *nothing* from the
- * file — it reports "errors loading models.json" and falls back to built-in
- * providers, so `refs` is what the file intended, not what pi will accept.
- */
-export interface PiModelsConfig {
-  readonly refs: ReadonlyArray<PiModelRef>
-  readonly problems: ReadonlyArray<string>
-}
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-/** Annotated rather than asserted, matching `NodeGeminiAcpBridge.parseJson`. */
-const parseJson = (raw: string): unknown => {
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return undefined
-  }
-}
-
-/**
- * pi's schema requires each `models` entry to be an object carrying a string
- * `id`; a bare `"model-name"` string fails validation with
- * `models.<i>: must be object` and takes the whole file down with it.
- */
-const modelId = (entry: unknown): string | undefined => {
-  if (!isRecord(entry)) {
-    return undefined
-  }
-  const id = entry.id
-  return typeof id === "string" && id.length > 0 ? id : undefined
-}
-
-/**
- * Read pi's config the way pi reads it, so a report can say why a model is
- * missing rather than only that it is. Deliberately total: an unreadable or
- * malformed file yields problems, never a raised error, because this runs
- * only to explain a failure and must never become one.
- */
-export const piModelsConfig = (modelsJson: string | undefined, port: string): PiModelsConfig => {
-  if (modelsJson === undefined) {
-    return { refs: [], problems: [] }
-  }
-  const parsed = parseJson(modelsJson)
-  if (parsed === undefined) {
-    return { refs: [], problems: ["models.json is not valid JSON"] }
-  }
-  const providers = isRecord(parsed) ? parsed.providers : undefined
-  if (!isRecord(providers)) {
-    return { refs: [], problems: ["providers: must be an object"] }
-  }
-  const refs: Array<PiModelRef> = []
-  const problems: Array<string> = []
-  for (const [provider, entry] of Object.entries(providers)) {
-    if (!isRecord(entry)) {
-      problems.push(`providers.${provider}: must be an object`)
-      continue
-    }
-    const baseUrl = entry.baseUrl
-    const bridged = typeof baseUrl === "string" && baseUrl.includes(`127.0.0.1:${port}`)
-    // pi resolves `apiKey` from a literal, `$ENV`, or a `!command`; any of
-    // them counts as configured here, because presence is the availability
-    // rule and llm4ts must never resolve the value itself.
-    const authConfigured = typeof entry.apiKey === "string" && entry.apiKey.length > 0
-    const models = entry.models
-    if (models === undefined) {
-      continue
-    }
-    if (!Array.isArray(models)) {
-      problems.push(`providers.${provider}.models: must be an array`)
-      continue
-    }
-    if (typeof baseUrl !== "string" || baseUrl.length === 0) {
-      problems.push(`providers.${provider}.baseUrl: required for a provider with models`)
-    }
-    models.forEach((model, index) => {
-      const id = modelId(model)
-      if (id === undefined) {
-        problems.push(`providers.${provider}.models.${index}: must be an object with a string id`)
-        return
-      }
-      refs.push({ ref: `${provider}/${id}`, bridged, authConfigured })
-    })
-  }
-  return { refs, problems }
-}
-
-/** Back-compat shape for callers that only want the pairs. */
-export const piModelRefs = (
-  modelsJson: string | undefined,
-  port: string
-): ReadonlyArray<PiModelRef> => piModelsConfig(modelsJson, port).refs
-
-/** The `provider/model` values that reach gemini through the bridge. */
-export const bridgeModelRefs = (
-  modelsJson: string | undefined,
-  port: string
-): ReadonlyArray<string> =>
-  piModelRefs(modelsJson, port)
-    .filter((entry) => entry.bridged)
-    .map((entry) => entry.ref)
+// Re-exported so `@llm4ts/runner/Doctor` stays the one place callers look
+// for pi-config questions, while the parsing itself has no dependency on
+// this module (the flow runner needs it, and Doctor imports the runner).
+export {
+  bridgeModelProblem,
+  bridgeModelRefs,
+  defaultGeminiBridgePort,
+  defaultReadPiModelsJson,
+  geminiBridgePort,
+  piModelRefs,
+  piModelsConfig,
+  resolveBridgeModel,
+  type BridgeModelResolution,
+  type PiModelRef,
+  type PiModelsConfig
+} from "./PiModels.ts"
 
 /**
  * Whether pi's custom-provider config points at this machine's Gemini ACP
@@ -261,7 +134,7 @@ export const geminiBridgePrerequisites = (
   if (!truthy(environment.LLM4TS_GEMINI_BRIDGE)) {
     return undefined
   }
-  const port = geminiBridgePort(environment)
+  const port = bridgePort(environment)
   const needle = `127.0.0.1:${port}`
   const hint =
     `add a custom provider to ~/.pi/agent/models.json with baseUrl ` +
@@ -270,7 +143,7 @@ export const geminiBridgePrerequisites = (
   if (modelsJson === undefined) {
     return { satisfied: false, summary: "~/.pi/agent/models.json not found", hint }
   }
-  const { refs, problems } = piModelsConfig(modelsJson, port)
+  const { refs, problems } = parsePiModels(modelsJson, port)
   // pi rejects the whole file on any schema error, so a well-formed bridge
   // entry sitting beside a bad one is still not loaded. Report that first:
   // every model below would otherwise look available while pi sees none.
@@ -336,7 +209,7 @@ export const geminiBridgePrerequisites = (
 export const makeDoctorProgram = (
   registry: ConnectorRegistryShape = nodeFlowRunnerDependencies().registry,
   environment: Readonly<Record<string, string | undefined>> = process.env,
-  readPiModelsJson: () => string | undefined = defaultReadPiModelsJson
+  readPiModelsJson: () => string | undefined = readPiModels
 ): Effect.Effect<string> =>
   Effect.map(registry.healthCheckAll, (statuses) => {
     const lines: Array<string> = []

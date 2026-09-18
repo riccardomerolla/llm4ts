@@ -37,6 +37,13 @@ overrides the fixed port (default `8731`) the bridge binds. Concurrent flow
 runs sharing one bridge are unsupported — a run that finds the port already
 bound fails fast rather than sharing an unowned server.
 
+The run starts the bridge only when a seat actually uses `pi` (the reasoning
+seat defaults to the coder, so a `pi` coder is enough), and points every such
+seat at the resolved bridge model. A seat that already names a model keeps it
+— an explicit choice outranks the default. If the bridge is requested but no
+model can be resolved, the run fails there with the reason rather than
+letting pi fail later with `No API key found for selected model`.
+
 The bridge does not configure `pi` for you: add a custom provider to
 `~/.pi/agent/models.json` with `baseUrl` set to `http://127.0.0.1:<port>`
 (`api: "anthropic-messages"`) once, outside any flow run — `llm4ts doctor`

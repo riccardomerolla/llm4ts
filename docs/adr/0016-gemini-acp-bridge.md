@@ -199,6 +199,10 @@ in this design.
   change, and no flow-visible selection surface.
 - `packages/runner` gains the bridge module and its `node:http` server, and
   a new `geminiBridgePrerequisites`-style check in `Doctor.ts`.
+- `makeFlowRunnerContext` acquires the bridge in the run's scope when
+  `LLM4TS_GEMINI_BRIDGE` is set and a seat uses `pi`, and rewrites those
+  seats' model. Reading pi's config lives in `PiModels.ts` rather than
+  `Doctor.ts`, which imports the runner and so cannot be imported by it.
 - The bridge's server implementation is written to be reusable as a
   standalone, longer-lived service later (a `shell` CLI entry point, e.g.
   `llm4ts bridge start`, for other Anthropic/OpenAI-API-shaped tools to
