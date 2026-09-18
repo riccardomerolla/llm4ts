@@ -17,8 +17,18 @@
  * session) with a prompt that requires pi to actually call a tool, so a
  * clean exit proves the whole chain — not just that the bridge answers a
  * synthetic HTTP request.
+ *
+ * `pi` selects a provider per invocation with `--model <provider>/<model>`,
+ * so the run must name the bridge-backed entry from `models.json`
+ * explicitly: without it pi uses its own default model and fails with "No
+ * API key found for selected model", which is the one thing this bridge
+ * exists to avoid. `LLM4TS_GEMINI_BRIDGE_MODEL` overrides the default when
+ * that entry is keyed differently; the name only routes pi to the bridge
+ * (the bridge echoes it back), while `LLM4TS_GEMINI_MODEL` picks the model
+ * gemini itself actually reasons with.
  */
 import * as Effect from "effect/Effect"
+import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { completeAndPublish } from "@llm4ts/flow/Flow"
 import { FlowLlmError } from "@llm4ts/flow/FlowError"
 import { pi, prepareConnector } from "@llm4ts/runner/Connectors"
@@ -30,9 +40,13 @@ import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 const defaultPrompt =
   'Read package.json in this repository with your tools and reply with only its "name" field.'
 
+/** Matches the `models.json` entry documented in docs/configuration.md. */
+const defaultBridgeModel = "gemini-bridge/gemini-2.5-pro"
+
 const program = Effect.scoped(
   Effect.gen(function* () {
     const port = Number(process.env.LLM4TS_GEMINI_BRIDGE_PORT ?? "8731")
+    const bridgeModel = process.env.LLM4TS_GEMINI_BRIDGE_MODEL ?? defaultBridgeModel
     const input = yield* resolveFlowInput(defaultPrompt)
 
     const bridge = yield* runGeminiAcpBridge({
@@ -46,11 +60,15 @@ const program = Effect.scoped(
 
     process.stderr.write(
       `Gemini ACP bridge listening on ${bridge.baseUrl}\n` +
-        "pi must already have a provider in ~/.pi/agent/models.json whose baseUrl " +
-        `points at it (run \`llm4ts doctor\` with LLM4TS_GEMINI_BRIDGE=1 to check).\n`
+        `Running pi with --model ${bridgeModel}; that provider must already exist in ` +
+        "~/.pi/agent/models.json with a baseUrl pointing at the bridge " +
+        "(run `llm4ts doctor` with LLM4TS_GEMINI_BRIDGE=1 to check).\n"
     )
 
-    const connector = prepareConnector(pi, input.workDir)
+    const connector = prepareConnector(
+      CliConnectorConfig.make({ ...pi, model: bridgeModel }),
+      input.workDir
+    )
 
     yield* runNode(
       {
