@@ -41,8 +41,32 @@ The bridge does not configure `pi` for you: add a custom provider to
 `~/.pi/agent/models.json` with `baseUrl` set to `http://127.0.0.1:<port>`
 (`api: "anthropic-messages"`) once, outside any flow run — `llm4ts doctor`
 reports whether that file already points at the configured port but never
-writes it (that file belongs to `pi`, not llm4ts). See ADR 0016 for the
-full design.
+writes it (that file belongs to `pi`, not llm4ts).
+
+```json
+{
+  "providers": {
+    "gemini-bridge": {
+      "baseUrl": "http://127.0.0.1:8731",
+      "api": "anthropic-messages",
+      "models": ["gemini-2.5-pro"]
+    }
+  }
+}
+```
+
+Pointing that file at the bridge is necessary but not sufficient: `pi`
+selects a provider per invocation, so the run must also be told to use this
+one with `--model <provider>/<model>` (`gemini-bridge/gemini-2.5-pro` for
+the entry above). A `pi` run that is not given that model uses pi's own
+default and fails with `No API key found for selected model` — the bridge
+is up and correct, nothing is routed to it. `LLM4TS_GEMINI_BRIDGE_MODEL`
+sets that value for the ADR 0016 smoke test
+(`examples/gemini-acp-bridge-smoke.ts`) when the entry is keyed
+differently. The name only routes pi; it is echoed back by the bridge and
+never reaches gemini, which reasons with `LLM4TS_GEMINI_MODEL` instead.
+
+See ADR 0016 for the full design.
 
 ## API connectors
 
