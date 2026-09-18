@@ -13,6 +13,7 @@
     "effect:patch": "effect-language-service patch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "llm4ts": "node packages/shell/dist/cli-main.js",
     "lint": "eslint packages examples flows kits --ext .ts",
     "lint:fix": "eslint packages examples flows kits --ext .ts --fix",
     "test": "vitest run",
