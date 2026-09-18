@@ -6,6 +6,7 @@
   "scripts": {
     "api": "node --experimental-strip-types api-provider.ts",
     "basic": "node --experimental-strip-types basic.ts",
+    "gemini-acp-bridge-smoke": "node --experimental-strip-types gemini-acp-bridge-smoke.ts",
     "seed": "bash seed.sh",
     "plain-js": "node plain-js.mjs"
   },
