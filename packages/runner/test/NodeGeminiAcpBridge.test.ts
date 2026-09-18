@@ -18,6 +18,7 @@ import {
   anthropicToolToMcpTool,
   handleMessagesRequest,
   makeBridgeState,
+  requestPath,
   runGeminiAcpBridge
 } from "@llm4ts/runner/NodeGeminiAcpBridge"
 
@@ -167,9 +168,31 @@ describe("NodeGeminiAcpBridge", () => {
             .get(`${bridge.baseUrl}/nope`, {}, Duration.seconds(5))
             .pipe(Effect.result)
           assert.strictEqual(notFound._tag, "Failure")
+
+          // pi posts to `/mcp` and `/v1/messages?beta=true`; a query string
+          // must not change the route. `/mcp` stands in for both because it
+          // answers without waiting on the ACP peer.
+          const withQuery = yield* nodeHttpClient
+            .postJson(
+              `${bridge.baseUrl}/mcp?beta=true`,
+              JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+              {},
+              Duration.seconds(5)
+            )
+            .pipe(Effect.result)
+          assert.strictEqual(withQuery._tag, "Success")
         })
       )
     )
+
+    it("routes on the path alone, ignoring query and fragment", () => {
+      assert.strictEqual(requestPath("/v1/messages?beta=true"), "/v1/messages")
+      assert.strictEqual(requestPath("/mcp?a=1&b=2"), "/mcp")
+      assert.strictEqual(requestPath("/v1/messages"), "/v1/messages")
+      assert.strictEqual(requestPath("/v1/messages#frag"), "/v1/messages")
+      assert.strictEqual(requestPath(undefined), "/")
+      assert.strictEqual(requestPath("?beta=true"), "/")
+    })
 
     it.effect("fails fast when the fixed port is already bound", () =>
       Effect.scoped(

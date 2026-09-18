@@ -195,6 +195,17 @@ const toolResultInLastMessage = (
 const userTextInLastMessage = (body: JsonValue): string =>
   contentBlocksText(jsonField(lastMessage(body), "content"))
 
+/**
+ * The route to match, without the query string. `request.url` carries it,
+ * and pi's bundled Anthropic SDK posts to `/v1/messages?beta=true` for
+ * tool-enabled requests — routing on the raw value 404s exactly the request
+ * this bridge exists to serve.
+ */
+export const requestPath = (url: string | undefined): string => {
+  const path = (url ?? "/").split(/[?#]/)[0]
+  return path === undefined || path.length === 0 ? "/" : path
+}
+
 const anthropicResponse = (model: string, outcome: TurnOutcome): JsonRecord => ({
   id: `msg_${Date.now()}`,
   type: "message",
@@ -356,7 +367,7 @@ export const runGeminiAcpBridge = Effect.fn("@llm4ts/runner/NodeGeminiAcpBridge.
   const state = yield* makeBridgeState(session, config.cwd, mcpServerUrl, forkBackground)
 
   const requestListener = (request: IncomingMessage, response: ServerResponse): void => {
-    const path = request.url ?? "/"
+    const path = requestPath(request.url)
     if (request.method !== "POST" || (path !== "/v1/messages" && path !== "/mcp")) {
       writeJson(response, 404, { error: { message: "not found" } })
       return
