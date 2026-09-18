@@ -52,11 +52,16 @@ points at `http://127.0.0.1:8731` (or whatever `LLM4TS_GEMINI_BRIDGE_PORT`
 is set to). See [`docs/configuration.md`](../docs/configuration.md) for that
 one-time setup and `llm4ts doctor` for checking it's still in place.
 
-The script runs `pi` with `--model gemini-bridge/gemini-2.5-pro`, matching
-the provider entry in those setup docs. If yours is keyed differently, set
-`LLM4TS_GEMINI_BRIDGE_MODEL` to `<provider>/<model>` from your own
-`models.json` — otherwise pi selects its own default model and exits with
-`No API key found for selected model`.
+The script prints the bridge-backed `provider/model` pairs it finds in your
+`models.json` and runs `pi --model` with the single one, so no name is
+hardcoded. With several it stops and asks you to pick:
+
+```sh
+LLM4TS_GEMINI_BRIDGE_MODEL=<provider>/<model> \
+  pnpm --filter @llm4ts/examples gemini-acp-bridge-smoke
+```
+
+`LLM4TS_GEMINI_BRIDGE=1 llm4ts doctor` prints the same list.
 
 ```sh
 pnpm build
