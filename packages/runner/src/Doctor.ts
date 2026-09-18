@@ -31,6 +31,8 @@ export interface PrerequisiteReport {
   readonly satisfied: boolean
   readonly summary: string
   readonly hint?: string
+  /** Extra lines rendered under the summary, already indented relative to it. */
+  readonly detail?: ReadonlyArray<string>
 }
 
 /**
@@ -116,6 +118,97 @@ export const defaultReadPiModelsJson = (): string | undefined => {
   }
 }
 
+export const geminiBridgePort = (
+  environment: Readonly<Record<string, string | undefined>>
+): string =>
+  isSet(environment.LLM4TS_GEMINI_BRIDGE_PORT)
+    ? environment.LLM4TS_GEMINI_BRIDGE_PORT.trim()
+    : defaultGeminiBridgePort
+
+/**
+ * One value pi accepts for `--model`: `<provider>/<model>`, where the
+ * provider is a key under `providers` in `~/.pi/agent/models.json` and the
+ * model is an entry in that provider's `models`. `bridged` marks the pairs
+ * whose provider points at this machine's ACP bridge — the ones that draw
+ * inference from gemini's OAuth session instead of a model API key.
+ */
+export interface PiModelRef {
+  readonly ref: string
+  readonly bridged: boolean
+}
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+/** Annotated rather than asserted, matching `NodeGeminiAcpBridge.parseJson`. */
+const parseJson = (raw: string): unknown => {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+}
+
+/** A `models` entry is a bare id or an object carrying one; pi writes both. */
+const modelId = (entry: unknown): string | undefined => {
+  if (typeof entry === "string") {
+    return entry.length === 0 ? undefined : entry
+  }
+  if (!isRecord(entry)) {
+    return undefined
+  }
+  const id = entry.id ?? entry.name
+  return typeof id === "string" && id.length > 0 ? id : undefined
+}
+
+/**
+ * Every `provider/model` pair pi could resolve from its own config, so a
+ * caller can name one instead of guessing. Reporting only, and deliberately
+ * total: an unreadable or malformed file yields no pairs rather than an
+ * error, because this exists to explain a failure and must never cause one.
+ */
+export const piModelRefs = (
+  modelsJson: string | undefined,
+  port: string
+): ReadonlyArray<PiModelRef> => {
+  if (modelsJson === undefined) {
+    return []
+  }
+  const parsed = parseJson(modelsJson)
+  const providers = isRecord(parsed) ? parsed.providers : undefined
+  if (!isRecord(providers)) {
+    return []
+  }
+  const refs: Array<PiModelRef> = []
+  for (const [provider, entry] of Object.entries(providers)) {
+    if (!isRecord(entry)) {
+      continue
+    }
+    const baseUrl = entry.baseUrl
+    const bridged = typeof baseUrl === "string" && baseUrl.includes(`127.0.0.1:${port}`)
+    const models = entry.models
+    if (!Array.isArray(models)) {
+      continue
+    }
+    for (const model of models) {
+      const id = modelId(model)
+      if (id !== undefined) {
+        refs.push({ ref: `${provider}/${id}`, bridged })
+      }
+    }
+  }
+  return refs
+}
+
+/** The `provider/model` values that reach gemini through the bridge. */
+export const bridgeModelRefs = (
+  modelsJson: string | undefined,
+  port: string
+): ReadonlyArray<string> =>
+  piModelRefs(modelsJson, port)
+    .filter((entry) => entry.bridged)
+    .map((entry) => entry.ref)
+
 /**
  * Whether pi's custom-provider config points at this machine's Gemini ACP
  * bridge — detect-and-report only, never auto-fixed (ADR 0016). `undefined`
@@ -128,9 +221,7 @@ export const geminiBridgePrerequisites = (
   if (!truthy(environment.LLM4TS_GEMINI_BRIDGE)) {
     return undefined
   }
-  const port = isSet(environment.LLM4TS_GEMINI_BRIDGE_PORT)
-    ? environment.LLM4TS_GEMINI_BRIDGE_PORT.trim()
-    : defaultGeminiBridgePort
+  const port = geminiBridgePort(environment)
   const needle = `127.0.0.1:${port}`
   const hint =
     `add a custom provider to ~/.pi/agent/models.json with baseUrl ` +
@@ -139,16 +230,38 @@ export const geminiBridgePrerequisites = (
   if (modelsJson === undefined) {
     return { satisfied: false, summary: "~/.pi/agent/models.json not found", hint }
   }
-  return modelsJson.includes(needle)
-    ? {
-        satisfied: true,
-        summary: `a provider in ~/.pi/agent/models.json points at ${needle}`
-      }
-    : {
-        satisfied: false,
-        summary: `no provider in ~/.pi/agent/models.json points at ${needle}`,
-        hint
-      }
+  const refs = piModelRefs(modelsJson, port)
+  const bridged = refs.filter((entry) => entry.bridged).map((entry) => entry.ref)
+  if (bridged.length > 0) {
+    return {
+      satisfied: true,
+      summary: `a provider in ~/.pi/agent/models.json points at ${needle}`,
+      detail: [
+        "bridge models — pass one as LLM4TS_GEMINI_BRIDGE_MODEL (pi's --model):",
+        ...bridged.map((ref) => `  ${ref}`)
+      ]
+    }
+  }
+  // A provider can point at the bridge and still list no models: pi resolves
+  // `--model` against that list, so the run fails with "Model not found"
+  // while a check that only greps for the port reports success.
+  const pointed = modelsJson.includes(needle)
+  const others = refs.map((entry) => entry.ref)
+  return {
+    satisfied: false,
+    summary: pointed
+      ? `a provider in ~/.pi/agent/models.json points at ${needle} but lists no models`
+      : `no provider in ~/.pi/agent/models.json points at ${needle}`,
+    hint,
+    ...(others.length === 0
+      ? {}
+      : {
+          detail: [
+            "models pi can resolve today, none of them bridged:",
+            ...others.map((ref) => `  ${ref}`)
+          ]
+        })
+  }
 }
 
 export const makeDoctorProgram = (
@@ -186,18 +299,20 @@ export const makeDoctorProgram = (
     if (geminiRelevant || bridge !== undefined) {
       lines.push("")
       lines.push("prerequisites:")
-      if (geminiRelevant) {
-        const gemini = geminiPrerequisites(environment)
-        lines.push(`  ${gemini.satisfied ? "✔" : "?"} gemini: ${gemini.summary}`)
-        if (gemini.hint !== undefined) {
-          lines.push(...wrap(gemini.hint, 78, "      "))
+      const pushReport = (label: string, report: PrerequisiteReport): void => {
+        lines.push(`  ${report.satisfied ? "✔" : "?"} ${label}: ${report.summary}`)
+        if (report.hint !== undefined) {
+          lines.push(...wrap(report.hint, 78, "      "))
+        }
+        for (const line of report.detail ?? []) {
+          lines.push(`      ${line}`)
         }
       }
+      if (geminiRelevant) {
+        pushReport("gemini", geminiPrerequisites(environment))
+      }
       if (bridge !== undefined) {
-        lines.push(`  ${bridge.satisfied ? "✔" : "?"} pi-gemini-bridge: ${bridge.summary}`)
-        if (bridge.hint !== undefined) {
-          lines.push(...wrap(bridge.hint, 78, "      "))
-        }
+        pushReport("pi-gemini-bridge", bridge)
       }
     }
 

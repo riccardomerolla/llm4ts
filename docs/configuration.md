@@ -58,13 +58,31 @@ writes it (that file belongs to `pi`, not llm4ts).
 Pointing that file at the bridge is necessary but not sufficient: `pi`
 selects a provider per invocation, so the run must also be told to use this
 one with `--model <provider>/<model>` (`gemini-bridge/gemini-2.5-pro` for
-the entry above). A `pi` run that is not given that model uses pi's own
-default and fails with `No API key found for selected model` — the bridge
-is up and correct, nothing is routed to it. `LLM4TS_GEMINI_BRIDGE_MODEL`
-sets that value for the ADR 0016 smoke test
-(`examples/gemini-acp-bridge-smoke.ts`) when the entry is keyed
-differently. The name only routes pi; it is echoed back by the bridge and
-never reaches gemini, which reasons with `LLM4TS_GEMINI_MODEL` instead.
+the entry above). The two ways to get that wrong fail differently — no
+`--model` at all uses pi's own default and fails with `No API key found for
+selected model`, while a name absent from the provider's `models` list
+fails with `Model not found`. Both mean the bridge is up and nothing is
+routed to it.
+
+`llm4ts doctor` resolves the file and prints every pair pi will accept,
+marking the bridged ones:
+
+```sh
+LLM4TS_GEMINI_BRIDGE=1 llm4ts doctor
+```
+
+```text
+prerequisites:
+  ✔ pi-gemini-bridge: a provider in ~/.pi/agent/models.json points at 127.0.0.1:8731
+      bridge models — pass one as LLM4TS_GEMINI_BRIDGE_MODEL (pi's --model):
+        gemini-bridge/gemini-2.5-pro
+```
+
+The ADR 0016 smoke test (`examples/gemini-acp-bridge-smoke.ts`) reads the
+same list rather than assuming a name: with exactly one bridged pair it uses
+it, and otherwise asks for `LLM4TS_GEMINI_BRIDGE_MODEL`. That value only
+routes pi — the bridge echoes it back and never forwards it, so gemini
+reasons with `LLM4TS_GEMINI_MODEL` instead.
 
 See ADR 0016 for the full design.
 

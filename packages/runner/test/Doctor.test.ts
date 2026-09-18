@@ -4,9 +4,11 @@ import { InvalidRequestError } from "@llm4ts/core/Errors"
 import { ConnectorIds, HealthStatus } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import {
+  bridgeModelRefs,
   geminiBridgePrerequisites,
   geminiPrerequisites,
-  makeDoctorProgram
+  makeDoctorProgram,
+  piModelRefs
 } from "@llm4ts/runner/Doctor"
 
 const noModelsJson = (): string | undefined => undefined
@@ -96,13 +98,21 @@ describe("doctor", () => {
         { LLM4TS_GEMINI_BRIDGE: "1", LLM4TS_GEMINI_BRIDGE_PORT: "9000" },
         () =>
           JSON.stringify({
-            providers: { gemini: { baseUrl: "http://127.0.0.1:9000", api: "anthropic-messages" } }
+            providers: {
+              gemini: {
+                baseUrl: "http://127.0.0.1:9000",
+                api: "anthropic-messages",
+                models: ["gemini-2.5-pro"]
+              }
+            }
           })
       )
       assert.include(
         report,
         "✔ pi-gemini-bridge: a provider in ~/.pi/agent/models.json points at 127.0.0.1:9000"
       )
+      assert.include(report, "LLM4TS_GEMINI_BRIDGE_MODEL")
+      assert.include(report, "gemini/gemini-2.5-pro")
     })
   )
 
@@ -209,12 +219,41 @@ describe("geminiBridgePrerequisites", () => {
     assert.isFalse(result?.satisfied)
   })
 
-  it("is satisfied when a provider baseUrl matches the default port", () => {
+  it("is satisfied when a matching provider also lists a model, and names it", () => {
+    const result = geminiBridgePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "1" },
+      JSON.stringify({
+        providers: {
+          gemini: { baseUrl: "http://127.0.0.1:8731", models: ["gemini-2.5-pro"] }
+        }
+      })
+    )
+    assert.isTrue(result?.satisfied)
+    assert.include((result?.detail ?? []).join("\n"), "gemini/gemini-2.5-pro")
+  })
+
+  // The port check alone reported success here, while the run still failed
+  // with pi's "Model not found" — `--model` resolves against `models`.
+  it("is unsatisfied when the matching provider lists no models", () => {
     const result = geminiBridgePrerequisites(
       { LLM4TS_GEMINI_BRIDGE: "1" },
       JSON.stringify({ providers: { gemini: { baseUrl: "http://127.0.0.1:8731" } } })
     )
-    assert.isTrue(result?.satisfied)
+    assert.isFalse(result?.satisfied)
+    assert.include(result?.summary ?? "", "lists no models")
+  })
+
+  it("names the models pi can resolve when none of them are bridged", () => {
+    const result = geminiBridgePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "1" },
+      JSON.stringify({
+        providers: {
+          other: { baseUrl: "https://api.openai.com/v1", models: ["gpt-5.5"] }
+        }
+      })
+    )
+    assert.isFalse(result?.satisfied)
+    assert.include((result?.detail ?? []).join("\n"), "other/gpt-5.5")
   })
 
   it("honors a custom LLM4TS_GEMINI_BRIDGE_PORT", () => {
@@ -223,5 +262,52 @@ describe("geminiBridgePrerequisites", () => {
       JSON.stringify({ providers: { gemini: { baseUrl: "http://127.0.0.1:8731" } } })
     )
     assert.isFalse(result?.satisfied)
+  })
+})
+
+describe("piModelRefs", () => {
+  const config = JSON.stringify({
+    providers: {
+      "gemini-bridge": {
+        baseUrl: "http://127.0.0.1:8731",
+        models: ["gemini-2.5-pro", "gemini-2.5-flash"]
+      },
+      "openai-codex": { baseUrl: "https://api.openai.com/v1", models: ["gpt-5.5"] }
+    }
+  })
+
+  it("pairs every provider with its models and marks the bridged ones", () => {
+    assert.deepStrictEqual(piModelRefs(config, "8731"), [
+      { ref: "gemini-bridge/gemini-2.5-pro", bridged: true },
+      { ref: "gemini-bridge/gemini-2.5-flash", bridged: true },
+      { ref: "openai-codex/gpt-5.5", bridged: false }
+    ])
+  })
+
+  it("marks nothing bridged when the port differs", () => {
+    assert.deepStrictEqual(bridgeModelRefs(config, "9000"), [])
+  })
+
+  it("reads a models entry written as an object", () => {
+    const objectForm = JSON.stringify({
+      providers: {
+        acp: {
+          baseUrl: "http://127.0.0.1:8731",
+          models: [{ id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" }]
+        }
+      }
+    })
+    assert.deepStrictEqual(bridgeModelRefs(objectForm, "8731"), ["acp/gemini-2.5-pro"])
+  })
+
+  // This runs only to explain a failure, so it must never raise one itself.
+  it("yields nothing for missing, malformed, or unexpected config", () => {
+    assert.deepStrictEqual(piModelRefs(undefined, "8731"), [])
+    assert.deepStrictEqual(piModelRefs("{ not json", "8731"), [])
+    assert.deepStrictEqual(piModelRefs(JSON.stringify({ providers: 7 }), "8731"), [])
+    assert.deepStrictEqual(
+      piModelRefs(JSON.stringify({ providers: { a: { models: "nope" } } }), "8731"),
+      []
+    )
   })
 })
