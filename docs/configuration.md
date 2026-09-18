@@ -71,6 +71,9 @@ marking the bridged ones:
 LLM4TS_GEMINI_BRIDGE=1 llm4ts doctor
 ```
 
+From a source checkout, `pnpm build && LLM4TS_GEMINI_BRIDGE=1 pnpm llm4ts
+doctor` runs the working tree's CLI instead of the installed release.
+
 ```text
 prerequisites:
   ✔ pi-gemini-bridge: a provider in ~/.pi/agent/models.json points at 127.0.0.1:8731

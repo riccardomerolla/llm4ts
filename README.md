@@ -186,6 +186,16 @@ pnpm build
 node scripts/pack-smoke.mjs   # verifies the published artifacts
 ```
 
+`pnpm llm4ts <args>` runs the checked-out CLI rather than whatever version is
+installed globally — the way to exercise a change before it ships:
+
+```sh
+pnpm build && pnpm llm4ts doctor
+```
+
+It runs the build output, so a stale `dist/` serves stale code; build first
+whenever you have edited a package.
+
 Layout: `packages/` (the library), `flows/` (the engine flows the shell
 ships), `kits/` (the built-in kits), `examples/` (embedding scripts and
 starters), `docs/`, `skills/`, `specs/` (the work queue), `tools/` (the
