@@ -8,7 +8,8 @@ import {
   geminiBridgePrerequisites,
   geminiPrerequisites,
   makeDoctorProgram,
-  piModelRefs
+  piModelRefs,
+  piModelsConfig
 } from "@llm4ts/runner/Doctor"
 
 const noModelsJson = (): string | undefined => undefined
@@ -102,7 +103,8 @@ describe("doctor", () => {
               gemini: {
                 baseUrl: "http://127.0.0.1:9000",
                 api: "anthropic-messages",
-                models: ["gemini-2.5-pro"]
+                apiKey: "unused",
+                models: [{ id: "gemini-2.5-pro" }]
               }
             }
           })
@@ -224,7 +226,11 @@ describe("geminiBridgePrerequisites", () => {
       { LLM4TS_GEMINI_BRIDGE: "1" },
       JSON.stringify({
         providers: {
-          gemini: { baseUrl: "http://127.0.0.1:8731", models: ["gemini-2.5-pro"] }
+          gemini: {
+            baseUrl: "http://127.0.0.1:8731",
+            apiKey: "unused",
+            models: [{ id: "gemini-2.5-pro" }]
+          }
         }
       })
     )
@@ -248,7 +254,11 @@ describe("geminiBridgePrerequisites", () => {
       { LLM4TS_GEMINI_BRIDGE: "1" },
       JSON.stringify({
         providers: {
-          other: { baseUrl: "https://api.openai.com/v1", models: ["gpt-5.5"] }
+          other: {
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "sk-test",
+            models: [{ id: "gpt-5.5" }]
+          }
         }
       })
     )
@@ -265,22 +275,27 @@ describe("geminiBridgePrerequisites", () => {
   })
 })
 
-describe("piModelRefs", () => {
+describe("piModelsConfig", () => {
   const config = JSON.stringify({
     providers: {
       "gemini-bridge": {
         baseUrl: "http://127.0.0.1:8731",
-        models: ["gemini-2.5-pro", "gemini-2.5-flash"]
+        apiKey: "unused",
+        models: [{ id: "gemini-2.5-pro" }, { id: "gemini-2.5-flash" }]
       },
-      "openai-codex": { baseUrl: "https://api.openai.com/v1", models: ["gpt-5.5"] }
+      "openai-codex": {
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "sk-test",
+        models: [{ id: "gpt-5.5" }]
+      }
     }
   })
 
   it("pairs every provider with its models and marks the bridged ones", () => {
     assert.deepStrictEqual(piModelRefs(config, "8731"), [
-      { ref: "gemini-bridge/gemini-2.5-pro", bridged: true },
-      { ref: "gemini-bridge/gemini-2.5-flash", bridged: true },
-      { ref: "openai-codex/gpt-5.5", bridged: false }
+      { ref: "gemini-bridge/gemini-2.5-pro", bridged: true, authConfigured: true },
+      { ref: "gemini-bridge/gemini-2.5-flash", bridged: true, authConfigured: true },
+      { ref: "openai-codex/gpt-5.5", bridged: false, authConfigured: true }
     ])
   })
 
@@ -288,26 +303,76 @@ describe("piModelRefs", () => {
     assert.deepStrictEqual(bridgeModelRefs(config, "9000"), [])
   })
 
-  it("reads a models entry written as an object", () => {
-    const objectForm = JSON.stringify({
-      providers: {
-        acp: {
-          baseUrl: "http://127.0.0.1:8731",
-          models: [{ id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" }]
+  // pi rejects `models: ["id"]`; the entry must be an object carrying `id`.
+  it("reports a bare-string model entry the way pi does", () => {
+    const result = piModelsConfig(
+      JSON.stringify({
+        providers: { "gemini-bridge": { baseUrl: "http://127.0.0.1:8731", models: ["x"] } }
+      }),
+      "8731"
+    )
+    assert.deepStrictEqual(result.refs, [])
+    assert.include(result.problems.join("\n"), "providers.gemini-bridge.models.0")
+  })
+
+  it("tracks whether a provider configures auth at all", () => {
+    const keyless = piModelsConfig(
+      JSON.stringify({
+        providers: {
+          "gemini-bridge": { baseUrl: "http://127.0.0.1:8731", models: [{ id: "gemini-2.5-pro" }] }
         }
-      }
-    })
-    assert.deepStrictEqual(bridgeModelRefs(objectForm, "8731"), ["acp/gemini-2.5-pro"])
+      }),
+      "8731"
+    )
+    assert.deepStrictEqual(keyless.problems, [])
+    assert.isFalse(keyless.refs[0]?.authConfigured)
+  })
+
+  it("flags a provider with models but no baseUrl", () => {
+    const result = piModelsConfig(
+      JSON.stringify({ providers: { broken: { models: [{ id: "x" }] } } }),
+      "8731"
+    )
+    assert.include(result.problems.join("\n"), "providers.broken.baseUrl")
   })
 
   // This runs only to explain a failure, so it must never raise one itself.
-  it("yields nothing for missing, malformed, or unexpected config", () => {
-    assert.deepStrictEqual(piModelRefs(undefined, "8731"), [])
-    assert.deepStrictEqual(piModelRefs("{ not json", "8731"), [])
-    assert.deepStrictEqual(piModelRefs(JSON.stringify({ providers: 7 }), "8731"), [])
-    assert.deepStrictEqual(
-      piModelRefs(JSON.stringify({ providers: { a: { models: "nope" } } }), "8731"),
-      []
+  it("yields problems rather than throwing on unreadable config", () => {
+    assert.deepStrictEqual(piModelsConfig(undefined, "8731"), { refs: [], problems: [] })
+    assert.deepStrictEqual(piModelsConfig("{ not json", "8731").refs, [])
+    assert.isNotEmpty(piModelsConfig("{ not json", "8731").problems)
+    assert.isNotEmpty(piModelsConfig(JSON.stringify({ providers: 7 }), "8731").problems)
+    assert.isNotEmpty(
+      piModelsConfig(JSON.stringify({ providers: { a: { models: "nope" } } }), "8731").problems
     )
+  })
+})
+
+describe("geminiBridgePrerequisites schema and auth reporting", () => {
+  // The two failures this check exists to catch, both of which previously
+  // reported ✔ while every pi run failed.
+  it("is unsatisfied when the file fails pi's schema", () => {
+    const result = geminiBridgePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "1" },
+      JSON.stringify({
+        providers: { "gemini-bridge": { baseUrl: "http://127.0.0.1:8731", models: ["x"] } }
+      })
+    )
+    assert.isFalse(result?.satisfied)
+    assert.include(result?.summary ?? "", "fails pi's schema")
+    assert.include((result?.detail ?? []).join("\n"), "must be an object with a string id")
+  })
+
+  it("is unsatisfied when the bridge provider configures no apiKey", () => {
+    const result = geminiBridgePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "1" },
+      JSON.stringify({
+        providers: {
+          "gemini-bridge": { baseUrl: "http://127.0.0.1:8731", models: [{ id: "gemini-2.5-pro" }] }
+        }
+      })
+    )
+    assert.isFalse(result?.satisfied)
+    assert.include(result?.summary ?? "", "configures no apiKey")
   })
 })
