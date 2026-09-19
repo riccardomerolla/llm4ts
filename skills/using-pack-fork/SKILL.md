@@ -45,10 +45,25 @@ npx -y @llm4ts/shell run pack-fork --repo <path-to-target-repo>
 One-shot: re-running with the same `LLM4TS_FORK_AS` overwrites the previous
 fork entirely. There is no incremental/partial mode.
 
+## Forked pack contents
+
+The fork is a full copy of the source pack's files (`pack.md` minus its
+`scaffold:` line, `prompts/`, any existing `reviewers/*.md`,
+`patterns/`, `lessons.md`), plus two new files this flow adds:
+
+- `conventions.md` — the target repository's tech stack, naming
+  conventions, shared components, auth/permissions, and design system,
+  captured by four bounded analysis passes. Read directly by
+  `modernize-implement`'s generation prompt (like `lessons.md` already
+  is), so the coder sees these conventions before writing anything.
+- `reviewers/target-conventions.md` — a static, generated review lens
+  checking new code against `conventions.md` as a post-hoc backstop.
+
 ## After it runs
 
-Exit codes: 0 success, 1 action failure, 2 usage error (missing/invalid
-`LLM4TS_TARGET_KIND` or `LLM4TS_FORK_AS`).
+Exit codes: 0 success, 1 any failure (including a usage error like a
+missing or invalid `LLM4TS_TARGET_KIND`/`LLM4TS_FORK_AS`) — `llm4ts run`
+propagates the flow's own exit code.
 
 On success, review `.llm4ts/kits/forked/packs/<name>/README.md` and
 `conventions.md` against what you actually know of the target repository —
