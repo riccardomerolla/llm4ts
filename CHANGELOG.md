@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.3.1
+
+Everything needed to actually run the ADR 0016 Gemini ACP bridge end to end,
+found and fixed via a live run against a real `gemini` + `pi` on a remote
+server — the class of bug the default deterministic test suite can't catch
+by design (no installed provider CLIs in CI):
+
+- **`session/new`'s `http`-type `mcpServers` entry needs `name` and
+  `headers`**: gemini-cli 0.59.0 rejects one missing either field with a
+  Zod `invalid_union` error under JSON-RPC -32603 — the public ACP docs
+  this was first built from show only `{type, url}`. `GeminiAcpSession`'s
+  `acpNewSessionParams` now sends both; `headers: []`, since the bridge is
+  a local loopback with nothing to authenticate.
+- **`/v1/messages` now streams**: pi's bundled Anthropic SDK sets
+  `stream: true` unconditionally, so the bridge emits a well-formed
+  Anthropic SSE event sequence (`message_start`/`content_block_*`/
+  `message_delta`/`message_stop`, or an in-band `error` event) instead of a
+  single JSON body, which pi's client couldn't parse.
+- Route matching keys on the request path rather than the raw URL.
+- `LLM4TS_GEMINI_BRIDGE` now actually wires the bridge into a `pi`-coding
+  flow run, not only the example script.
+- `llm4ts doctor` validates `~/.pi/agent/models.json` the way `pi` itself
+  parses it and lists which configured models are bridge-routed and
+  auth-configured, rather than one satisfied/unsatisfied bit.
+- `examples/gemini-acp-probe.mjs`: a standalone raw-ACP diagnostic script
+  with no `@llm4ts/core` dependency, isolating the protocol layer from pi
+  and the bridge stage by stage — kept in the repo for the next protocol
+  surprise.
+- `examples/gemini-acp-bridge-smoke.ts` confirmed passing end to end
+  against real infrastructure: pi completing a tool-calling turn with
+  gemini's OAuth subscription supplying the reasoning.
+
 ## 2.3.0
 
 - **Gemini ACP bridge** (ADR 0016): lets `pi` draw its inference from a

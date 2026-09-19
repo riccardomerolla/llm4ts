@@ -77,15 +77,23 @@ optional policy hook exists for callers that want otherwise): the actual
 safety decision belongs to `pi`'s own approval policy on the executing side,
 not to gemini.
 
-Field shapes are best-effort against public ACP docs
+Field shapes were originally best-effort against public ACP docs
 (`geminicli.com/docs/cli/acp-mode`, `agentclientprotocol.com`) — this
 codebase's tests exercise the parsing/correlation logic against a scripted
 fake peer, the same posture `ClaudeAgentSession.test.ts` already takes
 against a fake `claude` process, not against the real `gemini` binary
 (consistent with "CI must not need network access, provider credentials, or
-installed provider CLIs"). The first live run against a real installed
-`gemini` should be treated as an integration smoke test, not a substitute
-for that determinism.
+installed provider CLIs"). That gap was real: `session/new`'s `http`-type
+`mcpServers` entry needs `name` (string) and `headers` (array) alongside
+`type` and `url` on gemini-cli 0.59.0 — the public docs' minimal
+`{type, url}` example is incomplete relative to what the server actually
+validates (a Zod `invalid_union` error, JSON-RPC code -32603). Found and
+fixed via `examples/gemini-acp-probe.mjs`, a standalone raw-ACP diagnostic
+script kept in the repo for the next protocol surprise, and confirmed with
+a full, live run of `examples/gemini-acp-bridge-smoke.ts` against a real
+`gemini`+`pi` on a remote server. `acpNewSessionParams` now sends both
+fields; `headers: []`, since this is a local loopback bridge with nothing
+to authenticate.
 
 ### The bridge: an Anthropic-Messages-shaped local HTTP proxy
 
