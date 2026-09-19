@@ -20,7 +20,7 @@
 //
 // One-shot, not resumable: re-running overwrites the previous fork under
 // the same LLM4TS_FORK_AS name.
-import { basename, join, relative as relativePath } from "node:path"
+import { basename, join, relative as relativePath, resolve as resolvePath } from "node:path"
 import { rmSync } from "node:fs"
 import * as Effect from "effect/Effect"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
@@ -38,6 +38,7 @@ import {
   resolveFlowInput,
   runFlowMain,
   runNode,
+  ScriptUsage,
   stage
 } from "@llm4ts/runner"
 import {
@@ -137,6 +138,27 @@ const program = Effect.gen(function* () {
           })
         )
 
+        const destinationRel = join(".llm4ts", "kits", "forked", "packs", forkAs)
+        const destinationAbs = join(input.workDir, destinationRel)
+
+        // Guard BEFORE any read of the source pack or the "clean" rmSync
+        // below: if LLM4TS_PACK and LLM4TS_FORK_AS resolve to the same
+        // directory — reachable by cd-ing into the target repo and setting
+        // LLM4TS_PACK=forked/<name> for a re-fork, exactly as this flow's
+        // own closing message instructs — the clean stage would delete the
+        // pack this run is about to read, including any uncommitted human
+        // edits such as the approval-marker flip.
+        const sourceDirAbs = resolvePath(join(opened.workspace.root, opened.dir))
+        if (sourceDirAbs === resolvePath(destinationAbs)) {
+          return yield* ScriptUsage.make({
+            message:
+              `LLM4TS_PACK resolves to '${sourceDirAbs}', the same directory ` +
+              `LLM4TS_FORK_AS='${forkAs}' would fork into — forking a pack into itself ` +
+              "would delete it before it's read. Point LLM4TS_PACK at a different source " +
+              "pack, or choose a different LLM4TS_FORK_AS."
+          })
+        }
+
         const grounding = yield* stage(
           context.events,
           "grounding",
@@ -161,9 +183,6 @@ const program = Effect.gen(function* () {
           sections.push(result.markdown)
         }
         const conventionsMd = sections.join("\n\n")
-
-        const destinationRel = join(".llm4ts", "kits", "forked", "packs", forkAs)
-        const destinationAbs = join(input.workDir, destinationRel)
 
         yield* stage(
           context.events,

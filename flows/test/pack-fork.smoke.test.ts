@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
@@ -6,6 +7,7 @@ import { loadPack } from "@llm4ts/flow/Pack"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
 import {
   commitAll,
+  flowsRoot,
   initRepo,
   installStub,
   makeFixture,
@@ -127,6 +129,51 @@ describe("pack-fork", () => {
     assert.strictEqual(second.status, 0, `${second.stdout}\n${second.stderr}`)
 
     assert.isFalse(existsSync(join(forkedDir, "prompts", "implement.md")))
+  })
+
+  it("fails fast, without deleting the fork, when LLM4TS_PACK and LLM4TS_FORK_AS resolve to the same pack", () => {
+    const fixture = makeFixture()
+    installStub(fixture, stubProgram(respondSource))
+    initRepo(fixture.target)
+    write(fixture.target, "package.json", targetPackageJson)
+    commitAll(fixture.target, "seed the target repository")
+
+    const first = runFlow(fixture, "pack-fork", fixture.target, {
+      LLM4TS_TARGET_KIND: "frontend",
+      LLM4TS_FORK_AS: "acmecorp-nextjs"
+    })
+    assert.strictEqual(first.status, 0, `${first.stdout}\n${first.stderr}`)
+
+    const forkedDir = join(fixture.target, ".llm4ts", "kits", "forked", "packs", "acmecorp-nextjs")
+    assert.isTrue(existsSync(join(forkedDir, "pack.md")))
+
+    // The documented re-fork workflow: cd into the target repo (cwd = target,
+    // no --repo flag needed since it defaults to "."), then LLM4TS_PACK
+    // pointed at the fork itself, with the same LLM4TS_FORK_AS — the exact
+    // shape that made the flow delete its own input before this guard existed.
+    const second = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", join(flowsRoot, "pack-fork.ts")],
+      {
+        cwd: fixture.target,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${fixture.binDir}:${process.env.PATH ?? ""}`,
+          LLM4TS_PACK: "forked/acmecorp-nextjs",
+          LLM4TS_CODER: "claude",
+          LLM4TS_VERBOSITY: "quiet",
+          LLM4TS_TARGET_KIND: "frontend",
+          LLM4TS_FORK_AS: "acmecorp-nextjs"
+        }
+      }
+    )
+
+    assert.notStrictEqual(second.status, 0)
+    assert.include(`${second.stdout}${second.stderr}`, "LLM4TS_FORK_AS")
+    // The guard must fire before the "clean" stage — the fork survives untouched.
+    assert.isTrue(existsSync(join(forkedDir, "pack.md")))
+    assert.isTrue(existsSync(join(forkedDir, "conventions.md")))
   })
 
   it("fails fast with a usage error when LLM4TS_TARGET_KIND is missing", () => {

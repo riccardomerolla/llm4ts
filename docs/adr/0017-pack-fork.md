@@ -54,8 +54,13 @@ forked pack's `README.md`; flipping the marker is a human signal for now,
 not an enforced gate — wiring enforcement into `modernize-implement` is a
 natural follow-up, not part of this change.
 
-One-shot for v1, not resumable — re-running overwrites the previous fork
-under the same name. Coder-agnostic, like every other flow.
+One-shot for v1, not resumable — re-running clears and overwrites the
+previous fork under the same name. Before that clear runs, the flow
+resolves the source pack's own directory and the fork's destination
+directory and fails fast (`ScriptUsage`) if they're the same path — the
+guard that keeps a re-fork rooted inside its own target repository
+(`LLM4TS_PACK=forked/<name>`) from deleting itself before it's read.
+Coder-agnostic, like every other flow.
 
 ## Consequences
 
