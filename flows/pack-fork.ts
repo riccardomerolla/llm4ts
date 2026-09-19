@@ -64,7 +64,7 @@ const forkPackFiles = Effect.fn("flows/pack-fork.forkPackFiles")(function* (
   // node:path normalize the "." case correctly where manual string
   // concatenation or `.slice()` would not.
   const packMdPath = join(source.dir, "pack.md")
-  const entries = yield* source.workspace.discover(join(source.dir, "**/*"))
+  const entries = yield* source.workspace.discover(join(source.dir, "**"))
   for (const relative_ of entries) {
     if (relative_ === packMdPath) {
       continue
