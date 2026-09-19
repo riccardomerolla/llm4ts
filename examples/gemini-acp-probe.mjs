@@ -94,44 +94,58 @@ const main = async () => {
     clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }
   })
   if (!init.ok) {
+    // Nothing else can run without this one; every later stage needs the
+    // process to have negotiated a protocol version at all.
     return finish(1)
   }
 
-  const plain = await stage("session/new (no mcpServers)", "session/new", {
-    cwd: process.cwd()
+  // `mcpServers` turned out to be a required array (not an optional field a
+  // client may omit), so this stage — same session, an empty array — is the
+  // true "no MCP servers" baseline, isolating "the field must exist" from
+  // "the http-type entry specifically breaks it" below. Every remaining
+  // stage runs regardless of earlier failures, so one pass gives the full
+  // picture instead of stopping at the first mismatch.
+  const empty = await stage("session/new (mcpServers: [])", "session/new", {
+    cwd: process.cwd(),
+    mcpServers: []
   })
-  if (!plain.ok) {
-    return finish(1)
-  }
 
   const httpMcp = await stage("session/new (mcpServers: http)", "session/new", {
     cwd: process.cwd(),
     mcpServers: [{ type: "http", url: "http://127.0.0.1:8731/mcp" }]
   })
-  if (!httpMcp.ok) {
-    console.log(
-      "\nThe plain session/new above worked, but adding an http-type mcpServers entry " +
-        "broke it — this gemini build's ACP implementation likely doesn't support that " +
-        "mcpServers variant yet. See ADR 0016 / GeminiAcpSession.ts's acpNewSessionParams."
-    )
-    return finish(1)
-  }
 
-  const sessionId = plain.response.result?.sessionId ?? httpMcp.response.result?.sessionId
+  const sessionId = empty.response?.result?.sessionId ?? httpMcp.response?.result?.sessionId
+  let prompted
   if (sessionId === undefined) {
-    console.log("\nsession/new succeeded but returned no sessionId — check the raw response above.")
-    return finish(1)
+    console.log("\nno session/new stage returned a sessionId — session/prompt cannot run.")
+  } else {
+    prompted = await stage("session/prompt", "session/prompt", {
+      sessionId,
+      prompt: [{ type: "text", text: "Say hello in five words or fewer." }]
+    })
   }
 
-  const prompted = await stage("session/prompt", "session/prompt", {
-    sessionId,
-    prompt: [{ type: "text", text: "Say hello in five words or fewer." }]
-  })
-  finish(prompted.ok ? 0 : 1)
+  console.log("\n=== summary ===")
+  console.log(`initialize:                       ${init.ok ? "ok" : "FAILED"}`)
+  console.log(`session/new (mcpServers: []):      ${empty.ok ? "ok" : "FAILED"}`)
+  console.log(`session/new (mcpServers: http):    ${httpMcp.ok ? "ok" : "FAILED"}`)
+  console.log(
+    `session/prompt:                    ${prompted === undefined ? "skipped" : prompted.ok ? "ok" : "FAILED"}`
+  )
+  if (empty.ok && !httpMcp.ok) {
+    console.log(
+      "\nAn empty mcpServers array works but the http-type entry doesn't — this gemini " +
+        "build's ACP implementation likely doesn't support that mcpServers variant despite " +
+        "advertising mcpCapabilities.http in initialize. See ADR 0016 / " +
+        "GeminiAcpSession.ts's acpNewSessionParams."
+    )
+  }
+  finish(init.ok && empty.ok && httpMcp.ok && (prompted === undefined || prompted.ok) ? 0 : 1)
 }
 
 const finish = (code) => {
-  console.log(`\n${code === 0 ? "all stages passed" : "stopped at the first failing stage above"}`)
+  console.log(`\n${code === 0 ? "all stages passed" : "see the summary and FAILED stage(s) above"}`)
   child.stdin.end()
   child.kill()
   process.exit(code)
