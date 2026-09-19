@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.4.2
+
+- **`pack-fork`: give the reasoning seat zero tools, not just read-only.**
+  The actual, confirmed cause of the "no text to parse as structured
+  output" failure that persisted after 2.4.1 — isolated by testing
+  `gemini-cli` directly (works) against `pi` + the Gemini ACP bridge
+  (fails). Every flow's reasoning seat is built `asReadOnly(coder)`, which
+  stops writes but still lets the model call a read tool; `pi -p`'s
+  one-shot mode keeps that tool available unless told otherwise, and
+  `structuredAndPublish()` has no tool-loop continuation, so a turn the
+  model resolves as a tool call instead of text comes back with nothing to
+  parse. New `CliConnectorConfig.noTools` (mapped to pi's own `--no-tools`
+  flag) and an `asToolless()` helper alongside `asReadOnly()`; pack-fork's
+  reasoning seat now uses it.
+
 ## 2.4.1
 
 - **`pack-fork`: cap the grounding-heavy Tech Stack & Dependencies prompt.**
