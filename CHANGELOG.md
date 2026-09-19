@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.4.1
+
+- **`pack-fork`: cap the grounding-heavy Tech Stack & Dependencies prompt.**
+  It's the only one of the four convention passes carrying grounding file
+  content (`package.json`/`tsconfig.json` or `pom.xml`/`build.gradle`), so
+  its prompt could run far larger than the other three, ungrounded passes —
+  a systematic source of `"Failed to parse response as structured output"`
+  failures over the pi + Gemini ACP bridge path (a response cut off by an
+  output-token ceiling can't satisfy the structured-output parser, and the
+  parse-repair retry resent the same oversized prompt, so it failed the
+  same way twice). Now wrapped in `Context.withShrink` + `Context.capped`,
+  the pairing every other `modernize-*` flow already uses ahead of a
+  structured LLM call.
+
 ## 2.4.0
 
 A new flow, `pack-fork`, for the reverse of `modernize-*`: instead of
