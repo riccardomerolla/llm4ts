@@ -11,6 +11,11 @@
       "description": "Delegate a well-defined implementation task to llm4ts's autonomous plan-code-review flow."
     },
     {
+      "name": "using-pack-fork",
+      "source": "./skills/using-pack-fork",
+      "description": "Adopt a real target repository's own conventions into a pack, so modernize-implement reuses them instead of guessing."
+    },
+    {
       "name": "authoring-llm4ts-flows",
       "source": "./skills/authoring-llm4ts-flows",
       "description": "Write, verify, and fork llm4ts flows under .llm4ts/flows/ for the llm4ts CLI."

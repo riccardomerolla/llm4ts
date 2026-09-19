@@ -1,0 +1,8 @@
+{
+  "name": "using-pack-fork",
+  "description": "Adopt a real target repository's own conventions into a pack, so modernize-implement reuses them instead of guessing.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Riccardo Merolla"
+  }
+}
