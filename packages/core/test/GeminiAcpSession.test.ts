@@ -4,7 +4,9 @@ import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import { makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
+import { isJsonRecord, jsonArray, jsonStringField } from "@llm4ts/core/providers/CliSupport"
 import {
+  acpNewSessionParams,
   acpPermissionResponseLine,
   acpUnsupportedFsResponseLine,
   alwaysApprove,
@@ -57,6 +59,23 @@ const scriptedPeer = (respond: (request: Json) => ReadonlyArray<string>) =>
   })
 
 describe("GeminiAcpSession", () => {
+  describe("acpNewSessionParams", () => {
+    it("includes name and headers on the http mcpServers entry", () => {
+      // gemini-cli 0.59.0 rejects an http mcpServers entry missing either
+      // field with a Zod invalid_union error naming exactly these two as
+      // missing, even though the public ACP docs this was first built from
+      // show only {type, url} — confirmed against the real binary.
+      const params = acpNewSessionParams("/repo", "http://127.0.0.1:8731/mcp")
+      const servers = jsonArray(params.mcpServers)
+      assert.strictEqual(servers.length, 1)
+      const entry = servers[0]
+      assert.strictEqual(jsonStringField(entry, "type"), "http")
+      assert.strictEqual(jsonStringField(entry, "url"), "http://127.0.0.1:8731/mcp")
+      assert.isString(jsonStringField(entry, "name"))
+      assert.isTrue(isJsonRecord(entry) && Array.isArray(entry.headers))
+    })
+  })
+
   describe("parseAcpSessionUpdate", () => {
     it("reads a text delta", () => {
       const event = parseAcpSessionUpdate({

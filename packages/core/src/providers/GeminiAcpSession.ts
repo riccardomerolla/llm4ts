@@ -44,9 +44,17 @@ export const acpInitializeParams: JsonRecord = {
   clientCapabilities
 }
 
+/**
+ * `name` and `headers` are required by gemini-cli 0.59.0's own schema for an
+ * `http`-type MCP server entry, confirmed against the real binary (a Zod
+ * `invalid_union` error naming exactly these two as missing) — the public
+ * ACP docs this was first built from show only `{type, url}` as a minimal
+ * example, which the real server rejects outright. `headers` is an empty
+ * array, not omitted: this is a local loopback bridge with no auth to add.
+ */
 export const acpNewSessionParams = (cwd: string, mcpServerUrl: string): JsonRecord => ({
   cwd,
-  mcpServers: [{ type: "http", url: mcpServerUrl }]
+  mcpServers: [{ type: "http", url: mcpServerUrl, name: "llm4ts-gemini-bridge", headers: [] }]
 })
 
 export const acpPromptParams = (sessionId: string, text: string): JsonRecord => ({
