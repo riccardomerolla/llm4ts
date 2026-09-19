@@ -1,7 +1,10 @@
 # Installing the using-pack-fork skill
 
-[SKILL.md](SKILL.md) teaches coding agents when and how to delegate
-implementation tasks to llm4ts. Install it into your harness:
+[SKILL.md](SKILL.md) teaches coding agents when and how to fork an existing
+llm4ts pack into a new one that captures a real, already-in-production
+target repository's own conventions (tech stack, naming, shared components,
+auth, design system), so a later `modernize-implement` run reuses them
+instead of guessing. Install it into your harness:
 
 - **Claude Code**: as a plugin —
   `/plugin marketplace add riccardomerolla/llm4ts`, then

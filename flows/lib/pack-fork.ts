@@ -161,8 +161,8 @@ export const conventionSectionJsonSchema: JsonSchema = {
 
 export const techStackGroundingFiles = (kind: TargetKind): ReadonlyArray<string> =>
   kind === "frontend"
-    ? ["package.json", "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "tsconfig.json"]
-    : ["pom.xml", "build.gradle", "build.gradle.kts", "src/main/resources/application.yml"]
+    ? ["package.json", "tsconfig.json"]
+    : ["pom.xml", "build.gradle", "build.gradle.kts"]
 
 export const readGroundingFiles = (
   workspace: WorkspaceShape,

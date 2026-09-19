@@ -20,7 +20,8 @@
 //
 // One-shot, not resumable: re-running overwrites the previous fork under
 // the same LLM4TS_FORK_AS name.
-import { join, relative as relativePath } from "node:path"
+import { basename, join, relative as relativePath } from "node:path"
+import { rmSync } from "node:fs"
 import * as Effect from "effect/Effect"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { Info } from "@llm4ts/flow/FlowEvents"
@@ -77,6 +78,28 @@ const forkPackFiles = Effect.fn("flows/pack-fork.forkPackFiles")(function* (
     }
     const suffix = relativePath(source.dir, relative_)
     yield* files.writeAtomic(join(destinationAbs, suffix), content)
+  }
+})
+
+const forkKitPatterns = Effect.fn("flows/pack-fork.forkKitPatterns")(function* (
+  source: OpenedPack,
+  destinationAbs: string,
+  files: PlainFileStoreShape
+) {
+  if (source.kit === undefined) {
+    return
+  }
+  const entries = yield* source.workspace
+    .discover(join("patterns", "**"))
+    .pipe(Effect.catch(() => Effect.succeed([])))
+  for (const relative_ of entries) {
+    const content = yield* source.workspace
+      .read(relative_)
+      .pipe(Effect.catch(() => Effect.succeed(undefined)))
+    if (content === undefined) {
+      continue
+    }
+    yield* files.writeAtomic(join(destinationAbs, relative_), content)
   }
 })
 
@@ -142,7 +165,18 @@ const program = Effect.gen(function* () {
         const destinationRel = join(".llm4ts", "kits", "forked", "packs", forkAs)
         const destinationAbs = join(input.workDir, destinationRel)
 
+        yield* stage(
+          context.events,
+          "clean",
+          Effect.sync(() => rmSync(destinationAbs, { recursive: true, force: true }))
+        )
+
         yield* stage(context.events, "fork", forkPackFiles(opened, destinationAbs, files))
+        yield* stage(
+          context.events,
+          "fork patterns",
+          forkKitPatterns(opened, destinationAbs, files)
+        )
 
         const sourcePackMd = yield* opened.workspace.read(`${opened.dir}/pack.md`)
         yield* files.writeAtomic(
@@ -156,14 +190,16 @@ const program = Effect.gen(function* () {
         )
         yield* files.writeAtomic(
           join(destinationAbs, "README.md"),
-          withDraftApproval(forkedReadme(opened.pack.name, forkAs, targetKind, input.workDir))
+          withDraftApproval(
+            forkedReadme(opened.pack.name, forkAs, targetKind, basename(input.workDir))
+          )
         )
 
         yield* stage(
           context.events,
           "commit",
           context.git
-            .commitAll(`pack-fork: fork '${opened.pack.name}' as '${forkAs}'`)
+            .commitPaths(`pack-fork: fork '${opened.pack.name}' as '${forkAs}'`, [destinationRel])
             .pipe(Effect.asVoid)
         )
 
@@ -171,7 +207,8 @@ const program = Effect.gen(function* () {
           Info.make({
             message:
               `forked pack ready — review ${destinationRel}/README.md and ` +
-              `${destinationRel}/conventions.md, set '- [x] Approved', then set ` +
+              `${destinationRel}/conventions.md, set '- [x] Approved', then from ` +
+              `inside ${input.workDir} run modernize-implement with ` +
               `LLM4TS_PACK=forked/${forkAs}`
           })
         )

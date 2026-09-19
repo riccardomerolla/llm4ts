@@ -49,7 +49,10 @@ Trust: the forked pack's `README.md` carries the same unchecked
 `modernize-extract` pack does — no judge rubric, since "did this correctly
 capture our design system" has no checkable ground truth the way "does this
 spec match the legacy source" does; a human who knows the repository reads
-and confirms instead.
+and confirms instead. Nothing currently calls `requireApproval` against a
+forked pack's `README.md`; flipping the marker is a human signal for now,
+not an enforced gate — wiring enforcement into `modernize-implement` is a
+natural follow-up, not part of this change.
 
 One-shot for v1, not resumable — re-running overwrites the previous fork
 under the same name. Coder-agnostic, like every other flow.

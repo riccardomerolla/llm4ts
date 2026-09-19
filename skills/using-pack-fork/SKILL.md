@@ -68,9 +68,15 @@ propagates the flow's own exit code.
 On success, review `.llm4ts/kits/forked/packs/<name>/README.md` and
 `conventions.md` against what you actually know of the target repository —
 the flow captures findings, it doesn't guarantee them. Flip the marker
-(`- [ ] Approved` → `- [x] Approved`) once you've confirmed them, then run
-`modernize-implement` with `LLM4TS_PACK=forked/<name>` pointed at that same
-repository.
+(`- [ ] Approved` → `- [x] Approved`) once you've confirmed them — note that
+this is a human signal only; no flow currently calls `requireApproval`
+against a forked pack's `README.md`, so `modernize-implement` will run
+against an unapproved fork without complaint. Then run `modernize-implement`
+with `LLM4TS_PACK=forked/<name>` pointed at that same repository, launched
+with its working directory inside the target repository — project-tier kit
+discovery (which is how `forked/<name>` resolves) is keyed off `cwd`, not
+`--repo`, so running it from anywhere else will fail with `PackNotFound`
+even though the fork exists.
 
 `pack.md`, `prompts/`, and any existing `reviewers/*.md`/`patterns/`/
 `lessons.md` from the source pack carry over unchanged except for one

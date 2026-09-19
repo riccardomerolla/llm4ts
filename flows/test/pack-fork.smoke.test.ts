@@ -1,6 +1,9 @@
-import { readFileSync, readdirSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import { loadPack } from "@llm4ts/flow/Pack"
+import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
 import {
   commitAll,
   initRepo,
@@ -67,6 +70,63 @@ describe("pack-fork", () => {
     assert.isTrue(forkedPrompts.includes("implement.md"))
     const forkedLessons = readFileSync(join(forkedDir, "lessons.md"), "utf8")
     assert.include(forkedLessons, "Lessons")
+  })
+
+  it.effect(
+    "round-trips the forked pack through loadPack, as a real modernize-implement run would",
+    () =>
+      Effect.gen(function* () {
+        const fixture = makeFixture()
+        installStub(fixture, stubProgram(respondSource))
+        initRepo(fixture.target)
+        write(fixture.target, "package.json", targetPackageJson)
+        commitAll(fixture.target, "seed the target repository")
+
+        const result = runFlow(fixture, "pack-fork", fixture.target, {
+          LLM4TS_TARGET_KIND: "frontend",
+          LLM4TS_FORK_AS: "acmecorp-nextjs"
+        })
+        assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
+
+        const workspace = yield* makeNodeWorkspace(fixture.target)
+        const pack = yield* loadPack(
+          workspace,
+          join(".llm4ts", "kits", "forked", "packs", "acmecorp-nextjs")
+        )
+
+        assert.isDefined(pack.conventions)
+        assert.isUndefined(pack.scaffold)
+        assert.isTrue(pack.lenses.some((lens) => lens.name === "target-conventions"))
+      })
+  )
+
+  it("clears stale files from a previous fork under the same name on re-run", () => {
+    const fixture = makeFixture()
+    installStub(fixture, stubProgram(respondSource))
+    initRepo(fixture.target)
+    write(fixture.target, "package.json", targetPackageJson)
+    commitAll(fixture.target, "seed the target repository")
+
+    const first = runFlow(fixture, "pack-fork", fixture.target, {
+      LLM4TS_TARGET_KIND: "frontend",
+      LLM4TS_FORK_AS: "acmecorp-nextjs"
+    })
+    assert.strictEqual(first.status, 0, `${first.stdout}\n${first.stderr}`)
+
+    const forkedDir = join(fixture.target, ".llm4ts", "kits", "forked", "packs", "acmecorp-nextjs")
+    assert.isTrue(existsSync(join(forkedDir, "prompts", "implement.md")))
+
+    // Delete a prompt from the SOURCE pack fixture, then re-fork under the
+    // same LLM4TS_FORK_AS name.
+    rmSync(join(fixture.root, "packs", "smoke", "prompts", "implement.md"))
+
+    const second = runFlow(fixture, "pack-fork", fixture.target, {
+      LLM4TS_TARGET_KIND: "frontend",
+      LLM4TS_FORK_AS: "acmecorp-nextjs"
+    })
+    assert.strictEqual(second.status, 0, `${second.stdout}\n${second.stderr}`)
+
+    assert.isFalse(existsSync(join(forkedDir, "prompts", "implement.md")))
   })
 
   it("fails fast with a usage error when LLM4TS_TARGET_KIND is missing", () => {
