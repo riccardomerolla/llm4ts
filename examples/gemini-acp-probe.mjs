@@ -112,7 +112,11 @@ const main = async () => {
 
   const httpMcp = await stage("session/new (mcpServers: http)", "session/new", {
     cwd: process.cwd(),
-    mcpServers: [{ type: "http", url: "http://127.0.0.1:8731/mcp" }]
+    // name and headers are required by gemini-cli 0.59.0's own schema (see
+    // GeminiAcpSession.ts's acpNewSessionParams) — this used to omit them.
+    mcpServers: [
+      { type: "http", url: "http://127.0.0.1:8731/mcp", name: "llm4ts-gemini-bridge", headers: [] }
+    ]
   })
 
   const sessionId = empty.response?.result?.sessionId ?? httpMcp.response?.result?.sessionId
