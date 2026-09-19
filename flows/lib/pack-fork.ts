@@ -131,7 +131,17 @@ export const backendPasses: ReadonlyArray<ConventionPass> = [
 export const passesForTargetKind = (kind: TargetKind): ReadonlyArray<ConventionPass> =>
   kind === "frontend" ? frontendPasses : backendPasses
 
-export const conventionPassAsk = (pass: ConventionPass, grounding?: string): string =>
+/** A prior run's findings plus human feedback on them, for a --feedback re-run. */
+export interface Refinement {
+  readonly priorConventions: string
+  readonly feedback: string
+}
+
+export const conventionPassAsk = (
+  pass: ConventionPass,
+  grounding?: string,
+  refinement?: Refinement
+): string =>
   [
     pass.instructions,
     `Respond with a single markdown section starting with "## ${pass.heading}".`,
@@ -139,7 +149,15 @@ export const conventionPassAsk = (pass: ConventionPass, grounding?: string): str
       "inventing one.",
     ...(grounding === undefined || grounding.length === 0
       ? []
-      : [`Repository files for grounding:\n\n${grounding}`])
+      : [`Repository files for grounding:\n\n${grounding}`]),
+    ...(refinement === undefined
+      ? []
+      : [
+          "A previous run of this analysis produced the findings below, and a human " +
+            "reviewed them. Revise — do not simply repeat what you had before:\n\n" +
+            `Previous findings (all categories):\n\n${refinement.priorConventions}\n\n` +
+            `Human feedback on that previous run:\n\n${refinement.feedback}`
+        ])
   ].join("\n\n")
 
 export class ConventionSection extends Schema.Class<ConventionSection>("ConventionSection")({
@@ -159,10 +177,157 @@ export const conventionSectionJsonSchema: JsonSchema = {
   required: ["markdown"]
 }
 
-export const techStackGroundingFiles = (kind: TargetKind): ReadonlyArray<string> =>
-  kind === "frontend"
-    ? ["package.json", "tsconfig.json"]
-    : ["pom.xml", "build.gradle", "build.gradle.kts"]
+export interface GroundingCandidate {
+  readonly category: string
+  readonly path: string
+  readonly reason: string
+}
+
+export class GroundingSelection extends Schema.Class<GroundingSelection>("GroundingSelection")({
+  selections: Schema.Array(
+    Schema.Struct({
+      category: Schema.String,
+      path: Schema.String,
+      reason: Schema.String
+    })
+  )
+}) {}
+
+export const groundingSelectionJsonSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    selections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          category: {
+            type: "string",
+            description: "Must exactly match one of the category headings given."
+          },
+          path: {
+            type: "string",
+            description:
+              "Must be copied EXACTLY from the candidate file paths given — never " +
+              "invented or guessed."
+          },
+          reason: {
+            type: "string",
+            description: "One line explaining why this file is relevant to the category."
+          }
+        },
+        required: ["category", "path", "reason"]
+      }
+    }
+  },
+  required: ["selections"]
+}
+
+/** At most this many selected files get read (and fed as grounding) per category. */
+export const maxSelectedFilesPerCategory = 6
+
+export const groundingSelectionAsk = (
+  passes: ReadonlyArray<ConventionPass>,
+  candidatePaths: ReadonlyArray<string>,
+  refinement?: Refinement
+): string =>
+  [
+    "A coding agent needs to analyze this repository's real conventions across the " +
+      "categories below. From the list of real file paths given, select the files " +
+      "most likely to reveal each category's conventions — representative source " +
+      "and configuration files, not every file of a kind.",
+    ...passes.map((pass) => `## ${pass.heading}\n\n${pass.instructions}`),
+    `Select at most ${maxSelectedFilesPerCategory} files per category — quality over ` +
+      "quantity. Every path you return must be copied EXACTLY from the candidate " +
+      "list below; never invent or guess a path. A category with nothing relevant " +
+      "in this repository can have zero selections — say so via an empty selection " +
+      "list for it rather than forcing an irrelevant file in.",
+    `Candidate file paths (${candidatePaths.length}):\n\n${candidatePaths.join("\n")}`,
+    ...(refinement === undefined
+      ? []
+      : [
+          "A previous run selected files and produced the findings below; a human " +
+            "reviewed them and gave feedback. Reconsider the selection in light of " +
+            "it — the feedback may point at files that were missed entirely:\n\n" +
+            `Previous findings (all categories):\n\n${refinement.priorConventions}\n\n` +
+            `Human feedback on that previous run:\n\n${refinement.feedback}`
+        ])
+  ].join("\n\n")
+
+/**
+ * Drops any selection whose path wasn't in the real candidate list (never trust
+ * an LLM-fabricated path into a file read) and caps each category at
+ * `maxSelectedFilesPerCategory`, keeping the model's own priority order.
+ */
+export const validSelections = (
+  selection: GroundingSelection,
+  candidatePaths: ReadonlyArray<string>
+): ReadonlyArray<GroundingCandidate> => {
+  const candidates = new Set(candidatePaths)
+  const perCategoryCount = new Map<string, number>()
+  const kept: Array<GroundingCandidate> = []
+  for (const item of selection.selections) {
+    if (!candidates.has(item.path)) {
+      continue
+    }
+    const count = perCategoryCount.get(item.category) ?? 0
+    if (count >= maxSelectedFilesPerCategory) {
+      continue
+    }
+    perCategoryCount.set(item.category, count + 1)
+    kept.push(item)
+  }
+  return kept
+}
+
+export const selectionsForCategory = (
+  selections: ReadonlyArray<GroundingCandidate>,
+  category: string
+): ReadonlyArray<string> =>
+  selections
+    .filter((selection) => selection.category === category)
+    .map((selection) => selection.path)
+
+export const provenanceMarkdown = (
+  kind: TargetKind,
+  selections: ReadonlyArray<GroundingCandidate>,
+  feedback?: string
+): string => {
+  const lines: Array<string> = [
+    "# Provenance",
+    "",
+    "Which real files this pack's conventions.md was grounded on, and why — trace a " +
+      "rule back to the file that justified it.",
+    ""
+  ]
+  if (feedback !== undefined && feedback.length > 0) {
+    lines.push("## Feedback applied this run", "", feedback, "")
+  }
+  for (const pass of passesForTargetKind(kind)) {
+    lines.push(`## ${pass.heading}`, "")
+    const forCategory = selections.filter((selection) => selection.category === pass.heading)
+    if (forCategory.length === 0) {
+      lines.push(
+        "No files selected for grounding — this category's findings rely on the " +
+          "model's general knowledge only, not a specific file in this repository.",
+        ""
+      )
+    } else {
+      for (const selection of forCategory) {
+        lines.push(`- \`${selection.path}\` — ${selection.reason}`)
+      }
+      lines.push("")
+    }
+  }
+  return lines.join("\n")
+}
+
+export const parseFeedback = (
+  environment: Readonly<Record<string, string | undefined>>
+): string | undefined => {
+  const raw = environment.LLM4TS_FEEDBACK?.trim()
+  return raw === undefined || raw.length === 0 ? undefined : raw
+}
 
 export const readGroundingFiles = (
   workspace: WorkspaceShape,

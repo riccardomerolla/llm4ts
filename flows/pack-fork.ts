@@ -10,6 +10,12 @@
 //   LLM4TS_PACK=<source pack>       resolved as for any flow (default cobol-springboot)
 //   LLM4TS_TARGET_KIND=frontend|backend
 //   LLM4TS_FORK_AS=<new pack name>  lowercase kebab-case
+// Optional:
+//   LLM4TS_FEEDBACK=<free text>     revise an existing fork under the same
+//                                   LLM4TS_FORK_AS instead of starting over —
+//                                   the prior conventions.md and this feedback
+//                                   both feed every pass, including file
+//                                   selection, which can change too.
 //
 // The forked pack lands at
 // `<repo>/.llm4ts/kits/forked/packs/<LLM4TS_FORK_AS>/` — a dedicated
@@ -18,8 +24,9 @@
 // would hide its other packs from this project). `scaffold:` is dropped:
 // the whole point is that the target repository already exists.
 //
-// One-shot, not resumable: re-running overwrites the previous fork under
-// the same LLM4TS_FORK_AS name.
+// Not resumable: re-running clears and overwrites the previous fork under
+// the same LLM4TS_FORK_AS name (LLM4TS_FEEDBACK revises the CONTENT of that
+// overwrite, not the one-shot-per-run mechanics).
 import { basename, join, relative as relativePath, resolve as resolvePath } from "node:path"
 import { rmSync } from "node:fs"
 import * as Effect from "effect/Effect"
@@ -49,12 +56,19 @@ import {
   conventionSectionJsonSchema,
   forkPackMarkdown,
   forkedReadme,
+  GroundingSelection,
+  groundingSelectionAsk,
+  groundingSelectionJsonSchema,
+  parseFeedback,
   parseForkAs,
   parseTargetKind,
   passesForTargetKind,
+  provenanceMarkdown,
   readGroundingFiles,
+  type Refinement,
+  selectionsForCategory,
   targetConventionsReviewer,
-  techStackGroundingFiles
+  validSelections
 } from "./lib/pack-fork.ts"
 
 const forkPackFiles = Effect.fn("flows/pack-fork.forkPackFiles")(function* (
@@ -112,6 +126,7 @@ const program = Effect.gen(function* () {
   )
   const targetKind = yield* parseTargetKind(process.env)
   const forkAs = yield* parseForkAs(process.env)
+  const feedback = parseFeedback(process.env)
   const coder = asReadOnly(coderFromEnv(process.env))
   const files = nodePlainFileStore
 
@@ -168,24 +183,54 @@ const program = Effect.gen(function* () {
           })
         }
 
-        const grounding = yield* stage(
-          context.events,
-          "grounding",
-          readGroundingFiles(repo, techStackGroundingFiles(targetKind))
-        )
+        // Captured BEFORE "clean" (below) can remove it — a --feedback re-run
+        // revises what a previous run found rather than starting from zero.
+        const priorConventions =
+          feedback === undefined
+            ? undefined
+            : yield* repo
+                .read(join(destinationRel, "conventions.md"))
+                .pipe(Effect.catch(() => Effect.succeed(undefined)))
+        const refinement: Refinement | undefined =
+          priorConventions === undefined || feedback === undefined
+            ? undefined
+            : { priorConventions, feedback }
+
+        const candidatePaths = yield* stage(context.events, "discover", repo.discover("**"))
 
         const passes = passesForTargetKind(targetKind)
+        const selectionAsk = groundingSelectionAsk(passes, candidatePaths, refinement)
+        const selectionResult = yield* stage(
+          context.events,
+          "select grounding",
+          withShrink("select grounding", (cap) =>
+            Effect.gen(function* () {
+              const prompt = yield* capped("select grounding", selectionAsk, cap)
+              return yield* structuredAndPublish(
+                context.reasoning,
+                context.events,
+                prompt,
+                GroundingSelection,
+                groundingSelectionJsonSchema
+              )
+            })
+          ).pipe(Effect.provideService(FlowEvents, context.events))
+        )
+        const selections = validSelections(selectionResult, candidatePaths)
+        yield* context.events.publish(
+          Info.make({ message: provenanceMarkdown(targetKind, selections, feedback) })
+        )
+
         const sections: Array<string> = []
-        for (const [index, pass] of passes.entries()) {
-          const askText = conventionPassAsk(pass, index === 0 ? grounding : undefined)
-          // Tech Stack & Dependencies (index 0) is the only pass carrying
-          // grounding file content — a real package.json/tsconfig.json can
-          // make it substantially larger than the other three, ungrounded
-          // passes. `capped` bounds every attempt's prompt size (guarding
-          // against a truncated, unparseable structured response); `withShrink`
-          // retries at a smaller budget on an actual provider overflow —
-          // the same pairing every other modernize-* flow already uses
-          // ahead of a structuredAndPublish call.
+        for (const pass of passes) {
+          const groundingPaths = selectionsForCategory(selections, pass.heading)
+          const grounding = yield* readGroundingFiles(repo, groundingPaths)
+          const askText = conventionPassAsk(pass, grounding, refinement)
+          // `capped` bounds every attempt's prompt size (guarding against a
+          // truncated, unparseable structured response); `withShrink` retries
+          // at a smaller budget on an actual provider overflow — the same
+          // pairing every other modernize-* flow already uses ahead of a
+          // structuredAndPublish call.
           const result = yield* stage(
             context.events,
             pass.heading,
@@ -202,9 +247,11 @@ const program = Effect.gen(function* () {
               })
             ).pipe(Effect.provideService(FlowEvents, context.events))
           )
+          yield* context.events.publish(Info.make({ message: result.markdown }))
           sections.push(result.markdown)
         }
         const conventionsMd = sections.join("\n\n")
+        const provenanceMd = provenanceMarkdown(targetKind, selections, feedback)
 
         yield* stage(
           context.events,
@@ -225,6 +272,7 @@ const program = Effect.gen(function* () {
           forkPackMarkdown(sourcePackMd, forkAs)
         )
         yield* files.writeAtomic(join(destinationAbs, "conventions.md"), conventionsMd)
+        yield* files.writeAtomic(join(destinationAbs, "provenance.md"), provenanceMd)
         yield* files.writeAtomic(
           join(destinationAbs, "reviewers", "target-conventions.md"),
           targetConventionsReviewer
@@ -247,10 +295,13 @@ const program = Effect.gen(function* () {
         yield* context.events.publish(
           Info.make({
             message:
-              `forked pack ready — review ${destinationRel}/README.md and ` +
-              `${destinationRel}/conventions.md, set '- [x] Approved', then from ` +
+              `forked pack ready — review ${destinationRel}/README.md, ` +
+              `${destinationRel}/conventions.md, and ${destinationRel}/provenance.md ` +
+              "(which file justified which rule), set '- [x] Approved', then from " +
               `inside ${input.workDir} run modernize-implement with ` +
-              `LLM4TS_PACK=forked/${forkAs}`
+              `LLM4TS_PACK=forked/${forkAs}. Not satisfied? Re-run this same command ` +
+              "with LLM4TS_FEEDBACK=<what to fix> to revise this fork instead of " +
+              "starting over."
           })
         )
       })

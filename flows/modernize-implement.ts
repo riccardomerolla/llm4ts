@@ -53,6 +53,7 @@ import { type FlowError } from "@llm4ts/flow/FlowError"
 import { FlowEvents, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { judgeAllPrograms } from "@llm4ts/flow/ProgramJudge"
 import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
+import { ApprovedMarker, DraftApprovalMarker, requireApproval } from "@llm4ts/flow/Approval"
 import { loadPatternCards, taggedPatternIds } from "@llm4ts/flow/Patterns"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import { checkWall, wallBreachMessage } from "@llm4ts/flow/Wall"
@@ -259,6 +260,27 @@ const program = Effect.gen(function* () {
           })
         )
         const pack = opened.pack
+
+        // A pack whose own README.md carries the draft/approved marker (a
+        // fork from pack-fork, today — see docs/adr/0018-pack-fork.md) must
+        // be approved before this flow touches anything. A plain pack with
+        // no README.md, or one that never opted into the marker convention,
+        // is unaffected.
+        yield* stage(
+          context.events,
+          "approval",
+          Effect.gen(function* () {
+            const readmeAbs = join(opened.workspace.root, opened.dir, "README.md")
+            const readmeContent = yield* files.read(readmeAbs)
+            if (
+              readmeContent !== undefined &&
+              (readmeContent.includes(DraftApprovalMarker) ||
+                readmeContent.includes(ApprovedMarker))
+            ) {
+              yield* requireApproval(files, readmeAbs)
+            }
+          })
+        )
 
         yield* stage(
           context.events,

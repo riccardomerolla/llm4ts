@@ -5,12 +5,18 @@ import {
   conventionPassAsk,
   forkPackMarkdown,
   forkedReadme,
+  GroundingSelection,
+  groundingSelectionAsk,
+  maxSelectedFilesPerCategory,
+  parseFeedback,
   parseForkAs,
   parseTargetKind,
   passesForTargetKind,
+  provenanceMarkdown,
   readGroundingFiles,
+  selectionsForCategory,
   targetConventionsReviewer,
-  techStackGroundingFiles
+  validSelections
 } from "../lib/pack-fork.ts"
 
 describe("parseTargetKind", () => {
@@ -94,16 +100,109 @@ describe("conventionPassAsk", () => {
     )
     assert.include(ask, "package.json contents here")
   })
+
+  it("embeds prior findings and feedback when refining", () => {
+    const ask = conventionPassAsk(
+      { heading: "Test Heading", instructions: "Do the thing." },
+      undefined,
+      {
+        priorConventions: "## Test Heading\n\nOld finding.",
+        feedback: "You missed the auth layer."
+      }
+    )
+    assert.include(ask, "Old finding.")
+    assert.include(ask, "You missed the auth layer.")
+  })
 })
 
-describe("techStackGroundingFiles", () => {
-  it("lists package manifests for frontend", () => {
-    assert.include(techStackGroundingFiles("frontend"), "package.json")
+describe("groundingSelectionAsk", () => {
+  const passes = passesForTargetKind("frontend")
+
+  it("embeds every category heading and the real candidate paths", () => {
+    const ask = groundingSelectionAsk(passes, ["package.json", "src/app/page.tsx"])
+    for (const pass of passes) {
+      assert.include(ask, pass.heading)
+    }
+    assert.include(ask, "package.json")
+    assert.include(ask, "src/app/page.tsx")
   })
 
-  it("lists build manifests for backend", () => {
-    const files = techStackGroundingFiles("backend")
-    assert.isTrue(files.some((path) => path.includes("pom.xml") || path.includes("build.gradle")))
+  it("embeds prior findings and feedback when refining", () => {
+    const ask = groundingSelectionAsk(passes, ["package.json"], {
+      priorConventions: "## Tech Stack\n\nOld finding.",
+      feedback: "Look at the design-system folder too."
+    })
+    assert.include(ask, "Old finding.")
+    assert.include(ask, "Look at the design-system folder too.")
+  })
+})
+
+describe("validSelections", () => {
+  it("drops a selection whose path isn't in the real candidate list", () => {
+    const selection = GroundingSelection.make({
+      selections: [
+        { category: "Tech Stack", path: "package.json", reason: "real" },
+        { category: "Tech Stack", path: "made-up-file.json", reason: "hallucinated" }
+      ]
+    })
+    const kept = validSelections(selection, ["package.json"])
+    assert.strictEqual(kept.length, 1)
+    assert.strictEqual(kept[0]?.path, "package.json")
+  })
+
+  it(`caps each category at ${maxSelectedFilesPerCategory} selections`, () => {
+    const candidatePaths = Array.from(
+      { length: maxSelectedFilesPerCategory + 3 },
+      (_, i) => `f${i}.ts`
+    )
+    const selection = GroundingSelection.make({
+      selections: candidatePaths.map((path) => ({ category: "Naming", path, reason: "r" }))
+    })
+    const kept = validSelections(selection, candidatePaths)
+    assert.strictEqual(kept.length, maxSelectedFilesPerCategory)
+  })
+})
+
+describe("selectionsForCategory", () => {
+  it("returns only the paths for the requested category, in order", () => {
+    const selections = [
+      { category: "Tech Stack", path: "package.json", reason: "r" },
+      { category: "Naming", path: "src/index.ts", reason: "r" },
+      { category: "Tech Stack", path: "tsconfig.json", reason: "r" }
+    ]
+    assert.deepStrictEqual(selectionsForCategory(selections, "Tech Stack"), [
+      "package.json",
+      "tsconfig.json"
+    ])
+    assert.deepStrictEqual(selectionsForCategory(selections, "Auth"), [])
+  })
+})
+
+describe("provenanceMarkdown", () => {
+  it("lists every category, with selections or an explicit empty note", () => {
+    const selections = [
+      { category: "Tech Stack & Dependencies", path: "package.json", reason: "manifest" }
+    ]
+    const markdown = provenanceMarkdown("frontend", selections)
+    assert.include(markdown, "package.json")
+    assert.include(markdown, "manifest")
+    assert.include(markdown, "No files selected")
+  })
+
+  it("includes feedback when given", () => {
+    const markdown = provenanceMarkdown("frontend", [], "Look harder at auth.")
+    assert.include(markdown, "Look harder at auth.")
+  })
+})
+
+describe("parseFeedback", () => {
+  it("returns the trimmed value when set", () => {
+    assert.strictEqual(parseFeedback({ LLM4TS_FEEDBACK: "  do better  " }), "do better")
+  })
+
+  it("returns undefined when unset or empty", () => {
+    assert.isUndefined(parseFeedback({}))
+    assert.isUndefined(parseFeedback({ LLM4TS_FEEDBACK: "   " }))
   })
 })
 

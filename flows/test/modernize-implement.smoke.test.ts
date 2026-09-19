@@ -187,4 +187,38 @@ describe("modernize-implement end to end (model stubbed)", () => {
       rmSync(fixture.root, { recursive: true, force: true })
     }
   })
+
+  it("refuses to start against a pack whose README.md is still an unapproved draft", () => {
+    const fixture = makeFixture()
+    try {
+      write(fixture.root, "packs/smoke/README.md", "# Forked pack\n\n- [ ] Approved\n")
+      seedTarget(fixture)
+      installStub(fixture, stubProgram(responder))
+
+      const result = runFlow(fixture, "modernize-implement", fixture.target)
+      assert.notStrictEqual(result.status, 0, "an unapproved fork must stop the run")
+      const output = `${result.stdout}${result.stderr}`
+      assert.include(output, "approval required")
+      assert.include(output, "README.md")
+      // Nothing should have run — no branch, no commits beyond the seed.
+      const branch = git(fixture.target, "rev-parse", "--abbrev-ref", "HEAD").trim()
+      assert.notStrictEqual(branch, "meridian-transfers")
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it("proceeds normally against a pack whose README.md marker is approved", () => {
+    const fixture = makeFixture()
+    try {
+      write(fixture.root, "packs/smoke/README.md", "# Forked pack\n\n- [x] Approved\n")
+      seedTarget(fixture)
+      installStub(fixture, stubProgram(responder))
+
+      const result = runFlow(fixture, "modernize-implement", fixture.target)
+      assert.strictEqual(result.status, 0, failureReport("implement", result))
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true })
+    }
+  })
 })
