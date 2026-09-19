@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.4.0
+
+A new flow, `pack-fork`, for the reverse of `modernize-*`: instead of
+translating a legacy estate against a pack's contract, it analyzes an
+existing production repository and forks a pack whose `conventions.md`
+captures that repository's own established tech stack, naming, shared
+components, and auth/data patterns — so a later `modernize-implement` run
+against the fork reuses what's already there instead of guessing. See
+`docs/adr/0018-pack-fork.md` and the new `using-pack-fork` skill.
+
+- `Pack.conventions` — an optional field loaded exactly like `pack.lessons`,
+  folded into `modernize-implement`'s generation prompt the same way.
+- `pack-fork.ts`: four bounded LLM analysis passes (fixed frontend/backend
+  category presets), explicit `LLM4TS_TARGET_KIND`/`LLM4TS_FORK_AS`, writes
+  the fork to `<repo>/.llm4ts/kits/forked/packs/<name>/` via `commitPaths`
+  (scoped to only the fork's own files, never sweeping the operator's other
+  uncommitted work), with a post-hoc `target-conventions` reviewer lens as a
+  backstop. Guards against forking a pack into itself (failing fast with a
+  usage error) when `LLM4TS_PACK` and `LLM4TS_FORK_AS` would resolve to the
+  same directory.
+- A fully commented root `.env.example` covering every `LLM4TS_*` and
+  provider variable.
+
 ## 2.3.1
 
 Everything needed to actually run the ADR 0016 Gemini ACP bridge end to end,
