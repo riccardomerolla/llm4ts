@@ -47,6 +47,7 @@ unit: CALL '([^']+)'
         "---\nfiles: .*\\.java\n---\nReview security."
       )
       yield* workspace.write("pack/lessons.md", "Prefer decimal money.\n")
+      yield* workspace.write("pack/conventions.md", "Reuse the shared Button component.\n")
       const pack = yield* loadPack(workspace, "pack")
       yield* appendPackLesson(workspace, "pack", "Keep ids stable.")
       const lessons = yield* workspace.read("pack/lessons.md")
@@ -63,12 +64,30 @@ unit: CALL '([^']+)'
       assert.strictEqual(pack.equivalence.ordering, "PerKey")
       assert.isTrue(pack.equivalence.ignore.has("timestamp"))
       assert.match(lessons, /Keep ids stable/)
+      assert.strictEqual(pack.conventions, "Reuse the shared Button component.")
       // No programFiles template: filesFor falls back to a case-insensitive
       // name match with regex metacharacters escaped.
       assert.strictEqual(pack.programFiles, undefined)
       assert.isTrue(pack.filesFor("payroll").test("src/main/java/PAYROLL.java"))
       assert.isFalse(pack.filesFor("payroll").test("src/main/java/Billing.java"))
       assert.isFalse(pack.filesFor("pay.roll").test("src/payQroll.java"))
+    })
+  )
+
+  it.effect("leaves conventions undefined when conventions.md is absent", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "pack/pack.md",
+        `# Pack: minimal
+
+source: cobol
+scaffold: fixtures/spring
+sources: .*\\.cbl
+`
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      assert.isUndefined(pack.conventions)
     })
   )
 

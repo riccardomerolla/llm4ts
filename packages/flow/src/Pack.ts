@@ -38,6 +38,12 @@ export interface Pack {
   readonly prompts: Readonly<Record<string, string>>
   readonly lenses: ReadonlyArray<Reviewer>
   readonly lessons: string | undefined
+  // The target repository's own established conventions, captured by the
+  // pack-fork flow when this pack was forked from a real production repo
+  // (docs/adr/0017-pack-fork.md). Absent for every pack that was never
+  // forked. Loaded exactly like `lessons`, and injected into
+  // modernize-implement's generation prompt the same way.
+  readonly conventions: string | undefined
   // Regex template locating a program's TARGET implementation files (relative
   // paths), `<NAME>` substituted with the program name. The seam that makes
   // per-program judging possible.
@@ -209,6 +215,10 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     Effect.map((text) => text.trim()),
     Effect.catch(() => Effect.succeed(undefined))
   )
+  const conventions = yield* workspace.read(`${directory}/conventions.md`).pipe(
+    Effect.map((text) => text.trim()),
+    Effect.catch(() => Effect.succeed(undefined))
+  )
   const gateValues = namedItems(section(manifest.sections, "Gates"))
   const equivalenceValues = namedItems(section(manifest.sections, "Equivalence"))
   const ordering: ComparisonOrdering =
@@ -315,6 +325,7 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     prompts,
     lenses,
     lessons: lessons === undefined || lessons.length === 0 ? undefined : lessons,
+    conventions: conventions === undefined || conventions.length === 0 ? undefined : conventions,
     programFiles,
     featureFiles,
     specSchema,
