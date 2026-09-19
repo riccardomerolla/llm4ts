@@ -24,7 +24,8 @@ import { basename, join, relative as relativePath, resolve as resolvePath } from
 import { rmSync } from "node:fs"
 import * as Effect from "effect/Effect"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
-import { Info } from "@llm4ts/flow/FlowEvents"
+import { FlowEvents, Info } from "@llm4ts/flow/FlowEvents"
+import { capped, withShrink } from "@llm4ts/flow/Context"
 import { withDraftApproval } from "@llm4ts/flow/Approval"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
@@ -168,17 +169,30 @@ const program = Effect.gen(function* () {
         const passes = passesForTargetKind(targetKind)
         const sections: Array<string> = []
         for (const [index, pass] of passes.entries()) {
-          const prompt = conventionPassAsk(pass, index === 0 ? grounding : undefined)
+          const askText = conventionPassAsk(pass, index === 0 ? grounding : undefined)
+          // Tech Stack & Dependencies (index 0) is the only pass carrying
+          // grounding file content — a real package.json/tsconfig.json can
+          // make it substantially larger than the other three, ungrounded
+          // passes. `capped` bounds every attempt's prompt size (guarding
+          // against a truncated, unparseable structured response); `withShrink`
+          // retries at a smaller budget on an actual provider overflow —
+          // the same pairing every other modernize-* flow already uses
+          // ahead of a structuredAndPublish call.
           const result = yield* stage(
             context.events,
             pass.heading,
-            structuredAndPublish(
-              context.reasoning,
-              context.events,
-              prompt,
-              ConventionSection,
-              conventionSectionJsonSchema
-            )
+            withShrink(pass.heading, (cap) =>
+              Effect.gen(function* () {
+                const prompt = yield* capped(pass.heading, askText, cap)
+                return yield* structuredAndPublish(
+                  context.reasoning,
+                  context.events,
+                  prompt,
+                  ConventionSection,
+                  conventionSectionJsonSchema
+                )
+              })
+            ).pipe(Effect.provideService(FlowEvents, context.events))
           )
           sections.push(result.markdown)
         }

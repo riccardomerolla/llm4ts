@@ -74,6 +74,37 @@ describe("pack-fork", () => {
     assert.include(forkedLessons, "Lessons")
   })
 
+  it("caps the grounding-heavy Tech Stack & Dependencies prompt instead of shipping it unbounded", () => {
+    const fixture = makeFixture()
+    // Only the first pass (Tech Stack & Dependencies) carries grounding file
+    // content — a real package.json can make its prompt far larger than the
+    // other three, ungrounded passes. Fail loudly if that prompt isn't
+    // bounded, so an oversized-prompt regression (truncated, unparseable
+    // structured responses over a real model) shows up offline too.
+    const responder = `(prompt) => {
+      const heading = (prompt.match(/## ([^"]+)"/) ?? [])[1] ?? "Unknown"
+      if (heading === "Tech Stack & Dependencies" && prompt.length > 10000) {
+        console.error(
+          "expected the oversized grounding prompt to be capped, got " + prompt.length + " chars"
+        )
+        process.exit(9)
+      }
+      return JSON.stringify({ markdown: "## " + heading + "\\n\\nFindings for " + heading + "." })
+    }`
+    installStub(fixture, stubProgram(responder))
+    initRepo(fixture.target)
+    write(fixture.target, "package.json", "x".repeat(60_000))
+    commitAll(fixture.target, "seed the target repository")
+
+    const result = runFlow(fixture, "pack-fork", fixture.target, {
+      LLM4TS_TARGET_KIND: "frontend",
+      LLM4TS_FORK_AS: "acmecorp-nextjs",
+      LLM4TS_CONTEXT_BUDGET: "3000"
+    })
+
+    assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`)
+  })
+
   it.effect(
     "round-trips the forked pack through loadPack, as a real modernize-implement run would",
     () =>
