@@ -11,7 +11,16 @@ import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { TemporaryFilesShape } from "@llm4ts/core/TemporaryFiles"
 import type { GeminiCliExecutorShape } from "@llm4ts/core/providers/GeminiCliProvider"
 import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactories"
+import { ConnectorIds } from "@llm4ts/core/Models"
+import { ProviderError } from "@llm4ts/core/Errors"
 import { makeCostTracker, type CostTracker } from "@llm4ts/flow/CostTracker"
+import { runGeminiAcpBridge } from "./NodeGeminiAcpBridge.ts"
+import {
+  bridgeModelProblem,
+  defaultReadPiModelsJson,
+  geminiBridgePort,
+  resolveBridgeModel
+} from "./PiModels.ts"
 import { checkCostBudget, makeCostRecord, type CostBudget } from "@llm4ts/flow/CostLedger"
 import { FlowLlmError, describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
 import {
@@ -50,6 +59,8 @@ export interface FlowRunnerDependencies {
   readonly registry: ConnectorRegistryShape
   readonly process: ProcessExecutorShape
   readonly files: PlainFileStoreShape
+  /** pi's own model config (ADR 0016), injectable so a test never reads $HOME. */
+  readonly readPiModelsJson?: () => string | undefined
 }
 
 export interface NodeConnectorDependencies {
@@ -99,6 +110,68 @@ export interface FlowRunnerBundle {
   readonly tracker: CostTracker
 }
 
+const truthy = (value: string | undefined): boolean =>
+  value !== undefined && ["1", "true", "yes"].includes(value.trim().toLowerCase())
+
+const isPiSeat = (config: ConnectorConfig | undefined): config is CliConnectorConfig =>
+  config instanceof CliConnectorConfig && config.connectorId.value === ConnectorIds.Pi.value
+
+/**
+ * Start the ADR 0016 bridge for a `pi`-coder run, scoped to that run, and
+ * return the mapping that points pi's seats at it.
+ *
+ * Opting in with `LLM4TS_GEMINI_BRIDGE` but leaving pi unable to reach the
+ * bridge is the failure this whole feature exists to avoid, so an
+ * unresolvable model fails the run here rather than surfacing as pi's own
+ * "No API key found" several layers down. A seat that already names a model
+ * is left alone: an explicit choice outranks the default.
+ */
+const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats")(function* (
+  options: FlowRunnerOptions,
+  dependencies: FlowRunnerDependencies,
+  environment: Readonly<Record<string, string | undefined>>
+): Effect.fn.Return<(config: ConnectorConfig) => ConnectorConfig, FlowError, Scope.Scope> {
+  const identity = (config: ConnectorConfig): ConnectorConfig => config
+  if (!truthy(environment.LLM4TS_GEMINI_BRIDGE)) {
+    return identity
+  }
+  // The reasoning seat defaults to the coder, so a pi coder makes this a pi
+  // run even when nothing else names pi.
+  const seats = [options.coder, options.reasoning, ...(options.reviewers ?? [])]
+  if (!seats.some(isPiSeat)) {
+    return identity
+  }
+
+  const port = geminiBridgePort(environment)
+  const readPiModelsJson = dependencies.readPiModelsJson ?? defaultReadPiModelsJson
+  const resolution = resolveBridgeModel(
+    readPiModelsJson(),
+    port,
+    environment.LLM4TS_GEMINI_BRIDGE_MODEL
+  )
+  const problem = bridgeModelProblem(resolution, port)
+  if (problem !== undefined || resolution._tag !== "Resolved") {
+    return yield* FlowLlmError.from(
+      ProviderError.make({ message: problem ?? "no bridge model available" })
+    )
+  }
+  const model = resolution.model
+
+  yield* runGeminiAcpBridge({
+    port: Number(port),
+    cwd: options.workDir,
+    executor: dependencies.process,
+    ...(environment.LLM4TS_GEMINI_MODEL === undefined
+      ? {}
+      : { model: environment.LLM4TS_GEMINI_MODEL })
+  }).pipe(Effect.mapError(FlowLlmError.from))
+
+  return (config: ConnectorConfig): ConnectorConfig =>
+    isPiSeat(config) && config.model === undefined
+      ? CliConnectorConfig.make({ ...config, model })
+      : config
+})
+
 export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeContext")(function* (
   options: FlowRunnerOptions,
   dependencies: FlowRunnerDependencies
@@ -107,6 +180,13 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   const tracker = yield* makeCostTracker()
   yield* tracker.consume(events)
   const reasoning = defaultReasoningConfig(options.coder, options.reasoning)
+  // Bound to this run's scope: the bridge subprocess and its server go away
+  // with the run, matching every other long-lived subprocess here (ADR 0016).
+  const bridged = yield* geminiBridgeSeats(
+    options,
+    dependencies,
+    options.environment ?? process.env
+  )
   // Every seat retries transient provider failures and flaky streams (an
   // empty response or malformed tool call), announcing each attempt on the
   // run's events. Without the wrapper one hiccup from a CLI agent failed the
@@ -157,10 +237,12 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     Scope.Scope
   > {
     const environment = options.environment ?? process.env
-    const coder = yield* resolveSeat(prepareConnector(options.coder, workDir, environment))
-    const reasoningService = yield* resolveSeat(prepareConnector(reasoning, workDir, environment))
+    const coder = yield* resolveSeat(prepareConnector(bridged(options.coder), workDir, environment))
+    const reasoningService = yield* resolveSeat(
+      prepareConnector(bridged(reasoning), workDir, environment)
+    )
     const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
-      resolveSeat(prepareConnector(configuration, workDir, environment))
+      resolveSeat(prepareConnector(bridged(configuration), workDir, environment))
     )
     return { coder, reasoning: reasoningService, reviewers }
   })

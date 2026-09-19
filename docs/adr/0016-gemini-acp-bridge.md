@@ -100,6 +100,17 @@ dependency) exposing two routes on one local server:
   content-block-shaped, closer to Anthropic's `tool_use`/`tool_result`
   blocks than to OpenAI's `tool_calls` array, and this codebase already has
   a mature Anthropic-shaped vocabulary to extend (`AnthropicProvider.ts`).
+  That route must stream. pi's bundled Anthropic SDK sets `stream: true` on
+  every request with no compatibility flag to disable it, so a single JSON
+  body — which is what the first implementation wrote — is unusable by the
+  one client this bridge exists for. ACP resolves a turn as a whole rather
+  than as a token stream, so the bridge emits a well-formed but coarse event
+  sequence: `message_start` goes out before the turn resolves (keeping the
+  connection live while gemini works), then one `content_block_delta`
+  carrying the entire text, or a `tool_use` block whose arguments arrive as a
+  single `input_json_delta`. A failure after `message_start` can only be
+  reported as an in-band `error` event, never a status code.
+
 - `POST /mcp` — MCP over HTTP, using `@llm4ts/flow/McpServer`'s
   transport-agnostic `handleMcpRequest`/`McpTool`. `gemini --experimental-acp`
   is told about this endpoint via `session/new`'s `mcpServers: [{"type":
@@ -188,6 +199,10 @@ in this design.
   change, and no flow-visible selection surface.
 - `packages/runner` gains the bridge module and its `node:http` server, and
   a new `geminiBridgePrerequisites`-style check in `Doctor.ts`.
+- `makeFlowRunnerContext` acquires the bridge in the run's scope when
+  `LLM4TS_GEMINI_BRIDGE` is set and a seat uses `pi`, and rewrites those
+  seats' model. Reading pi's config lives in `PiModels.ts` rather than
+  `Doctor.ts`, which imports the runner and so cannot be imported by it.
 - The bridge's server implementation is written to be reusable as a
   standalone, longer-lived service later (a `shell` CLI entry point, e.g.
   `llm4ts bridge start`, for other Anthropic/OpenAI-API-shaped tools to

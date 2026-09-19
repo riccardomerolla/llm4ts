@@ -18,7 +18,11 @@ import {
   anthropicToolToMcpTool,
   handleMessagesRequest,
   makeBridgeState,
-  runGeminiAcpBridge
+  requestPath,
+  runGeminiAcpBridge,
+  turnErrorEvent,
+  turnOutcomeEvents,
+  turnStartEvents
 } from "@llm4ts/runner/NodeGeminiAcpBridge"
 
 /** Deterministic scheduling turns for a forked background fiber to catch up — see GeminiAcpSession.test.ts. */
@@ -147,6 +151,66 @@ describe("NodeGeminiAcpBridge", () => {
     )
   })
 
+  describe("streaming events", () => {
+    const names = (events: ReadonlyArray<{ readonly event: string }>): ReadonlyArray<string> =>
+      events.map((event) => event.event)
+
+    it("emits the Anthropic sequence for a text turn", () => {
+      const events = [
+        ...turnStartEvents("msg_1", "gemini-x"),
+        ...turnOutcomeEvents({ _tag: "Text", text: "hello from gemini" })
+      ]
+      assert.deepStrictEqual(names(events), [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop"
+      ])
+      assert.deepStrictEqual(events[2]?.data.delta, {
+        type: "text_delta",
+        text: "hello from gemini"
+      })
+      assert.deepStrictEqual(events[4]?.data.delta, {
+        stop_reason: "end_turn",
+        stop_sequence: null
+      })
+    })
+
+    // A tool_use block carries an empty input and supplies the arguments via
+    // input_json_delta; sending them inline is the shape clients mis-parse.
+    it("emits a tool_use block whose arguments arrive as input_json_delta", () => {
+      const events = turnOutcomeEvents({
+        _tag: "ToolUse",
+        id: "toolu_1",
+        name: "Read",
+        input: { path: "package.json" }
+      })
+      assert.deepStrictEqual(events[0]?.data.content_block, {
+        type: "tool_use",
+        id: "toolu_1",
+        name: "Read",
+        input: {}
+      })
+      assert.deepStrictEqual(events[1]?.data.delta, {
+        type: "input_json_delta",
+        partial_json: '{"path":"package.json"}'
+      })
+      assert.deepStrictEqual(events[2]?.data, { type: "content_block_stop", index: 0 })
+      assert.deepStrictEqual(events[3]?.data.delta, {
+        stop_reason: "tool_use",
+        stop_sequence: null
+      })
+    })
+
+    it("carries a failure as an in-band error event", () => {
+      const event = turnErrorEvent("gemini said no")
+      assert.strictEqual(event.event, "error")
+      assert.deepStrictEqual(event.data.error, { type: "api_error", message: "gemini said no" })
+    })
+  })
+
   describe("HTTP server", () => {
     it.effect("serves /v1/messages and rejects unknown routes", () =>
       Effect.scoped(
@@ -167,6 +231,69 @@ describe("NodeGeminiAcpBridge", () => {
             .get(`${bridge.baseUrl}/nope`, {}, Duration.seconds(5))
             .pipe(Effect.result)
           assert.strictEqual(notFound._tag, "Failure")
+
+          // pi posts to `/mcp` and `/v1/messages?beta=true`; a query string
+          // must not change the route. `/mcp` stands in for both because it
+          // answers without waiting on the ACP peer.
+          const withQuery = yield* nodeHttpClient
+            .postJson(
+              `${bridge.baseUrl}/mcp?beta=true`,
+              JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+              {},
+              Duration.seconds(5)
+            )
+            .pipe(Effect.result)
+          assert.strictEqual(withQuery._tag, "Success")
+        })
+      )
+    )
+
+    it("routes on the path alone, ignoring query and fragment", () => {
+      assert.strictEqual(requestPath("/v1/messages?beta=true"), "/v1/messages")
+      assert.strictEqual(requestPath("/mcp?a=1&b=2"), "/mcp")
+      assert.strictEqual(requestPath("/v1/messages"), "/v1/messages")
+      assert.strictEqual(requestPath("/v1/messages#frag"), "/v1/messages")
+      assert.strictEqual(requestPath(undefined), "/")
+      assert.strictEqual(requestPath("?beta=true"), "/")
+    })
+
+    // Drives the real SSE transport end to end. A tool_result with no pending
+    // call fails before any ACP traffic, so the head and `message_start` must
+    // already be on the wire and the failure must arrive as an error event —
+    // not as a status code, which is no longer available by then.
+    it.effect("streams text/event-stream when the request sets stream", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const stdin = yield* Queue.unbounded<string>()
+          const executor = makeProcessExecutor({
+            run: () => Effect.die("not used"),
+            runStreaming: () => Stream.empty,
+            runBidirectional: () => Effect.succeed([stdin, Stream.never])
+          })
+          const bridge = yield* runGeminiAcpBridge({ port: 0, cwd: "/repo", executor })
+
+          const raw = yield* nodeHttpClient.postJson(
+            `${bridge.baseUrl}/v1/messages?beta=true`,
+            JSON.stringify({
+              model: "gemini-x",
+              stream: true,
+              messages: [
+                {
+                  role: "user",
+                  content: [{ type: "tool_result", tool_use_id: "nope", content: "x" }]
+                }
+              ]
+            }),
+            {},
+            Duration.seconds(5)
+          )
+
+          assert.include(raw, "event: message_start")
+          assert.include(raw, '"model":"gemini-x"')
+          assert.include(raw, "event: error")
+          assert.include(raw, "no pending tool call matches tool_result id nope")
+          // SSE frames are terminated by a blank line.
+          assert.include(raw, "\n\n")
         })
       )
     )
