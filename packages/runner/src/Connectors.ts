@@ -108,6 +108,13 @@ export const withEnvironment = (
 export const asReadOnly = (config: CliConnectorConfig): CliConnectorConfig =>
   CliConnectorConfig.make({ ...config, readOnly: true })
 
+// For a seat driven only through complete()/completeStream() — structured or
+// reasoning calls with no tool-loop continuation — where even a read-only
+// tool is unsafe: the model can reach for it mid-turn and resolve with no
+// text instead of an error (see CliConnectorConfig.noTools's doc comment).
+export const asToolless = (config: CliConnectorConfig): CliConnectorConfig =>
+  CliConnectorConfig.make({ ...config, readOnly: true, noTools: true })
+
 export const withTimeoutSeconds = (
   config: ApiConnectorConfig,
   seconds: number

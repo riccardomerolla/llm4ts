@@ -32,6 +32,7 @@ import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import type { OpenedPack } from "@llm4ts/runner/Packs"
 import {
   asReadOnly,
+  asToolless,
   coderFromEnv,
   makeNodeWorkspace,
   nodePlainFileStore,
@@ -120,7 +121,14 @@ const program = Effect.gen(function* () {
       workspace: input.workspace,
       userPrompt: input.prompt,
       coder,
-      reasoning: coder,
+      // Every convention pass runs as a one-shot structuredAndPublish()
+      // call with no tool-loop continuation — a model that reaches for a
+      // tool mid-turn (invited by "Explore the repository…" in three of
+      // the four passes) resolves with no text instead of an error
+      // ("empty response … no text to parse as structured output"). A
+      // read-only coder still offers a read tool over some connectors
+      // (pi in particular); asToolless offers none.
+      reasoning: asToolless(coderFromEnv(process.env)),
       environment: process.env
     },
     (context) =>

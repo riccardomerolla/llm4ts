@@ -12,6 +12,7 @@ export type { FlowInput } from "./FlowArgs.ts"
 export {
   apiConnectorFromEnvironment,
   asReadOnly,
+  asToolless,
   coderFor,
   coderFromEnv,
   mock,

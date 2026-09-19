@@ -19,7 +19,12 @@ import {
 
 export const piExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => [
   ...optionalModelArgs(config.model),
-  ...(config.readOnly ? ["--tools", "read"] : []),
+  // `noTools` takes precedence over `readOnly`: `--no-tools` disables tool
+  // offering entirely (pi's own flag for it), while `--tools read` still
+  // offers a read tool the model can invoke — fine for an interactive
+  // session, unsafe for a one-shot complete() call with no tool-loop
+  // continuation (see the field's doc comment on CliConnectorConfig).
+  ...(config.noTools ? ["--no-tools"] : config.readOnly ? ["--tools", "read"] : []),
   ...sortedFlagArgs(config.flags)
 ]
 

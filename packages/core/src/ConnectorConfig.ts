@@ -71,7 +71,16 @@ export class CliConnectorConfig extends Schema.TaggedClass<CliConnectorConfig>()
       Schema.withConstructorDefault(Effect.succeed(emptyStringRecord))
     ),
     workingDir: Schema.optionalKey(Schema.String),
-    readOnly: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false)))
+    readOnly: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+    // Stronger than `readOnly` ("no writes, tools still allowed"): this
+    // connector must never be offered any tool at all, not even a read
+    // one — for a seat driven only through `complete()`/`completeStream()`
+    // (structured/reasoning calls), which has no tool-loop continuation, so
+    // a model that reaches for a tool mid-turn resolves with no text
+    // instead of an error. Connector families that don't build a
+    // `noTools`-aware argv (only PiConnector does today) ignore this field
+    // and fall back to their `readOnly` behavior.
+    noTools: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false)))
   }
 ) {}
 

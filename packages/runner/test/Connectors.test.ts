@@ -8,6 +8,7 @@ import {
   anthropic,
   apiConnectorFromEnvironment,
   asReadOnly,
+  asToolless,
   antigravity,
   claude,
   coderFor,
@@ -85,6 +86,15 @@ describe("runner connector presets", () => {
     assert.strictEqual(local.envVars.ANTHROPIC_BASE_URL, "http://localhost:1234")
     assert.isTrue(asReadOnly(local).readOnly)
     assert.deepStrictEqual(claude.envVars, {})
+  })
+
+  it("derives a toolless seat as read-only and toolless, immutably", () => {
+    const toolless = asToolless(claude)
+
+    assert.isTrue(toolless.readOnly)
+    assert.isTrue(toolless.noTools)
+    assert.isFalse(claude.readOnly)
+    assert.isFalse(claude.noTools)
   })
 
   it("enriches API defaults and credentials without replacing explicit values", () => {

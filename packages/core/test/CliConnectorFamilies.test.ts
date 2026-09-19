@@ -61,6 +61,16 @@ describe("PiConnector", () => {
     ])
   })
 
+  it("disables every tool with --no-tools when noTools is set, even over readOnly", () => {
+    const config = CliConnectorConfig.make({
+      connectorId: ConnectorIds.Pi,
+      readOnly: true,
+      noTools: true
+    })
+
+    assert.deepStrictEqual(piExtraArgs(config), ["--no-tools"])
+  })
+
   it.effect("feeds streaming prompts through stdin and parses text, tools, and usage", () =>
     Effect.gen(function* () {
       const seenArgv = yield* Ref.make<ReadonlyArray<string>>([])
