@@ -54,6 +54,26 @@ const responder = [
   "}"
 ].join("\n")
 
+const conventionsResponder = [
+  "(prompt) => {",
+  commonReplies,
+  '  if (prompt.includes("Encode Rule 1 as an acceptance test")) {',
+  '    if (!prompt.includes("Reuse the shared PaymentForm component")) {',
+  '      console.error("conventions.md content missing from the coder\'s system prompt")',
+  "      process.exit(9)",
+  "    }",
+  '    fs.writeFileSync("acctxfr-acceptance.txt", "asserts rule 1\\n")',
+  '    return "Wrote the failing acceptance test."',
+  "  }",
+  '  if (prompt.includes("Make the acceptance test pass")) {',
+  '    fs.writeFileSync("acctxfr-posting.txt", "posts the ledger\\n")',
+  '    fs.writeFileSync("IMPLEMENTED", "done\\n")',
+  '    return "Implemented transfer posting; the acceptance test now passes."',
+  "  }",
+  '  return "Acknowledged."',
+  "}"
+].join("\n")
+
 const seedTarget = (fixture: Fixture): void => {
   initRepo(fixture.target)
   write(fixture.target, "docs/specs/ACCTXFR.md", "# ACCTXFR\n\nRule 1: post the ledger.\n")
@@ -149,6 +169,20 @@ describe("modernize-implement end to end (model stubbed)", () => {
       const output = `${result.stdout}${result.stderr}`
       assert.include(output, "clean-room wall breached")
       assert.include(output, "legacy/ACCTXFR.cbl", "the breach should name the offending file")
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true })
+    }
+  })
+
+  it("folds pack.conventions into the coder's system prompt when present", () => {
+    const fixture = makeFixture()
+    try {
+      write(fixture.root, "packs/smoke/conventions.md", "Reuse the shared PaymentForm component.\n")
+      seedTarget(fixture)
+      installStub(fixture, stubProgram(conventionsResponder))
+
+      const result = runFlow(fixture, "modernize-implement", fixture.target)
+      assert.strictEqual(result.status, 0, failureReport("implement", result))
     } finally {
       rmSync(fixture.root, { recursive: true, force: true })
     }

@@ -325,6 +325,11 @@ const program = Effect.gen(function* () {
           pack.lessons === undefined
             ? undefined
             : `Lessons from previous modernization runs — apply them:\n${pack.lessons}`,
+          pack.conventions === undefined
+            ? undefined
+            : "This repository's own established conventions, captured from the real " +
+              "target repository — reuse them, stay inside them:\n" +
+              pack.conventions,
           playbook.length === 0
             ? undefined
             : "Pattern cards cited by the specs — the translation playbook (advisory, the specs win):\n\n" +
