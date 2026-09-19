@@ -1,4 +1,4 @@
-# ADR 0017: `pack-fork` — Adopting A Real Target Repository's Conventions Into A Pack
+# ADR 0018: `pack-fork` — Adopting A Real Target Repository's Conventions Into A Pack
 
 Status: Accepted · Date: 2026-09-19
 

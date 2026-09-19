@@ -3,7 +3,7 @@
 // target repository — so a later modernize-implement run (LLM4TS_PACK
 // pointed at the fork) writes new code that reuses this repo's own
 // architecture, shared components, and conventions instead of guessing.
-// See docs/adr/0017-pack-fork.md.
+// See docs/adr/0018-pack-fork.md.
 //
 // Runs rooted at the TARGET repository (`--repo <target>`) — there is no
 // legacy repository in this flow at all. Requires:

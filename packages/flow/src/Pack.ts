@@ -40,7 +40,7 @@ export interface Pack {
   readonly lessons: string | undefined
   // The target repository's own established conventions, captured by the
   // pack-fork flow when this pack was forked from a real production repo
-  // (docs/adr/0017-pack-fork.md). Absent for every pack that was never
+  // (docs/adr/0018-pack-fork.md). Absent for every pack that was never
   // forked. Loaded exactly like `lessons`, and injected into
   // modernize-implement's generation prompt the same way.
   readonly conventions: string | undefined
