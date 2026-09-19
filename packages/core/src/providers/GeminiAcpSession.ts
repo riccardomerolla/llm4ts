@@ -185,6 +185,11 @@ export const openGeminiAcpSession = Effect.fn("@llm4ts/core/providers/GeminiAcpS
     const pending = yield* Ref.make<ReadonlyMap<number, Deferred.Deferred<JsonValue, LlmError>>>(
       new Map()
     )
+    // Keyed by request id purely for error messages: which ACP call a
+    // response belongs to, so a failure names its method instead of just
+    // "Gemini ACP error: Internal error" with no way to tell initialize
+    // from session/new from session/prompt.
+    const pendingMethods = yield* Ref.make<ReadonlyMap<number, string>>(new Map())
 
     const allocateId = Ref.updateAndGet(nextId, (current) => current + 1)
 
@@ -212,11 +217,29 @@ export const openGeminiAcpSession = Effect.fn("@llm4ts/core/providers/GeminiAcpS
           next.delete(id)
           return next
         })
+        const methods = yield* Ref.get(pendingMethods)
+        const method = methods.get(id) ?? "unknown method"
+        yield* Ref.update(pendingMethods, (map) => {
+          const next = new Map(map)
+          next.delete(id)
+          return next
+        })
         if (error !== undefined) {
+          const code = jsonField(error, "code")
+          const data = jsonField(error, "data")
+          const detail = [
+            code === undefined ? undefined : `code=${jsonText(code)}`,
+            data === undefined ? undefined : `data=${jsonText(data)}`
+          ]
+            .filter((part) => part !== undefined)
+            .join(" ")
           yield* Deferred.fail(
             deferred,
             ProviderError.make({
-              message: `Gemini ACP error: ${jsonStringField(error, "message") ?? jsonText(error)}`
+              message:
+                `Gemini ACP ${method} failed: ` +
+                `${jsonStringField(error, "message") ?? jsonText(error)}` +
+                `${detail.length === 0 ? "" : ` (${detail})`}`
             })
           )
           return
@@ -306,6 +329,7 @@ export const openGeminiAcpSession = Effect.fn("@llm4ts/core/providers/GeminiAcpS
     ): Effect.fn.Return<JsonValue, LlmError> {
       const id = yield* allocateId
       const deferred = yield* registerPending(id)
+      yield* Ref.update(pendingMethods, (map) => new Map(map).set(id, method))
       yield* Queue.offer(stdin, jsonRpcRequest(id, method, params))
       return yield* Deferred.await(deferred)
     })

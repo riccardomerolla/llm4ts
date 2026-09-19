@@ -286,6 +286,34 @@ describe("GeminiAcpSession", () => {
     )
   )
 
+  it.effect("names the failing method and includes the error's code and data", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { executor } = yield* scriptedPeer((request) => {
+          if (request.method === "initialize") {
+            return [JSON.stringify({ jsonrpc: "2.0", id: request.id, result: {} })]
+          }
+          if (request.method === "session/new") {
+            return [
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: request.id,
+                error: { code: -32603, message: "Internal error", data: { detail: "boom" } }
+              })
+            ]
+          }
+          return []
+        })
+        const session = yield* openGeminiAcpSession(executor, geminiAcpArgv(undefined), "/repo")
+        const error = yield* Effect.flip(session.newSession("/repo", "http://127.0.0.1:8731/mcp"))
+        assert.include(error.message, "session/new")
+        assert.include(error.message, "Internal error")
+        assert.include(error.message, "-32603")
+        assert.include(error.message, "boom")
+      })
+    )
+  )
+
   it("alwaysApprove approves any tool", () =>
     Effect.runPromise(alwaysApprove.decide("Bash", {})).then((approved) => {
       assert.isTrue(approved)
