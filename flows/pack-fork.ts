@@ -1,0 +1,182 @@
+// Forks an existing pack into a new, project-tier pack whose conventions.md
+// and reviewers/target-conventions.md describe a REAL, already-in-production
+// target repository — so a later modernize-implement run (LLM4TS_PACK
+// pointed at the fork) writes new code that reuses this repo's own
+// architecture, shared components, and conventions instead of guessing.
+// See docs/adr/0017-pack-fork.md.
+//
+// Runs rooted at the TARGET repository (`--repo <target>`) — there is no
+// legacy repository in this flow at all. Requires:
+//   LLM4TS_PACK=<source pack>       resolved as for any flow (default cobol-springboot)
+//   LLM4TS_TARGET_KIND=frontend|backend
+//   LLM4TS_FORK_AS=<new pack name>  lowercase kebab-case
+//
+// The forked pack lands at
+// `<repo>/.llm4ts/kits/forked/packs/<LLM4TS_FORK_AS>/` — a dedicated
+// project-tier kit named "forked", never the source pack's own kit name
+// (Kits.ts dedupes kits by name across tiers; reusing the source kit's name
+// would hide its other packs from this project). `scaffold:` is dropped:
+// the whole point is that the target repository already exists.
+//
+// One-shot, not resumable: re-running overwrites the previous fork under
+// the same LLM4TS_FORK_AS name.
+import { join, relative as relativePath } from "node:path"
+import * as Effect from "effect/Effect"
+import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { Info } from "@llm4ts/flow/FlowEvents"
+import { withDraftApproval } from "@llm4ts/flow/Approval"
+import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
+import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import type { OpenedPack } from "@llm4ts/runner/Packs"
+import {
+  asReadOnly,
+  coderFromEnv,
+  makeNodeWorkspace,
+  nodePlainFileStore,
+  openPack,
+  resolveFlowInput,
+  runFlowMain,
+  runNode,
+  stage
+} from "@llm4ts/runner"
+import {
+  ConventionSection,
+  conventionPassAsk,
+  conventionSectionJsonSchema,
+  forkPackMarkdown,
+  forkedReadme,
+  parseForkAs,
+  parseTargetKind,
+  passesForTargetKind,
+  readGroundingFiles,
+  targetConventionsReviewer,
+  techStackGroundingFiles
+} from "./lib/pack-fork.ts"
+
+const forkPackFiles = Effect.fn("flows/pack-fork.forkPackFiles")(function* (
+  source: OpenedPack,
+  destinationAbs: string,
+  files: PlainFileStoreShape
+) {
+  // `source.dir` is "." for an absolute-path pack reference (Packs.ts's
+  // `locatePack`), "packs/<name>" for a relative-directory or kit pack
+  // reference — never assume it's non-empty. `join`/`relative` from
+  // node:path normalize the "." case correctly where manual string
+  // concatenation or `.slice()` would not.
+  const packMdPath = join(source.dir, "pack.md")
+  const entries = yield* source.workspace.discover(join(source.dir, "**/*"))
+  for (const relative_ of entries) {
+    if (relative_ === packMdPath) {
+      continue
+    }
+    const content = yield* source.workspace
+      .read(relative_)
+      .pipe(Effect.catch(() => Effect.succeed(undefined)))
+    if (content === undefined) {
+      continue
+    }
+    const suffix = relativePath(source.dir, relative_)
+    yield* files.writeAtomic(join(destinationAbs, suffix), content)
+  }
+})
+
+const program = Effect.gen(function* () {
+  const input = yield* resolveFlowInput(
+    "Analyze the target repository and fork the pack with its conventions."
+  )
+  const targetKind = yield* parseTargetKind(process.env)
+  const forkAs = yield* parseForkAs(process.env)
+  const coder = asReadOnly(coderFromEnv(process.env))
+  const files = nodePlainFileStore
+
+  yield* runNode(
+    {
+      workDir: input.workDir,
+      workspace: input.workspace,
+      userPrompt: input.prompt,
+      coder,
+      reasoning: coder,
+      environment: process.env
+    },
+    (context) =>
+      Effect.gen(function* () {
+        const repo = yield* makeNodeWorkspace(
+          input.workDir,
+          workspaceLimitsFromEnv(process.env, legacySourceWorkspaceLimits)
+        )
+        const opened = yield* stage(
+          context.events,
+          "pack",
+          openPack({
+            environment: process.env,
+            launchDir: input.workspace,
+            flowDir: import.meta.dirname
+          })
+        )
+
+        const grounding = yield* stage(
+          context.events,
+          "grounding",
+          readGroundingFiles(repo, techStackGroundingFiles(targetKind))
+        )
+
+        const passes = passesForTargetKind(targetKind)
+        const sections: Array<string> = []
+        for (const [index, pass] of passes.entries()) {
+          const prompt = conventionPassAsk(pass, index === 0 ? grounding : undefined)
+          const result = yield* stage(
+            context.events,
+            pass.heading,
+            structuredAndPublish(
+              context.reasoning,
+              context.events,
+              prompt,
+              ConventionSection,
+              conventionSectionJsonSchema
+            )
+          )
+          sections.push(result.markdown)
+        }
+        const conventionsMd = sections.join("\n\n")
+
+        const destinationRel = join(".llm4ts", "kits", "forked", "packs", forkAs)
+        const destinationAbs = join(input.workDir, destinationRel)
+
+        yield* stage(context.events, "fork", forkPackFiles(opened, destinationAbs, files))
+
+        const sourcePackMd = yield* opened.workspace.read(`${opened.dir}/pack.md`)
+        yield* files.writeAtomic(
+          join(destinationAbs, "pack.md"),
+          forkPackMarkdown(sourcePackMd, forkAs)
+        )
+        yield* files.writeAtomic(join(destinationAbs, "conventions.md"), conventionsMd)
+        yield* files.writeAtomic(
+          join(destinationAbs, "reviewers", "target-conventions.md"),
+          targetConventionsReviewer
+        )
+        yield* files.writeAtomic(
+          join(destinationAbs, "README.md"),
+          withDraftApproval(forkedReadme(opened.pack.name, forkAs, targetKind, input.workDir))
+        )
+
+        yield* stage(
+          context.events,
+          "commit",
+          context.git
+            .commitAll(`pack-fork: fork '${opened.pack.name}' as '${forkAs}'`)
+            .pipe(Effect.asVoid)
+        )
+
+        yield* context.events.publish(
+          Info.make({
+            message:
+              `forked pack ready — review ${destinationRel}/README.md and ` +
+              `${destinationRel}/conventions.md, set '- [x] Approved', then set ` +
+              `LLM4TS_PACK=forked/${forkAs}`
+          })
+        )
+      })
+  )
+})
+
+runFlowMain(program)
