@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `judgment:eval` with labelled-set accuracy, calibration, policy and missed-issue
+  measures, latency and optional server RSS, reproducible Markdown reports, and fake-backend tests.
+
 - Add `judgment:label` to seed held-out datasets from commits and observations,
   track pending human labels, and validate promotion with shared dataset schemas.
 

@@ -22,7 +22,8 @@
     "judgment:replay": "tsx tools/judgment/replay-review.ts",
     "typecheck": "tsc -b tsconfig.json --pretty false",
     "version:set": "node scripts/set-version.mjs",
-    "judgment:label": "tsx tools/judgment/label.ts"
+    "judgment:label": "tsx tools/judgment/label.ts",
+    "judgment:eval": "tsx tools/judgment/eval.ts"
   },
   "devDependencies": {
     "@effect/language-service": "latest",

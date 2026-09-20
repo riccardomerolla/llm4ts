@@ -48,3 +48,36 @@ The tool permits smaller batches while building the set; it does not invent
 labels or enforce the final sample size. These are held-out evaluation data:
 exclude the selected states and their source observations from all scorer
 training, including copies in the observation logs.
+
+## Running the evaluation
+
+Run a backend against the labelled set with:
+
+```bash
+pnpm judgment:eval review-prescreen --backend llm \
+  --out docs/judgment/evals/2026-09-20-review-prescreen.md
+```
+
+The default dataset is `tools/judgment/datasets/<decision>.jsonl`. Override it
+with `--dataset <path>`; use `satisfied-probe` or `program-judge` for the other
+decisions. Each item is asked independently, sequentially by default;
+`--concurrency N` permits multiple independent requests in flight. `--out`
+writes the Markdown also printed to stdout; without it no report is saved.
+
+`--backend llm|typesafe|fake` overrides environment selection. Otherwise the
+runner's rule applies: `LLM4TS_JUDGMENT_BACKEND=typesafe` selects TypeSafe,
+and other values select `llm`. The LLM uses the existing runner registry and
+`LLM4TS_JUDGMENT_PROVIDER` / `LLM4TS_JUDGMENT_MODEL`, falling back to
+`LLM4TS_PROVIDER` / `LLM4TS_MODEL` when no judgment provider is set. TypeSafe
+requires a nonblank `TYPESAFE_API_KEY`; the key is kept Redacted and is never
+printed. `fake` needs no credentials and returns the existing fake's defaults
+(Truth=1, Score=level 0), independently of the labels.
+
+For a local LLM server, add `--pid <server-pid>` to sample server RSS before
+and after the run. The report marks memory unavailable without a PID and
+describes the sampled-peak limitation. Dataset and backend request failures
+exit non-zero; per-question failures are counted in the report.
+
+See [evaluation baselines](judgment/evals/README.md) for metric definitions,
+severity limitations, and the exact-command/environment record to include
+when committing a report as a fixed baseline.
