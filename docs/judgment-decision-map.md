@@ -39,6 +39,8 @@ Evidence: `packages/core/test/Judgment.test.ts`, `packages/flow/test/Judgment.te
 
 ## Phase 1: evaluation baseline (next)
 
+Spec: `specs/pending/judgment-evaluation-baseline.md`.
+
 Decision: what "good" means for each selected llm4ts decision.
 
 Selected decisions, in order:
