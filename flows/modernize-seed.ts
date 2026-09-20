@@ -148,8 +148,11 @@ const program = Effect.gen(function* () {
           context.events,
           "scaffold",
           Effect.gen(function* () {
+            // Git housekeeping and the runner's own state (`.llm4ts/` holds the
+            // trace and cost ledger of this very run) are not project content.
             const existing = (yield* target.discover().pipe(Effect.orElseSucceed(() => []))).filter(
-              (path) => !path.startsWith(".git/")
+              (path) =>
+                !path.startsWith(".git/") && !path.startsWith(".llm4ts/") && path !== ".gitignore"
             )
             if (existing.length > 0) {
               yield* context.events.publish(

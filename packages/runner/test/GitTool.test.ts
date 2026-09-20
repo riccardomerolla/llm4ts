@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import { execFileSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -47,6 +48,43 @@ describe("GitTool", () => {
           "one\n"
         )
         assert.strictEqual(yield* git.status, "")
+      })
+    )
+  )
+
+  it.effect("commitAll stages everything except the runner's trace and cost ledger", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        yield* git.config("user.name", "llm4ts test")
+        yield* git.config("user.email", "llm4ts@example.invalid")
+        yield* Effect.promise(() =>
+          mkdir(join(root, ".llm4ts", "kits", "forked"), { recursive: true })
+        )
+        for (const [path, contents] of [
+          ["value.txt", "one\n"],
+          [".llm4ts/trace-1700000000000.jsonl", "{}\n"],
+          [".llm4ts/costs.jsonl", "{}\n"],
+          [".llm4ts/plan-abc.md", "# plan\n"],
+          [".llm4ts/kits/forked/pack.md", "# Pack\n"]
+        ]) {
+          yield* Effect.promise(() => writeFile(join(root, path), contents, "utf8"))
+        }
+        assert.strictEqual((yield* git.commitAll("first"))._tag, "Committed")
+        const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
+          .trim()
+          .split("\n")
+          .sort()
+
+        assert.deepStrictEqual(tracked, [
+          ".llm4ts/kits/forked/pack.md",
+          ".llm4ts/plan-abc.md",
+          "value.txt"
+        ])
+        assert.match(yield* git.status, /trace-1700000000000\.jsonl/)
       })
     )
   )

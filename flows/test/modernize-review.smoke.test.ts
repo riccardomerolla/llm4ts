@@ -9,9 +9,10 @@ import {
   installStub,
   makeFixture,
   runFlow,
+  smokeTimeout,
   stubProgram,
-  write,
-  type Fixture
+  type Fixture,
+  write
 } from "./support/smoke.ts"
 
 /**
@@ -81,7 +82,7 @@ const seedTarget = (fixture: Fixture): void => {
   commitAll(fixture.target, "meridian-transfers: implement transfer posting")
 }
 
-describe("modernize-review end to end (model stubbed)", () => {
+describe("modernize-review end to end (model stubbed)", { timeout: smokeTimeout }, () => {
   it("routes findings into fix specs, plan tasks, and pack lessons", () => {
     const fixture = makeFixture()
     try {

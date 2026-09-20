@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 import { SurveyGraph } from "@llm4ts/flow/Survey"
+import { runnerStateIgnore, smokeTimeout } from "./support/smoke.ts"
 
 const flowsRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -149,6 +150,7 @@ const makeEstate = (): Estate => {
   const git = (...args: ReadonlyArray<string>): void => {
     execFileSync("git", [...args], { cwd: estate, stdio: "ignore" })
   }
+  writeFileSync(join(estate, ".gitignore"), runnerStateIgnore)
   git("init", "-q", "-b", "main")
   git("config", "user.email", "smoke@llm4ts.test")
   git("config", "user.name", "llm4ts smoke")
@@ -214,6 +216,7 @@ const makeJ2eeEstate = (): Estate => {
   const git = (...args: ReadonlyArray<string>): void => {
     execFileSync("git", [...args], { cwd: estate, stdio: "ignore" })
   }
+  writeFileSync(join(estate, ".gitignore"), runnerStateIgnore)
   git("init", "-q", "-b", "main")
   git("config", "user.email", "smoke@llm4ts.test")
   git("config", "user.name", "llm4ts smoke")
@@ -247,7 +250,7 @@ const runSurvey = (estate: Estate, cwd: string = flowsRoot, pack = "cobol-spring
     }
   )
 
-describe("modernize-survey end to end (model stubbed)", () => {
+describe("modernize-survey end to end (model stubbed)", { timeout: smokeTimeout }, () => {
   it("surveys an estate, refines its graph, and writes an unapproved wave plan", () => {
     const estate = makeEstate()
     try {
@@ -352,7 +355,7 @@ describe("modernize-survey end to end (model stubbed)", () => {
   })
 })
 
-describe("modernize-survey over a J2EE estate (model stubbed)", () => {
+describe("modernize-survey over a J2EE estate (model stubbed)", { timeout: smokeTimeout }, () => {
   it("survives a large build tree, resolves fragment includes, and prompts in J2EE terms", () => {
     const estate = makeJ2eeEstate()
     try {

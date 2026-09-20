@@ -8,10 +8,11 @@ import {
   installStub,
   makeFixture,
   runFlow,
+  smokeTimeout,
   stubProgram,
+  type Fixture,
   write,
-  writeExecutable,
-  type Fixture
+  writeExecutable
 } from "./support/smoke.ts"
 
 /**
@@ -126,72 +127,82 @@ const seedTarget = (fixture: Fixture): void => {
   commitAll(fixture.target, "seeded target")
 }
 
-describe("modernize-verify end to end (model stubbed, replay real)", () => {
-  it("generates vectors, replays them, and proves equivalence", () => {
-    const fixture = makeFixture()
-    try {
-      seedTarget(fixture)
-      installStub(fixture, stubProgram(responder))
+describe(
+  "modernize-verify end to end (model stubbed, replay real)",
+  { timeout: smokeTimeout },
+  () => {
+    it("generates vectors, replays them, and proves equivalence", () => {
+      const fixture = makeFixture()
+      try {
+        seedTarget(fixture)
+        installStub(fixture, stubProgram(responder))
 
-      const result = runFlow(fixture, "modernize-verify", fixture.target)
-      assert.strictEqual(result.status, 0, failureReport("verify", result))
+        const result = runFlow(fixture, "modernize-verify", fixture.target)
+        assert.strictEqual(result.status, 0, failureReport("verify", result))
 
-      // Vectors are persisted per program so a rerun resumes.
-      const vectorFile = join(fixture.target, "docs/modernization/vectors/ACCTXFR.jsonl")
-      assert.isTrue(existsSync(vectorFile), "vectors should persist per program")
-      const lines = readFileSync(vectorFile, "utf8").trim().split("\n")
-      assert.lengthOf(lines, 2, "both generated vectors should be written")
-      for (const line of lines) {
-        const parsed: unknown = JSON.parse(line)
-        assert.isObject(parsed)
+        // Vectors are persisted per program so a rerun resumes.
+        const vectorFile = join(fixture.target, "docs/modernization/vectors/ACCTXFR.jsonl")
+        assert.isTrue(existsSync(vectorFile), "vectors should persist per program")
+        const lines = readFileSync(vectorFile, "utf8").trim().split("\n")
+        assert.lengthOf(lines, 2, "both generated vectors should be written")
+        for (const line of lines) {
+          const parsed: unknown = JSON.parse(line)
+          assert.isObject(parsed)
+        }
+
+        // The report covers the FROZEN rule universe, including the rule no
+        // vector exercises — that gap is the point of reporting against rules.txt.
+        const report = readFileSync(
+          join(fixture.target, "docs/modernization/equivalence.md"),
+          "utf8"
+        )
+        assert.include(report, "0100-VALIDATE-INPUT")
+        assert.include(report, "0200-POST-LEDGER")
+        assert.include(report, "UNEXERCISED", "0300-AUDIT has no vector and must be flagged")
+
+        // Provenance carries the equivalence report's hash: the clean-room receipt.
+        const provenance = readFileSync(
+          join(fixture.target, "docs/modernization/provenance.json"),
+          "utf8"
+        )
+        assert.include(provenance, '"equivalenceReport"')
+
+        // No failures, so no fix specs and no plan increment.
+        assert.isFalse(existsSync(join(fixture.target, "docs/specs/fixes")))
+        const plan = readFileSync(join(fixture.target, "docs/modernization/plan.md"), "utf8")
+        assert.notInclude(plan, "Emit OVERDRAFT as the reject reason")
+      } finally {
+        rmSync(fixture.root, { recursive: true, force: true })
       }
+    })
 
-      // The report covers the FROZEN rule universe, including the rule no
-      // vector exercises — that gap is the point of reporting against rules.txt.
-      const report = readFileSync(join(fixture.target, "docs/modernization/equivalence.md"), "utf8")
-      assert.include(report, "0100-VALIDATE-INPUT")
-      assert.include(report, "0200-POST-LEDGER")
-      assert.include(report, "UNEXERCISED", "0300-AUDIT has no vector and must be flagged")
+    it("triages a mismatch into fix specs and plan tasks, and fails the run", () => {
+      const fixture = makeFixture()
+      try {
+        seedTarget(fixture)
+        installStub(fixture, stubProgram(responder))
 
-      // Provenance carries the equivalence report's hash: the clean-room receipt.
-      const provenance = readFileSync(
-        join(fixture.target, "docs/modernization/provenance.json"),
-        "utf8"
-      )
-      assert.include(provenance, '"equivalenceReport"')
+        // The harness now emits the wrong reason code for the reject vector.
+        const result = runFlow(fixture, "modernize-verify", fixture.target, { REPLAY_BREAK: "1" })
+        assert.notStrictEqual(result.status, 0, "a failing vector must fail the phase")
+        assert.include(`${result.stdout}${result.stderr}`, "equivalence not proven")
 
-      // No failures, so no fix specs and no plan increment.
-      assert.isFalse(existsSync(join(fixture.target, "docs/specs/fixes")))
-      const plan = readFileSync(join(fixture.target, "docs/modernization/plan.md"), "utf8")
-      assert.notInclude(plan, "Emit OVERDRAFT as the reject reason")
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true })
-    }
-  })
+        // The mismatch is reported, not swallowed.
+        const report = readFileSync(
+          join(fixture.target, "docs/modernization/equivalence.md"),
+          "utf8"
+        )
+        assert.include(report, "DECLINED", "the actual value should appear in the report")
 
-  it("triages a mismatch into fix specs and plan tasks, and fails the run", () => {
-    const fixture = makeFixture()
-    try {
-      seedTarget(fixture)
-      installStub(fixture, stubProgram(responder))
-
-      // The harness now emits the wrong reason code for the reject vector.
-      const result = runFlow(fixture, "modernize-verify", fixture.target, { REPLAY_BREAK: "1" })
-      assert.notStrictEqual(result.status, 0, "a failing vector must fail the phase")
-      assert.include(`${result.stdout}${result.stderr}`, "equivalence not proven")
-
-      // The mismatch is reported, not swallowed.
-      const report = readFileSync(join(fixture.target, "docs/modernization/equivalence.md"), "utf8")
-      assert.include(report, "DECLINED", "the actual value should appear in the report")
-
-      // Triage filed a fix spec and appended a plan task for another pass.
-      const fix = join(fixture.target, "docs/specs/fixes/fix-reject-reason-must-be-overdraft.md")
-      assert.isTrue(existsSync(fix), "a fix spec should be filed for the root cause")
-      assert.include(readFileSync(fix, "utf8"), "OVERDRAFT")
-      const plan = readFileSync(join(fixture.target, "docs/modernization/plan.md"), "utf8")
-      assert.include(plan, "## [ ] Emit OVERDRAFT as the reject reason")
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true })
-    }
-  })
-})
+        // Triage filed a fix spec and appended a plan task for another pass.
+        const fix = join(fixture.target, "docs/specs/fixes/fix-reject-reason-must-be-overdraft.md")
+        assert.isTrue(existsSync(fix), "a fix spec should be filed for the root cause")
+        assert.include(readFileSync(fix, "utf8"), "OVERDRAFT")
+        const plan = readFileSync(join(fixture.target, "docs/modernization/plan.md"), "utf8")
+        assert.include(plan, "## [ ] Emit OVERDRAFT as the reject reason")
+      } finally {
+        rmSync(fixture.root, { recursive: true, force: true })
+      }
+    })
+  }
+)

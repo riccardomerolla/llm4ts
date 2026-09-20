@@ -10,10 +10,11 @@ import {
   installStub,
   makeFixture,
   runFlow,
+  smokeTimeout,
   stubProgram,
+  type Fixture,
   write,
-  writeExecutable,
-  type Fixture
+  writeExecutable
 } from "./support/smoke.ts"
 
 /**
@@ -103,7 +104,7 @@ const seedTarget = (fixture: Fixture): void => {
   commitAll(fixture.target, "seeded target")
 }
 
-describe("modernize-implement end to end (model stubbed)", () => {
+describe("modernize-implement end to end (model stubbed)", { timeout: smokeTimeout }, () => {
   it("implements each task behind the pack's gates and clears the compliance judge", () => {
     const fixture = makeFixture()
     try {

@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { runnerBookkeeping } from "@llm4ts/flow/GitTool"
 
 /**
  * Shared harness for the offline modernization smokes.
@@ -30,11 +31,23 @@ export interface Fixture {
 export const git = (cwd: string, ...args: ReadonlyArray<string>): string =>
   execFileSync("git", [...args], { cwd, encoding: "utf8" })
 
+/**
+ * Per-test budget for the smoke suites: each spawns real `node` processes
+ * that run a flow against a stub CLI, and writes a trace and cost ledger per
+ * run, so under the parallel full suite they need more than vitest's default
+ * five seconds.
+ */
+export const smokeTimeout = 30_000
+
+/** What a target repository ignores: the runner's trace and cost ledger. */
+export const runnerStateIgnore = `${runnerBookkeeping.join("\n")}\n`
+
 export const initRepo = (path: string): void => {
   mkdirSync(path, { recursive: true })
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: path, stdio: "ignore" })
   execFileSync("git", ["config", "user.email", "smoke@llm4ts.test"], { cwd: path, stdio: "ignore" })
   execFileSync("git", ["config", "user.name", "llm4ts smoke"], { cwd: path, stdio: "ignore" })
+  writeFileSync(join(path, ".gitignore"), runnerStateIgnore)
 }
 
 export const commitAll = (path: string, message: string): void => {

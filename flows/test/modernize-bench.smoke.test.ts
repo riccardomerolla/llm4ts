@@ -10,9 +10,10 @@ import {
   installStub,
   makeFixture,
   runFlow,
+  smokeTimeout,
   stubProgram,
-  write,
-  type Fixture
+  type Fixture,
+  write
 } from "./support/smoke.ts"
 
 /**
@@ -73,7 +74,7 @@ const seedEstate = (fixture: Fixture): void => {
   commitAll(fixture.legacy, "estate baseline")
 }
 
-describe("modernize-bench end to end (model stubbed)", () => {
+describe("modernize-bench end to end (model stubbed)", { timeout: smokeTimeout }, () => {
   it("measures an extraction run, then reports and projects from the record", () => {
     const fixture = makeFixture()
     try {

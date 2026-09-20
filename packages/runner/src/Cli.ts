@@ -1,4 +1,3 @@
-import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
 import { AssistantMessage } from "@llm4ts/flow/FlowEvents"
@@ -35,7 +34,6 @@ export const makeCliProgram = (
         userPrompt: prompt,
         coder,
         verbosity: parseVerbosity(environment.LLM4TS_VERBOSITY),
-        tracePath: join(workDir, ".llm4ts", `trace-${timestamp}.jsonl`),
         runId: timestamp.toString()
       },
       (context) =>

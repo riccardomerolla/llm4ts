@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
@@ -26,7 +27,13 @@ import {
   geminiBridgePort,
   resolveBridgeModel
 } from "./PiModels.ts"
-import { checkCostBudget, makeCostRecord, type CostBudget } from "@llm4ts/flow/CostLedger"
+import {
+  appendCostRecord,
+  checkCostBudget,
+  CostLedgerFileName,
+  makeCostRecord,
+  type CostBudget
+} from "@llm4ts/flow/CostLedger"
 import { FlowLlmError, describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
 import {
   FlowEvents,
@@ -112,7 +119,23 @@ export interface FlowRunnerOptions {
   readonly judgmentBackend?: JudgmentBackend
   /** Persist judgment observations under workDir/.llm4ts/judgments; off by default. */
   readonly judgmentLog?: boolean
+  /**
+   * Where the run's trace goes. Default `workDir/.llm4ts/trace-<start ms>.jsonl`
+   * while `persistRun` holds.
+   */
   readonly tracePath?: string
+  /**
+   * Append-only ledger (`CostLedger`) that receives one `CostRecord` per run
+   * that accrued usage, so `llm4ts costs` and budgets can look across runs.
+   * Default `workDir/.llm4ts/costs.jsonl` while `persistRun` holds.
+   */
+  readonly costLedgerPath?: string
+  /**
+   * `false` writes neither the trace nor the ledger unless their paths are
+   * given explicitly. Default `true`: every run leaves its record under
+   * `workDir/.llm4ts/`, which `llm4ts costs` and replay read back.
+   */
+  readonly persistRun?: boolean
   readonly runId?: string
   readonly verbosity?: Verbosity
   readonly surface?: TerminalSurface
@@ -396,6 +419,13 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   const startedAt = yield* Clock.currentTimeMillis
   const environment = options.environment ?? process.env
   const verbosity = options.verbosity ?? "Normal"
+  const persistRun = options.persistRun ?? true
+  const tracePath =
+    options.tracePath ??
+    (persistRun ? join(options.workDir, ".llm4ts", `trace-${startedAt}.jsonl`) : undefined)
+  const costLedgerPath =
+    options.costLedgerPath ??
+    (persistRun ? join(options.workDir, ".llm4ts", CostLedgerFileName) : undefined)
   const tracker = bundle.tracker
   const surface = options.surface ?? (yield* makeTerminalSurface(environment))
   const palette = surface.palette
@@ -410,18 +440,18 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
       ...(reviewers.length === 0 ? [] : [`reviewers ${reviewers.map(describeSeat).join(", ")}`])
     ].join(" · ")
     yield* surface.log(palette.info(`${seats} · ${options.workDir}`))
-    if (options.tracePath !== undefined) {
+    if (tracePath !== undefined) {
       yield* surface.log(
         palette.info(
-          `trace ${options.tracePath}${options.runId === undefined ? "" : ` · run ${options.runId}`}`
+          `trace ${tracePath}${options.runId === undefined ? "" : ` · run ${options.runId}`}`
         )
       )
     }
   }
   const recorder =
-    options.tracePath === undefined
+    tracePath === undefined
       ? undefined
-      : yield* makeFlowRecorder(dependencies.files, options.tracePath, bundle.runId)
+      : yield* makeFlowRecorder(dependencies.files, tracePath, bundle.runId)
   if (recorder !== undefined) {
     yield* recorder.consume(bundle.events)
   }
@@ -445,6 +475,32 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
             budget
           )
         })
+  // Runs without usage leave no record: a ledger line of zeros would only
+  // inflate run counts for backends that report nothing.
+  const appendLedger =
+    costLedgerPath === undefined
+      ? Effect.void
+      : Effect.gen(function* () {
+          const cells = yield* tracker.cells
+          if (cells.length === 0) {
+            return
+          }
+          yield* appendCostRecord(
+            dependencies.files,
+            costLedgerPath,
+            makeCostRecord({
+              runId: bundle.runId,
+              at: new Date(startedAt).toISOString(),
+              repo: options.workDir,
+              prompt: options.userPrompt,
+              cells
+            })
+          )
+        }).pipe(
+          Effect.catch((error) =>
+            surface.log(palette.fail(`cost ledger not written: ${describeFlowError(error)}`))
+          )
+        )
   return yield* body(bundle.context).pipe(
     Effect.provideService(FlowContext, bundle.context),
     Effect.andThen((value) => Effect.as(enforceBudget, value)),
@@ -460,6 +516,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
         ],
         { concurrency: "unbounded" }
       ).pipe(
+        Effect.andThen(appendLedger),
         Effect.andThen(surface.setStatus(undefined)),
         Effect.andThen(tracker.summary),
         Effect.flatMap((summary) => surface.log(`\n${summary}`))
@@ -474,8 +531,8 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
             `flow failed after ${formatDurationMs(finishedAt - startedAt)}: ${describeFlowError(error)}`
           )}`
         )
-        if (options.tracePath !== undefined) {
-          yield* surface.log(palette.info(`trace ${options.tracePath}`))
+        if (tracePath !== undefined) {
+          yield* surface.log(palette.info(`trace ${tracePath}`))
         }
       })
     ),

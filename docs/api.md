@@ -156,6 +156,14 @@ export list; the following modules are the main entry points.
 
 - `@llm4ts/flow/Replay`, `Equiv`, and `EquivReport`: offline replay and
   behavioral proof.
+- `@llm4ts/flow/CostReport`: the cross-run budgeting view. `usageSamplesFromTrace`
+  lifts a trace's `TokensUsed` lines into timestamped samples,
+  `buildCostReport` buckets them per day and hour in a chosen zone with
+  measured and `estimated:<model>` usage kept apart, averages per active
+  day, calendar day, active hour, and run, and an optional projection for an
+  assumed run rate; `renderCostReport` prints it. `CostLedger` is the
+  run-level companion: the runner appends one `CostRecord` per run to
+  `.llm4ts/costs.jsonl`.
 - `@llm4ts/flow/Artifacts`: resumable per-program extraction and vector
   generation; `@llm4ts/flow/Approval`: the draft marker and human gate the
   modernization phases pause on (both moved here from the retired
@@ -187,6 +195,13 @@ export list; the following modules are the main entry points.
   global, and built-in tiers, pack name resolution, `openPack`, and the
   kit's pattern deck (ADR 0014).
 - `@llm4ts/runner/Cli`: command-line composition.
+- Every run through `runNode` writes `.llm4ts/trace-<timestamp>.jsonl` and
+  appends to `.llm4ts/costs.jsonl` under `workDir` unless
+  `FlowRunnerOptions.tracePath` / `costLedgerPath` name other files or
+  `persistRun: false` turns both off.
+- `@llm4ts/runner/Costs`: `makeCostsProgram` reads the traces of one or more
+  repositories into a `CostReport`, skipping and naming unreadable traces;
+  `llm4ts costs` is its command.
 - `@llm4ts/runner/McpStdio`: JSON-RPC MCP stdio transport.
 
 ## JavaScript

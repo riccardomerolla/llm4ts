@@ -90,6 +90,17 @@ const problem = (result: ProcessResult): string => {
   return detail.length === 0 ? `process exited with code ${result.exitCode}` : detail
 }
 
+/**
+ * The runner's own bookkeeping under `workDir/.llm4ts/`: the run trace and
+ * the cost ledger. `commitAll` never stages them — they grow while the run
+ * commits and belong to the machine, not the repository — while the rest of
+ * `.llm4ts/` (plans, forked packs) is committed as before.
+ */
+export const runnerBookkeeping: ReadonlyArray<string> = [
+  ".llm4ts/trace-*.jsonl",
+  ".llm4ts/costs.jsonl"
+]
+
 export const makeGitTool = (
   process: ProcessExecutorShape,
   workDir: string,
@@ -200,7 +211,14 @@ export const makeGitTool = (
   const checkout = (name: string): Effect.Effect<void, FlowError> =>
     write("git checkout", runOrFail(["checkout", name]).pipe(Effect.asVoid))
 
-  const addAll = runOrFail(["add", "-A"]).pipe(Effect.asVoid)
+  // Stage everything, then take the runner's bookkeeping back out of the
+  // index: `reset -- <glob>` leaves an ignored or unmatched glob alone and
+  // keeps a previously committed trace at its HEAD version, whereas an
+  // `:(exclude)` pathspec makes `add` refuse the ignored files outright.
+  const addAll = runOrFail(["add", "-A"]).pipe(
+    Effect.andThen(runOrFail(["reset", "-q", "--", ...runnerBookkeeping])),
+    Effect.asVoid
+  )
 
   const commitStaged = (message: string): Effect.Effect<CommitResult, FlowError> =>
     Effect.gen(function* () {

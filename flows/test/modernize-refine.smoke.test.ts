@@ -9,6 +9,7 @@ import {
   installStub,
   makeFixture,
   runFlow,
+  smokeTimeout,
   stubProgram,
   write
 } from "./support/smoke.ts"
@@ -105,7 +106,7 @@ const estate = (root: string): void => {
 
 const read = (root: string, relative: string): string => readFileSync(join(root, relative), "utf8")
 
-describe("modernize-refine (model stubbed)", () => {
+describe("modernize-refine (model stubbed)", { timeout: smokeTimeout }, () => {
   it("deepens, proposes, halts on open points, then consolidates and plans per feature", () => {
     const fixture = makeFixture()
     installStub(fixture, stubProgram(respond))

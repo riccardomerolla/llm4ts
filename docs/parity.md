@@ -255,6 +255,13 @@ reference release.
 - Pricing preserves the pinned source rates and cached-input multiplier.
   Budget overruns are typed failures, while cost summaries and ledger values
   remain visibly marked as estimates with the pricing-table date.
+- Beyond the source, the runner appends one `CostRecord` per usage-reporting
+  run to `.llm4ts/costs.jsonl`, and `@llm4ts/flow/CostReport` with
+  `llm4ts costs` aggregate the traces of past runs per day, hour, run, and
+  model for budgeting. The source only summarised a single run. Because every
+  run now leaves those files under `workDir/.llm4ts/`, `commitAll` stages the
+  tree and then unstages them (`runnerBookkeeping`), so a flow's commits never
+  carry the runner's own records.
 - Equivalence observations use the public `type` discriminator from the source
   JSONL contract. Replay commands use the injected process boundary and require
   their exact `Exec` capability before launch.

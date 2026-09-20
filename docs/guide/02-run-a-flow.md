@@ -55,12 +55,47 @@ sequenceDiagram
   Note over You,Plan: re-run the same command after an interruption:<br/>the plan is recovered and unchecked tasks resume
 ```
 
-Two files under `.llm4ts/` in the target repository carry the state:
+Three files under `.llm4ts/` in the target repository carry the state:
 
 - **`plan-<hash>.md`** is the plan, keyed by a hash of the task text. Each
   task is a `## [ ] title` heading that becomes `## [x]` when its commit
   lands. Edit it by hand between runs if the plan is wrong.
-- **`trace-<timestamp>.jsonl`** records every event of the run for replay.
+- **`trace-<timestamp>.jsonl`** records every event of the run for replay,
+  including every token report with its timestamp.
+- **`costs.jsonl`** gains one record per run that reported usage: when it
+  started, the prompt's first line, and the tokens and cost per stage,
+  agent, and model.
+
+## Budgeting from past runs
+
+```bash
+llm4ts costs
+```
+
+reads every trace under `.llm4ts/` and prints tokens and cost per day, per
+hour, per run, and per model, plus the peak day and hour. `--repo <dir>`
+(repeatable) reads other repositories, `--since 2026-09-01` narrows the
+window, `--tz Europe/Rome` cuts the day and hour buckets in your zone, and
+`--runs-per-day 5` adds a projected daily figure for the run rate you
+expect. `--json` emits the same report as data.
+
+Measured token counts and estimates are never mixed: a CLI seat that reports
+no usage is metered from character counts under the model label
+`estimated:<model>` (see [configuration](../configuration.md)), and the
+report keeps those in their own column. Costs come from the backend when it
+reports them, otherwise from the pricing table, whose date the report
+prints.
+
+A flow's own commits never stage the trace or the ledger, but `git status`
+still lists them until the repository ignores them:
+
+```gitignore
+.llm4ts/trace-*.jsonl
+.llm4ts/costs.jsonl
+```
+
+(Not the whole directory: forked packs live under `.llm4ts/kits/` and are
+meant to be committed.)
 
 Every task is its own commit on the flow's branch, so `git log` on that
 branch is the story of the run and `git diff main` is the whole change.

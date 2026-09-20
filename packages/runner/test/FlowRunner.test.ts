@@ -24,7 +24,7 @@ import {
   StageStarted,
   TokensUsed
 } from "@llm4ts/flow/FlowEvents"
-import { CostBudget } from "@llm4ts/flow/CostLedger"
+import { CostBudget, loadCostLedger } from "@llm4ts/flow/CostLedger"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { JudgmentObservation, judgmentLogPath } from "@llm4ts/flow/JudgmentLog"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
@@ -286,6 +286,151 @@ describe("runner cost budget", () => {
 
         assert.strictEqual(error._tag, "BudgetExceeded")
         assert.isAbove(cells.length, 0)
+      })
+    )
+  )
+})
+
+describe("runner cost ledger", () => {
+  const setup = Effect.gen(function* () {
+    const process = yield* makeFakeProcessExecutor()
+    const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+    const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+    const registry = makeConnectorRegistry([
+      {
+        connectorId: ConnectorIds.Mock,
+        kind: "Api",
+        create: (_configuration) => Effect.succeed(mock)
+      }
+    ])
+    const surface: TerminalSurface = {
+      palette: plainTerminalPalette,
+      log: (_line) => Effect.void,
+      setStatus: (_label) => Effect.void,
+      suspend: (effect) => effect
+    }
+    const dependencies = { registry, process: process.executor, files: files(state) }
+    const options = {
+      workDir: "/repo",
+      workspace: "/repo",
+      userPrompt: "  budget   this\nrun",
+      coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+      surface,
+      runId: "run-7",
+      costLedgerPath: "/repo/.llm4ts/costs.jsonl"
+    }
+    return { state, dependencies, options }
+  })
+
+  it.effect("appends one record per run that accrued usage, stamped with the run start", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { state, dependencies, options } = yield* setup
+        yield* TestClock.setTime(Date.parse("2026-09-18T09:10:00Z"))
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) =>
+            context.events.publish(StageStarted.make({ stage: "Plan" })).pipe(
+              Effect.andThen(
+                context.events.publish(
+                  TokensUsed.make({
+                    agent: "coder",
+                    model: "claude-sonnet-4",
+                    usage: TokenUsage.make({ prompt: 100, completion: 40, total: 140 })
+                  })
+                )
+              ),
+              Effect.andThen(context.events.publish(StageCompleted.make({ stage: "Plan" })))
+            ),
+          dependencies
+        )
+        const records = yield* loadCostLedger(dependencies.files, options.costLedgerPath)
+        const contents = (yield* Ref.get(state))[options.costLedgerPath] ?? ""
+
+        assert.strictEqual(records.length, 1)
+        assert.strictEqual(records[0]?.runId, "run-7")
+        assert.strictEqual(records[0]?.at, "2026-09-18T09:10:00.000Z")
+        assert.strictEqual(records[0]?.repo, "/repo")
+        assert.strictEqual(records[0]?.promptHead, "budget this run")
+        assert.strictEqual(records[0]?.totalPrompt, 100)
+        assert.strictEqual(records[0]?.totalCompletion, 40)
+        assert.deepStrictEqual(
+          records[0]?.cells.map((cell) => [cell.stage, cell.agent, cell.model]),
+          [["Plan", "coder", "claude-sonnet-4"]]
+        )
+        assert.strictEqual(contents.split("\n").filter((line) => line.length > 0).length, 1)
+      })
+    )
+  )
+
+  it.effect("records the trace and the ledger under workDir/.llm4ts by default", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { state, dependencies, options: withPaths } = yield* setup
+        const { costLedgerPath: _ledger, ...options } = withPaths
+        yield* TestClock.setTime(1_700_000_000_000)
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) =>
+            context.events.publish(
+              TokensUsed.make({
+                agent: "coder",
+                usage: TokenUsage.make({ prompt: 1, completion: 1, total: 2 })
+              })
+            ),
+          dependencies
+        )
+        const written = Object.keys(yield* Ref.get(state)).sort()
+
+        assert.deepStrictEqual(written, [
+          "/repo/.llm4ts/costs.jsonl",
+          "/repo/.llm4ts/trace-1700000000000.jsonl"
+        ])
+      })
+    )
+  )
+
+  it.effect("leaves no files behind when persistRun is off", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { state, dependencies, options: withPaths } = yield* setup
+        const { costLedgerPath: _ledger, ...options } = { ...withPaths, persistRun: false }
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) =>
+            context.events.publish(
+              TokensUsed.make({
+                agent: "coder",
+                usage: TokenUsage.make({ prompt: 1, completion: 1, total: 2 })
+              })
+            ),
+          dependencies
+        )
+
+        assert.deepStrictEqual(Object.keys(yield* Ref.get(state)), [])
+      })
+    )
+  )
+
+  it.effect("writes nothing for a run whose backend reported no usage", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { state, dependencies, options } = yield* setup
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) => context.events.publish(Info.make({ message: "quiet" })),
+          dependencies
+        )
+
+        assert.strictEqual((yield* Ref.get(state))[options.costLedgerPath], undefined)
       })
     )
   )
@@ -626,7 +771,11 @@ describe("judgment observation logging", () => {
             )
             assert.strictEqual(trace.runId, bundle.runId)
           } else {
-            assert.deepStrictEqual(stored, {})
+            // The run still leaves its default trace; only the judgment log is absent.
+            assert.deepStrictEqual(
+              Object.keys(stored).filter((path) => !path.includes("/trace-")),
+              []
+            )
           }
         })
       )

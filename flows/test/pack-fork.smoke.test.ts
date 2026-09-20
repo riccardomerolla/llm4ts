@@ -12,6 +12,7 @@ import {
   installStub,
   makeFixture,
   runFlow,
+  smokeTimeout,
   stubProgram,
   write
 } from "./support/smoke.ts"
@@ -40,7 +41,7 @@ const respondSource = `(prompt) => {
   return JSON.stringify({ markdown: "## " + heading + "\\n\\nFindings for " + heading + "." })
 }`
 
-describe("pack-fork", () => {
+describe("pack-fork", { timeout: smokeTimeout }, () => {
   it("forks the pack into .llm4ts/kits/forked, drops scaffold, and writes conventions.md", () => {
     const fixture = makeFixture()
     installStub(fixture, stubProgram(respondSource))

@@ -8,6 +8,7 @@ import {
   installStub,
   makeFixture,
   runFlow,
+  smokeTimeout,
   write
 } from "./support/smoke.ts"
 
@@ -90,7 +91,7 @@ const estate = (root: string): void => {
   commitAll(root, "legacy estate with an approved wave plan")
 }
 
-describe("modernize-extract scoped to one wave (model stubbed)", () => {
+describe("modernize-extract scoped to one wave (model stubbed)", { timeout: smokeTimeout }, () => {
   it("clears the gate on the wave's own units and reports the other waves' as not gating", () => {
     const fixture = makeFixture()
     installStub(fixture, stubClaude)

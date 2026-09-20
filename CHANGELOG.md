@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Add `llm4ts costs`: tokens and cost across past runs per day, hour, run,
+  and model from the `.llm4ts/` traces, in a chosen time zone, with measured
+  and `estimated:<model>` usage in separate columns and an optional
+  `--runs-per-day` projection (`@llm4ts/flow/CostReport`,
+  `@llm4ts/runner/Costs`). Every `runNode` run now records its trace and
+  appends a `CostRecord` to `.llm4ts/costs.jsonl` by default — before, only
+  `llm4ts ask` wrote a trace — with `FlowRunnerOptions.tracePath`,
+  `costLedgerPath`, and `persistRun: false` as the overrides. A flow's
+  `commitAll` no longer stages the trace or the ledger (`runnerBookkeeping`
+  in `@llm4ts/flow/GitTool`), and the seed flow no longer counts `.llm4ts/`
+  or a lone `.gitignore` as target content.
 - `LlmJudgmentConfig.batching`: `shared-prefix` sends a request's state once
   with every question and reads each answer as its own label distribution
   (an optional `scoreLabelSequence` primitive, native on `mlx-lm`, derived

@@ -5,7 +5,8 @@ import { assert, describe, it } from "@effect/vitest"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as Effect from "effect/Effect"
 import type { FileSystem } from "effect/FileSystem"
-import { renderFlowList, renderKitList, resolveFlow } from "@llm4ts/shell/Cli"
+import * as Option from "effect/Option"
+import { costsOptionsFrom, renderFlowList, renderKitList, resolveFlow } from "@llm4ts/shell/Cli"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
 
 const flows: ReadonlyArray<DiscoveredFlow> = [
@@ -159,4 +160,61 @@ describe("resolveFlow", () => {
         assert.strictEqual(result.failure._tag, "ShellUsage")
       }
     }))
+})
+
+describe("costsOptionsFrom", () => {
+  const none = {
+    repo: [],
+    since: Option.none(),
+    tz: Option.none(),
+    runsPerDay: Option.none()
+  }
+
+  it.effect("defaults to the current directory in UTC with no projection", () =>
+    Effect.gen(function* () {
+      const options = yield* costsOptionsFrom(none, "/work")
+
+      assert.deepStrictEqual(options, { repos: ["/work"] })
+    })
+  )
+
+  it.effect("resolves repositories, the start date, the zone and the projection", () =>
+    Effect.gen(function* () {
+      const options = yield* costsOptionsFrom(
+        {
+          repo: ["../other", "/abs"],
+          since: Option.some("2026-09-01"),
+          tz: Option.some("Europe/Rome"),
+          runsPerDay: Option.some(3)
+        },
+        "/work/repo"
+      )
+
+      assert.deepStrictEqual(options.repos, ["/work/other", "/abs"])
+      assert.strictEqual(options.since, Date.parse("2026-09-01"))
+      assert.strictEqual(options.timeZone?._tag, "Named")
+      assert.strictEqual(options.runsPerDay, 3)
+    })
+  )
+
+  it.effect("rejects an unparseable date, an unknown zone and a non-positive run count", () =>
+    Effect.gen(function* () {
+      const badDate = yield* Effect.flip(
+        costsOptionsFrom({ ...none, since: Option.some("yesterday") }, "/work")
+      )
+      const badZone = yield* Effect.flip(
+        costsOptionsFrom({ ...none, tz: Option.some("Mars/Olympus") }, "/work")
+      )
+      const badRuns = yield* Effect.flip(
+        costsOptionsFrom({ ...none, runsPerDay: Option.some(0) }, "/work")
+      )
+
+      assert.strictEqual(badDate._tag, "ShellUsage")
+      assert.match(badDate.message, /--since/)
+      assert.strictEqual(badZone._tag, "ShellUsage")
+      assert.match(badZone.message, /--tz/)
+      assert.strictEqual(badRuns._tag, "ShellUsage")
+      assert.match(badRuns.message, /--runs-per-day/)
+    })
+  )
 })

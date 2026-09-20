@@ -12,6 +12,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
+import { smokeTimeout } from "./support/smoke.ts"
 
 const flowsRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -161,7 +162,7 @@ const runFlow = (
 const failureReport = (label: string, result: SpawnSyncReturns<string>): string =>
   `${label} exited ${result.status}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`
 
-describe("modernize extract → seed end to end (model stubbed)", () => {
+describe("modernize extract → seed end to end (model stubbed)", { timeout: smokeTimeout }, () => {
   it("extracts a judged spec pack, gates approval, then seeds the target", () => {
     const fixture = makeFixture()
     try {

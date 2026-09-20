@@ -27,6 +27,7 @@
     "./Classified": "./dist/Classified.js",
     "./Context": "./dist/Context.js",
     "./CostLedger": "./dist/CostLedger.js",
+    "./CostReport": "./dist/CostReport.js",
     "./CostTracker": "./dist/CostTracker.js",
     "./Decisions": "./dist/Decisions.js",
     "./Domains": "./dist/Domains.js",

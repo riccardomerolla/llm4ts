@@ -2,13 +2,21 @@ import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Console from "effect/Console"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import { FileSystem } from "effect/FileSystem"
 import * as Schema from "effect/Schema"
 import * as Argument from "effect/unstable/cli/Argument"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
 import { makeCliProgram } from "@llm4ts/runner/Cli"
+import {
+  CostsResult,
+  makeCostsProgram,
+  renderCostsResult,
+  type CostsOptions
+} from "@llm4ts/runner/Costs"
 import { makeDoctorProgram } from "@llm4ts/runner/Doctor"
 import { builtinKitsDir, discoverKits, kitTierPaths, type DiscoveredKit } from "@llm4ts/runner/Kits"
 import {
@@ -351,6 +359,88 @@ const refineCommand = Command.make(
   )
 )
 
+export interface CostsFlags {
+  readonly repo: ReadonlyArray<string>
+  readonly since: Option.Option<string>
+  readonly tz: Option.Option<string>
+  readonly runsPerDay: Option.Option<number>
+}
+
+/** Turns the `costs` flags into program options; every rejection is a usage error. */
+export const costsOptionsFrom = (
+  flags: CostsFlags,
+  cwd: string = process.cwd()
+): Effect.Effect<CostsOptions, ShellUsageError> =>
+  Effect.gen(function* () {
+    const repos = flags.repo.length === 0 ? [cwd] : flags.repo.map((repo) => resolve(cwd, repo))
+    const since = Option.isNone(flags.since) ? undefined : Date.parse(flags.since.value)
+    if (since !== undefined && Number.isNaN(since)) {
+      return yield* new ShellUsageError({
+        message: `--since needs an ISO date such as 2026-09-01 or 2026-09-01T00:00:00Z, got ${flags.since._tag === "Some" ? flags.since.value : ""}`
+      })
+    }
+    const timeZone = Option.isNone(flags.tz)
+      ? undefined
+      : Option.getOrUndefined(DateTime.zoneMakeNamed(flags.tz.value))
+    if (Option.isSome(flags.tz) && timeZone === undefined) {
+      return yield* new ShellUsageError({
+        message: `--tz needs an IANA zone such as Europe/Rome or UTC, got ${flags.tz.value}`
+      })
+    }
+    const runsPerDay = Option.getOrUndefined(flags.runsPerDay)
+    if (runsPerDay !== undefined && runsPerDay <= 0) {
+      return yield* new ShellUsageError({ message: "--runs-per-day must be positive" })
+    }
+    return {
+      repos,
+      ...(since === undefined ? {} : { since }),
+      ...(timeZone === undefined ? {} : { timeZone }),
+      ...(runsPerDay === undefined ? {} : { runsPerDay })
+    }
+  })
+
+const costsCommand = Command.make(
+  "costs",
+  {
+    repo: Flag.String("repo").pipe(
+      Flag.atLeast(0),
+      Flag.withDescription(
+        "Repository whose .llm4ts/ traces to read; repeatable (defaults to the current directory)"
+      )
+    ),
+    since: Flag.String("since").pipe(
+      Flag.optional,
+      Flag.withDescription("Only count token reports at or after this ISO date")
+    ),
+    tz: Flag.String("tz").pipe(
+      Flag.optional,
+      Flag.withDescription("IANA time zone for the day and hour buckets (default UTC)")
+    ),
+    runsPerDay: Flag.Int("runs-per-day").pipe(
+      Flag.optional,
+      Flag.withDescription("Assumed daily run count for a projected daily budget")
+    ),
+    json: Flag.Boolean("json").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Emit the report as JSON")
+    )
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const options = yield* costsOptionsFrom(config)
+      const result = yield* makeCostsProgram(options)
+      yield* Console.log(
+        config.json
+          ? Schema.encodeSync(Schema.fromJsonString(CostsResult))(result)
+          : renderCostsResult(result)
+      )
+    })
+).pipe(
+  Command.withDescription(
+    "Token and cost usage across past runs, bucketed per day and hour for budgeting"
+  )
+)
+
 const doctorCommand = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const report = yield* makeDoctorProgram()
@@ -378,6 +468,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     viewCommand,
     askCommand,
     refineCommand,
+    costsCommand,
     doctorCommand
   ])
 )

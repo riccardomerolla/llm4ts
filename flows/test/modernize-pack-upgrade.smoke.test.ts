@@ -9,6 +9,7 @@ import {
   installStub,
   makeFixture,
   runFlow,
+  smokeTimeout,
   stubProgram,
   write
 } from "./support/smoke.ts"
@@ -103,7 +104,7 @@ const ageThePack = (legacy: string): void => {
   commitAll(legacy, "a pack from an older release")
 }
 
-describe("modernize-pack-upgrade (no model)", () => {
+describe("modernize-pack-upgrade (no model)", { timeout: smokeTimeout }, () => {
   it("checks an older pack, re-indexes it, marks the programs to deepen, and refine re-extracts them", () => {
     const fixture = makeFixture()
     installStub(fixture, stubProgram(respond))

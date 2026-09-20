@@ -49,6 +49,11 @@ Every task is a commit on the flow's branch, the plan lives under
 `llm4ts list` shows the other built-ins: `sdd`, `issue-pr`, `epic-stories`,
 the `modernize-*` phases. More: [chapter 2](docs/guide/02-run-a-flow.md).
 
+`llm4ts costs` reads the traces of every past run and reports tokens and
+cost per day, per hour, per run, and per model, with a projection for the
+run rate you expect — the numbers a budget needs. Measured token counts and
+character-count estimates stay in separate columns.
+
 ## Write a flow
 
 A flow is one TypeScript file in `.llm4ts/flows/` of the directory you
