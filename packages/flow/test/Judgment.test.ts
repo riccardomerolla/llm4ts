@@ -75,6 +75,10 @@ describe("JudgmentPolicy and decide", () => {
               : outcome._tag === "SatisfiedProbe"
                 ? "satisfied-probe"
                 : "program-judge",
+          state: "state",
+          question: truth("Question?"),
+          answer: truthAnswer(0.85, origins.llm("logprobs"), 0.8),
+          judgmentIdentity: "llm:test-checkpoint",
           key: "question",
           decision: "caution",
           certainty: 0.7,

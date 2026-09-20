@@ -12,6 +12,11 @@ describe("Classified", () => {
     assert.strictEqual(`token: ${secret}`, "token: Classified(…)")
   })
 
+  it("never reveals nested values through JSON serialization", () => {
+    const secret = Classified.of("hunter2")
+    assert.strictEqual(JSON.stringify({ secret }), '{"secret":"Classified(…)"}')
+  })
+
   it("maps without unwrapping", () => {
     const upper = Classified.of("hunter2").map((value) => value.toUpperCase())
 

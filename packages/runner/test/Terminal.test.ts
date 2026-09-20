@@ -12,7 +12,7 @@ import {
   makeFlowEventHub
 } from "@llm4ts/flow/FlowEvents"
 import { TestClock } from "effect/testing"
-import { origins } from "@llm4ts/core/judgment/Schemas"
+import { origins, truth, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 import {
   consumeTerminalEvents,
   formatDurationMs,
@@ -33,6 +33,11 @@ describe("terminal rendering", () => {
     const event = JudgmentObserved.make({
       consumer: "satisfied-probe",
       key: "satisfied",
+      state: "reply",
+      question: truth("Satisfied?"),
+      answer: truthAnswer(1, origins.fake()),
+      judgmentIdentity: "fake:test",
+
       decision: "act",
       certainty: 1,
       support: 1,

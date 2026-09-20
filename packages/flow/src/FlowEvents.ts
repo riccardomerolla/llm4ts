@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
-import { AnswerOrigin } from "@llm4ts/core/judgment/Schemas"
+import { Answer, AnswerOrigin, Question, State } from "@llm4ts/core/judgment/Schemas"
 import { Decision, JudgmentMode } from "./JudgmentTypes.ts"
 
 export const JudgmentOutcome = Schema.Union([
@@ -23,6 +23,10 @@ export type JudgmentOutcome = typeof JudgmentOutcome.Type
 export class JudgmentObserved extends Schema.TaggedClass<JudgmentObserved>()("JudgmentObserved", {
   consumer: Schema.Literals(["review-prescreen", "satisfied-probe", "program-judge"]),
   key: Schema.String,
+  state: State,
+  question: Question,
+  answer: Answer,
+  judgmentIdentity: Schema.String,
   decision: Decision,
   certainty: Schema.Number,
   support: Schema.Number,

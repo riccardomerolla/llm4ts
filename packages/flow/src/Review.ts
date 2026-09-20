@@ -318,6 +318,9 @@ export interface ReviewPrescreenResult {
   readonly observations: ReadonlyArray<{
     readonly key: string
     readonly answer: TruthAnswer
+    readonly question: ReturnType<typeof truth>
+    readonly state: { readonly diff: string }
+    readonly judgmentIdentity: string
     readonly decision: Decision
   }>
 }
@@ -338,31 +341,37 @@ export const prescreenReviewers = Effect.fn("@llm4ts/flow/Review.prescreen")(fun
     return { reviewers: lenses, observations: [] }
   }
   const policy = prescreen.policy ?? defaultJudgmentPolicy
-  const result = yield* prescreen.judgment
-    .judge({
-      state: { diff },
-      questions: Object.fromEntries(
-        lenses.map((lens) => [lens.name, truth(lens.screeningStatement)])
-      )
-    })
-    .pipe(
-      Effect.catch((error) =>
-        events
-          .publish(
-            Info.make({
-              message: `review pre-screen unavailable (${error.message}); running every lens`
-            })
-          )
-          .pipe(Effect.as<JudgmentResult | undefined>(undefined))
-      )
+  const state = { diff }
+  const questions = Object.fromEntries(
+    lenses.map((lens) => [lens.name, truth(lens.screeningStatement)])
+  )
+  const result = yield* prescreen.judgment.judge({ state, questions }).pipe(
+    Effect.catch((error) =>
+      events
+        .publish(
+          Info.make({
+            message: `review pre-screen unavailable (${error.message}); running every lens`
+          })
+        )
+        .pipe(Effect.as<JudgmentResult | undefined>(undefined))
     )
+  )
   if (result === undefined) {
     return { reviewers: lenses, observations: [] }
   }
   const observations = lenses.flatMap((lens) => {
     const answer = result.answers[lens.name]
     return answer?.type === "truth"
-      ? [{ key: lens.name, answer, decision: decide(answer, policy) }]
+      ? [
+          {
+            key: lens.name,
+            answer,
+            decision: decide(answer, policy),
+            state,
+            question: questions[lens.name],
+            judgmentIdentity: prescreen.judgment.identity
+          }
+        ]
       : []
   })
   const kept =
@@ -466,13 +475,17 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
         for (const { lens, result } of results) {
           const observation = screened.observations.find(({ key }) => key === lens.name)
           if (observation === undefined) continue
-          const { key, answer, decision } = observation
+          const { key, answer, decision, state, question, judgmentIdentity } = observation
           const counts = { Critical: 0, Warning: 0, Info: 0 }
           for (const issue of result.issues) counts[issue.severity] += 1
           yield* publishJudgmentObserved(
             options.events,
             JudgmentObserved.make({
               consumer: "review-prescreen",
+              state,
+              question,
+              answer,
+              judgmentIdentity,
               key,
               decision,
               certainty: certaintyOf(answer),

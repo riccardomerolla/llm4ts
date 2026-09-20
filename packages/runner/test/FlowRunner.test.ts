@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 import { ApiConnectorConfig, CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
@@ -15,10 +16,18 @@ import * as Queue from "effect/Queue"
 import { makeMockProvider } from "@llm4ts/core/providers/MockProvider"
 import { makeRecordingHttpClient } from "@llm4ts/core/HttpClient"
 import { choiceOf, truthOf } from "@llm4ts/core/judgment/Judgment"
-import { choice, truth } from "@llm4ts/core/judgment/Schemas"
-import { Info, StageCompleted, StageStarted, TokensUsed } from "@llm4ts/flow/FlowEvents"
+import { choice, truth, truthAnswer, origins } from "@llm4ts/core/judgment/Schemas"
+import {
+  Info,
+  JudgmentObserved,
+  StageCompleted,
+  StageStarted,
+  TokensUsed
+} from "@llm4ts/flow/FlowEvents"
 import { CostBudget } from "@llm4ts/flow/CostLedger"
-import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { JudgmentObservation, judgmentLogPath } from "@llm4ts/flow/JudgmentLog"
+import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { makeFlowRunnerContext, runWithBundle } from "@llm4ts/runner/FlowRunner"
 import { plainTerminalPalette, type TerminalSurface } from "@llm4ts/runner/Terminal"
 
@@ -541,5 +550,140 @@ describe("judgment seat", () => {
         assert.match(String(refused), /TYPESAFE_API_KEY/)
       })
     )
+  )
+})
+
+describe("judgment observation logging", () => {
+  for (const enabled of [undefined, false, true]) {
+    it.effect(`attaches only when enabled (${String(enabled)}) and drains before returning`, () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const memory = yield* makeMemoryPlainFileStore()
+          const process = yield* makeFakeProcessExecutor()
+          const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+          const registry = makeConnectorRegistry([
+            {
+              connectorId: ConnectorIds.Mock,
+              kind: "Api",
+              create: () => Effect.succeed(mock)
+            }
+          ])
+          const dependencies = { registry, process: process.executor, files: memory.store }
+          const surface: TerminalSurface = {
+            palette: plainTerminalPalette,
+            log: () => Effect.void,
+            setStatus: () => Effect.void,
+            suspend: (effect) => effect
+          }
+          const options = {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "task",
+            coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+            environment: {},
+            surface,
+            ...(enabled === undefined ? {} : { judgmentLog: enabled }),
+            ...(enabled === true ? { tracePath: "/repo/trace.jsonl" } : {})
+          }
+          const bundle = yield* makeFlowRunnerContext(options, dependencies)
+          assert.strictEqual(bundle.judgmentLog !== undefined, enabled === true)
+          const event = JudgmentObserved.make({
+            consumer: "satisfied-probe",
+            key: "satisfied",
+            state: "reply",
+            question: truth("Satisfied?"),
+            answer: truthAnswer(1, origins.fake()),
+            judgmentIdentity: "fake",
+            decision: "act",
+            certainty: 1,
+            support: 1,
+            origin: origins.fake(),
+            outcome: { _tag: "SatisfiedProbe", literalMatch: true },
+            mode: "observe"
+          })
+          // Two observations inside the run: the log subscriber was attached
+          // when the context was created, before any of them.
+          yield* runWithBundle(
+            bundle,
+            options,
+            (context) =>
+              context.events.publish(event).pipe(Effect.andThen(context.events.publish(event))),
+            dependencies
+          )
+          const stored = yield* memory.files
+          if (enabled === true) {
+            const records = yield* Effect.forEach(
+              (stored[judgmentLogPath("/repo", event.consumer)] ?? "").trimEnd().split("\n"),
+              (line) => Schema.decodeUnknownEffect(Schema.fromJsonString(JudgmentObservation))(line)
+            )
+            assert.strictEqual(records.length, 2)
+            assert.deepStrictEqual(
+              records.map((record) => record.runId),
+              [bundle.runId, bundle.runId]
+            )
+            const trace = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TraceLine))(
+              (stored["/repo/trace.jsonl"] ?? "").split("\n")[0] ?? ""
+            )
+            assert.strictEqual(trace.runId, bundle.runId)
+          } else {
+            assert.deepStrictEqual(stored, {})
+          }
+        })
+      )
+    )
+  }
+
+  it.effect("drains when the context scope closes without runWithBundle", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const process = yield* makeFakeProcessExecutor()
+          const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+          const bundle = yield* makeFlowRunnerContext(
+            {
+              workDir: "/repo",
+              workspace: "/repo",
+              userPrompt: "task",
+              runId: "explicit-run",
+              coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+              environment: {},
+              judgmentLog: true
+            },
+            {
+              registry: makeConnectorRegistry([
+                {
+                  connectorId: ConnectorIds.Mock,
+                  kind: "Api",
+                  create: () => Effect.succeed(mock)
+                }
+              ]),
+              process: process.executor,
+              files: memory.store
+            }
+          )
+          yield* bundle.events.publish(
+            JudgmentObserved.make({
+              consumer: "satisfied-probe",
+              key: "satisfied",
+              state: "reply",
+              question: truth("Satisfied?"),
+              answer: truthAnswer(1, origins.fake()),
+              judgmentIdentity: "fake",
+              decision: "act",
+              certainty: 1,
+              support: 1,
+              origin: origins.fake(),
+              outcome: { _tag: "SatisfiedProbe", literalMatch: true },
+              mode: "observe"
+            })
+          )
+        })
+      )
+      const record = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(JudgmentObservation))(
+        ((yield* memory.files)[judgmentLogPath("/repo", "satisfied-probe")] ?? "").trimEnd()
+      )
+      assert.strictEqual(record.runId, "explicit-run")
+    })
   )
 })

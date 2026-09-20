@@ -93,15 +93,13 @@ export const satisfiedByJudgment = Effect.fn("@llm4ts/flow/Flow.satisfiedByJudgm
   mode: JudgmentMode = "observe"
 ): Effect.fn.Return<boolean | undefined> {
   const literalMatch = reply.includes("TASK_ALREADY_SATISFIED")
-  const result = yield* judgmentOf(context)
-    .judge({
-      state: { task: taskTitle, reply },
-      questions: {
-        satisfied: truth(
-          "The reply states that the task is already fully satisfied by the current repository and that no change was made."
-        )
-      }
-    })
+  const judgment = judgmentOf(context)
+  const state = { task: taskTitle, reply }
+  const question = truth(
+    "The reply states that the task is already fully satisfied by the current repository and that no change was made."
+  )
+  const result = yield* judgment
+    .judge({ state, questions: { satisfied: question } })
     .pipe(Effect.option)
   if (result._tag === "None") {
     return mode === "act" ? undefined : literalMatch
@@ -117,6 +115,10 @@ export const satisfiedByJudgment = Effect.fn("@llm4ts/flow/Flow.satisfiedByJudgm
       JudgmentObserved.make({
         consumer: "satisfied-probe",
         key: "satisfied",
+        state,
+        question,
+        answer,
+        judgmentIdentity: judgment.identity,
         decision,
         certainty: certaintyOf(answer),
         support: answer.support,

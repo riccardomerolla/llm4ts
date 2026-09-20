@@ -61,6 +61,11 @@ export class Classified<A> {
     )
   }
 
+  /** JSON boundaries must use the same sealed representation as text boundaries. */
+  toJSON(): string {
+    return this.toString()
+  }
+
   toString(): string {
     return "Classified(…)"
   }

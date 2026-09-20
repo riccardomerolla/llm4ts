@@ -38,6 +38,7 @@ import {
 } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
+import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog"
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
 import { makeGitTool } from "@llm4ts/flow/GitTool"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
@@ -109,6 +110,8 @@ export interface FlowRunnerOptions {
    * environment's `LLM4TS_JUDGMENT_BACKEND` decides, then `llm`.
    */
   readonly judgmentBackend?: JudgmentBackend
+  /** Persist judgment observations under workDir/.llm4ts/judgments; off by default. */
+  readonly judgmentLog?: boolean
   readonly tracePath?: string
   readonly runId?: string
   readonly verbosity?: Verbosity
@@ -129,6 +132,8 @@ export interface FlowRunnerBundle {
   readonly events: FlowEventHub
   /** The run's cost tracker, already subscribed to `events`. */
   readonly tracker: CostTracker
+  readonly runId: string
+  readonly judgmentLog?: JudgmentLogShape
 }
 
 const truthy = (value: string | undefined): boolean =>
@@ -198,6 +203,12 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   dependencies: FlowRunnerDependencies
 ): Effect.fn.Return<FlowRunnerBundle, FlowError, Scope.Scope> {
   const events = yield* makeFlowEventHub()
+  const runId = options.runId ?? `run-${(yield* Clock.currentTimeMillis).toString()}`
+  const judgmentLog =
+    options.judgmentLog === true
+      ? yield* makeJudgmentLog({ files: dependencies.files, root: options.workDir, runId })
+      : undefined
+  if (judgmentLog !== undefined) yield* judgmentLog.consume(events)
   const tracker = yield* makeCostTracker()
   yield* tracker.consume(events)
   const reasoning = defaultReasoningConfig(options.coder, options.reasoning)
@@ -361,6 +372,8 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   return {
     events,
     tracker,
+    runId,
+    ...(judgmentLog === undefined ? {} : { judgmentLog }),
     context: contextAt(options.workDir, seats, true)
   }
 })
@@ -403,11 +416,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   const recorder =
     options.tracePath === undefined
       ? undefined
-      : yield* makeFlowRecorder(
-          dependencies.files,
-          options.tracePath,
-          options.runId ?? `run-${(yield* Clock.currentTimeMillis).toString()}`
-        )
+      : yield* makeFlowRecorder(dependencies.files, options.tracePath, bundle.runId)
   if (recorder !== undefined) {
     yield* recorder.consume(bundle.events)
   }
@@ -439,7 +448,10 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
         [
           terminal.awaitDrained(),
           tracker.awaitDrained(bundle.events),
-          recorder === undefined ? Effect.void : recorder.awaitDrained(bundle.events)
+          recorder === undefined ? Effect.void : recorder.awaitDrained(bundle.events),
+          bundle.judgmentLog === undefined
+            ? Effect.void
+            : bundle.judgmentLog.awaitDrained(bundle.events)
         ],
         { concurrency: "unbounded" }
       ).pipe(

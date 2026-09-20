@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Opt-in judgment observation logs capture complete state, question, answer,
+  outcome, and backend identity as schema-validated JSON lines, with sealed
+  `Classified` values redacted and scoped draining in the runner.
+
 - Judgment consumers now default to observe: review pre-screen, satisfied
   probe, and program judge publish typed `JudgmentObserved` outcomes while
   preserving the full path; advise adds operator notices, and explicit act

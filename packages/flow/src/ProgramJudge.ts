@@ -104,6 +104,10 @@ export const withJudgment = (
                     events,
                     JudgmentObserved.make({
                       consumer: "program-judge",
+                      state: request.state,
+                      question: request.questions[dimension.name],
+                      answer,
+                      judgmentIdentity: options.judgment.identity,
                       key: dimension.name,
                       decision: decide(answer),
                       certainty: certaintyOf(answer),

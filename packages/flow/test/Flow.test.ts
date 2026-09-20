@@ -844,6 +844,13 @@ describe("Flow gate and diff safety", () => {
             })
             assert.strictEqual(observations[0]?.consumer, "satisfied-probe")
             assert.strictEqual(observations[0]?.key, "satisfied")
+            assert.deepStrictEqual(observations[0]?.state, (yield* fake.recorded)[0]?.state)
+            assert.deepStrictEqual(
+              observations[0]?.question,
+              (yield* fake.recorded)[0]?.questions["satisfied"]
+            )
+            assert.strictEqual(observations[0]?.judgmentIdentity, fake.judgment.identity)
+            assert.deepStrictEqual(observations[0]?.answer, answer)
             assert.strictEqual(observations[0]?.mode, mode ?? "observe")
             assert.strictEqual(observations[0]?.decision, "act")
             assert.strictEqual(observations[0]?.certainty, 1)

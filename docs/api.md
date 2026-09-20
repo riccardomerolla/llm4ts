@@ -125,12 +125,29 @@ export list; the following modules are the main entry points.
   `"literal"` makes no judgment call. `"judgment"` remains a legacy alias
   for `{ mode: "act" }`, with literal fallback on doubt or failure.
   `FlowEvents.JudgmentObserved` carries consumer, question key, policy
-  decision, certainty, support, origin, mode, and a `JudgmentOutcome` tagged
+  decision, certainty, support, origin, mode, state, question, answer,
+  judgment identity, and a `JudgmentOutcome` tagged
   union: `ReviewPrescreen { lens, issues: { Critical, Warning, Info } }`,
   `SatisfiedProbe { literalMatch }`, or `ProgramJudge { score }`. Events
   are published in observe/advise for answered questions with a full-path
   outcome; failed questions/backend calls never fabricate an answer or
   change that outcome. Act retains the existing automated behavior.
+
+  `@llm4ts/flow/JudgmentLog` exports `JudgmentObservation`, `judgmentLogPath`,
+  and `makeJudgmentLog({ files, root, runId })`: a scoped hub subscriber
+  (`consume`, `awaitDrained`) that validates and appends one JSON line per
+  observation through `PlainFileStoreShape`. Enable it with
+  `FlowRunnerOptions.judgmentLog: true` (off by default, no environment
+  variable); files accumulate across runs at
+  `<workDir>/.llm4ts/judgments/<consumer>.jsonl`, with `at` in epoch
+  milliseconds as in `FlowRecorder`. State is preserved verbatim except
+  sealed `Classified` values: text and JSON conversion use `Classified(…)`,
+  without declassification. Explicitly declassified strings have no remaining
+  classification metadata. Writes degrade permanently on a persistence or
+  encoding failure, as with the recorder, without changing the flow result.
+  The engine never stages or commits these observations; this repository
+  already ignores `.llm4ts/`.
+
 - `@llm4ts/flow/Replay`, `Equiv`, and `EquivReport`: offline replay and
   behavioral proof.
 - `@llm4ts/flow/Artifacts`: resumable per-program extraction and vector
