@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `LlmJudgmentConfig.batching`: `shared-prefix` sends a request's state once
+  with every question and reads each answer as its own label distribution
+  (an optional `scoreLabelSequence` primitive, native on `mlx-lm`, derived
+  from structured output elsewhere); a position the batch cannot read falls
+  back to an independent call. `LLM4TS_JUDGMENT_BATCHING` and `--batching`
+  on `judgment:eval` and `judgment:replay` select it; `independent` stays
+  the default until the Phase 1 comparison is recorded.
 - Add outcome-derived calibration and missed-lens/severity measures to `judgment:replay`,
   separate seat token totals, and shared Markdown output/provenance for judgment tools.
 

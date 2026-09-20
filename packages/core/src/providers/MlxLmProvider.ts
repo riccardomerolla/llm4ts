@@ -5,11 +5,12 @@ import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
 import { ConfigError, InvalidRequestError, ParseError, type LlmError } from "../Errors.ts"
 import type { HttpClientShape } from "../HttpClient.ts"
 import { normalizeLabelProbabilities } from "../LabelScoring.ts"
-import type { StructuredResult } from "../LlmService.ts"
-import type { LabelDistribution } from "../Models.ts"
+import type { LabelSequence, StructuredResult } from "../LlmService.ts"
+import * as Result from "effect/Result"
 import {
   ConnectorCapabilities,
   ConnectorIds,
+  LabelDistribution,
   LlmChunk,
   TokenUsage,
   type JsonSchema,
@@ -21,6 +22,7 @@ import {
   OpenAIChatCompletionRequest,
   OpenAIChatCompletionResponse,
   OpenAIChatMessage,
+  type OpenAITokenLogprob,
   type OpenAITopLogprob
 } from "./OpenAIModels.ts"
 import { openAIHistoryMessages } from "./OpenAIProvider.ts"
@@ -104,6 +106,78 @@ const usageOf = (response: OpenAIChatCompletionResponse): TokenUsage | undefined
           response.usage.total_tokens ??
           (response.usage.prompt_tokens ?? 0) + (response.usage.completion_tokens ?? 0)
       })
+
+/**
+ * Read a shared-prefix reply, one `<n>: <label>` line per question, from
+ * the generated tokens. The text is rebuilt token by token; whenever it
+ * ends in a `<n>:` marker for the next expected question, the first
+ * following token that spells one of that question's labels is that
+ * question's answer position and its top-k is the distribution. A question
+ * whose marker or label never appears fails on its own.
+ */
+export const labelSequenceFrom = (
+  labelSets: ReadonlyArray<ReadonlyArray<string>>,
+  tokens: ReadonlyArray<OpenAITokenLogprob>
+): ReadonlyArray<Result.Result<LabelDistribution, ParseError>> => {
+  const found: Array<LabelDistribution | undefined> = labelSets.map(() => undefined)
+  let buffer = ""
+  let expecting = 0
+  let awaitingLabel = false
+  for (const token of tokens) {
+    const text = token.token.replace(/[Ġ▁]/g, " ")
+    if (awaitingLabel) {
+      const labels = labelSets[expecting] ?? []
+      const normalized = normalizeLabelToken(token.token)
+      if (normalized.length === 0) {
+        continue
+      }
+      if (labels.some((label) => normalizeLabelToken(label) === normalized)) {
+        const top = token.top_logprobs ?? [{ token: token.token, logprob: token.logprob }]
+        const mass = labelMassFrom(labels, top)
+        const total = Object.values(mass).reduce((sum, value) => sum + value, 0)
+        if (total > 0) {
+          found[expecting] = LabelDistribution.make({
+            probabilities: Object.fromEntries(
+              Object.entries(mass).map(([label, value]) => [label, value / total])
+            ),
+            method: "logprobs",
+            support: Math.min(1, total)
+          })
+        }
+        expecting += 1
+        awaitingLabel = false
+        buffer = ""
+        continue
+      }
+      // Anything else before the label: keep scanning, but a new marker
+      // means the answer for the previous question was skipped.
+    }
+    buffer += text
+    const marker = /(\d+)\s*[:.)]\s*$/.exec(buffer)
+    if (marker !== null) {
+      const number = Number.parseInt(marker[1] ?? "", 10) - 1
+      if (number >= expecting && number < labelSets.length) {
+        expecting = number
+        awaitingLabel = true
+        buffer = ""
+      }
+    }
+  }
+  return labelSets.map((_, index) => {
+    const distribution = found[index]
+    return distribution === undefined
+      ? Result.fail(
+          ParseError.make({
+            message: `question ${index + 1} of ${labelSets.length}: no label read in the batched reply`,
+            raw: tokens
+              .map((token) => token.token)
+              .join("")
+              .slice(0, 200)
+          })
+        )
+      : Result.succeed(distribution)
+  })
+}
 
 export const mlxLmCapabilities = (): ConnectorCapabilities =>
   ConnectorCapabilities.make({
@@ -227,6 +301,39 @@ export const makeMlxLmProvider = (
       })
     })
 
+  /** One call for several questions: enough tokens for one short line each, every position read. */
+  const scoreLabelSequence = (
+    prompt: string,
+    labelSets: ReadonlyArray<ReadonlyArray<string>>
+  ): Effect.Effect<LabelSequence, LlmError> =>
+    Effect.gen(function* () {
+      const response = yield* complete(
+        OpenAIChatCompletionRequest.make({
+          model: config.model,
+          messages: [OpenAIChatMessage.make({ role: "user", content: prompt })],
+          temperature: 0,
+          max_tokens: labelSets.length * 8 + 4,
+          stream: false,
+          logprobs: true,
+          top_logprobs: mlxLmTopLogprobs
+        })
+      )
+      const tokens = response.choices[0]?.logprobs?.content
+      if (tokens === undefined || tokens === null) {
+        return yield* ParseError.make({
+          message: "mlx-lm returned no logprobs; is the server started with a text model?",
+          raw: JSON.stringify(response.choices[0]?.message?.content ?? "")
+        })
+      }
+      const usage = usageOf(response)
+      const sequence: LabelSequence = {
+        entries: labelSequenceFrom(labelSets, tokens),
+        ...(usage === undefined ? {} : { usage }),
+        ...(response.model === undefined ? {} : { model: response.model })
+      }
+      return sequence
+    })
+
   const isAvailable: Effect.Effect<boolean> =
     config.baseUrl === undefined
       ? Effect.succeed(false)
@@ -243,6 +350,7 @@ export const makeMlxLmProvider = (
       Effect.fail(InvalidRequestError.make({ message: "mlx-lm does not support tool calling" })),
     executeStructuredWithUsage,
     scoreLabels,
+    scoreLabelSequence,
     isAvailable,
     capabilities: mlxLmCapabilities()
   })

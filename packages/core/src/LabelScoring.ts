@@ -1,7 +1,8 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { InvalidRequestError, ParseError, type LlmError } from "./Errors.ts"
-import type { LlmServiceShape } from "./LlmService.ts"
+import * as Result from "effect/Result"
+import type { LabelSequence, LlmServiceShape } from "./LlmService.ts"
 import { LabelDistribution, type JsonSchema, type LabelMethod } from "./Models.ts"
 
 /**
@@ -115,3 +116,96 @@ export const verbalizedScoreLabels =
 /** For fakes and adapters that cannot classify: fails typed instead of guessing. */
 export const unsupportedScoreLabels: LlmServiceShape["scoreLabels"] = (_prompt, _labels) =>
   Effect.fail(InvalidRequestError.make({ message: "label scoring is not supported here" }))
+
+export class VerbalizedLabelSequence extends Schema.Class<VerbalizedLabelSequence>(
+  "VerbalizedLabelSequence"
+)({
+  answers: Schema.Array(VerbalizedLabels)
+}) {}
+
+export const verbalizedLabelSequenceJsonSchema = (
+  labelSets: ReadonlyArray<ReadonlyArray<string>>
+): JsonSchema => ({
+  type: "object",
+  properties: {
+    answers: {
+      type: "array",
+      minItems: labelSets.length,
+      maxItems: labelSets.length,
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          probabilities: { type: "object", additionalProperties: { type: "number" } }
+        },
+        required: ["label", "probabilities"]
+      }
+    }
+  },
+  required: ["answers"],
+  additionalProperties: false
+})
+
+export const verbalizedLabelSequencePrompt = (
+  prompt: string,
+  labelSets: ReadonlyArray<ReadonlyArray<string>>
+): string =>
+  `${prompt}\n\nReply with JSON only: {"answers": [<one entry per question, in order>]}, each entry {"label": <the one label you choose>, "probabilities": {<a probability for every label of that question, summing to 1>}}. Labels per question: ${labelSets
+    .map((labels, index) => `${index + 1}: ${labels.join(", ")}`)
+    .join("; ")}.`
+
+/**
+ * The derived `scoreLabelSequence`: one schema-constrained JSON reply with
+ * an answer per question. A missing position, or a chosen label with no
+ * mass, fails that position only.
+ */
+export const verbalizedScoreLabelSequence =
+  (executeStructuredWithUsage: LlmServiceShape["executeStructuredWithUsage"]) =>
+  (
+    prompt: string,
+    labelSets: ReadonlyArray<ReadonlyArray<string>>
+  ): Effect.Effect<LabelSequence, LlmError> =>
+    executeStructuredWithUsage(
+      verbalizedLabelSequencePrompt(prompt, labelSets),
+      VerbalizedLabelSequence,
+      verbalizedLabelSequenceJsonSchema(labelSets)
+    ).pipe(
+      Effect.flatMap(([reply, usage, model]) =>
+        Effect.forEach(labelSets, (labels, index) => {
+          const answer = reply.answers[index]
+          const entry: Effect.Effect<LabelDistribution, ParseError> =
+            answer === undefined
+              ? Effect.fail(
+                  ParseError.make({
+                    message: `no answer for question ${index + 1} of ${labelSets.length}`,
+                    raw: raw(JSON.stringify(reply.answers))
+                  })
+                )
+              : labels.includes(answer.label) && !((answer.probabilities[answer.label] ?? 0) > 0)
+                ? Effect.fail(
+                    ParseError.make({
+                      message: `question ${index + 1}: the model chose "${answer.label}" but gave it no probability`,
+                      raw: raw(JSON.stringify(answer.probabilities))
+                    })
+                  )
+                : normalizeLabelProbabilities(labels, answer.probabilities, "verbalized", {
+                    support: 1
+                  })
+          return Effect.result(entry)
+        }).pipe(
+          Effect.map(
+            (entries): LabelSequence => ({
+              entries,
+              ...(usage === undefined ? {} : { usage }),
+              ...(model === undefined ? {} : { model })
+            })
+          )
+        )
+      )
+    )
+
+/** Convenience for callers that want the sequence's successes only. */
+export const sequenceSuccesses = (
+  sequence: LabelSequence
+): ReadonlyArray<LabelDistribution | undefined> =>
+  sequence.entries.map((entry) => (Result.isSuccess(entry) ? entry.success : undefined))

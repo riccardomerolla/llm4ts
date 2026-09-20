@@ -22,12 +22,13 @@ arguments, events, or persisted flow artifacts.
 Typed judgments (ADR 0017) run on their own seat, which defaults to the
 reasoning seat:
 
-| Variable                   | Meaning                                                                       |
-| -------------------------- | ----------------------------------------------------------------------------- |
-| `LLM4TS_JUDGMENT_PROVIDER` | An API provider name as for `LLM4TS_PROVIDER`; unset keeps the reasoning seat |
-| `LLM4TS_JUDGMENT_MODEL`    | Its model                                                                     |
-| `LLM4TS_JUDGMENT_BACKEND`  | `llm` (default) or `typesafe` for the hosted Jev model                        |
-| `TYPESAFE_API_KEY`         | Required by the `typesafe` backend; header only, never logged                 |
+| Variable                   | Meaning                                                                                                                                      |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_JUDGMENT_PROVIDER` | An API provider name as for `LLM4TS_PROVIDER`; unset keeps the reasoning seat                                                                |
+| `LLM4TS_JUDGMENT_MODEL`    | Its model                                                                                                                                    |
+| `LLM4TS_JUDGMENT_BACKEND`  | `llm` (default) or `typesafe` for the hosted Jev model                                                                                       |
+| `LLM4TS_JUDGMENT_BATCHING` | `independent` (default, one call per question) or `shared-prefix` (one call per request, state sent once, each answer read as its own label) |
+| `TYPESAFE_API_KEY`         | Required by the `typesafe` backend; header only, never logged                                                                                |
 
 A small non-thinking model served by `mlx-lm` is the intended judgment seat:
 one forward pass and one output token per question.

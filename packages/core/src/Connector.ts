@@ -88,6 +88,8 @@ export interface ApiConnectorPrimitives {
   readonly isAvailable: Effect.Effect<boolean>
   /** Native label scoring (log-probabilities); derived from structured output when absent. */
   readonly scoreLabels?: LlmServiceShape["scoreLabels"]
+  /** Native shared-prefix sequence scoring; the judgment layer derives one when absent. */
+  readonly scoreLabelSequence?: LlmServiceShape["scoreLabelSequence"]
   readonly capabilities?: ConnectorCapabilities
 }
 
@@ -102,8 +104,10 @@ export const makeApiConnector = (primitives: ApiConnectorPrimitives): ApiConnect
       ([value]) => value
     )
 
+  const { scoreLabelSequence, ...rest } = primitives
   return {
-    ...primitives,
+    ...rest,
+    ...(scoreLabelSequence === undefined ? {} : { scoreLabelSequence }),
     kind: "Api",
     capabilities: primitives.capabilities ?? apiConnectorCapabilities(),
     healthCheck: timedHealthCheck(primitives.isAvailable),

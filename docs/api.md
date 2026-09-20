@@ -22,14 +22,20 @@ export list; the following modules are the main entry points.
   `JudgmentResult`; `Judgment` the service, its errors, and the typed
   accessors `choiceOf` / `scoreOf` / `truthOf`; `LlmJudgment` the layer over
   any `LlmServiceShape` (per-question label scoring, `concurrency`,
-  `permutations`, verbalized fallback, usage and fallback hooks);
+  `permutations`, `batching` (`independent` or `shared-prefix`: the state
+  once with every question, each position read as its own label, a
+  position the batch could not read falling back to its own call),
+  verbalized fallback, usage and fallback hooks);
   `TypeSafeJudgment` the hosted Jev layer (`TYPESAFE_API_KEY`, native
   batching, `truth` ↔ `noul`, calibration `claimed`); `FakeJudgment` the
   deterministic test double.
 - `@llm4ts/core/LabelScoring`: `scoreLabels`, the classification primitive
   every connector offers (a probability per offered label), with the
   verbalized default derivation, `normalizeLabelProbabilities`, and
-  `unsupportedScoreLabels` for fakes. `mlx-lm` answers it from token
+  `unsupportedScoreLabels` for fakes. The optional `scoreLabelSequence`
+  primitive answers several label questions in one call over a shared
+  prompt prefix; `verbalizedScoreLabelSequence` derives it from structured
+  output when a backend has no native read. `mlx-lm` answers it from token
   log-probabilities in one forward pass.
 - `@llm4ts/core/observability/*`: metrics, tracing, recording, logging,
   redaction.

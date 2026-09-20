@@ -10,17 +10,19 @@ import { nodeFlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
 import {
   argValue,
   backendFromEnvironment,
+  batchingFromEnvironment,
   judgmentBackend,
   writeReport,
   JudgmentToolError
 } from "./lib.ts"
+import { Batching } from "@llm4ts/core/judgment/LlmJudgment"
 
 class EvalToolError extends Schema.TaggedError<EvalToolError>()("EvalToolError", {
   message: Schema.String
 }) {}
 
 const usage = [
-  "Usage: pnpm judgment:eval <decision> [--backend llm|typesafe|fake] [--dataset <path>] [--out <path>] [--concurrency N] [--pid PID]",
+  "Usage: pnpm judgment:eval <decision> [--backend llm|typesafe|fake] [--dataset <path>] [--out <path>] [--concurrency N] [--pid PID] [--batching independent|shared-prefix]",
   "Decisions: review-prescreen | satisfied-probe | program-judge",
   "Default dataset: tools/judgment/datasets/<decision>.jsonl; concurrency: 1.",
   "Suggested --out: docs/judgment/evals/<YYYY-MM-DD>-<decision>.md",
@@ -34,7 +36,8 @@ const Arguments = Schema.Struct({
   dataset: Path,
   out: Schema.optionalKey(Path),
   concurrency: PositiveInt,
-  pid: Schema.optionalKey(PositiveInt)
+  pid: Schema.optionalKey(PositiveInt),
+  batching: Batching
 })
 
 const residentMb = Effect.fn("JudgmentEval.residentMb")(function* (pid: number) {
@@ -64,7 +67,7 @@ const program = Effect.gen(function* () {
   for (let index = 1; index < args.length; index += 2) {
     const flag = args[index] ?? ""
     if (
-      !["--backend", "--dataset", "--out", "--concurrency", "--pid"].includes(flag) ||
+      !["--backend", "--dataset", "--out", "--concurrency", "--pid", "--batching"].includes(flag) ||
       seen.has(flag) ||
       args[index + 1] === undefined ||
       args[index + 1]?.startsWith("--")
@@ -80,6 +83,7 @@ const program = Effect.gen(function* () {
     backend: argValue("backend", defaultBackend, args),
     dataset: argValue("dataset", `tools/judgment/datasets/${decision}.jsonl`, args),
     concurrency: Number(argValue("concurrency", "1", args)),
+    batching: argValue("batching", batchingFromEnvironment(environment), args),
     ...(seen.has("--out") ? { out: argValue("out", "", args) } : {}),
     ...(seen.has("--pid") ? { pid: Number(argValue("pid", "", args)) } : {})
   }).pipe(Effect.mapError(() => EvalToolError.make({ message: usage })))
@@ -101,7 +105,14 @@ const program = Effect.gen(function* () {
       message: "Dataset contains an item for a different decision."
     })
   }
-  const backend = yield* judgmentBackend(options.backend, environment, root, dependencies)
+  const backend = yield* judgmentBackend(
+    options.backend,
+    environment,
+    root,
+    dependencies,
+    {},
+    options.batching
+  )
   const restMb = options.pid === undefined ? undefined : yield* residentMb(options.pid)
   const results = yield* Effect.forEach(
     dataset,

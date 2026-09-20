@@ -2,7 +2,8 @@ import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import type * as Stream from "effect/Stream"
 import type * as Schema from "effect/Schema"
-import type { LlmError } from "./Errors.ts"
+import type * as Result from "effect/Result"
+import type { LlmError, ParseError } from "./Errors.ts"
 import type {
   JsonSchema,
   LabelDistribution,
@@ -48,7 +49,31 @@ export interface LlmServiceShape {
     prompt: string,
     labels: ReadonlyArray<string>
   ) => Effect.Effect<LabelDistribution, LlmError>
+  /**
+   * Several label questions answered in one call over a shared prompt
+   * prefix (the judgment layer's `shared-prefix` batching): the reply is one
+   * label per question in order, and each position is read as its own
+   * distribution. Optional, unlike `scoreLabels`: it is a cost optimization
+   * that only backends with token log-probabilities implement natively, and
+   * the judgment layer derives a verbalized version from structured output
+   * when it is absent, so no fake or decorator has to carry it.
+   */
+  readonly scoreLabelSequence?: (
+    prompt: string,
+    labelSets: ReadonlyArray<ReadonlyArray<string>>
+  ) => Effect.Effect<LabelSequence, LlmError>
   readonly isAvailable: Effect.Effect<boolean>
+}
+
+/**
+ * The reply to `scoreLabelSequence`: one outcome per question in order (a
+ * position that could not be read fails on its own, so the caller can fall
+ * back for that question only), plus the call's usage and model once.
+ */
+export interface LabelSequence {
+  readonly entries: ReadonlyArray<Result.Result<LabelDistribution, ParseError>>
+  readonly usage?: TokenUsage
+  readonly model?: string
 }
 
 export class LlmService extends Context.Service<LlmService, LlmServiceShape>()(

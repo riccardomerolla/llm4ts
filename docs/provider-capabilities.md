@@ -59,11 +59,11 @@ must not write should be picked on this capability.
 `ConnectorCapabilities.labelProbabilities` says how a connector answers
 `scoreLabels` (ADR 0017):
 
-| Connector family                  | Label probabilities | Note                                                                  |
-| --------------------------------- | ------------------- | --------------------------------------------------------------------- |
-| mlx-lm                            | logprobs            | One forward pass, `max_tokens: 1`, top 11 token log-probabilities.    |
-| Every other API and CLI connector | verbalized          | Schema-constrained JSON in which the model writes the numbers itself. |
-| Mock                              | verbalized          | Deterministic: the first label gets 0.6, the rest share 0.4.          |
+| Connector family                  | Label probabilities | Note                                                                                                                                                                     |
+| --------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| mlx-lm                            | logprobs            | One forward pass, `max_tokens: 1`, top 11 token log-probabilities; also answers a shared-prefix sequence natively, reading each `<n>: <label>` line's log-probabilities. |
+| Every other API and CLI connector | verbalized          | Schema-constrained JSON in which the model writes the numbers itself.                                                                                                    |
+| Mock                              | verbalized          | Deterministic: the first label gets 0.6, the rest share 0.4.                                                                                                             |
 
 Neither path is calibrated. `logprobs` distributions from a greedy instruct
 model are almost fully peaked (a spike on 2026-09-19 measured probability

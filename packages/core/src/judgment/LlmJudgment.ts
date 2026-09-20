@@ -3,8 +3,8 @@ import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type { LlmError } from "../Errors.ts"
-import { verbalizedScoreLabels } from "../LabelScoring.ts"
-import type { LlmServiceShape } from "../LlmService.ts"
+import { verbalizedScoreLabelSequence, verbalizedScoreLabels } from "../LabelScoring.ts"
+import type { LabelSequence, LlmServiceShape } from "../LlmService.ts"
 import { TokenUsage, type LabelDistribution } from "../Models.ts"
 import { Judgment, type JudgmentInput, type JudgmentShape } from "./Judgment.ts"
 import {
@@ -28,8 +28,14 @@ import {
  * `LlmJudgment`: the Judgment service over any `LlmServiceShape`. One label
  * question per atomic question, answered through `scoreLabels`: a single
  * forward pass on connectors with log-probabilities, a short JSON reply on
- * the rest. Questions never see each other's answers.
+ * the rest. Questions never see each other's answers in `independent`
+ * batching; `shared-prefix` sends the state once with every question and
+ * reads each answer as its own label distribution, trading that isolation
+ * for one prompt prefix per request.
  */
+
+export const Batching = Schema.Literals(["independent", "shared-prefix"])
+export type Batching = typeof Batching.Type
 
 export class LlmJudgmentConfig extends Schema.Class<LlmJudgmentConfig>("LlmJudgmentConfig")({
   /** Questions in flight at once. 1 keeps a local server's prompt cache warm. */
@@ -38,6 +44,13 @@ export class LlmJudgmentConfig extends Schema.Class<LlmJudgmentConfig>("LlmJudgm
   permutations: Schema.Literals([1, 2]).pipe(
     Schema.withConstructorDefault(Effect.succeed<1 | 2>(1))
   ),
+  /**
+   * `independent` (default): one call per question, Jev's answer
+   * independence. `shared-prefix`: every question of a request in one call
+   * whose state prefix is sent once; a question the batch could not read
+   * falls back to its own independent call.
+   */
+  batching: Batching.pipe(Schema.withConstructorDefault(Effect.succeed<Batching>("independent"))),
   /** Connector and model behind the seat, for `identity` and answer origins. */
   connector: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(Schema.String)
@@ -62,19 +75,21 @@ interface LabelPlan {
   readonly keys: Readonly<Record<string, string>>
 }
 
-/**
- * The fixed label-scoring template: state first, then the question, then
- * one single-token label per option. Truth uses `yes`/`no`.
- */
-export const labelPlan = (state: State, question: Question, reverse: boolean): LabelPlan => {
-  const header = `State:\n${renderState(state)}\n\n`
+/** A question's part of a prompt, without the state header. */
+export interface QuestionBody {
+  readonly body: string
+  readonly labels: ReadonlyArray<string>
+  readonly keys: Readonly<Record<string, string>>
+}
+
+export const questionBody = (question: Question, reverse: boolean): QuestionBody => {
   if (question.type === "truth") {
     const criteria =
       question.criteria === undefined
         ? ""
         : `\nYes means: ${describe(question.criteria.true)}\nNo means: ${describe(question.criteria.false)}`
     return {
-      prompt: `${header}Statement: ${question.instructions}${criteria}\nAnswer with exactly one word: yes or no.`,
+      body: `Statement: ${question.instructions}${criteria}\nAnswer with exactly one word: yes or no.`,
       labels: ["yes", "no"],
       keys: { yes: "yes", no: "no" }
     }
@@ -94,16 +109,50 @@ export const labelPlan = (state: State, question: Question, reverse: boolean): L
     .join("\n")
   const ask = question.type === "choice" ? "Question" : "Rate on the levels below"
   return {
-    prompt: `${header}${ask}: ${question.instructions}\nOptions:\n${lines}\nAnswer with exactly one letter.`,
+    body: `${ask}: ${question.instructions}\nOptions:\n${lines}\nAnswer with exactly one letter.`,
     labels,
     keys: Object.fromEntries(ordered.map(([key], index) => [labels[index] ?? `L${index}`, key]))
   }
 }
 
-const byKey = (plan: LabelPlan, distribution: LabelDistribution): Record<string, number> =>
+const stateHeader = (state: State): string => `State:\n${renderState(state)}\n\n`
+
+/**
+ * The fixed label-scoring template: state first, then the question, then
+ * one single-token label per option. Truth uses `yes`/`no`.
+ */
+export const labelPlan = (state: State, question: Question, reverse: boolean): LabelPlan => {
+  const part = questionBody(question, reverse)
+  return { prompt: `${stateHeader(state)}${part.body}`, labels: part.labels, keys: part.keys }
+}
+
+/**
+ * The shared-prefix template: the state once, then every question numbered,
+ * and an answer format of one label per line so a backend can read each
+ * position as its own distribution.
+ */
+export const sequencePlan = (
+  state: State,
+  questions: ReadonlyArray<Question>,
+  reverse: boolean
+): { readonly prompt: string; readonly parts: ReadonlyArray<QuestionBody> } => {
+  const parts = questions.map((question) => questionBody(question, reverse))
+  const numbered = parts.map((part, index) => `Question ${index + 1}.\n${part.body}`).join("\n\n")
+  return {
+    prompt:
+      `${stateHeader(state)}Answer each numbered question below with exactly one label on its own line, ` +
+      `formatted as "<number>: <label>", in order, and nothing else.\n\n${numbered}`,
+    parts
+  }
+}
+
+const byKey = (
+  keys: Readonly<Record<string, string>>,
+  distribution: LabelDistribution
+): Record<string, number> =>
   Object.fromEntries(
     Object.entries(distribution.probabilities).map(([label, value]) => [
-      plan.keys[label] ?? label,
+      keys[label] ?? label,
       value
     ])
   )
@@ -137,12 +186,47 @@ interface Scored {
   readonly model: string | undefined
 }
 
+type Read = readonly [keys: Readonly<Record<string, string>>, distribution: LabelDistribution]
+
+/** Combine one distribution per permutation into an answer; the weaker method and support win. */
+const combine = (
+  question: Question,
+  reads: ReadonlyArray<Read>,
+  fallbackModel: string | undefined
+): Scored => {
+  const method: ScoringMethod = reads.every(
+    ([, distribution]) => distribution.method === "logprobs"
+  )
+    ? "logprobs"
+    : reads.some(([, distribution]) => distribution.method === "sampled")
+      ? "sampled"
+      : "verbalized"
+  const support = Math.min(...reads.map(([, distribution]) => distribution.support))
+  const probabilities = averageProbabilities(
+    reads.map(([keys, distribution]) => byKey(keys, distribution))
+  )
+  const model =
+    reads.find(([, distribution]) => distribution.model !== undefined)?.[1].model ?? fallbackModel
+  return {
+    answer: toAnswer(question, probabilities, origins.llm(method, model), support),
+    usage: sumUsage(reads.map(([, distribution]) => distribution.usage)),
+    model
+  }
+}
+
+type Outcome = readonly [key: string, outcome: Result.Result<Scored, LlmError>]
+
 export const makeLlmJudgment = (
   llm: LlmServiceShape,
   config: LlmJudgmentConfig = LlmJudgmentConfig.make({}),
   hooks: LlmJudgmentHooks = {}
 ): JudgmentShape => {
   const fallback = verbalizedScoreLabels(llm.executeStructuredWithUsage)
+  const sequence =
+    llm.scoreLabelSequence ?? verbalizedScoreLabelSequence(llm.executeStructuredWithUsage)
+  const permutations: ReadonlyArray<boolean> = config.permutations === 2 ? [false, true] : [false]
+  const permutationsFor = (question: Question): ReadonlyArray<boolean> =>
+    permutations.filter((reverse) => !reverse || question.type !== "truth")
 
   const scoreOnce = (plan: LabelPlan, key: string): Effect.Effect<LabelDistribution, LlmError> =>
     llm
@@ -161,32 +245,107 @@ export const makeLlmJudgment = (
     question: Question
   ): Effect.Effect<Scored, LlmError> =>
     Effect.gen(function* () {
-      const plans =
-        config.permutations === 2 && question.type !== "truth"
-          ? [labelPlan(state, question, false), labelPlan(state, question, true)]
-          : [labelPlan(state, question, false)]
-      const distributions = yield* Effect.forEach(plans, (plan) =>
-        Effect.map(scoreOnce(plan, key), (distribution) => [plan, distribution] as const)
+      const plans = permutationsFor(question).map((reverse) => labelPlan(state, question, reverse))
+      const reads = yield* Effect.forEach(plans, (plan) =>
+        Effect.map(scoreOnce(plan, key), (distribution): Read => [plan.keys, distribution])
       )
-      // A mixed pair reports the weaker method; support is the weakest seen.
-      const method: ScoringMethod = distributions.every(
-        ([, distribution]) => distribution.method === "logprobs"
+      return combine(question, reads, config.model)
+    })
+
+  const independently = (
+    input: JudgmentInput,
+    entries: ReadonlyArray<readonly [string, Question]>
+  ): Effect.Effect<ReadonlyArray<Outcome>> =>
+    Effect.forEach(
+      entries,
+      ([key, question]) =>
+        Effect.map(
+          Effect.result(scoreQuestion(input.state, key, question)),
+          (outcome): Outcome => [key, outcome]
+        ),
+      { concurrency: config.concurrency }
+    )
+
+  /**
+   * One call per permutation for the whole request. A question whose
+   * position could not be read in any permutation, or a call that failed
+   * outright, goes back through the independent path for that question.
+   */
+  const sharedPrefix = (
+    input: JudgmentInput,
+    entries: ReadonlyArray<readonly [string, Question]>
+  ): Effect.Effect<{
+    readonly outcomes: ReadonlyArray<Outcome>
+    readonly usage: TokenUsage | undefined
+    readonly model: string | undefined
+  }> =>
+    Effect.gen(function* () {
+      const questions = entries.map(([, question]) => question)
+      const calls = yield* Effect.forEach(permutations, (reverse) => {
+        const plan = sequencePlan(input.state, questions, reverse)
+        return Effect.map(
+          Effect.result(
+            sequence(
+              plan.prompt,
+              plan.parts.map((part) => part.labels)
+            )
+          ),
+          (outcome) => [plan, outcome] as const
+        )
+      })
+      const successes = calls.flatMap(([, outcome]) =>
+        Result.isSuccess(outcome) ? [outcome.success] : []
       )
-        ? "logprobs"
-        : distributions.some(([, distribution]) => distribution.method === "sampled")
-          ? "sampled"
-          : "verbalized"
-      const support = Math.min(...distributions.map(([, distribution]) => distribution.support))
-      const probabilities = averageProbabilities(
-        distributions.map(([plan, distribution]) => byKey(plan, distribution))
+      const batchModel = successes.find((call) => call.model !== undefined)?.model ?? config.model
+      const answered: Array<Outcome> = []
+      const retry: Array<readonly [string, Question]> = []
+      for (const [index, [key, question]] of entries.entries()) {
+        const reads: Array<Read> = []
+        let reason: string | undefined
+        for (const [callIndex, reverse] of permutations.entries()) {
+          if (!permutationsFor(question).includes(reverse)) {
+            continue
+          }
+          const call = calls[callIndex]
+          const part = call?.[0].parts[index]
+          const outcome = call?.[1]
+          if (outcome === undefined || part === undefined) {
+            reason = "no batched call covered this question"
+            break
+          }
+          if (Result.isFailure(outcome)) {
+            reason = outcome.failure.message
+            break
+          }
+          const entry = outcome.success.entries[index]
+          if (entry === undefined) {
+            reason = "no entry for this question"
+            break
+          }
+          if (Result.isFailure(entry)) {
+            reason = entry.failure.message
+            break
+          }
+          reads.push([part.keys, entry.success])
+        }
+        if (reason === undefined && reads.length > 0) {
+          // Usage was reported once for the whole call; the per-question reads carry none.
+          answered.push([key, Result.succeed(combine(question, reads, batchModel))])
+        } else {
+          yield* hooks.onFallback?.(key, `shared-prefix batch: ${reason ?? "unreadable"}`) ??
+            Effect.void
+          retry.push([key, question])
+        }
+      }
+      const retried = retry.length === 0 ? [] : yield* independently(input, retry)
+      const order = new Map(entries.map(([key], index) => [key, index] as const))
+      const outcomes = [...answered, ...retried].sort(
+        ([a], [b]) => (order.get(a) ?? 0) - (order.get(b) ?? 0)
       )
-      const model =
-        distributions.find(([, distribution]) => distribution.model !== undefined)?.[1].model ??
-        config.model
       return {
-        answer: toAnswer(question, probabilities, origins.llm(method, model), support),
-        usage: sumUsage(distributions.map(([, distribution]) => distribution.usage)),
-        model
+        outcomes,
+        usage: sumUsage(successes.map((call) => call.usage)),
+        model: successes.find((call) => call.model !== undefined)?.model
       }
     })
 
@@ -194,20 +353,15 @@ export const makeLlmJudgment = (
     input: JudgmentInput
   ): Effect.fn.Return<JudgmentResult> {
     const entries = Object.entries(input.questions)
-    const outcomes = yield* Effect.forEach(
-      entries,
-      ([key, question]) =>
-        Effect.map(
-          Effect.result(scoreQuestion(input.state, key, question)),
-          (outcome) => [key, outcome] as const
-        ),
-      { concurrency: config.concurrency }
-    )
+    const batched =
+      config.batching === "shared-prefix" && entries.length > 1
+        ? yield* sharedPrefix(input, entries)
+        : { outcomes: yield* independently(input, entries), usage: undefined, model: undefined }
     const answers: Record<string, Answer> = {}
     const failures: Array<QuestionFailure> = []
-    const usages: Array<TokenUsage | undefined> = []
-    let model: string | undefined
-    for (const [key, outcome] of outcomes) {
+    const usages: Array<TokenUsage | undefined> = [batched.usage]
+    let model: string | undefined = batched.model
+    for (const [key, outcome] of batched.outcomes) {
       if (Result.isFailure(outcome)) {
         failures.push(QuestionFailure.make({ key, reason: outcome.failure.message }))
       } else {
@@ -241,3 +395,5 @@ export const LlmJudgmentLive = (
   config?: LlmJudgmentConfig,
   hooks?: LlmJudgmentHooks
 ): Layer.Layer<Judgment> => Layer.succeed(Judgment, makeLlmJudgment(llm, config, hooks))
+
+export type { LabelSequence }

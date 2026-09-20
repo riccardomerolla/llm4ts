@@ -285,7 +285,12 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
           seat,
           LlmJudgmentConfig.make({
             connector: seatConfig.connectorId.value,
-            ...(seatConfig.model === undefined ? {} : { model: seatConfig.model })
+            ...(seatConfig.model === undefined ? {} : { model: seatConfig.model }),
+            // LLM4TS_JUDGMENT_BATCHING=shared-prefix sends each request's state
+            // once with every question; anything else keeps them independent.
+            ...(environment.LLM4TS_JUDGMENT_BATCHING?.trim().toLowerCase() === "shared-prefix"
+              ? { batching: "shared-prefix" as const }
+              : {})
           }),
           judgmentHooks
         )

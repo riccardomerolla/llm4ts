@@ -17,6 +17,7 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
 import {
+  Batching,
   LlmJudgmentConfig,
   makeLlmJudgment,
   type LlmJudgmentHooks
@@ -49,7 +50,8 @@ export const judgmentBackend = Effect.fn("JudgmentTool.backend")(function* (
   environment: Readonly<Record<string, string | undefined>>,
   root: string,
   dependencies: FlowRunnerDependencies,
-  hooks: LlmJudgmentHooks = {}
+  hooks: LlmJudgmentHooks = {},
+  batching: Batching = batchingFromEnvironment(environment)
 ) {
   if (backend === "fake") {
     return { judgment: (yield* makeFakeJudgment()).judgment, model: "deterministic defaults" }
@@ -82,6 +84,7 @@ export const judgmentBackend = Effect.fn("JudgmentTool.backend")(function* (
       seat,
       LlmJudgmentConfig.make({
         connector: config.connectorId.value,
+        batching,
         ...(config.model === undefined ? {} : { model: config.model })
       }),
       hooks
@@ -89,6 +92,14 @@ export const judgmentBackend = Effect.fn("JudgmentTool.backend")(function* (
     model: config.model ?? "default"
   }
 })
+
+/** `LLM4TS_JUDGMENT_BATCHING=shared-prefix` selects the batched local path, as in the runner. */
+export const batchingFromEnvironment = (
+  environment: Readonly<Record<string, string | undefined>>
+): Batching =>
+  environment.LLM4TS_JUDGMENT_BATCHING?.trim().toLowerCase() === "shared-prefix"
+    ? "shared-prefix"
+    : "independent"
 
 // Explicit allowlist: only presence is captured, never credential values or endpoint URLs.
 const provenanceEnvironment = [
@@ -99,6 +110,7 @@ const provenanceEnvironment = [
   "LLM4TS_JUDGMENT_BACKEND",
   "LLM4TS_JUDGMENT_PROVIDER",
   "LLM4TS_JUDGMENT_MODEL",
+  "LLM4TS_JUDGMENT_BATCHING",
   "LLM4TS_JUDGMENT_BASE_URL",
   "LLM4TS_JUDGMENT_API_KEY",
   "TYPESAFE_API_KEY",

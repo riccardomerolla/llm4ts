@@ -8,7 +8,13 @@ import { InvalidRequestError, ParseError } from "@llm4ts/core/Errors"
 import { makeRecordingHttpClient } from "@llm4ts/core/HttpClient"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
 import { choiceOf, scoreOf, truthOf } from "@llm4ts/core/judgment/Judgment"
-import { labelPlan, LlmJudgmentConfig, makeLlmJudgment } from "@llm4ts/core/judgment/LlmJudgment"
+import {
+  labelPlan,
+  LlmJudgmentConfig,
+  makeLlmJudgment,
+  sequencePlan
+} from "@llm4ts/core/judgment/LlmJudgment"
+import * as Result from "effect/Result"
 import {
   Answer,
   averageProbabilities,
@@ -344,6 +350,163 @@ describe("judgment/FakeJudgment", () => {
       const recorded = yield* fake.recorded
       assert.strictEqual(recorded.length, 1)
       assert.strictEqual(result.backend, "fake")
+    })
+  )
+})
+
+describe("judgment/LlmJudgment shared-prefix batching", () => {
+  const three = {
+    department: questions.department,
+    clarity: questions.clarity,
+    urgent: questions.urgent
+  }
+  const distributionFor = (labels: ReadonlyArray<string>, peak: number) =>
+    normalizeLabelProbabilities(
+      labels,
+      Object.fromEntries(labels.map((label, at) => [label, at === peak ? 0.8 : 0.2])),
+      "logprobs",
+      { support: 0.9 }
+    )
+
+  /** A fake with a native sequence read that records every batched prompt. */
+  const makeSequenceFake = (
+    failIndex?: number
+  ): Effect.Effect<{
+    readonly service: LlmServiceShape
+    readonly batched: Effect.Effect<ReadonlyArray<string>>
+    readonly single: Effect.Effect<ReadonlyArray<string>>
+  }> =>
+    Effect.gen(function* () {
+      const batched = yield* Ref.make<ReadonlyArray<string>>([])
+      const single = yield* Ref.make<ReadonlyArray<string>>([])
+      const base = yield* makeLabelFake(peakedOn(0))
+      const service: LlmServiceShape = {
+        ...base.service,
+        scoreLabels: (prompt, labels) =>
+          Ref.update(single, (all) => [...all, prompt]).pipe(
+            Effect.andThen(base.service.scoreLabels(prompt, labels))
+          ),
+        scoreLabelSequence: (prompt, labelSets) =>
+          Effect.gen(function* () {
+            yield* Ref.update(batched, (all) => [...all, prompt])
+            const entries = yield* Effect.forEach(
+              labelSets,
+              (labels, index): Effect.Effect<Result.Result<LabelDistribution, ParseError>> =>
+                index === failIndex
+                  ? Effect.succeed(
+                      Result.fail(ParseError.make({ message: `no label at ${index + 1}`, raw: "" }))
+                    )
+                  : Effect.result(distributionFor(labels, 1))
+            )
+            return {
+              entries,
+              usage: TokenUsage.make({ prompt: 100, completion: 6, total: 106 }),
+              model: "batched-model"
+            }
+          })
+      }
+      return { service, batched: Ref.get(batched), single: Ref.get(single) }
+    })
+
+  it("lays out the state once and every question numbered", () => {
+    const plan = sequencePlan("the state", [questions.department, questions.urgent], false)
+    assert.strictEqual(plan.prompt.split("State:\nthe state").length, 2)
+    assert.match(plan.prompt, /Question 1\.\nQuestion: Which department\?/)
+    assert.match(plan.prompt, /Question 2\.\nStatement: The customer is blocked\./)
+    assert.match(plan.prompt, /"<number>: <label>"/)
+    assert.deepStrictEqual(
+      plan.parts.map((part) => part.labels),
+      [
+        ["A", "B"],
+        ["yes", "no"]
+      ]
+    )
+  })
+
+  it.effect("answers three questions with one native call, mapping positions back to keys", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeSequenceFake()
+      const usages = yield* Ref.make<ReadonlyArray<TokenUsage>>([])
+      const judgment = makeLlmJudgment(
+        fake.service,
+        LlmJudgmentConfig.make({ batching: "shared-prefix" }),
+        { onUsage: (usage) => Ref.update(usages, (all) => [...all, usage]) }
+      )
+      const result = yield* judgment.judge({ state: "s", questions: three })
+      assert.strictEqual((yield* fake.batched).length, 1)
+      assert.strictEqual((yield* fake.single).length, 0)
+      const department = yield* choiceOf(result, "department")
+      assert.strictEqual(department.choice, "technical")
+      assert.strictEqual(department.origin.method, "logprobs")
+      assert.strictEqual(department.origin.model, "batched-model")
+      assert.closeTo(department.support, 0.9, 1e-9)
+      const clarity = yield* scoreOf(result, "clarity")
+      assert.closeTo(clarity.probabilities["1"] ?? 0, 0.8 / 1.2, 1e-9)
+      const urgent = yield* truthOf(result, "urgent")
+      assert.closeTo(urgent.truth, 0.2 / 1.0, 1e-9)
+      assert.deepStrictEqual(yield* Ref.get(usages), [
+        TokenUsage.make({ prompt: 100, completion: 6, total: 106 })
+      ])
+    })
+  )
+
+  it.effect(
+    "falls back to an independent call only for the position the batch could not read",
+    () =>
+      Effect.gen(function* () {
+        const fake = yield* makeSequenceFake(1)
+        const fallbacks = yield* Ref.make<ReadonlyArray<string>>([])
+        const judgment = makeLlmJudgment(
+          fake.service,
+          LlmJudgmentConfig.make({ batching: "shared-prefix" }),
+          {
+            onFallback: (key, reason) =>
+              Ref.update(fallbacks, (all) => [...all, `${key}: ${reason}`])
+          }
+        )
+        const result = yield* judgment.judge({ state: "s", questions: three })
+        assert.strictEqual((yield* fake.batched).length, 1)
+        assert.strictEqual((yield* fake.single).length, 1)
+        assert.deepStrictEqual(yield* Ref.get(fallbacks), [
+          "clarity: shared-prefix batch: no label at 2"
+        ])
+        assert.strictEqual(Object.keys(result.answers).length, 3)
+        assert.strictEqual((yield* scoreOf(result, "clarity")).origin.method, "logprobs")
+        assert.deepStrictEqual(Object.keys(result.answers), ["department", "clarity", "urgent"])
+      })
+  )
+
+  it.effect("derives a verbalized sequence when the service has no native one", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeLabelFake(peakedOn(0), {
+        answers: [
+          { label: "B", probabilities: { A: 0.3, B: 0.7 } },
+          { label: "yes", probabilities: { yes: 0.6, no: 0.4 } }
+        ]
+      })
+      const judgment = makeLlmJudgment(
+        fake.service,
+        LlmJudgmentConfig.make({ batching: "shared-prefix" })
+      )
+      const result = yield* judgment.judge({
+        state: "s",
+        questions: { department: questions.department, urgent: questions.urgent }
+      })
+      assert.strictEqual((yield* fake.prompts).length, 0)
+      const department = yield* choiceOf(result, "department")
+      assert.strictEqual(department.choice, "technical")
+      assert.strictEqual(department.origin.method, "verbalized")
+      assert.closeTo((yield* truthOf(result, "urgent")).truth, 0.6, 1e-9)
+    })
+  )
+
+  it.effect("independent batching still makes one call per question", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeSequenceFake()
+      const judgment = makeLlmJudgment(fake.service)
+      yield* judgment.judge({ state: "s", questions: three })
+      assert.strictEqual((yield* fake.batched).length, 0)
+      assert.strictEqual((yield* fake.single).length, 3)
     })
   )
 })

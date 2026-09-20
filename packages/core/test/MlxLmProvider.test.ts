@@ -4,8 +4,10 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { makeRecordingHttpClient, type HttpRequest } from "@llm4ts/core/HttpClient"
 import { LlmConfig, type JsonSchema } from "@llm4ts/core/Models"
+import * as Result from "effect/Result"
 import {
   labelMassFrom,
+  labelSequenceFrom,
   makeMlxLmProvider,
   normalizeLabelToken,
   normalizeMlxLmBaseUrl
@@ -185,6 +187,112 @@ describe("MlxLmProvider", () => {
       assert.isFalse(yield* unconfigured.isAvailable)
       const error = yield* Effect.flip(unconfigured.scoreLabels("p", ["a"]))
       assert.strictEqual(error._tag, "ConfigError")
+    })
+  )
+})
+
+describe("MlxLmProvider shared-prefix sequence", () => {
+  const token = (text: string, top?: ReadonlyArray<{ token: string; logprob: number }>) => ({
+    token: text,
+    logprob: 0,
+    ...(top === undefined ? {} : { top_logprobs: top })
+  })
+
+  it("reads one distribution per numbered answer line and fails a missing position alone", () => {
+    const tokens = [
+      token("1"),
+      token(":"),
+      token(" B", [
+        { token: " B", logprob: Math.log(0.6) },
+        { token: " A", logprob: Math.log(0.3) },
+        { token: " C", logprob: Math.log(0.1) }
+      ]),
+      token("\n"),
+      token("2"),
+      token(":"),
+      token(" maybe", [{ token: " maybe", logprob: 0 }]),
+      token("\n"),
+      token("3"),
+      token(":"),
+      token(" yes", [
+        { token: " yes", logprob: Math.log(0.55) },
+        { token: " no", logprob: Math.log(0.4) },
+        { token: " Yes", logprob: Math.log(0.05) }
+      ])
+    ]
+    const entries = labelSequenceFrom(
+      [
+        ["A", "B"],
+        ["A", "B"],
+        ["yes", "no"]
+      ],
+      tokens
+    )
+    const first = entries[0]
+    assert.isTrue(first !== undefined && Result.isSuccess(first))
+    if (first !== undefined && Result.isSuccess(first)) {
+      assert.closeTo(first.success.probabilities["B"] ?? 0, 0.6 / 0.9, 1e-9)
+      assert.closeTo(first.success.support, 0.9, 1e-9)
+      assert.strictEqual(first.success.method, "logprobs")
+    }
+    const second = entries[1]
+    assert.isTrue(second !== undefined && Result.isFailure(second))
+    const third = entries[2]
+    assert.isTrue(third !== undefined && Result.isSuccess(third))
+    if (third !== undefined && Result.isSuccess(third)) {
+      // "yes" and "Yes" are the same label; "no" keeps its own mass.
+      assert.closeTo(third.success.probabilities["yes"] ?? 0, 0.6, 1e-9)
+      assert.closeTo(third.success.support, 1, 1e-9)
+    }
+  })
+
+  it.effect("asks for the whole sequence in one request and reports usage once", () =>
+    Effect.gen(function* () {
+      const recording = yield* makeRecordingHttpClient(() =>
+        Effect.succeed(
+          completion({
+            message: { role: "assistant", content: "1: A\n2: no" },
+            logprobs: {
+              content: [
+                { token: "1", logprob: 0 },
+                { token: ":", logprob: 0 },
+                {
+                  token: " A",
+                  logprob: 0,
+                  top_logprobs: [
+                    { token: " A", logprob: Math.log(0.9) },
+                    { token: " B", logprob: Math.log(0.1) }
+                  ]
+                },
+                { token: "\n", logprob: 0 },
+                { token: "2", logprob: 0 },
+                { token: ":", logprob: 0 },
+                {
+                  token: " no",
+                  logprob: 0,
+                  top_logprobs: [
+                    { token: " no", logprob: Math.log(0.7) },
+                    { token: " yes", logprob: Math.log(0.3) }
+                  ]
+                }
+              ]
+            }
+          })
+        )
+      )
+      const provider = makeMlxLmProvider(config, recording.client)
+      const sequence = yield* provider.scoreLabelSequence!("batched?", [
+        ["A", "B"],
+        ["yes", "no"]
+      ])
+      assert.strictEqual(sequence.entries.length, 2)
+      assert.strictEqual(sequence.usage?.total, 27)
+      const [request] = yield* recording.recorded
+      if (request !== undefined) {
+        const body = yield* decodeRequest(request)
+        assert.strictEqual(body.max_tokens, 2 * 8 + 4)
+        assert.isTrue(body.logprobs)
+      }
     })
   )
 })

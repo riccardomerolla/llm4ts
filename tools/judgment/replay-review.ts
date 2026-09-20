@@ -15,10 +15,12 @@ import {
   commits,
   lenses,
   backendFromEnvironment,
+  batchingFromEnvironment,
   judgmentBackend,
   writeReport,
   JudgmentToolError
 } from "./lib.ts"
+import { Batching } from "@llm4ts/core/judgment/LlmJudgment"
 import * as DateTime from "effect/DateTime"
 import * as Schema from "effect/Schema"
 import {
@@ -36,13 +38,14 @@ import { apiConnectorFromEnvironment, prepareConnector } from "@llm4ts/runner/Co
 import { nodeFlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
 
 const usage =
-  "Usage: pnpm judgment:replay [--commits 30] [--repo .] [--diff-cap 60000] [--out <path>]"
+  "Usage: pnpm judgment:replay [--commits 30] [--repo .] [--diff-cap 60000] [--out <path>] [--batching independent|shared-prefix]"
 const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 const Arguments = Schema.Struct({
   commitCount: PositiveInt,
   repo: Schema.String.check(Schema.isNonEmpty()),
   diffCap: PositiveInt,
-  out: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty()))
+  out: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty())),
+  batching: Batching
 })
 
 const tokensIn = (events: ReadonlyArray<FlowEvent>): number =>
@@ -65,7 +68,7 @@ const program = Effect.gen(function* () {
   for (let index = 0; index < args.length; index += 2) {
     const flag = args[index] ?? ""
     if (
-      !["--commits", "--repo", "--diff-cap", "--out"].includes(flag) ||
+      !["--commits", "--repo", "--diff-cap", "--out", "--batching"].includes(flag) ||
       seen.has(flag) ||
       args[index + 1] === undefined ||
       args[index + 1]?.startsWith("--")
@@ -73,11 +76,14 @@ const program = Effect.gen(function* () {
       return yield* JudgmentToolError.make({ message: usage })
     seen.add(flag)
   }
-  const { commitCount, repo, diffCap, out } = yield* Schema.decodeUnknownEffect(Arguments)({
+  const { commitCount, repo, diffCap, out, batching } = yield* Schema.decodeUnknownEffect(
+    Arguments
+  )({
     commitCount: Number(argValue("commits", "30", args)),
     repo: argValue("repo", process.cwd(), args),
     diffCap: Number(argValue("diff-cap", "60000", args)),
-    ...(seen.has("--out") ? { out: argValue("out", "", args) } : {})
+    ...(seen.has("--out") ? { out: argValue("out", "", args) } : {}),
+    batching: argValue("batching", batchingFromEnvironment(process.env), args)
   }).pipe(Effect.mapError(() => JudgmentToolError.make({ message: usage })))
   const environment = process.env
   const dependencies = nodeFlowRunnerDependencies()
@@ -96,7 +102,8 @@ const program = Effect.gen(function* () {
         screenEvents.publish(
           new TokensUsed({ agent: "judgment", usage, ...(model === undefined ? {} : { model }) })
         )
-    }
+    },
+    batching
   )
   const labelledAt = DateTime.formatIso(yield* DateTime.now)
   const items: Array<EvalItem> = []
