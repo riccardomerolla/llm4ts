@@ -28,6 +28,9 @@ import type { FlowContextShape } from "./FlowContext.ts"
 import { FlowLlmError, PersistenceError, type FlowError } from "./FlowError.ts"
 import { Info, type FlowEventsShape } from "./FlowEvents.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
+import { type Decision } from "./JudgmentTypes.ts"
+
+export { Decision, JudgmentMode } from "./JudgmentTypes.ts"
 
 /**
  * Judgment policy (ADR 0017): core answers questions and reports their
@@ -80,9 +83,6 @@ export class JudgmentPolicy extends Schema.Class<JudgmentPolicy>("JudgmentPolicy
 }
 
 export const defaultJudgmentPolicy = JudgmentPolicy.make({})
-
-export const Decision = Schema.Literals(["act", "caution", "hold"])
-export type Decision = typeof Decision.Type
 
 /**
  * How sure an answer is, whatever its kind. A Choice or Score carries its

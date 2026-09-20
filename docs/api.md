@@ -79,9 +79,16 @@ export list; the following modules are the main entry points.
   `judgeAllPrograms` judges each program against only its slice of the diff
   (cached per program, resumable), judges the unassigned remainder once, and
   reports every spec'd program with no matching changed file as a Critical
-  finding.
+  finding. `judgment: { judgment, mode? }` compares typed Score answers with
+  the generative scores in observe mode by default. `withJudgment` exposes
+  the same wrapper for an `Evaluator<Sample>`; act returns judgment scores.
+  Verdict caches include mode and checkpoint identity when configured;
+  cache hits emit no new observations.
 - `@llm4ts/flow/Reviewer`, `Pack`, `Review`, `SpecChecks`, and `Survey`:
   file-scoped review lenses, bounded review/fix loops, and discovery.
+  `ReviewPrescreen.mode` defaults to observe: `prescreenReviewers` returns
+  selected reviewers plus answers/decisions, and `reviewAndFixLoop` publishes
+  their outcomes after the lenses run. Only act skips confident negative lenses.
   `Pack.programFiles`/`filesFor(program)` locate a program's implementation
   files; `Survey.closureFor(graph, program, maxFiles)` resolves the bounded
   breadth-first include closure extract hands its analysts.
@@ -101,6 +108,9 @@ export list; the following modules are the main entry points.
   typed `MissingDependency`.
 - `@llm4ts/flow/PrSummary`: structured pull-request titles and bodies.
 - `@llm4ts/flow/Judgment` (ADR 0017): what a flow does with a judgment.
+  `JudgmentMode` is `observe | advise | act`, defaulting to observe whenever
+  a consumer enables a judgment. Observe preserves the full path's result;
+  advise also renders its decision and outcome through an `Info` event.
   `JudgmentPolicy` (bands keyed by calibration evidence, then by extraction
   method, verbalized held highest, plus `minSupport`), `decide` (act /
   caution / hold), `judgeOrEscalate` (held or failed answers re-asked of the
@@ -108,10 +118,19 @@ export list; the following modules are the main entry points.
   (fingerprinted on state, questions and the judgment identity), and
   `judgmentOf(context)`.
   `Review.prescreenReviewers` and the `prescreen` option of
-  `reviewAndFixLoop` are its first consumer: one Truth question per lens
-  over the diff, skipping lenses the screen is confidently negative about;
-  off by default. `ImplementPlanOptions.satisfiedProbe: "judgment"` reads
-  the empty-diff confirmation through it.
+  `reviewAndFixLoop` ask one Truth question per selected lens over the diff;
+  the pre-screen is disabled unless configured. In `Flow`,
+  `ImplementPlanOptions.satisfiedProbe: { mode?: JudgmentMode }` enables a
+  judgment alongside the literal empty-diff confirmation. Omitted or
+  `"literal"` makes no judgment call. `"judgment"` remains a legacy alias
+  for `{ mode: "act" }`, with literal fallback on doubt or failure.
+  `FlowEvents.JudgmentObserved` carries consumer, question key, policy
+  decision, certainty, support, origin, mode, and a `JudgmentOutcome` tagged
+  union: `ReviewPrescreen { lens, issues: { Critical, Warning, Info } }`,
+  `SatisfiedProbe { literalMatch }`, or `ProgramJudge { score }`. Events
+  are published in observe/advise for answered questions with a full-path
+  outcome; failed questions/backend calls never fabricate an answer or
+  change that outcome. Act retains the existing automated behavior.
 - `@llm4ts/flow/Replay`, `Equiv`, and `EquivReport`: offline replay and
   behavioral proof.
 - `@llm4ts/flow/Artifacts`: resumable per-program extraction and vector

@@ -26,6 +26,9 @@ export const parseVerbosity = (value: string | undefined): Verbosity => {
 
 export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean => {
   switch (event._tag) {
+    case "JudgmentObserved":
+      // Advise mode publishes a separate Info event for the operator.
+      return false
     case "StageStarted":
     case "StageCompleted":
     case "StageFailed":
@@ -141,6 +144,8 @@ export const terminalLine = (
 ): string => {
   const safe = terminalSafe
   switch (event._tag) {
+    case "JudgmentObserved":
+      return ""
     case "StageStarted":
       return palette.stageStart(safe(event.stage))
     case "StageCompleted":

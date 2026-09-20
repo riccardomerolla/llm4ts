@@ -12,6 +12,10 @@ import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { Reviewer } from "@llm4ts/flow/Pack"
 import { ReviewIssue, ReviewResult, llmDriven, reviewAndFixLoop } from "@llm4ts/flow/Review"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
+import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
+import { JudgmentBackendError } from "@llm4ts/core/judgment/Judgment"
+import { origins, truthAnswer } from "@llm4ts/core/judgment/Schemas"
+import type { JudgmentMode } from "@llm4ts/flow/Judgment"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -63,6 +67,127 @@ const lens = (files?: string, name = "correctness"): Reviewer =>
   })
 
 describe("reviewAndFixLoop", () => {
+  it.effect(
+    "keeps reviewing when observations have failed questions or an unavailable backend",
+    () =>
+      Effect.gen(function* () {
+        const fake = yield* makeFakeJudgment({ failures: { correctness: "no answer" } })
+        const broken = {
+          ...fake.judgment,
+          judge: () =>
+            Effect.fail(JudgmentBackendError.make({ backend: "fake", message: "unavailable" }))
+        }
+        for (const judgment of [fake.judgment, broken]) {
+          const events = yield* makeCollectingFlowEvents
+          const calls = yield* Ref.make(0)
+          const asks = yield* Ref.make(0)
+          const dirty = ReviewResult.make({
+            issues: [ReviewIssue.make({ severity: "Critical", title: "bug" })]
+          })
+          const values = yield* Ref.make<ReadonlyArray<unknown>>([dirty])
+          const coder = yield* makeChat(coderService(asks))
+          const result = yield* reviewAndFixLoop({
+            reviewers: [lens()],
+            reviewerService: reviewerService(values, calls),
+            coder,
+            taskTitle: "task",
+            currentDiff: Effect.succeed("diff"),
+            events,
+            maxRounds: 1,
+            prescreen: { judgment }
+          })
+          assert.deepStrictEqual(result.issues, dirty.issues)
+          assert.strictEqual(yield* Ref.get(calls), 1)
+          assert.isFalse(
+            (yield* events.recorded).some((event) => event._tag === "JudgmentObserved")
+          )
+        }
+      })
+  )
+
+  const modes: ReadonlyArray<JudgmentMode | undefined> = [undefined, "observe", "advise", "act"]
+  for (const mode of modes) {
+    it.effect(`pre-screen ${mode ?? "default"} preserves the appropriate review/fix path`, () =>
+      Effect.gen(function* () {
+        const answer = truthAnswer(0, origins.llm("logprobs"))
+        const fake = yield* makeFakeJudgment({
+          answers: { correctness: answer, security: answer }
+        })
+        const dirty = ReviewResult.make({
+          issues: [
+            ReviewIssue.make({ severity: "Critical", title: "missed guard" }),
+            ReviewIssue.make({ severity: "Warning", title: "missing test" }),
+            ReviewIssue.make({ severity: "Info", title: "unclear name" })
+          ]
+        })
+        const values = yield* Ref.make<ReadonlyArray<unknown>>([dirty, { issues: [] }])
+        const calls = yield* Ref.make(0)
+        const asks = yield* Ref.make(0)
+        const events = yield* makeCollectingFlowEvents
+        const coder = yield* makeChat(coderService(asks))
+        const result = yield* reviewAndFixLoop({
+          reviewers: [lens(), lens(undefined, "security")],
+          reviewerService: reviewerService(values, calls),
+          coder,
+          taskTitle: "task",
+          currentDiff: Effect.succeed("diff"),
+          events,
+          parallelism: 1,
+          prescreen: { judgment: fake.judgment, ...(mode === undefined ? {} : { mode }) }
+        })
+        assert.isTrue(result.isClean)
+        assert.strictEqual(yield* Ref.get(calls), mode === "act" ? 0 : 4)
+        assert.strictEqual(yield* Ref.get(asks), mode === "act" ? 0 : 1)
+        assert.strictEqual((yield* fake.recorded).length, mode === "act" ? 1 : 2)
+        const recorded = yield* events.recorded
+        const observations = recorded.filter((event) => event._tag === "JudgmentObserved")
+        assert.strictEqual(observations.length, mode === "act" ? 0 : 4)
+        if (mode !== "act") {
+          assert.deepStrictEqual(
+            observations.map((event) => event.outcome),
+            [
+              {
+                _tag: "ReviewPrescreen",
+                lens: "correctness",
+                issues: { Critical: 1, Warning: 1, Info: 1 }
+              },
+              {
+                _tag: "ReviewPrescreen",
+                lens: "security",
+                issues: { Critical: 0, Warning: 0, Info: 0 }
+              },
+              {
+                _tag: "ReviewPrescreen",
+                lens: "correctness",
+                issues: { Critical: 0, Warning: 0, Info: 0 }
+              },
+              {
+                _tag: "ReviewPrescreen",
+                lens: "security",
+                issues: { Critical: 0, Warning: 0, Info: 0 }
+              }
+            ]
+          )
+          assert.strictEqual(observations[0]?.consumer, "review-prescreen")
+          assert.strictEqual(observations[0]?.key, "correctness")
+          assert.strictEqual(observations[0]?.mode, mode ?? "observe")
+          assert.strictEqual(observations[0]?.decision, "act")
+          assert.strictEqual(observations[0]?.certainty, 1)
+          assert.strictEqual(observations[0]?.support, 1)
+          assert.deepStrictEqual(observations[0]?.origin, answer.origin)
+        }
+        const advice = recorded.filter(
+          (event) => event._tag === "Info" && event.message.includes("judgment review-prescreen")
+        )
+        assert.strictEqual(advice.length, mode === "advise" ? 4 : 0)
+        if (mode === "advise") {
+          const first = advice[0]
+          assert.match(first?._tag === "Info" ? first.message : "", /correctness.*act.*Critical.*1/)
+        }
+      })
+    )
+  }
+
   // Reviewer lenses are structured calls, and their usage went unpublished:
   // every flow whose cost is dominated by review reported none of it.
   it.effect("publishes the token usage each reviewer lens reported", () =>

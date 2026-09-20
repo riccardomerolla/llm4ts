@@ -8,12 +8,24 @@ import { Capabilities } from "@llm4ts/core/Capability"
 import { guarded } from "./CapabilityGuard.ts"
 import type { Chat } from "./Chat.ts"
 import { FlowLlmError, ProcessError, describeFlowError, type FlowError } from "./FlowError.ts"
-import { Info, type FlowEventsShape } from "./FlowEvents.ts"
+import {
+  Info,
+  JudgmentObserved,
+  publishJudgmentObserved,
+  type FlowEventsShape
+} from "./FlowEvents.ts"
 import { Reviewer } from "./Reviewer.ts"
 import { publishUsage } from "./Usage.ts"
 import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
-import { truth, type JudgmentResult } from "@llm4ts/core/judgment/Schemas"
-import { decide, defaultJudgmentPolicy, type JudgmentPolicy } from "./Judgment.ts"
+import { truth, type JudgmentResult, type TruthAnswer } from "@llm4ts/core/judgment/Schemas"
+import {
+  certaintyOf,
+  decide,
+  defaultJudgmentPolicy,
+  type Decision,
+  type JudgmentMode,
+  type JudgmentPolicy
+} from "./Judgment.ts"
 
 export const Severity = Schema.Literals(["Critical", "Warning", "Info"])
 export type Severity = typeof Severity.Type
@@ -289,8 +301,8 @@ export interface ReviewAndFixOptions {
   readonly format?: Effect.Effect<void, FlowError>
   /**
    * A judgment pre-screen (ADR 0017): one Truth question per lens over the
-   * diff, skipping lenses the screen is confident have nothing to report.
-   * Off by default until the replay in `tools/judgment` clears its bar.
+   * diff. Observes by default, keeping every selected lens; only explicit
+   * act mode skips lenses. Omit to disable the judgment entirely.
    */
   readonly prescreen?: ReviewPrescreen
 }
@@ -298,10 +310,21 @@ export interface ReviewAndFixOptions {
 export interface ReviewPrescreen {
   readonly judgment: JudgmentShape
   readonly policy?: JudgmentPolicy
+  readonly mode?: JudgmentMode
+}
+
+export interface ReviewPrescreenResult {
+  readonly reviewers: ReadonlyArray<Reviewer>
+  readonly observations: ReadonlyArray<{
+    readonly key: string
+    readonly answer: TruthAnswer
+    readonly decision: Decision
+  }>
 }
 
 /**
- * Which lenses deserve a full pass. A lens is skipped only when its screen
+ * Selected lenses and their answers for publication after review. In act mode
+ * a lens is skipped only when its screen
  * answered with `act` certainty that the diff has nothing for it; doubt,
  * failure, and escalation all run the lens. Never skip on doubt.
  */
@@ -310,9 +333,9 @@ export const prescreenReviewers = Effect.fn("@llm4ts/flow/Review.prescreen")(fun
   events: FlowEventsShape,
   diff: string,
   lenses: ReadonlyArray<Reviewer>
-): Effect.fn.Return<ReadonlyArray<Reviewer>, FlowError> {
+): Effect.fn.Return<ReviewPrescreenResult, FlowError> {
   if (lenses.length === 0) {
-    return lenses
+    return { reviewers: lenses, observations: [] }
   }
   const policy = prescreen.policy ?? defaultJudgmentPolicy
   const result = yield* prescreen.judgment
@@ -334,17 +357,24 @@ export const prescreenReviewers = Effect.fn("@llm4ts/flow/Review.prescreen")(fun
       )
     )
   if (result === undefined) {
-    return lenses
+    return { reviewers: lenses, observations: [] }
   }
-  const kept = lenses.filter((lens) => {
+  const observations = lenses.flatMap((lens) => {
     const answer = result.answers[lens.name]
-    return !(
-      answer !== undefined &&
-      answer.type === "truth" &&
-      answer.truth < 0.5 &&
-      decide(answer, policy) === "act"
-    )
+    return answer?.type === "truth"
+      ? [{ key: lens.name, answer, decision: decide(answer, policy) }]
+      : []
   })
+  const kept =
+    prescreen.mode !== "act"
+      ? lenses
+      : lenses.filter(
+          (lens) =>
+            !observations.some(
+              ({ key, answer, decision }) =>
+                key === lens.name && answer.truth < 0.5 && decision === "act"
+            )
+        )
   const skipped = lenses.filter((lens) => !kept.includes(lens))
   if (skipped.length > 0) {
     yield* events.publish(
@@ -353,7 +383,7 @@ export const prescreenReviewers = Effect.fn("@llm4ts/flow/Review.prescreen")(fun
       })
     )
   }
-  return kept
+  return { reviewers: kept, observations }
 })
 
 export const reviewWith = (
@@ -417,18 +447,44 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       const diff = yield* options.currentDiff
       const files = yield* changedFiles
       const selected = yield* selector.select(options.reviewers, files, round, previous)
-      const chosen =
+      const screened =
         options.prescreen === undefined
-          ? selected
+          ? { reviewers: selected, observations: [] }
           : yield* prescreenReviewers(options.prescreen, options.events, diff, selected)
+      const chosen = screened.reviewers
       const run = (lens: Reviewer) =>
-        reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
+        reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff).pipe(
+          Effect.map((result) => ({ lens, result }))
+        )
       const parallelism = options.parallelism ?? 0
       const results =
         parallelism > 0
           ? yield* Effect.forEach(chosen, run, { concurrency: parallelism })
           : yield* Effect.forEach(chosen, run, { concurrency: "unbounded" })
-      return mergeReviewResults(results)
+      const mode = options.prescreen?.mode ?? "observe"
+      if (mode !== "act") {
+        for (const { lens, result } of results) {
+          const observation = screened.observations.find(({ key }) => key === lens.name)
+          if (observation === undefined) continue
+          const { key, answer, decision } = observation
+          const counts = { Critical: 0, Warning: 0, Info: 0 }
+          for (const issue of result.issues) counts[issue.severity] += 1
+          yield* publishJudgmentObserved(
+            options.events,
+            JudgmentObserved.make({
+              consumer: "review-prescreen",
+              key,
+              decision,
+              certainty: certaintyOf(answer),
+              support: answer.support,
+              origin: answer.origin,
+              outcome: { _tag: "ReviewPrescreen", lens: lens.name, issues: counts },
+              mode
+            })
+          )
+        }
+      }
+      return mergeReviewResults(results.map(({ result }) => result))
     })
 
   const loop = (

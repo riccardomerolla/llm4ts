@@ -4,6 +4,7 @@ import * as Ref from "effect/Ref"
 import { TokenUsage } from "@llm4ts/core/Models"
 import {
   AssistantMessage,
+  JudgmentObserved,
   StageCompleted,
   StageFailed,
   StageStarted,
@@ -11,6 +12,7 @@ import {
   makeFlowEventHub
 } from "@llm4ts/flow/FlowEvents"
 import { TestClock } from "effect/testing"
+import { origins } from "@llm4ts/core/judgment/Schemas"
 import {
   consumeTerminalEvents,
   formatDurationMs,
@@ -19,6 +21,7 @@ import {
   makeLiveTerminalSurface,
   makeTerminalPalette,
   plainTerminalPalette,
+  rendersEvent,
   terminalLine,
   terminalSafe,
   terminalSupportsColor,
@@ -26,6 +29,22 @@ import {
 } from "@llm4ts/runner/Terminal"
 
 describe("terminal rendering", () => {
+  it("leaves judgment telemetry silent; advice arrives as Info", () => {
+    const event = JudgmentObserved.make({
+      consumer: "satisfied-probe",
+      key: "satisfied",
+      decision: "act",
+      certainty: 1,
+      support: 1,
+      origin: origins.fake(),
+      outcome: { _tag: "SatisfiedProbe", literalMatch: true },
+      mode: "observe"
+    })
+    assert.isFalse(rendersEvent("Normal", event))
+    assert.isFalse(rendersEvent("Verbose", event))
+    assert.strictEqual(terminalLine(event), "")
+  })
+
   it("sanitizes controls and renders stable tree lines", () => {
     assert.strictEqual(terminalSafe("safe\u001b[2J title\u0007"), "safe title")
     assert.strictEqual(

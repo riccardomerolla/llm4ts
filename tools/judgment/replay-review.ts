@@ -138,7 +138,12 @@ const program = Effect.gen(function* () {
         )
     })
     const screenStarted = Date.now()
-    const kept = yield* prescreenReviewers({ judgment }, screenEvents, commit.diff, lenses)
+    const { reviewers: kept } = yield* prescreenReviewers(
+      { judgment, mode: "act" },
+      screenEvents,
+      commit.diff,
+      lenses
+    )
     const screenMs = Date.now() - screenStarted
     const screenTokens = tokensIn(yield* screenEvents.recorded)
     const skipped = runs.filter((run) => !kept.includes(run.lens))

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Judgment consumers now default to observe: review pre-screen, satisfied
+  probe, and program judge publish typed `JudgmentObserved` outcomes while
+  preserving the full path; advise adds operator notices, and explicit act
+  retains automation.
+
 Typed judgments (ADR 0017), the Jev "System One" idea brought into llm4ts:
 atomic Choice / Score / Truth questions evaluated against one state, answered
 with probabilities, confidence, `support` and an `origin` (backend,

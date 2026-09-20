@@ -1,9 +1,18 @@
 import * as Effect from "effect/Effect"
 import { Sample, type Dimension, type EvalResult } from "@llm4ts/core/eval/Eval"
-import type { Evaluator } from "@llm4ts/core/eval/Evaluator"
+import { makeEvaluator, type Evaluator } from "@llm4ts/core/eval/Evaluator"
+import { judgeWithJudgment } from "@llm4ts/core/eval/Judge"
+import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
 import { capped, withShrink } from "./Context.ts"
 import { FlowLlmError, type FlowError } from "./FlowError.ts"
-import { FlowEvents, Info } from "./FlowEvents.ts"
+import {
+  FlowEvents,
+  Info,
+  JudgmentObserved,
+  publishJudgmentObserved,
+  type FlowEventsShape
+} from "./FlowEvents.ts"
+import { certaintyOf, decide, type JudgmentMode } from "./Judgment.ts"
 import type { GitToolShape } from "./GitTool.ts"
 import type { Pack } from "./Pack.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
@@ -49,6 +58,8 @@ export const groupFiles = (
 export interface ProgramJudgeOptions {
   readonly pack: Pack
   readonly judge: Evaluator<Sample>
+  /** Observe alongside the generative judge by default; only act replaces its scores. */
+  readonly judgment?: { readonly judgment: JudgmentShape; readonly mode?: JudgmentMode }
   readonly dimensions: ReadonlyArray<Dimension>
   readonly git: GitToolShape
   readonly files: PlainFileStoreShape
@@ -61,6 +72,66 @@ export interface ProgramJudgeOptions {
   readonly query: string
   /** Content fingerprint for the verdict cache (hashing lives outside flow). */
   readonly fingerprint: (...parts: ReadonlyArray<string>) => string
+}
+
+/**
+ * Compare typed answers with generative scores without changing the result in
+ * observe/advise. Failed questions have no answer to observe; backend failure
+ * keeps the generative result. Act uses core's judgment evaluator unchanged.
+ */
+export const withJudgment = (
+  generative: Evaluator<Sample>,
+  dimensions: ReadonlyArray<Dimension>,
+  options: NonNullable<ProgramJudgeOptions["judgment"]>,
+  events: FlowEventsShape
+): Evaluator<Sample> => {
+  const mode = options.mode ?? "observe"
+  if (mode === "act") return judgeWithJudgment(options.judgment, dimensions)
+  return makeEvaluator(
+    Effect.fn("@llm4ts/flow/ProgramJudge.withJudgment")(function* (sample: Sample) {
+      const full = yield* generative.evaluate(sample)
+      const observing: JudgmentShape = {
+        ...options.judgment,
+        judge: (request) =>
+          options.judgment.judge(request).pipe(
+            Effect.tap(
+              Effect.fnUntraced(function* (result) {
+                for (const dimension of dimensions) {
+                  const answer = result.answers[dimension.name]
+                  const score = full.scores.find((entry) => entry.name === dimension.name)
+                  if (answer?.type !== "score" || score === undefined) continue
+                  yield* publishJudgmentObserved(
+                    events,
+                    JudgmentObserved.make({
+                      consumer: "program-judge",
+                      key: dimension.name,
+                      decision: decide(answer),
+                      certainty: certaintyOf(answer),
+                      support: answer.support,
+                      origin: answer.origin,
+                      outcome: { _tag: "ProgramJudge", score: score.score },
+                      mode
+                    })
+                  )
+                }
+              })
+            )
+          )
+      }
+      yield* judgeWithJudgment(observing, dimensions)
+        .evaluate(sample)
+        .pipe(
+          Effect.catch(() =>
+            events.publish(
+              Info.make({
+                message: "program judgment unavailable; keeping the generative result"
+              })
+            )
+          )
+        )
+      return full
+    })
+  )
 }
 
 const join = (root: string, path: string): string =>
@@ -128,17 +199,27 @@ const judgeSlice = Effect.fn("@llm4ts/flow/ProgramJudge.judgeSlice")(function* (
 ): Effect.fn.Return<ReviewResult, FlowError, FlowEvents> {
   const events = yield* FlowEvents
   const rubric = rubricText(options.dimensions)
+  const judge =
+    options.judgment === undefined
+      ? options.judge
+      : withJudgment(options.judge, options.dimensions, options.judgment, events)
+  // A mode switch (especially act back to observe) must not reuse the other
+  // path's verdict. Checkpoint changes must run the comparison again too.
+  const judgmentKey =
+    options.judgment === undefined
+      ? []
+      : [options.judgment.mode ?? "observe", options.judgment.judgment.identity]
   return yield* cachedReview(
     options.files,
     join(options.gateDir, `${label}.json`),
-    options.fingerprint(spec, diff, rubric),
+    options.fingerprint(spec, diff, rubric, ...judgmentKey),
     events.publish(Info.make({ message: `judging ${label}` })).pipe(
       Effect.andThen(
         withShrink(`judge[${label}]`, (cap) =>
           Effect.gen(function* () {
             const cappedSpec = yield* capped(`spec[${label}]`, spec, cap)
             const cappedDiff = yield* capped(`diff[${label}]`, diff, cap)
-            return yield* options.judge
+            return yield* judge
               .evaluate(
                 Sample.make({ response: cappedDiff, context: cappedSpec, query: options.query })
               )

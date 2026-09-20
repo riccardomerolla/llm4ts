@@ -11,11 +11,12 @@ import {
   implementPlanFlow,
   flowReviewer,
   completeAndPublish,
+  satisfiedByJudgment,
   structuredAndPublish
 } from "@llm4ts/flow/Flow"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
-import { makeFlowEventHub, type FlowEvent } from "@llm4ts/flow/FlowEvents"
+import { makeCollectingFlowEvents, makeFlowEventHub, type FlowEvent } from "@llm4ts/flow/FlowEvents"
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { Plan, Task } from "@llm4ts/flow/Plan"
@@ -23,7 +24,9 @@ import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 import { makeMemoryPlainFileStore, makePlanStore } from "@llm4ts/flow/Persistence"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
+import { JudgmentBackendError } from "@llm4ts/core/judgment/Judgment"
 import { origins, truthAnswer } from "@llm4ts/core/judgment/Schemas"
+import type { JudgmentMode } from "@llm4ts/flow/Judgment"
 
 const unused = InvalidRequestError.make({ message: "unused in test" })
 const unusedFlow: Effect.Effect<never, FlowError> = Effect.fail(
@@ -744,6 +747,125 @@ describe("Flow", () => {
 })
 
 describe("Flow gate and diff safety", () => {
+  it.effect("keeps the literal probe result on held or failed judgments", () =>
+    Effect.gen(function* () {
+      const held = yield* makeFakeJudgment({
+        answers: { satisfied: truthAnswer(0.5, origins.fake()) }
+      })
+      const failed = yield* makeFakeJudgment({ failures: { satisfied: "no answer" } })
+      const broken = {
+        ...failed.judgment,
+        judge: () =>
+          Effect.fail(JudgmentBackendError.make({ backend: "fake", message: "unavailable" }))
+      }
+      const asked = yield* Ref.make<ReadonlyArray<string>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      for (const judgment of [held.judgment, failed.judgment, broken]) {
+        const events = yield* makeCollectingFlowEvents
+        const context: FlowContextShape = {
+          reasoning: cleanReviewer,
+          coder: coderService(asked),
+          judgment,
+          git: makeFakeGit(gitLog),
+          hosting: failingHosting,
+          events,
+          reviewers: [cleanReviewer],
+          coderCapabilities: ConnectorCapabilities.make({}),
+          userPrompt: "implement",
+          workDir: "/repo",
+          workspace: "/repo"
+        }
+        for (const literalMatch of [true, false]) {
+          const reply = literalMatch ? "TASK_ALREADY_SATISFIED" : "No work done."
+          assert.strictEqual(yield* satisfiedByJudgment(context, "task", reply), literalMatch)
+          assert.strictEqual(yield* satisfiedByJudgment(context, "task", reply, "act"), undefined)
+        }
+        const observations = (yield* events.recorded).filter(
+          (event) => event._tag === "JudgmentObserved"
+        )
+        assert.strictEqual(observations.length, judgment === held.judgment ? 2 : 0)
+        if (judgment === held.judgment) assert.strictEqual(observations[0]?.decision, "hold")
+      }
+    })
+  )
+
+  const modes: ReadonlyArray<JudgmentMode | undefined> = [undefined, "observe", "advise", "act"]
+  for (const mode of modes) {
+    for (const literalMatch of [true, false]) {
+      it.effect(`satisfied probe ${mode ?? "default"} with literal match ${literalMatch}`, () =>
+        Effect.gen(function* () {
+          const events = yield* makeCollectingFlowEvents
+          const snapshots = yield* Ref.make<ReadonlyArray<ReadonlyArray<Message>>>([])
+          const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+          const memory = yield* makeMemoryPlainFileStore()
+          const store = makePlanStore(memory.store)
+          const plan = Plan.make({
+            epicId: "probe",
+            tasks: [Task.make({ title: "task", description: "task" })]
+          })
+          const reply = literalMatch ? "TASK_ALREADY_SATISFIED" : "Already done."
+          // Deliberately disagree with the literal path in both directions.
+          const answer = truthAnswer(literalMatch ? 0 : 1, origins.llm("logprobs"))
+          const fake = yield* makeFakeJudgment({ answers: { satisfied: answer } })
+          const context: FlowContextShape = {
+            reasoning: cleanReviewer,
+            coder: messageSnapshotCoderService(snapshots, reply),
+            judgment: fake.judgment,
+            git: { ...makeFakeGit(gitLog), diffAll: Effect.succeed("") },
+            hosting: failingHosting,
+            events,
+            reviewers: [cleanReviewer],
+            coderCapabilities: ConnectorCapabilities.make({}),
+            userPrompt: "implement",
+            workDir: "/repo",
+            workspace: "/repo"
+          }
+          const result = yield* implementPlanFlow(context, {
+            store,
+            planPath: "plan.md",
+            plan: Effect.succeed(plan),
+            satisfiedProbe: mode === undefined ? {} : { mode }
+          }).pipe(Effect.result)
+          const completes = mode === "act" ? !literalMatch : literalMatch
+          assert.strictEqual(result._tag, completes ? "Success" : "Failure")
+          assert.strictEqual((yield* store.load("plan.md"))?.tasks[0]?.completed, completes)
+          assert.strictEqual((yield* Ref.get(snapshots)).length, 2)
+          assert.deepStrictEqual((yield* Ref.get(gitLog)).commits, [])
+          const requests = yield* fake.recorded
+          assert.strictEqual(requests.length, 1)
+          assert.deepStrictEqual(requests[0]?.state, { task: "task", reply })
+          const recorded = yield* events.recorded
+          const observations = recorded.filter((event) => event._tag === "JudgmentObserved")
+          assert.strictEqual(observations.length, mode === "act" ? 0 : 1)
+          if (mode !== "act") {
+            assert.deepStrictEqual(observations[0]?.outcome, {
+              _tag: "SatisfiedProbe",
+              literalMatch
+            })
+            assert.strictEqual(observations[0]?.consumer, "satisfied-probe")
+            assert.strictEqual(observations[0]?.key, "satisfied")
+            assert.strictEqual(observations[0]?.mode, mode ?? "observe")
+            assert.strictEqual(observations[0]?.decision, "act")
+            assert.strictEqual(observations[0]?.certainty, 1)
+            assert.strictEqual(observations[0]?.support, 1)
+            assert.deepStrictEqual(observations[0]?.origin, answer.origin)
+          }
+          const advice = recorded.filter(
+            (event) => event._tag === "Info" && event.message.includes("judgment satisfied-probe")
+          )
+          assert.strictEqual(advice.length, mode === "advise" ? 1 : 0)
+          if (mode === "advise") {
+            const first = advice[0]
+            assert.include(
+              first?._tag === "Info" ? first.message : "",
+              `act; outcome {"_tag":"SatisfiedProbe","literalMatch":${literalMatch}}`
+            )
+          }
+        })
+      )
+    }
+  }
+
   it.effect("refuses to commit when the lint gate is still failing after review settles", () =>
     Effect.gen(function* () {
       const events = yield* makeFlowEventHub()
@@ -796,6 +918,7 @@ describe("Flow gate and diff safety", () => {
   it.effect("skips no-change tasks only when the coder confirms them satisfied", () =>
     Effect.gen(function* () {
       const events = yield* makeFlowEventHub()
+      const fake = yield* makeFakeJudgment({ defaultTruth: 0 })
       const asked = yield* Ref.make<ReadonlyArray<string>>([])
       const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
       const memory = yield* makeMemoryPlainFileStore()
@@ -819,6 +942,7 @@ describe("Flow gate and diff safety", () => {
       }
       const context: FlowContextShape = {
         reasoning: cleanReviewer,
+        judgment: fake.judgment,
         coder: confirmingCoder,
         git: { ...makeFakeGit(gitLog), diffAll: Effect.succeed("") },
         hosting: failingHosting,
@@ -841,6 +965,7 @@ describe("Flow gate and diff safety", () => {
       assert.isTrue(completed.tasks.every((task) => task.completed))
       assert.deepStrictEqual(log.commits, [])
       assert.strictEqual(prompts.length, 2)
+      assert.strictEqual((yield* fake.recorded).length, 0)
       assert.match(prompts[1] ?? "", /TASK_ALREADY_SATISFIED/)
     })
   )

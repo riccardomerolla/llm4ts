@@ -480,15 +480,36 @@ Details worth copying:
 
 When a flow needs a decision rather than prose — which lens to run, whether
 a reply says the work is done, how severe a finding is — ask the run's
-judgment service (ADR 0017) and branch on a typed answer. Questions over one
-state are answered independently, so send them all at once and let the code
-decide what matters (Jev's speculative fan-out):
+judgment service (ADR 0017) and start in **observe** mode. The review
+pre-screen, empty-diff probe, and program judge run their full path and
+publish `JudgmentObserved` alongside it. The event carries the policy
+decision, certainty, support, origin, mode, and the actual outcome: issue
+counts by severity for each lens, the literal `TASK_ALREADY_SATISFIED`
+match, or the generative score per dimension.
+
+Enable them with `prescreen: { judgment }` on `reviewAndFixLoop`,
+`satisfiedProbe: { mode: "observe" }` on `implementPlanFlow`, or
+`judgment: { judgment }` on `judgeAllPrograms`. Omitted modes default to
+observe. Use `mode: "advise"` to also show the decision beside the outcome
+through an `Info` event. Both modes keep the full path's result, including
+when the judgment fails. Failed questions emit no fabricated observation.
+Program verdict cache hits perform no new evaluation or observation;
+switching mode or checkpoint invalidates that cache.
+
+Only explicit `mode: "act"` lets a judgment skip a lens, replace the literal
+probe, or replace generative scores. The probe's legacy `"judgment"` string
+is an alias for act; omitted or `"literal"` disables judgments entirely.
+Automation requires task-specific evidence from the decision map.
+
+For custom decisions, questions over one state are independent. Send them
+all at once, inspect the typed answers, and keep running the full checks
+while collecting evidence:
 
 <!-- prettier-ignore -->
 ```ts
 import { choice, truth } from "@llm4ts/core/judgment/Schemas"
 import { choiceOf, truthOf } from "@llm4ts/core/judgment/Judgment"
-import { decide, judgeOrEscalate } from "@llm4ts/flow/Judgment"
+import { decide, judgeOrEscalate, judgmentOf } from "@llm4ts/flow/Judgment"
 
 const verdict = yield* judgeOrEscalate({
   judgment: judgmentOf(context),
@@ -508,9 +529,9 @@ const verdict = yield* judgeOrEscalate({
 })
 const lane = yield* choiceOf(verdict, "lane")
 const needsTests = yield* truthOf(verdict, "needsTests")
-if (decide(lane) === "act" && lane.choice === "trivial") {
-  // skip the expensive lenses
-}
+const laneDecision = decide(lane)
+// Compare laneDecision and needsTests with the full review's outcome.
+// A policy decision of "act" describes certainty; it does not enable act mode.
 ```
 
 Every answer carries an `origin` (backend, checkpoint, extraction method,

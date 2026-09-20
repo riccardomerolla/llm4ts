@@ -7,6 +7,29 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
+import { AnswerOrigin } from "@llm4ts/core/judgment/Schemas"
+import { Decision, JudgmentMode } from "./JudgmentTypes.ts"
+
+export const JudgmentOutcome = Schema.Union([
+  Schema.TaggedStruct("ReviewPrescreen", {
+    lens: Schema.String,
+    issues: Schema.Struct({ Critical: Schema.Int, Warning: Schema.Int, Info: Schema.Int })
+  }),
+  Schema.TaggedStruct("SatisfiedProbe", { literalMatch: Schema.Boolean }),
+  Schema.TaggedStruct("ProgramJudge", { score: Schema.Number })
+])
+export type JudgmentOutcome = typeof JudgmentOutcome.Type
+
+export class JudgmentObserved extends Schema.TaggedClass<JudgmentObserved>()("JudgmentObserved", {
+  consumer: Schema.Literals(["review-prescreen", "satisfied-probe", "program-judge"]),
+  key: Schema.String,
+  decision: Decision,
+  certainty: Schema.Number,
+  support: Schema.Number,
+  origin: AnswerOrigin,
+  outcome: JudgmentOutcome,
+  mode: JudgmentMode
+}) {}
 
 export class StageStarted extends Schema.TaggedClass<StageStarted>()("StageStarted", {
   stage: Schema.String
@@ -72,6 +95,7 @@ export class Declassified extends Schema.TaggedClass<Declassified>()("Declassifi
 }) {}
 
 export const FlowEvent = Schema.Union([
+  JudgmentObserved,
   StageStarted,
   StageCompleted,
   StageFailed,
@@ -100,6 +124,20 @@ export const FlowEventsValues = Object.freeze({
 export interface FlowEventsShape {
   readonly publish: (event: FlowEvent) => Effect.Effect<void>
 }
+
+/** Publish an observation, rendering the same decision and outcome in advise mode. */
+export const publishJudgmentObserved = Effect.fn("@llm4ts/flow/FlowEvents.publishJudgmentObserved")(
+  function* (events: FlowEventsShape, observation: JudgmentObserved): Effect.fn.Return<void> {
+    yield* events.publish(observation)
+    if (observation.mode === "advise") {
+      yield* events.publish(
+        Info.make({
+          message: `judgment ${observation.consumer} '${observation.key}': ${observation.decision}; outcome ${JSON.stringify(observation.outcome)}`
+        })
+      )
+    }
+  }
+)
 
 export class FlowEvents extends Context.Service<FlowEvents, FlowEventsShape>()(
   "@llm4ts/flow/FlowEvents"

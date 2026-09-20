@@ -10,7 +10,12 @@ import type { JsonSchema } from "@llm4ts/core/Models"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
 import { JudgmentBackendError, choiceOf, truthOf } from "@llm4ts/core/judgment/Judgment"
 import { choice, choiceAnswer, origins, truth, truthAnswer } from "@llm4ts/core/judgment/Schemas"
-import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
+import {
+  FlowEvent,
+  JudgmentObserved,
+  makeCollectingFlowEvents,
+  type JudgmentOutcome
+} from "@llm4ts/flow/FlowEvents"
 import {
   JudgmentPolicy,
   CertaintyBands,
@@ -55,6 +60,36 @@ const questions = {
 }
 
 describe("JudgmentPolicy and decide", () => {
+  it.effect("round-trips observations through the FlowEvent schema", () =>
+    Effect.gen(function* () {
+      const outcomes: ReadonlyArray<JudgmentOutcome> = [
+        { _tag: "ReviewPrescreen", lens: "security", issues: { Critical: 1, Warning: 0, Info: 2 } },
+        { _tag: "SatisfiedProbe", literalMatch: false },
+        { _tag: "ProgramJudge", score: 2 }
+      ]
+      for (const outcome of outcomes) {
+        const event = JudgmentObserved.make({
+          consumer:
+            outcome._tag === "ReviewPrescreen"
+              ? "review-prescreen"
+              : outcome._tag === "SatisfiedProbe"
+                ? "satisfied-probe"
+                : "program-judge",
+          key: "question",
+          decision: "caution",
+          certainty: 0.7,
+          support: 0.8,
+          origin: origins.llm("logprobs"),
+          outcome,
+          mode: "observe"
+        })
+        const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(FlowEvent))(event)
+        const decoded = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(FlowEvent))(encoded)
+        assert.deepStrictEqual(decoded, event)
+      }
+    })
+  )
+
   it("holds verbalized answers to a higher bar than logprobs, and claimed calibration higher than measured", () => {
     const logprobs = choiceAnswer({ a: 0.92, b: 0.08 }, origins.llm("logprobs"))
     const verbalized = choiceAnswer({ a: 0.92, b: 0.08 }, origins.llm("verbalized"))
@@ -209,7 +244,12 @@ describe("prescreenReviewers", () => {
         }
       })
       const events = yield* makeCollectingFlowEvents
-      const kept = yield* prescreenReviewers({ judgment: fake.judgment }, events, "+x", lenses)
+      const { reviewers: kept } = yield* prescreenReviewers(
+        { judgment: fake.judgment, mode: "act" },
+        events,
+        "+x",
+        lenses
+      )
       assert.deepStrictEqual(
         kept.map((lens) => lens.name),
         [testReviewer.name]
@@ -233,7 +273,12 @@ describe("prescreenReviewers", () => {
           failures: { [testReviewer.name]: "unreadable" }
         })
         const events = yield* makeCollectingFlowEvents
-        const kept = yield* prescreenReviewers({ judgment: fake.judgment }, events, "+x", lenses)
+        const { reviewers: kept } = yield* prescreenReviewers(
+          { judgment: fake.judgment, mode: "act" },
+          events,
+          "+x",
+          lenses
+        )
         // 0.85 certainty is "act" for logprobs but only "caution" for verbalized.
         assert.strictEqual(kept.length, 2)
       })
@@ -247,7 +292,12 @@ describe("prescreenReviewers", () => {
         identity: "llm:down",
         judge: () => Effect.fail(JudgmentBackendError.make({ backend: "llm", message: "down" }))
       }
-      const kept = yield* prescreenReviewers({ judgment: broken }, events, "+x", lenses)
+      const { reviewers: kept } = yield* prescreenReviewers(
+        { judgment: broken, mode: "act" },
+        events,
+        "+x",
+        lenses
+      )
       assert.strictEqual(kept.length, 2)
       const messages = (yield* events.recorded).map((event) =>
         event._tag === "Info" ? event.message : ""

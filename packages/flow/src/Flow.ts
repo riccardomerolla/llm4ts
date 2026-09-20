@@ -5,12 +5,19 @@ import { withToolActivity } from "./Activity.ts"
 import { makeChat, type Chat } from "./Chat.ts"
 import type { FlowContextShape } from "./FlowContext.ts"
 import { FlowAborted, FlowLlmError, type FlowError } from "./FlowError.ts"
-import { AssistantMessage, Info, TokensUsed, type FlowEventsShape } from "./FlowEvents.ts"
+import {
+  AssistantMessage,
+  Info,
+  JudgmentObserved,
+  publishJudgmentObserved,
+  TokensUsed,
+  type FlowEventsShape
+} from "./FlowEvents.ts"
 import type { Plan, Task } from "./Plan.ts"
 import type { PlanStoreShape } from "./Persistence.ts"
 import { implementTaskLoop, stage } from "./PlanExecution.ts"
 import { truth } from "@llm4ts/core/judgment/Schemas"
-import { decide, judgmentOf } from "./Judgment.ts"
+import { certaintyOf, decide, judgmentOf, type JudgmentMode } from "./Judgment.ts"
 import { minimalReviewers, reviewAndFixLoop, type ReviewResult } from "./Review.ts"
 import type { Reviewer } from "./Reviewer.ts"
 
@@ -69,19 +76,23 @@ export interface ImplementPlanOptions {
   readonly noopTaskPolicy?: "fail" | "complete"
   /**
    * How the "already satisfied" confirmation is read (ADR 0017): "literal"
-   * (default) looks for the TASK_ALREADY_SATISFIED token; "judgment" asks the
-   * run's judgment service whether the coder's reply says so, and falls back
-   * to the literal reading when the answer is not confident.
+   * (default) looks for TASK_ALREADY_SATISFIED without any judgment call.
+   * { mode } asks the run's judgment service, defaulting to observe: observe
+   * and advise publish the literal outcome and keep using it. Explicit act
+   * uses a confident judgment, falling back to the literal reading on doubt
+   * or failure. The legacy "judgment" string remains an alias for { mode: "act" }.
    */
-  readonly satisfiedProbe?: "literal" | "judgment"
+  readonly satisfiedProbe?: "literal" | "judgment" | { readonly mode?: JudgmentMode }
 }
 
 /** The judgment form of the empty-diff probe: one Truth question over the coder's reply. */
 export const satisfiedByJudgment = Effect.fn("@llm4ts/flow/Flow.satisfiedByJudgment")(function* (
   context: FlowContextShape,
   taskTitle: string,
-  reply: string
+  reply: string,
+  mode: JudgmentMode = "observe"
 ): Effect.fn.Return<boolean | undefined> {
+  const literalMatch = reply.includes("TASK_ALREADY_SATISFIED")
   const result = yield* judgmentOf(context)
     .judge({
       state: { task: taskTitle, reply },
@@ -93,12 +104,30 @@ export const satisfiedByJudgment = Effect.fn("@llm4ts/flow/Flow.satisfiedByJudgm
     })
     .pipe(Effect.option)
   if (result._tag === "None") {
-    return undefined
+    return mode === "act" ? undefined : literalMatch
   }
   const answer = result.value.answers["satisfied"]
-  if (answer === undefined || answer.type !== "truth" || decide(answer) !== "act") {
-    return undefined
+  if (answer === undefined || answer.type !== "truth") {
+    return mode === "act" ? undefined : literalMatch
   }
+  const decision = decide(answer)
+  if (mode !== "act") {
+    yield* publishJudgmentObserved(
+      context.events,
+      JudgmentObserved.make({
+        consumer: "satisfied-probe",
+        key: "satisfied",
+        decision,
+        certainty: certaintyOf(answer),
+        support: answer.support,
+        origin: answer.origin,
+        outcome: { _tag: "SatisfiedProbe", literalMatch },
+        mode
+      })
+    )
+    return literalMatch
+  }
+  if (decision !== "act") return undefined
   return answer.truth >= 0.5
 })
 
@@ -166,8 +195,13 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           const afterConfirmation = yield* context.git.diffAll
           if (afterConfirmation.trim().length === 0) {
             const judged =
-              options.satisfiedProbe === "judgment"
-                ? yield* satisfiedByJudgment(context, task.title, confirmation)
+              options.satisfiedProbe !== undefined && options.satisfiedProbe !== "literal"
+                ? yield* satisfiedByJudgment(
+                    context,
+                    task.title,
+                    confirmation,
+                    options.satisfiedProbe === "judgment" ? "act" : options.satisfiedProbe.mode
+                  )
                 : undefined
             if (judged ?? confirmation.includes("TASK_ALREADY_SATISFIED")) {
               yield* context.events.publish(
