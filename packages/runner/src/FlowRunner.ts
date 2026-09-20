@@ -5,8 +5,13 @@ import type { ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { CliConnectorConfig, defaultReasoningConfig } from "@llm4ts/core/ConnectorConfig"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import type { HttpClientShape } from "@llm4ts/core/HttpClient"
+import type { JudgmentBackend } from "@llm4ts/core/judgment/Schemas"
+import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
+import { LlmJudgmentConfig, makeLlmJudgment } from "@llm4ts/core/judgment/LlmJudgment"
+import { makeTypeSafeJudgment } from "@llm4ts/core/judgment/TypeSafeJudgment"
+import * as Redacted from "effect/Redacted"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
-import type { ConnectorCapabilities } from "@llm4ts/core/Models"
+import type { ConnectorCapabilities, TokenUsage } from "@llm4ts/core/Models"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { TemporaryFilesShape } from "@llm4ts/core/TemporaryFiles"
 import type { GeminiCliExecutorShape } from "@llm4ts/core/providers/GeminiCliProvider"
@@ -26,6 +31,8 @@ import { FlowLlmError, describeFlowError, type FlowError } from "@llm4ts/flow/Fl
 import {
   FlowEvents,
   FlowEventsValues,
+  Info,
+  TokensUsed,
   makeFlowEventHub,
   type FlowEventHub
 } from "@llm4ts/flow/FlowEvents"
@@ -61,6 +68,8 @@ export interface FlowRunnerDependencies {
   readonly files: PlainFileStoreShape
   /** pi's own model config (ADR 0016), injectable so a test never reads $HOME. */
   readonly readPiModelsJson?: () => string | undefined
+  /** For the hosted TypeSafe judgment backend; defaults to the Node client. */
+  readonly http?: HttpClientShape
 }
 
 export interface NodeConnectorDependencies {
@@ -73,6 +82,7 @@ export interface NodeConnectorDependencies {
 export const nodeFlowRunnerDependencies = (): FlowRunnerDependencies => ({
   process: nodeProcessExecutor,
   files: nodePlainFileStore,
+  http: nodeHttpClient,
   registry: createConnectorRegistry({
     http: nodeHttpClient,
     process: nodeProcessExecutor,
@@ -88,6 +98,17 @@ export interface FlowRunnerOptions {
   readonly coder: ConnectorConfig
   readonly reasoning?: ConnectorConfig
   readonly reviewers?: ReadonlyArray<ConnectorConfig>
+  /**
+   * The seat typed judgments run on (ADR 0017). Defaults to the reasoning
+   * seat; point it at a small non-thinking model for one-token label scoring.
+   */
+  readonly judgment?: ConnectorConfig
+  /**
+   * `llm` (default) answers on the judgment seat; `typesafe` uses the hosted
+   * Jev model with `TYPESAFE_API_KEY` from the environment. Unset, the
+   * environment's `LLM4TS_JUDGMENT_BACKEND` decides, then `llm`.
+   */
+  readonly judgmentBackend?: JudgmentBackend
   readonly tracePath?: string
   readonly runId?: string
   readonly verbosity?: Verbosity
@@ -225,6 +246,57 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         )
       )
     )
+  // Judgment usage is metered like any chat (ADR 0005 amendment) and every
+  // fallback from label scoring to the verbalized path is announced.
+  const judgmentHooks = {
+    onUsage: (usage: TokenUsage, model: string | undefined) =>
+      events.publish(
+        new TokensUsed({ agent: "judgment", usage, ...(model === undefined ? {} : { model }) })
+      ),
+    onFallback: (key: string, reason: string) =>
+      events.publish(
+        new Info({ message: `judgment '${key}' fell back to verbalized scoring: ${reason}` })
+      )
+  }
+  const judgmentFor = (
+    seat: LlmServiceShape,
+    seatConfig: ConnectorConfig,
+    environment: Readonly<Record<string, string | undefined>>
+  ): Effect.Effect<JudgmentShape, FlowError> => {
+    const backend =
+      options.judgmentBackend ??
+      (environment.LLM4TS_JUDGMENT_BACKEND?.trim().toLowerCase() === "typesafe"
+        ? "typesafe"
+        : "llm")
+    if (backend !== "typesafe") {
+      return Effect.succeed(
+        makeLlmJudgment(
+          seat,
+          LlmJudgmentConfig.make({
+            connector: seatConfig.connectorId.value,
+            ...(seatConfig.model === undefined ? {} : { model: seatConfig.model })
+          }),
+          judgmentHooks
+        )
+      )
+    }
+    const key = environment.TYPESAFE_API_KEY?.trim()
+    if (key === undefined || key.length === 0) {
+      return Effect.fail(
+        FlowLlmError.from(
+          ProviderError.make({
+            message: "judgment backend 'typesafe' needs TYPESAFE_API_KEY in the environment"
+          })
+        )
+      )
+    }
+    return Effect.succeed(
+      makeTypeSafeJudgment(
+        { apiKey: Redacted.make(key), onUsage: judgmentHooks.onUsage },
+        dependencies.http ?? nodeHttpClient
+      )
+    )
+  }
   const seatsFor = Effect.fn("@llm4ts/runner/FlowRunner.seatsFor")(function* (
     workDir: string
   ): Effect.fn.Return<
@@ -232,6 +304,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       readonly coder: LlmServiceShape & { readonly capabilities: ConnectorCapabilities }
       readonly reasoning: LlmServiceShape
       readonly reviewers: ReadonlyArray<LlmServiceShape>
+      readonly judgment: JudgmentShape
     },
     FlowError,
     Scope.Scope
@@ -244,7 +317,14 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
       resolveSeat(prepareConnector(bridged(configuration), workDir, environment))
     )
-    return { coder, reasoning: reasoningService, reviewers }
+    // The judgment seat defaults to the reasoning seat's service itself, so
+    // an unconfigured run resolves nothing extra.
+    const judgmentSeat =
+      options.judgment === undefined
+        ? reasoningService
+        : yield* resolveSeat(prepareConnector(bridged(options.judgment), workDir, environment))
+    const judgment = yield* judgmentFor(judgmentSeat, options.judgment ?? reasoning, environment)
+    return { coder, reasoning: reasoningService, reviewers, judgment }
   })
   const contextAt = (
     workDir: string,
@@ -252,12 +332,14 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       readonly coder: LlmServiceShape & { readonly capabilities: ConnectorCapabilities }
       readonly reasoning: LlmServiceShape
       readonly reviewers: ReadonlyArray<LlmServiceShape>
+      readonly judgment: JudgmentShape
     },
     rebind: boolean
   ): FlowContextShape =>
     FlowContext.of({
       reasoning: seats.reasoning,
       coder: seats.coder,
+      judgment: seats.judgment,
       git: makeGitTool(dependencies.process, workDir, events),
       hosting: makeGitHubTool(dependencies.process, workDir, events),
       events,

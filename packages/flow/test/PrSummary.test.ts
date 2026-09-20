@@ -5,6 +5,7 @@ import * as Stream from "effect/Stream"
 import { InvalidRequestError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { summarisePr } from "@llm4ts/flow/PrSummary"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -21,6 +22,7 @@ describe("summarisePr", () => {
             body: "Adjust the loop boundary."
           }).pipe(Effect.orDie),
         executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+        scoreLabels: unsupportedScoreLabels,
         isAvailable: Effect.succeed(true)
       }
       const summary = yield* summarisePr(service, "diff", "Issue: owner/repo#1")

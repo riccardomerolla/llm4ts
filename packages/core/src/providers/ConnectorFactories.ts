@@ -33,6 +33,7 @@ import {
 } from "./GeminiCliProvider.ts"
 import { makeGrokCliConnector } from "./GrokCliConnector.ts"
 import { makeLmStudioProvider } from "./LmStudioProvider.ts"
+import { makeMlxLmProvider } from "./MlxLmProvider.ts"
 import { makeMockProvider } from "./MockProvider.ts"
 import { makeOllamaProvider } from "./OllamaProvider.ts"
 import { makeOpenAIProvider } from "./OpenAIProvider.ts"
@@ -93,6 +94,9 @@ export const createConnectorRegistry = (
     ),
     apiFactory(ConnectorIds.Ollama, (config) =>
       makeOllamaProvider(toLlmConfig(config), dependencies.http)
+    ),
+    apiFactory(ConnectorIds.MlxLm, (config) =>
+      makeMlxLmProvider(toLlmConfig(config), dependencies.http)
     ),
     cliFactory(ConnectorIds.ClaudeCli, (config) =>
       makeClaudeCliConnector(config, dependencies.process)

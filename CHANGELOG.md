@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+Typed judgments (ADR 0017), the Jev "System One" idea brought into llm4ts:
+atomic Choice / Score / Truth questions evaluated against one state, answered
+with probabilities, confidence, `support` and an `origin` (backend,
+checkpoint, extraction method, calibration evidence, escalation) instead of
+generated text.
+Vocabulary in the new root `CONTEXT.md`.
+
+- `@llm4ts/core/judgment/*`: schemas mirroring TypeSafe's wire names
+  (`noul` is `truth`), the `Judgment` service with typed accessors, three
+  layers — `LlmJudgment` over any LLM service, `TypeSafeJudgment` for the
+  hosted model, `FakeJudgment` for tests.
+- `scoreLabels` on every LLM service (`@llm4ts/core/LabelScoring`), with a
+  `labelProbabilities` capability. Derived from structured output by
+  default; `mlx-lm` answers it from token log-probabilities in one forward
+  pass. A spike on the same 4B weights: 19/20 correct at 0.22 s per question
+  versus 17/20 at 1.26 s for verbalized JSON.
+- A new `mlx-lm` API connector (`makeMlxLmProvider`, preset `mlxLm`,
+  `LLM4TS_PROVIDER=mlx-lm`), streaming over the OpenAI wire format.
+- LM Studio structured output is now schema-constrained
+  (`response_format: json_schema` on `/v1/chat/completions`, thinking
+  disabled, `reasoning_content` fallback) instead of prompt-coerced.
+- The runner's fourth seat, `judgment` (`FlowRunnerOptions.judgment`,
+  `LLM4TS_JUDGMENT_PROVIDER` / `_MODEL`), defaulting to the reasoning seat;
+  `LLM4TS_JUDGMENT_BACKEND=typesafe` with `TYPESAFE_API_KEY` selects the
+  hosted model. Judgment usage is metered as agent `judgment` (ADR 0005
+  amended).
+- `@llm4ts/flow/Judgment`: `JudgmentPolicy` (verbalized answers held to a
+  higher bar), `decide`, `judgeOrEscalate`, `cachedJudgment`. Consumers:
+  `judgeWithJudgment` (the rubric judge as Score questions), the review
+  pre-screen (`reviewAndFixLoop({ prescreen })`, off by default until
+  `pnpm judgment:replay` clears its bar), and
+  `ImplementPlanOptions.satisfiedProbe: "judgment"`.
+- `tools/judgment/replay-review.ts` (`pnpm judgment:replay`): replays the
+  review lenses over recent commits with and without the pre-screen and
+  reports tokens, time, skipped lenses, and issues lost by severity.
+
 ## 2.5.0
 
 `pack-fork`: real per-category grounding, live findings, and an enforced

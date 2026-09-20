@@ -3,6 +3,7 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { InvalidRequestError, ParseError, ProviderError } from "@llm4ts/core/Errors"
+import { verbalizedScoreLabels } from "@llm4ts/core/LabelScoring"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
@@ -211,6 +212,24 @@ export const makeReplayConnector = Effect.fn("@llm4ts/flow/Replay.makeConnector"
     )
   )
 
+  const executeStructuredWithUsage = <A, E, RD, RE>(
+    _prompt: string,
+    schema: Schema.ConstraintCodec<A, E, RD, RE>
+  ) =>
+    collect(next).pipe(
+      Effect.flatMap((response) =>
+        Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(response.content).pipe(
+          Effect.map((value) => [value, response.usage, response.metadata.model] as const)
+        )
+      ),
+      Effect.mapError((error) =>
+        ParseError.make({
+          message: `replay structured parse error: ${String(error)}`,
+          raw: ""
+        })
+      )
+    )
+
   return {
     executeStream: (_prompt) => next,
     executeStreamWithHistory: (_messages) => next,
@@ -235,23 +254,10 @@ export const makeReplayConnector = Effect.fn("@llm4ts/flow/Replay.makeConnector"
           })
         )
       ),
-    executeStructuredWithUsage: <A, E, RD, RE>(
-      _prompt: string,
-      schema: Schema.ConstraintCodec<A, E, RD, RE>
-    ) =>
-      collect(next).pipe(
-        Effect.flatMap((response) =>
-          Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(response.content).pipe(
-            Effect.map((value) => [value, response.usage, response.metadata.model] as const)
-          )
-        ),
-        Effect.mapError((error) =>
-          ParseError.make({
-            message: `replay structured parse error: ${String(error)}`,
-            raw: ""
-          })
-        )
-      ),
+    executeStructuredWithUsage,
+    // A replayed label question decodes the recorded JSON reply like any
+    // other structured call: the trace holds the verbalized answer.
+    scoreLabels: verbalizedScoreLabels(executeStructuredWithUsage),
     isAvailable: Effect.succeed(true)
   }
 })

@@ -106,6 +106,7 @@ const providerCharactersPerToken = (provider: LlmProvider): number => {
       return 4.2
     case "LmStudio":
     case "Ollama":
+    case "MlxLm":
     case "Mock":
       return 4.5
   }

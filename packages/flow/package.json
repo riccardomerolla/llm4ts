@@ -47,6 +47,7 @@
     "./Package": "./dist/Package.js",
     "./PageSpec": "./dist/PageSpec.js",
     "./Patterns": "./dist/Patterns.js",
+    "./Judgment": "./dist/Judgment.js",
     "./Perimeter": "./dist/Perimeter.js",
     "./Persistence": "./dist/Persistence.js",
     "./Plan": "./dist/Plan.js",

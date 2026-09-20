@@ -8,6 +8,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk } from "@llm4ts/core/Models"
 import { assessThenPlan, briefPlan, planFrom, reviewPlan } from "@llm4ts/flow/Planner"
 import { Plan, Task } from "@llm4ts/flow/Plan"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -20,6 +21,7 @@ const structuredService = (value: unknown, prompt: Ref.Ref<string>): LlmServiceS
       Effect.andThen(Schema.decodeUnknownEffect(schema)(value).pipe(Effect.orDie))
     ),
   executeStructuredWithUsage: (_text, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 

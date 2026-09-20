@@ -6,7 +6,19 @@ export class OpenAIJsonSchemaSpec extends Schema.Class<OpenAIJsonSchemaSpec>(
   "OpenAIJsonSchemaSpec"
 )({
   name: Schema.String,
-  schema: JsonSchema
+  schema: JsonSchema,
+  strict: Schema.optionalKey(Schema.Boolean)
+}) {}
+
+/**
+ * Chat-template switches forwarded verbatim by OpenAI-compatible local
+ * servers (LM Studio, mlx-lm). `enable_thinking: false` turns a hybrid
+ * reasoning model into a plain instruct model for the request.
+ */
+export class OpenAIChatTemplateKwargs extends Schema.Class<OpenAIChatTemplateKwargs>(
+  "OpenAIChatTemplateKwargs"
+)({
+  enable_thinking: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 export class OpenAIResponseFormat extends Schema.Class<OpenAIResponseFormat>(
@@ -30,7 +42,10 @@ export class OpenAIChatCompletionRequest extends Schema.Class<OpenAIChatCompleti
   max_tokens: Schema.optionalKey(Schema.Int),
   max_completion_tokens: Schema.optionalKey(Schema.Int),
   stream: Schema.optionalKey(Schema.Boolean),
-  response_format: Schema.optionalKey(OpenAIResponseFormat)
+  response_format: Schema.optionalKey(OpenAIResponseFormat),
+  chat_template_kwargs: Schema.optionalKey(OpenAIChatTemplateKwargs),
+  logprobs: Schema.optionalKey(Schema.Boolean),
+  top_logprobs: Schema.optionalKey(Schema.Int)
 }) {}
 
 export class OpenAITokenUsage extends Schema.Class<OpenAITokenUsage>("OpenAITokenUsage")({
@@ -43,13 +58,35 @@ export class OpenAIChatResponseMessage extends Schema.Class<OpenAIChatResponseMe
   "OpenAIChatResponseMessage"
 )({
   role: Schema.String,
-  content: Schema.NullOr(Schema.String)
+  content: Schema.NullOr(Schema.String),
+  // Local servers that split a reasoning model's output put the visible
+  // reply here when their parser mistakes it for thinking.
+  reasoning_content: Schema.optionalKey(Schema.NullOr(Schema.String))
+}) {}
+
+/** One candidate token at a generated position, with its log-probability. */
+export class OpenAITopLogprob extends Schema.Class<OpenAITopLogprob>("OpenAITopLogprob")({
+  token: Schema.String,
+  logprob: Schema.Number
+}) {}
+
+export class OpenAITokenLogprob extends Schema.Class<OpenAITokenLogprob>("OpenAITokenLogprob")({
+  token: Schema.String,
+  logprob: Schema.Number,
+  top_logprobs: Schema.optionalKey(Schema.Array(OpenAITopLogprob))
+}) {}
+
+export class OpenAIChoiceLogprobs extends Schema.Class<OpenAIChoiceLogprobs>(
+  "OpenAIChoiceLogprobs"
+)({
+  content: Schema.optionalKey(Schema.NullOr(Schema.Array(OpenAITokenLogprob)))
 }) {}
 
 export class OpenAIChatChoice extends Schema.Class<OpenAIChatChoice>("OpenAIChatChoice")({
   index: Schema.Int.pipe(Schema.withConstructorDefault(Effect.succeed(0))),
   message: Schema.optionalKey(OpenAIChatResponseMessage),
   text: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  logprobs: Schema.optionalKey(Schema.NullOr(OpenAIChoiceLogprobs)),
   finish_reason: Schema.optionalKey(Schema.NullOr(Schema.String))
 }) {}
 

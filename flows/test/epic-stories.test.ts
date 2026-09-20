@@ -44,6 +44,7 @@ import {
   storyPlanInstructions,
   worktreeSetupCommand
 } from "../lib/epic-stories.ts"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const fixture = readFileSync(
   join(
@@ -68,6 +69,7 @@ const replying = (reply: string): LlmServiceShape => ({
   executeWithTools: () => Effect.fail(unused),
   executeStructured: () => Effect.fail(unused),
   executeStructuredWithUsage: () => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 
@@ -83,6 +85,7 @@ const structured = (value: unknown): LlmServiceShape => ({
       Effect.orDie,
       Effect.map((decoded) => [decoded, undefined, undefined] as const)
     ),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 

@@ -65,6 +65,11 @@ import { AssistantMessage } from "@llm4ts/flow/FlowEvents"
 import { runNode } from "@llm4ts/runner/FlowRunner"
 import { runFlowMain, resolveFlowInput, completeAndPublish } from "@llm4ts/runner"
 import { requireApproval } from "@llm4ts/flow/Approval"
+import { choice, truth } from "@llm4ts/core/judgment/Schemas"
+import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
+import { verbalizedScoreLabels } from "@llm4ts/core/LabelScoring"
+import { makeMlxLmProvider } from "@llm4ts/core/providers/MlxLmProvider"
+import { decide, defaultJudgmentPolicy } from "@llm4ts/flow/Judgment"
 import { createClient } from "@llm4ts/js"
 import { parseFlowDescription } from "@llm4ts/shell/FlowCatalog"
 
@@ -80,6 +85,13 @@ assert.ok(Message)
 assert.ok(FlowContext)
 assert.ok(AssistantMessage)
 assert.ok(ApiConnectorConfig)
+assert.equal(typeof makeFakeJudgment, "function")
+assert.equal(typeof verbalizedScoreLabels, "function")
+assert.equal(typeof makeMlxLmProvider, "function")
+assert.equal(typeof decide, "function")
+assert.ok(defaultJudgmentPolicy.verbalized.act > defaultJudgmentPolicy.logprobs.act)
+assert.equal(choice("q", { a: "x" }).type, "choice")
+assert.equal(truth("s").type, "truth")
 
 const client = createClient({ provider: "mock", model: "mock" })
 const response = await client.complete("Say hello")

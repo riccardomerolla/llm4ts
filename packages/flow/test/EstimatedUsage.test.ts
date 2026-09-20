@@ -13,6 +13,7 @@ import {
   isEstimatedModel,
   makeEstimatedUsageMeter
 } from "@llm4ts/flow/EstimatedUsage"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -24,6 +25,7 @@ const serviceOf = (overrides: Partial<LlmServiceShape>): LlmServiceShape => ({
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true),
   ...overrides
 })

@@ -9,6 +9,8 @@ import { AssistantMessage, Info, TokensUsed, type FlowEventsShape } from "./Flow
 import type { Plan, Task } from "./Plan.ts"
 import type { PlanStoreShape } from "./Persistence.ts"
 import { implementTaskLoop, stage } from "./PlanExecution.ts"
+import { truth } from "@llm4ts/core/judgment/Schemas"
+import { decide, judgmentOf } from "./Judgment.ts"
 import { minimalReviewers, reviewAndFixLoop, type ReviewResult } from "./Review.ts"
 import type { Reviewer } from "./Reviewer.ts"
 
@@ -65,7 +67,40 @@ export interface ImplementPlanOptions {
    * where one unconfirmed no-op should not sink otherwise-finished work.
    */
   readonly noopTaskPolicy?: "fail" | "complete"
+  /**
+   * How the "already satisfied" confirmation is read (ADR 0017): "literal"
+   * (default) looks for the TASK_ALREADY_SATISFIED token; "judgment" asks the
+   * run's judgment service whether the coder's reply says so, and falls back
+   * to the literal reading when the answer is not confident.
+   */
+  readonly satisfiedProbe?: "literal" | "judgment"
 }
+
+/** The judgment form of the empty-diff probe: one Truth question over the coder's reply. */
+export const satisfiedByJudgment = Effect.fn("@llm4ts/flow/Flow.satisfiedByJudgment")(function* (
+  context: FlowContextShape,
+  taskTitle: string,
+  reply: string
+): Effect.fn.Return<boolean | undefined> {
+  const result = yield* judgmentOf(context)
+    .judge({
+      state: { task: taskTitle, reply },
+      questions: {
+        satisfied: truth(
+          "The reply states that the task is already fully satisfied by the current repository and that no change was made."
+        )
+      }
+    })
+    .pipe(Effect.option)
+  if (result._tag === "None") {
+    return undefined
+  }
+  const answer = result.value.answers["satisfied"]
+  if (answer === undefined || answer.type !== "truth" || decide(answer) !== "act") {
+    return undefined
+  }
+  return answer.truth >= 0.5
+})
 
 const defaultCommitMessage = (plan: Plan, task: Task): string => `${plan.epicId}: ${task.title}`
 
@@ -130,7 +165,11 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           )
           const afterConfirmation = yield* context.git.diffAll
           if (afterConfirmation.trim().length === 0) {
-            if (confirmation.includes("TASK_ALREADY_SATISFIED")) {
+            const judged =
+              options.satisfiedProbe === "judgment"
+                ? yield* satisfiedByJudgment(context, task.title, confirmation)
+                : undefined
+            if (judged ?? confirmation.includes("TASK_ALREADY_SATISFIED")) {
               yield* context.events.publish(
                 Info.make({
                   message: `task "${task.title}" confirmed already satisfied; skipping review and commit`

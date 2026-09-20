@@ -23,6 +23,7 @@ import {
   type Tool
 } from "@llm4ts/core/tools/Tool"
 import { makeToolRegistry } from "@llm4ts/core/tools/ToolRegistry"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const addParameters = {
   type: "object",
@@ -71,6 +72,7 @@ const toolService = (executeWithTools: LlmServiceShape["executeWithTools"]): Llm
   executeWithTools,
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 

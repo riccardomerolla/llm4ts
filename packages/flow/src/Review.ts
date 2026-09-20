@@ -11,6 +11,9 @@ import { FlowLlmError, ProcessError, describeFlowError, type FlowError } from ".
 import { Info, type FlowEventsShape } from "./FlowEvents.ts"
 import { Reviewer } from "./Reviewer.ts"
 import { publishUsage } from "./Usage.ts"
+import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
+import { truth, type JudgmentResult } from "@llm4ts/core/judgment/Schemas"
+import { decide, defaultJudgmentPolicy, type JudgmentPolicy } from "./Judgment.ts"
 
 export const Severity = Schema.Literals(["Critical", "Warning", "Info"])
 export type Severity = typeof Severity.Type
@@ -67,8 +70,8 @@ export const reviewJsonSchema: JsonSchema = {
   required: ["issues", "summary"]
 }
 
-const reviewer = (name: string, systemPrompt: string, files = ".*"): Reviewer =>
-  Reviewer.make({ name, systemPrompt, files })
+const reviewer = (name: string, systemPrompt: string, screen: string, files = ".*"): Reviewer =>
+  Reviewer.make({ name, systemPrompt, files, screen })
 
 export const correctnessReviewer = reviewer(
   "code-functionality",
@@ -76,7 +79,8 @@ export const correctnessReviewer = reviewer(
     "Review for functional correctness. Check that the change implements the task's intent,",
     "handles obvious edge cases, and does not regress existing behavior. Report only concrete",
     "logic errors, wrong conditions, mishandled error paths, and missing cases. Ignore style."
-  ].join("\n")
+  ].join("\n"),
+  "The diff plausibly contains a logic error, a wrong condition, a mishandled error path, or a missing case."
 )
 
 export const readabilityReviewer = reviewer(
@@ -84,7 +88,8 @@ export const readabilityReviewer = reviewer(
   [
     "Review for readability and clarity. Check names, focused functions, understandable control",
     "flow, and useful comments. Report only concrete, actionable readability problems."
-  ].join("\n")
+  ].join("\n"),
+  "The diff plausibly introduces an unclear name, a tangled function, or confusing control flow."
 )
 
 export const testReviewer = reviewer(
@@ -92,27 +97,32 @@ export const testReviewer = reviewer(
   [
     "Review test coverage and quality. Check that new behavior and important error paths are",
     "covered by tests that assert real outcomes and would fail on regression. Report concrete gaps."
-  ].join("\n")
+  ].join("\n"),
+  "The diff changes behavior that is not covered by a test in the same diff."
 )
 
 export const structureReviewer = reviewer(
   "code-structure",
-  "Review module boundaries, dependency direction, cohesion, and unnecessary coupling. Report concrete structural problems."
+  "Review module boundaries, dependency direction, cohesion, and unnecessary coupling. Report concrete structural problems.",
+  "The diff plausibly crosses a module boundary, reverses a dependency direction, or adds coupling."
 )
 
 export const performanceReviewer = reviewer(
   "performance",
-  "Review for material performance regressions, unbounded work, avoidable repeated I/O, and resource leaks."
+  "Review for material performance regressions, unbounded work, avoidable repeated I/O, and resource leaks.",
+  "The diff plausibly changes performance characteristics: unbounded work, repeated I/O, or a resource leak."
 )
 
 export const securityReviewer = reviewer(
   "security",
-  "Review trust boundaries, input handling, secrets, authorization, injection risks, and unsafe defaults."
+  "Review trust boundaries, input handling, secrets, authorization, injection risks, and unsafe defaults.",
+  "The diff plausibly touches a trust boundary, secret, authorization check, input parser, or unsafe default."
 )
 
 export const effectReviewer = reviewer(
   "effect-ts",
   "Review Effect usage: typed errors, scoped resources, service boundaries, interruption, concurrency, and runtime ownership.",
+  "The diff plausibly misuses Effect: an untyped error, an unscoped resource, a leaked service, or unmanaged concurrency.",
   ".*\\.(ts|tsx|mts|cts)$"
 )
 
@@ -277,9 +287,76 @@ export interface ReviewAndFixOptions {
   readonly lint?: Effect.Effect<ReviewResult, FlowError>
   readonly parallelism?: number
   readonly format?: Effect.Effect<void, FlowError>
+  /**
+   * A judgment pre-screen (ADR 0017): one Truth question per lens over the
+   * diff, skipping lenses the screen is confident have nothing to report.
+   * Off by default until the replay in `tools/judgment` clears its bar.
+   */
+  readonly prescreen?: ReviewPrescreen
 }
 
-const reviewWith = (
+export interface ReviewPrescreen {
+  readonly judgment: JudgmentShape
+  readonly policy?: JudgmentPolicy
+}
+
+/**
+ * Which lenses deserve a full pass. A lens is skipped only when its screen
+ * answered with `act` certainty that the diff has nothing for it; doubt,
+ * failure, and escalation all run the lens. Never skip on doubt.
+ */
+export const prescreenReviewers = Effect.fn("@llm4ts/flow/Review.prescreen")(function* (
+  prescreen: ReviewPrescreen,
+  events: FlowEventsShape,
+  diff: string,
+  lenses: ReadonlyArray<Reviewer>
+): Effect.fn.Return<ReadonlyArray<Reviewer>, FlowError> {
+  if (lenses.length === 0) {
+    return lenses
+  }
+  const policy = prescreen.policy ?? defaultJudgmentPolicy
+  const result = yield* prescreen.judgment
+    .judge({
+      state: { diff },
+      questions: Object.fromEntries(
+        lenses.map((lens) => [lens.name, truth(lens.screeningStatement)])
+      )
+    })
+    .pipe(
+      Effect.catch((error) =>
+        events
+          .publish(
+            Info.make({
+              message: `review pre-screen unavailable (${error.message}); running every lens`
+            })
+          )
+          .pipe(Effect.as<JudgmentResult | undefined>(undefined))
+      )
+    )
+  if (result === undefined) {
+    return lenses
+  }
+  const kept = lenses.filter((lens) => {
+    const answer = result.answers[lens.name]
+    return !(
+      answer !== undefined &&
+      answer.type === "truth" &&
+      answer.truth < 0.5 &&
+      decide(answer, policy) === "act"
+    )
+  })
+  const skipped = lenses.filter((lens) => !kept.includes(lens))
+  if (skipped.length > 0) {
+    yield* events.publish(
+      Info.make({
+        message: `review pre-screen skipped ${skipped.map((lens) => lens.name).join(", ")}`
+      })
+    )
+  }
+  return kept
+})
+
+export const reviewWith = (
   service: LlmServiceShape,
   events: FlowEventsShape,
   lens: Reviewer,
@@ -339,7 +416,11 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       }
       const diff = yield* options.currentDiff
       const files = yield* changedFiles
-      const chosen = yield* selector.select(options.reviewers, files, round, previous)
+      const selected = yield* selector.select(options.reviewers, files, round, previous)
+      const chosen =
+        options.prescreen === undefined
+          ? selected
+          : yield* prescreenReviewers(options.prescreen, options.events, diff, selected)
       const run = (lens: Reviewer) =>
         reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
       const parallelism = options.parallelism ?? 0

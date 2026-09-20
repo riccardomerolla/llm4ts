@@ -44,7 +44,7 @@ describe("ConnectorFactories", () => {
         })
       )
 
-      assert.strictEqual(ids.length, 15)
+      assert.strictEqual(ids.length, 16)
       assert.deepStrictEqual(
         new Set(ids.map((id) => id.value)),
         new Set([
@@ -53,6 +53,7 @@ describe("ConnectorFactories", () => {
           "gemini-api",
           "lm-studio",
           "ollama",
+          "mlx-lm",
           "claude-cli",
           "opencode",
           "gemini-cli",

@@ -55,6 +55,11 @@ export const lmStudio = ApiConnectorConfig.make({
   baseUrl: "http://localhost:1234/v1"
 })
 
+export const mlxLm = ApiConnectorConfig.make({
+  connectorId: ConnectorIds.MlxLm,
+  baseUrl: "http://localhost:8080"
+})
+
 export const openAI = ApiConnectorConfig.make({
   connectorId: ConnectorIds.OpenAI
 })
@@ -188,6 +193,10 @@ export const apiConnectorFromEnvironment = Effect.fn(
         return lmStudio
       case "ollama":
         return ollama
+      case "mlx-lm":
+      case "mlxlm":
+      case "mlx":
+        return mlxLm
       default:
         return undefined
     }
@@ -196,7 +205,7 @@ export const apiConnectorFromEnvironment = Effect.fn(
     return yield* ScriptUsage.make({
       message:
         `unknown LLM4TS_PROVIDER '${provider}'; expected ` +
-        "mock|openai|anthropic|gemini|lm-studio|ollama"
+        "mock|openai|anthropic|gemini|lm-studio|ollama|mlx-lm"
     })
   }
   const model = environment.LLM4TS_MODEL?.trim()
@@ -264,3 +273,24 @@ export const coderFromEnvironment = Effect.fn("@llm4ts/runner/Connectors.coderFr
       : preset
   }
 )
+
+/**
+ * The judgment seat from the environment (ADR 0017): `LLM4TS_JUDGMENT_PROVIDER`
+ * names an API provider the way `LLM4TS_PROVIDER` does, `LLM4TS_JUDGMENT_MODEL`
+ * its model. Unset, the runner falls back to the reasoning seat.
+ */
+export const judgmentConnectorFromEnvironment = Effect.fn(
+  "@llm4ts/runner/Connectors.judgmentConnectorFromEnvironment"
+)(function* (
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): Effect.fn.Return<ApiConnectorConfig | undefined, ScriptUsage> {
+  const provider = environment.LLM4TS_JUDGMENT_PROVIDER?.trim()
+  if (provider === undefined || provider.length === 0) {
+    return undefined
+  }
+  return yield* apiConnectorFromEnvironment({
+    ...environment,
+    LLM4TS_PROVIDER: provider,
+    LLM4TS_MODEL: environment.LLM4TS_JUDGMENT_MODEL
+  })
+})

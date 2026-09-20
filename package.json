@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:verbose": "vitest run --reporter verbose",
+    "judgment:replay": "tsx tools/judgment/replay-review.ts",
     "typecheck": "tsc -b tsconfig.json --pretty false",
     "version:set": "node scripts/set-version.mjs"
   },

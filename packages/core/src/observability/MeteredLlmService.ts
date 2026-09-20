@@ -152,5 +152,12 @@ export const meterLlmService = (
       options,
       <A>(result: StructuredResult<A>) => result[1]
     ),
+  scoreLabels: (prompt, labels) =>
+    meterEffect(
+      service.scoreLabels(prompt, labels),
+      collector,
+      options,
+      (distribution) => distribution.usage
+    ),
   isAvailable: service.isAvailable
 })

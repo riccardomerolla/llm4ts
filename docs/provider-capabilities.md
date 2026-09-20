@@ -8,6 +8,7 @@ connector. Runtime availability and authentication are reported separately by
 | ----------------------------- | ---- | --------: | ----------------: | --------------: | ----------------: | --------: | -------: | -------: | --------: |
 | OpenAI, Anthropic, Gemini API | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced |
 | LM Studio, Ollama, Mock       | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced |
+| mlx-lm                        | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced |
 | Claude CLI                    | CLI  |       yes |               yes |             yes |               yes |       yes |      yes |      yes |  enforced |
 | Codex, Pi CLI                 | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  enforced |
 | Gemini CLI                    | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  advisory |
@@ -52,3 +53,23 @@ Requesting `readOnly` from a non-enforced connector publishes a
 `CapabilityUnenforceable` flow event naming the connector and its grade, so
 runs never silently trust a request-shaped restriction. Reviewer seats that
 must not write should be picked on this capability.
+
+## Label probabilities
+
+`ConnectorCapabilities.labelProbabilities` says how a connector answers
+`scoreLabels` (ADR 0017):
+
+| Connector family                  | Label probabilities | Note                                                                  |
+| --------------------------------- | ------------------- | --------------------------------------------------------------------- |
+| mlx-lm                            | logprobs            | One forward pass, `max_tokens: 1`, top 11 token log-probabilities.    |
+| Every other API and CLI connector | verbalized          | Schema-constrained JSON in which the model writes the numbers itself. |
+| Mock                              | verbalized          | Deterministic: the first label gets 0.6, the rest share 0.4.          |
+
+Neither path is calibrated. `logprobs` distributions from a greedy instruct
+model are almost fully peaked (a spike on 2026-09-19 measured probability
+1.00 on the chosen label for 20 of 20 questions, including the one wrong
+answer), so a threshold on their confidence rarely triggers.
+
+LM Studio structured output is schema-constrained (`response_format:
+json_schema` on `/v1/chat/completions`, grammar-enforced by the server) since the
+typed-judgments release (ADR 0017); before that it was prompt-coerced through the native endpoint.

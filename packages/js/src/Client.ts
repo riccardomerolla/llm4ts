@@ -20,7 +20,8 @@ export const JsProvider = Schema.Literals([
   "anthropic",
   "gemini",
   "lm-studio",
-  "ollama"
+  "ollama",
+  "mlx-lm"
 ])
 export type JsProvider = typeof JsProvider.Type
 
@@ -98,6 +99,8 @@ const connectorId = (provider: JsProvider): ConnectorId => {
       return ConnectorIds.LmStudio
     case "ollama":
       return ConnectorIds.Ollama
+    case "mlx-lm":
+      return ConnectorIds.MlxLm
   }
 }
 

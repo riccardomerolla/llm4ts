@@ -5,6 +5,7 @@ import type * as Schema from "effect/Schema"
 import type { LlmError } from "./Errors.ts"
 import type {
   JsonSchema,
+  LabelDistribution,
   LlmChunk,
   Message,
   TokenUsage,
@@ -37,6 +38,16 @@ export interface LlmServiceShape {
     schema: Schema.ConstraintCodec<A, E, RD, RE>,
     jsonSchema: JsonSchema
   ) => Effect.Effect<StructuredResult<A>, LlmError, RD>
+  /**
+   * One atomic classification: the probability of each offered label given
+   * the prompt. Connectors with token log-probabilities answer in one forward
+   * pass; the rest derive it from `executeStructured` (see `LabelScoring`).
+   * Fails with `ParseError` when no offered label could be observed.
+   */
+  readonly scoreLabels: (
+    prompt: string,
+    labels: ReadonlyArray<string>
+  ) => Effect.Effect<LabelDistribution, LlmError>
   readonly isAvailable: Effect.Effect<boolean>
 }
 

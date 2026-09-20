@@ -97,6 +97,8 @@ const providerForConnector = (connectorId: ConnectorId): LlmProvider => {
       return "LmStudio"
     case "ollama":
       return "Ollama"
+    case "mlx-lm":
+      return "MlxLm"
     case "mock":
       return "Mock"
     default:

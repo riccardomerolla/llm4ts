@@ -44,6 +44,10 @@ Extend the existing seams instead of writing one-off variants:
 - CLI coding agents: `makeCliConnector` + `versionProbe` (same module)
 - Connector identity: the id/provider/baseUrl table in
   `packages/core/src/Models.ts`
+- Typed judgments: the `Judgment` service in `packages/core/src/judgment/`
+  (ADR 0017); a new backend is a layer over it, a new decision is questions
+  plus a `JudgmentPolicy` in flow, never a parsed prose reply. Connectors
+  reach probabilities only through `scoreLabels` (`LabelScoring.ts`)
 - Flow spine: `implementPlanFlow` (`packages/flow/src/Flow.ts`)
 - Node composition: `runNode` in `packages/runner/src/FlowRunner.ts` — the
   runner stays thin; policy belongs in core/flow

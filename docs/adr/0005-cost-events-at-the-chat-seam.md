@@ -42,3 +42,10 @@ an event sink is in scope:
   indicates a genuinely non-reporting backend rather than a broken pipeline.
 - Flows that bypass `Chat`/`completeAndPublish` and call connector methods
   directly are unmetered unless they publish `TokensUsed` themselves.
+
+## Amendment (2026-09-19, ADR 0017)
+
+The chat seam is no longer the only producer. The judgment layers
+(`TypeSafeJudgment`, `LlmJudgment`) publish `TokensUsed` for every request
+they answer, with agent `"judgment"`, because a judgment is not a chat and
+never passes through `Chat` or `completeAndPublish`.

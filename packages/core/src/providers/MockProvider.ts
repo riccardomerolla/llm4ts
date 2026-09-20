@@ -16,6 +16,7 @@ import {
   type LlmConfig,
   type Message
 } from "../Models.ts"
+import { normalizeLabelProbabilities } from "../LabelScoring.ts"
 import { parseFromText } from "../StructuredOutput.ts"
 
 export const mockResponse = (): string =>
@@ -317,6 +318,20 @@ export const makeMockProvider = (config: LlmConfig): ApiConnectorShape => {
     ): Effect.Effect<A, LlmError, RD> =>
       Effect.map(executeStructuredWithUsage(prompt, schema, jsonSchema), ([value]) => value),
     executeStructuredWithUsage,
+    // Deterministic: the first offered label gets most of the mass, the rest
+    // share the remainder evenly, so tests can assert on ordering.
+    scoreLabels: (_prompt, labels) =>
+      normalizeLabelProbabilities(
+        labels,
+        Object.fromEntries(
+          labels.map((label, index) => [
+            label,
+            index === 0 ? 0.6 : 0.4 / Math.max(1, labels.length - 1)
+          ])
+        ),
+        "verbalized",
+        { support: 1 }
+      ),
     isAvailable: Effect.succeed(true)
   }
 }

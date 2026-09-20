@@ -174,6 +174,21 @@ export const makeEstimatedUsageMeter = Effect.fn("@llm4ts/flow/EstimatedUsage.ma
           )
         })
       ),
+    scoreLabels: (prompt, labels) =>
+      service
+        .scoreLabels(prompt, labels)
+        .pipe(
+          Effect.tap((distribution) =>
+            record(
+              distribution.usage ??
+                estimateUsage(
+                  prompt.length,
+                  JSON.stringify(distribution.probabilities).length,
+                  options
+                )
+            )
+          )
+        ),
     isAvailable: service.isAvailable
   }
   return { service: decorated, totals: Ref.get(totals) }

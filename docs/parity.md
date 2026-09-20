@@ -108,6 +108,13 @@ reference release.
 
 ## Accepted Adaptations
 
+- Typed judgments (`@llm4ts/core/judgment/*`, ADR 0017) have no source
+  counterpart. They add a `Judgment` service (Choice, Score, Truth questions
+  over one state, answers with probabilities, confidence, and provenance),
+  a `scoreLabels` primitive on the LLM service, an `mlx-lm` connector, a
+  `judgment` runner seat, and flow-level policy, escalation, and caching.
+  This is an accepted addition beyond `llm4zio` v4.3.0, not a divergence in
+  shared behavior.
 - Effect schema-backed tagged errors are yieldable JavaScript error values. This
   differs from Scala's non-`Throwable` ADT representation while preserving typed
   error-channel behavior, stable tags, fields, messages, and serialization.

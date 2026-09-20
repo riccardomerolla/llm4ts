@@ -9,6 +9,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk, TokenUsage, type Message } from "@llm4ts/core/Models"
 import { makeChat } from "@llm4ts/flow/Chat"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -26,6 +27,7 @@ const recordingService = (
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 
@@ -123,6 +125,7 @@ describe("Chat usage events", () => {
     executeWithTools: (_prompt, _tools) => Effect.fail(unused),
     executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
     executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+    scoreLabels: unsupportedScoreLabels,
     isAvailable: Effect.succeed(true)
   })
 

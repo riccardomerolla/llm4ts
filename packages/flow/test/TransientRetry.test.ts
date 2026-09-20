@@ -28,6 +28,7 @@ import {
   repairPrompt,
   transientDelay
 } from "@llm4ts/flow/TransientRetry"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 interface CountingService {
   readonly service: LlmServiceShape
@@ -67,6 +68,7 @@ const makeCountingService = (
         Effect.fail(InvalidRequestError.make({ message: "not used" })),
       executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) =>
         Effect.fail(InvalidRequestError.make({ message: "not used" })),
+      scoreLabels: unsupportedScoreLabels,
       isAvailable: Effect.succeed(true)
     })
   }))
@@ -253,6 +255,7 @@ describe("TransientRetry", () => {
           executeStructured: (prompt, schema, _jsonSchema) => attempt(prompt, schema),
           executeStructuredWithUsage: (prompt, schema, _jsonSchema) =>
             attempt(prompt, schema).pipe(Effect.map((value) => [value, undefined, undefined])),
+          scoreLabels: unsupportedScoreLabels,
           isAvailable: Effect.succeed(true)
         })
       }

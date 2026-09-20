@@ -13,6 +13,9 @@ import { collect } from "@llm4ts/core/Streaming"
 import { makeFakeProcessExecutor, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import * as Queue from "effect/Queue"
 import { makeMockProvider } from "@llm4ts/core/providers/MockProvider"
+import { makeRecordingHttpClient } from "@llm4ts/core/HttpClient"
+import { choiceOf, truthOf } from "@llm4ts/core/judgment/Judgment"
+import { choice, truth } from "@llm4ts/core/judgment/Schemas"
 import { Info, StageCompleted, StageStarted, TokensUsed } from "@llm4ts/flow/FlowEvents"
 import { CostBudget } from "@llm4ts/flow/CostLedger"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
@@ -417,6 +420,125 @@ describe("gemini ACP bridge wiring (ADR 0016)", () => {
         )
         // Nothing was resolved, so no pi process could have been started.
         assert.deepStrictEqual(yield* Ref.get(seen), [])
+      })
+    )
+  )
+})
+
+describe("judgment seat", () => {
+  const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+  const registryCounting = (created: Ref.Ref<ReadonlyArray<string>>) =>
+    makeConnectorRegistry([
+      {
+        connectorId: ConnectorIds.Mock,
+        kind: "Api",
+        create: (configuration) =>
+          Ref.update(created, (all) => [...all, configuration.model ?? "default"]).pipe(
+            Effect.as(mock)
+          )
+      }
+    ])
+  const baseOptions = {
+    workDir: "/repo",
+    workspace: "/repo",
+    userPrompt: "do it",
+    coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock, model: "coder" })
+  }
+
+  it.effect("defaults to the reasoning seat and answers through the mock's label scoring", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const created = yield* Ref.make<ReadonlyArray<string>>([])
+        const bundle = yield* makeFlowRunnerContext(baseOptions, {
+          registry: registryCounting(created),
+          process: process.executor,
+          files: files(state)
+        })
+        // coder + reasoning only: no third resolution for the judgment seat.
+        assert.deepStrictEqual(yield* Ref.get(created), ["coder", "coder"])
+        assert.strictEqual(bundle.context.judgment?.backend, "llm")
+        const result = yield* bundle.context.judgment!.judge({
+          state: "s",
+          questions: { pick: choice("which?", { a: "first", b: "second" }) }
+        })
+        const answer = yield* choiceOf(result, "pick")
+        assert.strictEqual(answer.choice, "a")
+        assert.strictEqual(answer.origin.method, "verbalized")
+        assert.strictEqual(bundle.context.judgment?.identity, "llm:mock:coder")
+      })
+    )
+  )
+
+  it.effect("resolves an explicit judgment seat and meters its usage as agent 'judgment'", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const created = yield* Ref.make<ReadonlyArray<string>>([])
+        const bundle = yield* makeFlowRunnerContext(
+          {
+            ...baseOptions,
+            judgment: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock, model: "tiny" })
+          },
+          { registry: registryCounting(created), process: process.executor, files: files(state) }
+        )
+        assert.deepStrictEqual(yield* Ref.get(created), ["coder", "coder", "tiny"])
+        assert.strictEqual(bundle.context.judgment?.backend, "llm")
+      })
+    )
+  )
+
+  it.effect("selects the hosted backend from the environment and refuses without a key", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const created = yield* Ref.make<ReadonlyArray<string>>([])
+        const http = yield* makeRecordingHttpClient(() =>
+          Effect.succeed(
+            JSON.stringify({
+              model: "jev-1.13.0",
+              answers: { pick: { type: "noul", noul: 0.8 } },
+              usage: { input_tokens: 10, output_tokens: 2 }
+            })
+          )
+        )
+        const bundle = yield* makeFlowRunnerContext(
+          {
+            ...baseOptions,
+            environment: { LLM4TS_JUDGMENT_BACKEND: "typesafe", TYPESAFE_API_KEY: "k" }
+          },
+          {
+            registry: registryCounting(created),
+            process: process.executor,
+            files: files(state),
+            http: http.client
+          }
+        )
+        assert.strictEqual(bundle.context.judgment?.backend, "typesafe")
+        const subscription = yield* bundle.events.subscribe
+        const result = yield* bundle.context.judgment!.judge({
+          state: "s",
+          questions: { pick: truth("is it?") }
+        })
+        assert.strictEqual((yield* truthOf(result, "pick")).truth, 0.8)
+        const usage = yield* Stream.fromSubscription(subscription).pipe(
+          Stream.filter((event) => event instanceof TokensUsed),
+          Stream.take(1),
+          Stream.runCollect
+        )
+        const [metered] = usage
+        assert.isTrue(metered instanceof TokensUsed && metered.agent === "judgment")
+
+        const refused = yield* Effect.flip(
+          makeFlowRunnerContext(
+            { ...baseOptions, judgmentBackend: "typesafe", environment: {} },
+            { registry: registryCounting(created), process: process.executor, files: files(state) }
+          )
+        )
+        assert.match(String(refused), /TYPESAFE_API_KEY/)
       })
     )
   )

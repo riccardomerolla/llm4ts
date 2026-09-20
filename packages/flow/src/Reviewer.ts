@@ -3,8 +3,22 @@ import * as Schema from "effect/Schema"
 export class Reviewer extends Schema.Class<Reviewer>("Reviewer")({
   name: Schema.String,
   systemPrompt: Schema.String,
-  files: Schema.optionalKey(Schema.String)
+  files: Schema.optionalKey(Schema.String),
+  /**
+   * The yes/no statement a judgment pre-screen evaluates against a diff to
+   * decide whether this lens is worth a full pass (ADR 0017). Absent, one is
+   * derived from the system prompt.
+   */
+  screen: Schema.optionalKey(Schema.String)
 }) {
+  /** The screening statement, explicit or derived. */
+  get screeningStatement(): string {
+    return (
+      this.screen ??
+      `A reviewer following these instructions would report at least one concrete issue in the diff: ${this.systemPrompt}`
+    )
+  }
+
   matches(changedFiles: ReadonlyArray<string>): boolean {
     if (this.files === undefined || changedFiles.length === 0) {
       return true

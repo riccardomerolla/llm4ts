@@ -4,18 +4,33 @@
 
 `createClient` validates a plain object:
 
-| Field            | Meaning                                                           |
-| ---------------- | ----------------------------------------------------------------- |
-| `provider`       | `mock`, `openai`, `anthropic`, `gemini`, `lm-studio`, or `ollama` |
-| `model`          | Provider model identifier                                         |
-| `baseUrl`        | Optional endpoint override                                        |
-| `apiKey`         | Optional secret; converted immediately to `Redacted`              |
-| `timeoutSeconds` | Optional request timeout                                          |
-| `temperature`    | Optional sampling temperature                                     |
-| `maxTokens`      | Optional completion limit                                         |
+| Field            | Meaning                                                                     |
+| ---------------- | --------------------------------------------------------------------------- |
+| `provider`       | `mock`, `openai`, `anthropic`, `gemini`, `lm-studio`, `ollama`, or `mlx-lm` |
+| `model`          | Provider model identifier                                                   |
+| `baseUrl`        | Optional endpoint override                                                  |
+| `apiKey`         | Optional secret; converted immediately to `Redacted`                        |
+| `timeoutSeconds` | Optional request timeout                                                    |
+| `temperature`    | Optional sampling temperature                                               |
+| `maxTokens`      | Optional completion limit                                                   |
 
 API keys are sent in provider headers and are not placed in URLs, process
 arguments, events, or persisted flow artifacts.
+
+## Judgment seat
+
+Typed judgments (ADR 0017) run on their own seat, which defaults to the
+reasoning seat:
+
+| Variable                   | Meaning                                                                       |
+| -------------------------- | ----------------------------------------------------------------------------- |
+| `LLM4TS_JUDGMENT_PROVIDER` | An API provider name as for `LLM4TS_PROVIDER`; unset keeps the reasoning seat |
+| `LLM4TS_JUDGMENT_MODEL`    | Its model                                                                     |
+| `LLM4TS_JUDGMENT_BACKEND`  | `llm` (default) or `typesafe` for the hosted Jev model                        |
+| `TYPESAFE_API_KEY`         | Required by the `typesafe` backend; header only, never logged                 |
+
+A small non-thinking model served by `mlx-lm` is the intended judgment seat:
+one forward pass and one output token per question.
 
 ## CLI connectors
 
@@ -115,7 +130,7 @@ See ADR 0016 for the full design.
 
 ## API connectors
 
-The runner exports `openAI`, `anthropic`, `geminiApi`, `lmStudio`, `ollama`, and
+The runner exports `openAI`, `anthropic`, `geminiApi`, `lmStudio`, `ollama`, `mlxLm`, and
 `mock` presets. Before registry resolution it fills a missing provider base URL
 and reads a missing cloud credential from:
 
@@ -162,3 +177,24 @@ repository they run in. The source-compatible approval marker is
 
 Phase bodies receive their LLM, repository, workspace, and forge dependencies
 through `runNode`; no provider is selected inside the flow package.
+
+### mlx-lm
+
+`mlx-lm` serves MLX models on Apple Silicon over the OpenAI wire format and
+returns token log-probabilities, which the `Judgment` service uses for
+one-token label scoring. Start it against a text-only MLX model directory
+(the ones LM Studio downloads work when they are text-only, for example
+`Qwen3-4B-Instruct-2507-4bit`; Qwen 3.5+ community conversions are
+multimodal and do not load):
+
+```bash
+python3 -m venv ~/.mlxenv && ~/.mlxenv/bin/pip install mlx-lm
+```
+
+```bash
+~/.mlxenv/bin/python -m mlx_lm.server --model ~/.lmstudio/models/mlx-community/Qwen3-4B-Instruct-2507-4bit --port 8080
+```
+
+Then `LLM4TS_PROVIDER=mlx-lm LLM4TS_MODEL=<the same path>`; the default base
+URL is `http://localhost:8080`. The model id must be the path the server
+lists at `/v1/models`.

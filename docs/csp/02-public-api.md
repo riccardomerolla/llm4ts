@@ -5,7 +5,7 @@ Notation: `async` means the operation may perform asynchronous work. `Stream<Res
 ## Core LLM Shapes
 
 ```text
-Provider = OpenAI | Anthropic | GeminiApi | GeminiCli | LmStudio | Ollama | OpenCode | ClaudeCli | Codex | Copilot | Pi | Mock
+Provider = OpenAI | Anthropic | GeminiApi | GeminiCli | LmStudio | Ollama | MlxLm | OpenCode | ClaudeCli | Codex | Copilot | Pi | Mock
 ConnectorKind = Api | Cli
 MessageRole = System | User | Assistant | Tool
 
@@ -408,3 +408,43 @@ resolvePrompt(args, defaultPrompt?) -> Result<Text, UsageText>
 ```
 
 Runner connector presets should include edit-capable configurations for the main CLI coders and a local reasoning preset for a local model server. A helper should select the coder from an environment variable, defaulting to the primary CLI coder when unset or unrecognized.
+
+## Typed Judgment Shapes
+
+Judgments evaluate atomic typed questions against one state and return
+probabilities, not text. Wire names follow TypeSafe's Jev except that the
+yes/no primitive is `Truth` (`noul` on the hosted wire) and every answer
+carries an `Origin` and a `Support`.
+
+```text
+State = Text | Map<Text, Json> | List<Text>
+Description = Json
+Question =
+  | Choice { instructions: Text, criteria: Map<OptionKey, Description> }
+  | Score  { instructions: Text, criteria: List<Description> }         // ordered levels
+  | Truth  { instructions: Text, criteria: Optional<{ true, false }> }
+Method = Logprobs | Verbalized | Sampled | Reasoning | Hosted
+Calibration = None | Claimed | Measured
+Origin = { backend: JudgmentBackend, model: Optional<Text>, method: Method, calibration: Calibration, escalated: Boolean }
+Answer =
+  | ChoiceAnswer { choice, probabilities: Map<OptionKey, Number>, confidence, reportedConfidence?, support, origin }
+  | ScoreAnswer  { score: Number, legend: Map<Level, Description>, probabilities, confidence, reportedConfidence?, support, origin }
+  | TruthAnswer  { truth: Number, support, origin }
+JudgmentRequest = { state: State, questions: Map<Key, Question> }
+JudgmentResult  = { answers: Map<Key, Answer>, failures: List<{ key, reason }>, usage?, model?, backend }
+JudgmentBackend = TypeSafe | Llm | Fake
+
+Judgment.judge(request) -> async Result<JudgmentResult, JudgmentBackendError>
+LlmClient.scoreLabels(prompt, labels) -> async Result<LabelDistribution, LlmError>
+LabelDistribution = { probabilities: Map<Label, Number>, method: Logprobs | Verbalized | Sampled, support: Number, usage? }
+Judgment.identity: Text   // backend plus checkpoint; the cache key component
+ConnectorCapabilities.labelProbabilities = Logprobs | Verbalized | None
+```
+
+Confidence is the maximum probability on every backend (a hosted service's
+own statistic is carried as `reportedConfidence`); score is the expected
+level index; a Truth answer has no confidence. Support is the mass the
+backend placed on the offered options before renormalization, 1 when the
+numbers were declared over the options alone. Questions in one request are answered
+independently. The typed accessors (`choiceOf`, `scoreOf`, `truthOf`) fail
+with a mismatch error rather than asserting a kind.

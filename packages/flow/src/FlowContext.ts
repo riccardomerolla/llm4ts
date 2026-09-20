@@ -1,6 +1,7 @@
 import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
+import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
 import type { ConnectorCapabilities } from "@llm4ts/core/Models"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import type { FlowError } from "./FlowError.ts"
@@ -19,6 +20,12 @@ export interface FlowContextShape {
   readonly userPrompt: string
   readonly workDir: string
   readonly workspace: string
+  /**
+   * Typed judgments (ADR 0017), over the run's `judgment` seat or the hosted
+   * TypeSafe backend. Absent on a context built by hand; `judgmentOf` in
+   * `Judgment.ts` then derives one from the reasoning seat.
+   */
+  readonly judgment?: JudgmentShape
   /**
    * The same seats rebound to another directory (a story worktree, ADR
    * 0013): every CLI seat launched there, git rooted there, the run's

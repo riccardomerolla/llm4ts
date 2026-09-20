@@ -11,6 +11,7 @@ import { ProcessError } from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { Reviewer } from "@llm4ts/flow/Pack"
 import { ReviewIssue, ReviewResult, llmDriven, reviewAndFixLoop } from "@llm4ts/flow/Review"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -39,6 +40,7 @@ const reviewerService = (
     // has to review, so the default fake leaves it undefined.
     executeStructuredWithUsage: (_prompt, schema, _jsonSchema) =>
       next(schema).pipe(Effect.map((value) => [value, usage, model] as const)),
+    scoreLabels: unsupportedScoreLabels,
     isAvailable: Effect.succeed(true)
   }
 }

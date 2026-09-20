@@ -7,6 +7,7 @@ import { InvalidRequestError } from "@llm4ts/core/Errors"
 import { LlmService } from "@llm4ts/core/LlmService"
 import { LlmChunk, Message, ToolCallResponse, type JsonSchema } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const mockService = LlmService.of({
   executeStream: (_prompt) =>
@@ -34,6 +35,7 @@ const mockService = LlmService.of({
     _schema: Schema.ConstraintCodec<A, E, RD, RE>,
     _jsonSchema: JsonSchema
   ) => Effect.fail(new InvalidRequestError({ message: "Not implemented in mock" })),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 

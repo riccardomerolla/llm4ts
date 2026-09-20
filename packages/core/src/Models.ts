@@ -9,6 +9,7 @@ export const LlmProvider = Schema.Literals([
   "Anthropic",
   "LmStudio",
   "Ollama",
+  "MlxLm",
   "OpenCode",
   "Mock"
 ])
@@ -24,6 +25,7 @@ export const ConnectorIds = Object.freeze({
   GeminiApi: new ConnectorId({ value: "gemini-api" }),
   LmStudio: new ConnectorId({ value: "lm-studio" }),
   Ollama: new ConnectorId({ value: "ollama" }),
+  MlxLm: new ConnectorId({ value: "mlx-lm" }),
   ClaudeCli: new ConnectorId({ value: "claude-cli" }),
   GeminiCli: new ConnectorId({ value: "gemini-cli" }),
   OpenCode: new ConnectorId({ value: "opencode" }),
@@ -41,7 +43,8 @@ export const apiConnectorIds: ReadonlyArray<ConnectorId> = Object.freeze([
   ConnectorIds.Anthropic,
   ConnectorIds.GeminiApi,
   ConnectorIds.LmStudio,
-  ConnectorIds.Ollama
+  ConnectorIds.Ollama,
+  ConnectorIds.MlxLm
 ])
 
 export const cliConnectorIds: ReadonlyArray<ConnectorId> = Object.freeze([
@@ -77,6 +80,8 @@ export const defaultBaseUrl = (provider: LlmProvider): string | undefined => {
       return "http://localhost:1234/v1"
     case "Ollama":
       return "http://localhost:11434"
+    case "MlxLm":
+      return "http://localhost:8080"
     case "OpenCode":
       return "http://localhost:4096"
   }
@@ -88,6 +93,7 @@ const connectorProviderTable: Readonly<Record<string, LlmProvider>> = {
   "gemini-api": "GeminiApi",
   "lm-studio": "LmStudio",
   ollama: "Ollama",
+  "mlx-lm": "MlxLm",
   opencode: "OpenCode",
   "gemini-cli": "GeminiCli",
   mock: "Mock"
@@ -115,6 +121,8 @@ export const providerConnectorId = (provider: LlmProvider): ConnectorId => {
       return ConnectorIds.LmStudio
     case "Ollama":
       return ConnectorIds.Ollama
+    case "MlxLm":
+      return ConnectorIds.MlxLm
     case "OpenCode":
       return ConnectorIds.OpenCode
     case "Mock":
@@ -255,6 +263,37 @@ export type InteractionSupport = typeof InteractionSupport.Type
 export const ReadOnlyEnforcement = Schema.Literals(["enforced", "advisory", "ignored"])
 export type ReadOnlyEnforcement = typeof ReadOnlyEnforcement.Type
 
+/**
+ * How a connector produces the per-label probabilities behind `scoreLabels`:
+ * - "logprobs": read off the backend's token log-probabilities in one
+ *   forward pass (a real distribution, still uncalibrated).
+ * - "verbalized": the model writes the numbers itself in a JSON reply
+ *   (typically overconfident; hold to a higher bar).
+ * - "none": the connector cannot answer label questions at all.
+ */
+export const LabelProbabilities = Schema.Literals(["logprobs", "verbalized", "none"])
+export type LabelProbabilities = typeof LabelProbabilities.Type
+
+/** How a label distribution's numbers were extracted (see `LabelProbabilities`). */
+export const LabelMethod = Schema.Literals(["logprobs", "verbalized", "sampled"])
+export type LabelMethod = typeof LabelMethod.Type
+
+/**
+ * A probability per label, normalized over the labels the caller offered.
+ * `support` is the probability mass the backend actually placed on those
+ * labels before renormalization (1 when the numbers were declared over the
+ * labels alone): a distribution renormalized from a sliver of mass is not
+ * a confident one, and callers must not treat it as one.
+ * `usage` is whatever the backend reported for the call, if anything.
+ */
+export class LabelDistribution extends Schema.Class<LabelDistribution>("LabelDistribution")({
+  probabilities: Schema.Record(Schema.String, Schema.Number),
+  method: LabelMethod,
+  support: Schema.Number,
+  usage: Schema.optionalKey(TokenUsage),
+  model: Schema.optionalKey(Schema.String)
+}) {}
+
 export class ConnectorCapabilities extends Schema.Class<ConnectorCapabilities>(
   "ConnectorCapabilities"
 )({
@@ -265,6 +304,9 @@ export class ConnectorCapabilities extends Schema.Class<ConnectorCapabilities>(
   approval: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   structuredOutput: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true))),
   usageReporting: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(true))),
+  labelProbabilities: LabelProbabilities.pipe(
+    Schema.withConstructorDefault(Effect.succeed<LabelProbabilities>("verbalized"))
+  ),
   readOnlyEnforcement: ReadOnlyEnforcement.pipe(
     Schema.withConstructorDefault(Effect.succeed<ReadOnlyEnforcement>("advisory"))
   )

@@ -476,6 +476,54 @@ Details worth copying:
   fails the flow). A headless coding agent can edit files but usually cannot
   run your formatter — deterministic tools should do deterministic work.
 
+### Typed judgments instead of parsed replies
+
+When a flow needs a decision rather than prose — which lens to run, whether
+a reply says the work is done, how severe a finding is — ask the run's
+judgment service (ADR 0017) and branch on a typed answer. Questions over one
+state are answered independently, so send them all at once and let the code
+decide what matters (Jev's speculative fan-out):
+
+<!-- prettier-ignore -->
+```ts
+import { choice, truth } from "@llm4ts/core/judgment/Schemas"
+import { choiceOf, truthOf } from "@llm4ts/core/judgment/Judgment"
+import { decide, judgeOrEscalate } from "@llm4ts/flow/Judgment"
+
+const verdict = yield* judgeOrEscalate({
+  judgment: judgmentOf(context),
+  reasoning: context.reasoning,
+  events: context.events,
+  request: {
+    state: { task: task.title, diff },
+    questions: {
+      lane: choice("Which review lane fits this change?", {
+        trivial: "docs, comments, formatting",
+        standard: "ordinary code change",
+        risky: "auth, secrets, data migration, concurrency"
+      }),
+      needsTests: truth("The diff changes behavior that no test in the diff covers.")
+    }
+  }
+})
+const lane = yield* choiceOf(verdict, "lane")
+const needsTests = yield* truthOf(verdict, "needsTests")
+if (decide(lane) === "act" && lane.choice === "trivial") {
+  // skip the expensive lenses
+}
+```
+
+Every answer carries an `origin` (backend, checkpoint, extraction method,
+calibration evidence, escalation) and a `support` (how much mass the
+backend placed on the offered options). `decide` applies `JudgmentPolicy`
+bands keyed by calibration evidence first and extraction method otherwise,
+so a model that wrote its own probabilities (`verbalized`) is trusted less
+than one whose log-probabilities were read (`logprobs`), and an answer
+rebuilt from a sliver of mass is held whatever its confidence. Keep the
+questions and the policy together in one place per flow, observe before
+automating (see `docs/judgment-decision-map.md`), and never skip on doubt:
+`hold` means escalate or run the full check.
+
 ## Testing a flow
 
 Flows are functions over `FlowContextShape`, so they test without any LLM,

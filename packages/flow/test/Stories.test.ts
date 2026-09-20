@@ -27,6 +27,7 @@ import {
   type StorySeats
 } from "@llm4ts/flow/Stories"
 import { Story, StoryPlan, storyHash } from "@llm4ts/flow/StoryPlan"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 // ---- Fakes -------------------------------------------------------------------
 
@@ -50,6 +51,7 @@ const coder = (reply: string): LlmServiceShape => ({
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 
@@ -65,6 +67,7 @@ const cleanReviewer: LlmServiceShape = {
       Effect.orDie,
       Effect.map((value) => [value, undefined, undefined] as const)
     ),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 }
 

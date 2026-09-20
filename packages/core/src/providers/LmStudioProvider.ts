@@ -9,14 +9,23 @@ import type { StructuredResult } from "../LlmService.ts"
 import {
   ConnectorIds,
   LlmChunk,
+  TokenUsage,
   type JsonSchema,
   type LlmConfig,
   type Message,
   type MessageRole
 } from "../Models.ts"
 import { parseFromText } from "../StructuredOutput.ts"
-import { LmStudioChatRequest, LmStudioChatResponse, LmStudioMessage } from "./LmStudioModels.ts"
-import { OpenAIChatChunk, OpenAIChatCompletionRequest, OpenAIChatMessage } from "./OpenAIModels.ts"
+import { LmStudioMessage } from "./LmStudioModels.ts"
+import {
+  OpenAIChatChunk,
+  OpenAIChatCompletionRequest,
+  OpenAIChatCompletionResponse,
+  OpenAIChatMessage,
+  OpenAIChatTemplateKwargs,
+  OpenAIJsonSchemaSpec,
+  OpenAIResponseFormat
+} from "./OpenAIModels.ts"
 
 const emptyHeaders: Readonly<Record<string, string>> = Object.freeze({})
 
@@ -67,11 +76,13 @@ export const renderLmStudioNativeInput = (
   }
 }
 
-const decodeNativeResponse = (raw: string): Effect.Effect<LmStudioChatResponse, ParseError> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(LmStudioChatResponse))(raw).pipe(
+const decodeCompletionResponse = (
+  raw: string
+): Effect.Effect<OpenAIChatCompletionResponse, ParseError> =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAIChatCompletionResponse))(raw).pipe(
     Effect.mapError((error) =>
       ParseError.make({
-        message: `Failed to decode LmStudio native API response: ${String(error)}`,
+        message: `Failed to decode LmStudio chat completion: ${String(error)}`,
         raw
       })
     )
@@ -87,29 +98,39 @@ const decodeStreamChunk = (raw: string): Effect.Effect<OpenAIChatChunk, ParseErr
     )
   )
 
-const nativeContent = (
-  response: LmStudioChatResponse,
+/**
+ * The visible reply, or the reasoning field when LM Studio's reasoning
+ * parser filed a constrained JSON reply under `reasoning_content` and left
+ * `content` empty (observed with Qwen 3.6 on 2026-09-19).
+ */
+const completionContent = (
+  response: OpenAIChatCompletionResponse,
   raw: string
 ): Effect.Effect<string, ParseError> => {
-  const content = response.output
-    .find(
-      (item) =>
-        item.type === "message" &&
-        item.content !== undefined &&
-        item.content !== null &&
-        item.content.trim().length > 0
-    )
-    ?.content?.trim()
-
-  return content === undefined || content === null
+  const message = response.choices[0]?.message
+  const content = message?.content?.trim() ?? ""
+  const reasoning = message?.reasoning_content?.trim() ?? ""
+  const text = content.length > 0 ? content : reasoning
+  return text.length === 0
     ? Effect.fail(
         ParseError.make({
           message: "LmStudio response missing choices[0].message.content",
           raw
         })
       )
-    : Effect.succeed(content)
+    : Effect.succeed(text)
 }
+
+const completionUsage = (response: OpenAIChatCompletionResponse): TokenUsage | undefined =>
+  response.usage === undefined
+    ? undefined
+    : TokenUsage.make({
+        prompt: response.usage.prompt_tokens ?? 0,
+        completion: response.usage.completion_tokens ?? 0,
+        total:
+          response.usage.total_tokens ??
+          (response.usage.prompt_tokens ?? 0) + (response.usage.completion_tokens ?? 0)
+      })
 
 export const makeLmStudioProvider = (
   config: LlmConfig,
@@ -178,47 +199,42 @@ export const makeLmStudioProvider = (
       })
     )
 
-  const nativeRequest = (
-    messages: ReadonlyArray<LmStudioMessage>
-  ): Effect.Effect<readonly [response: LmStudioChatResponse, raw: string], LlmError> =>
-    Effect.gen(function* () {
-      const normalized = yield* baseUrl
-      const rendered = renderLmStudioNativeInput(messages)
-      const request = LmStudioChatRequest.make({
-        model: config.model,
-        input: rendered.input,
-        temperature: config.temperature ?? 0.7,
-        stream: false,
-        ...(rendered.systemPrompt === undefined ? {} : { system_prompt: rendered.systemPrompt }),
-        ...(config.maxTokens === undefined ? {} : { max_output_tokens: config.maxTokens })
-      })
-      const raw = yield* httpClient.postJson(
-        `${normalized}/api/v1/chat`,
-        JSON.stringify(request),
-        authHeaders(),
-        config.timeout
-      )
-      const response = yield* decodeNativeResponse(raw)
-      return [response, raw]
-    })
-
   const executeStructuredWithUsage = <A, E, RD, RE>(
     prompt: string,
     schema: Schema.ConstraintCodec<A, E, RD, RE>,
     jsonSchema: JsonSchema
   ): Effect.Effect<StructuredResult<A>, LlmError, RD> =>
     Effect.gen(function* () {
-      const [response, raw] = yield* nativeRequest([
-        LmStudioMessage.make({
-          role: "user",
-          content:
-            `${prompt}\n\n` +
-            "Please respond with valid JSON only, no additional text or markdown formatting."
-        })
-      ])
-      const content = yield* nativeContent(response, raw)
+      const normalized = yield* baseUrl
+      // Grammar-constrained sampling on the OpenAI-compatible endpoint: the
+      // reply is guaranteed to match `jsonSchema`, so no "JSON only" nudge is
+      // needed and `parseFromText` only has to decode it.
+      const request = OpenAIChatCompletionRequest.make({
+        model: config.model,
+        messages: [OpenAIChatMessage.make({ role: "user", content: prompt })],
+        temperature: config.temperature ?? 0.7,
+        stream: false,
+        response_format: OpenAIResponseFormat.make({
+          type: "json_schema",
+          json_schema: OpenAIJsonSchemaSpec.make({
+            name: "response",
+            schema: jsonSchema,
+            strict: true
+          })
+        }),
+        chat_template_kwargs: OpenAIChatTemplateKwargs.make({ enable_thinking: false }),
+        ...(config.maxTokens === undefined ? {} : { max_tokens: config.maxTokens })
+      })
+      const raw = yield* httpClient.postJson(
+        `${normalized}/v1/chat/completions`,
+        JSON.stringify(request),
+        authHeaders(),
+        config.timeout
+      )
+      const response = yield* decodeCompletionResponse(raw)
+      const content = yield* completionContent(response, raw)
       const value = yield* parseFromText(content, schema, jsonSchema)
-      const result: StructuredResult<A> = [value, undefined, undefined]
+      const result: StructuredResult<A> = [value, completionUsage(response), undefined]
       return result
     })
 

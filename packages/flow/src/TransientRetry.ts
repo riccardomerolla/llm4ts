@@ -353,6 +353,7 @@ export const makeTransientRetry = Effect.fn("@llm4ts/flow/TransientRetry.make")(
         options,
         events
       ),
+    scoreLabels: underlying.scoreLabels,
     isAvailable: underlying.isAvailable
   })
 })

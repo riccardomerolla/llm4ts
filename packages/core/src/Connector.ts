@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import { CliSandbox } from "./ConnectorConfig.ts"
 import { InvalidRequestError, type LlmError } from "./Errors.ts"
+import { verbalizedScoreLabels } from "./LabelScoring.ts"
 import type { LlmServiceShape, StructuredResult } from "./LlmService.ts"
 import {
   ConnectorCapabilities,
@@ -85,6 +86,8 @@ export interface ApiConnectorPrimitives {
     jsonSchema: JsonSchema
   ) => Effect.Effect<StructuredResult<A>, LlmError, RD>
   readonly isAvailable: Effect.Effect<boolean>
+  /** Native label scoring (log-probabilities); derived from structured output when absent. */
+  readonly scoreLabels?: LlmServiceShape["scoreLabels"]
   readonly capabilities?: ConnectorCapabilities
 }
 
@@ -104,7 +107,9 @@ export const makeApiConnector = (primitives: ApiConnectorPrimitives): ApiConnect
     kind: "Api",
     capabilities: primitives.capabilities ?? apiConnectorCapabilities(),
     healthCheck: timedHealthCheck(primitives.isAvailable),
-    executeStructured
+    executeStructured,
+    scoreLabels:
+      primitives.scoreLabels ?? verbalizedScoreLabels(primitives.executeStructuredWithUsage)
   }
 }
 
@@ -217,6 +222,7 @@ export const makeCliConnector = (primitives: CliConnectorPrimitives): CliConnect
     executeStreamWithHistory: (messages) => primitives.completeStream(flattenHistory(messages)),
     executeWithTools: (prompt, tools) => unsupportedTools(primitives.id, prompt, tools),
     executeStructured,
-    executeStructuredWithUsage
+    executeStructuredWithUsage,
+    scoreLabels: verbalizedScoreLabels(executeStructuredWithUsage)
   }
 }

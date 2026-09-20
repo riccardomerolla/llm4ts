@@ -4,8 +4,8 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { makeHttpClient, makeRecordingHttpClient, type HttpRequest } from "@llm4ts/core/HttpClient"
-import { LlmConfig, Message, type JsonSchema } from "@llm4ts/core/Models"
-import { LmStudioChatRequest, LmStudioMessage } from "@llm4ts/core/providers/LmStudioModels"
+import { LlmConfig, Message, TokenUsage, type JsonSchema } from "@llm4ts/core/Models"
+import { LmStudioMessage } from "@llm4ts/core/providers/LmStudioModels"
 import {
   makeLmStudioProvider,
   normalizeLmStudioBaseUrl,
@@ -41,9 +41,6 @@ const decodeStreamRequest = (
   request: HttpRequest
 ): Effect.Effect<OpenAIChatCompletionRequest, unknown> =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAIChatCompletionRequest))(request.body ?? "")
-
-const decodeNativeRequest = (request: HttpRequest): Effect.Effect<LmStudioChatRequest, unknown> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(LmStudioChatRequest))(request.body ?? "")
 
 const personSchema = Schema.Struct({
   name: Schema.String,
@@ -141,23 +138,49 @@ describe("LmStudioProvider", () => {
     })
   )
 
-  it.effect("uses the native API for structured output", () =>
+  const completionBody = (message: Record<string, unknown>): string =>
+    JSON.stringify({
+      id: "chatcmpl-1",
+      model: "llama-2-7b",
+      choices: [{ index: 0, message: { role: "assistant", ...message }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }
+    })
+
+  it.effect("uses schema-constrained JSON on the OpenAI-compatible endpoint", () =>
+    Effect.gen(function* () {
+      const recording = yield* makeRecordingHttpClient(() =>
+        Effect.succeed(completionBody({ content: '{"name":"Alice","age":25}' }))
+      )
+      const provider = makeLmStudioProvider(config(), recording.client)
+
+      const [person, usage] = yield* provider.executeStructuredWithUsage(
+        "Generate a person",
+        personSchema,
+        personJsonSchema
+      )
+      const requests = yield* recording.recorded
+      const request = requests[0]
+
+      assert.deepStrictEqual(person, { name: "Alice", age: 25 })
+      assert.deepStrictEqual(usage, TokenUsage.make({ prompt: 10, completion: 5, total: 15 }))
+      assert.strictEqual(request?.url, "http://lmstudio.test/v1/chat/completions")
+      if (request !== undefined) {
+        const body = yield* decodeStreamRequest(request)
+        assert.isFalse(body.stream)
+        assert.strictEqual(body.response_format?.type, "json_schema")
+        assert.strictEqual(body.response_format?.json_schema?.strict, true)
+        assert.deepStrictEqual(body.response_format?.json_schema?.schema, personJsonSchema)
+        assert.strictEqual(body.chat_template_kwargs?.enable_thinking, false)
+        assert.strictEqual(body.messages[0]?.content, "Generate a person")
+      }
+    })
+  )
+
+  it.effect("falls back to reasoning_content when a thinking model leaves content empty", () =>
     Effect.gen(function* () {
       const recording = yield* makeRecordingHttpClient(() =>
         Effect.succeed(
-          JSON.stringify({
-            model_instance_id: "inst-local-123",
-            output: [
-              {
-                type: "message",
-                content: '{"name":"Alice","age":25}'
-              }
-            ],
-            stats: {
-              input_tokens: 10,
-              total_output_tokens: 5
-            }
-          })
+          completionBody({ content: "", reasoning_content: '{"name":"Bob","age":41}' })
         )
       )
       const provider = makeLmStudioProvider(config(), recording.client)
@@ -167,17 +190,23 @@ describe("LmStudioProvider", () => {
         personSchema,
         personJsonSchema
       )
-      const requests = yield* recording.recorded
-      const request = requests[0]
 
-      assert.deepStrictEqual(person, { name: "Alice", age: 25 })
-      assert.strictEqual(request?.url, "http://lmstudio.test/api/v1/chat")
-      if (request !== undefined) {
-        const body = yield* decodeNativeRequest(request)
-        assert.isFalse(body.stream)
-        assert.strictEqual(body.temperature, 0.7)
-        assert.match(String(body.input), /valid JSON only/)
-      }
+      assert.deepStrictEqual(person, { name: "Bob", age: 41 })
+    })
+  )
+
+  it.effect("fails typed when the constrained reply is not the requested JSON", () =>
+    Effect.gen(function* () {
+      const recording = yield* makeRecordingHttpClient(() =>
+        Effect.succeed(completionBody({ content: "not json at all" }))
+      )
+      const provider = makeLmStudioProvider(config(), recording.client)
+
+      const error = yield* Effect.flip(
+        provider.executeStructured("Generate a person", personSchema, personJsonSchema)
+      )
+
+      assert.strictEqual(error._tag, "ParseError")
     })
   )
 

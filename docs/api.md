@@ -14,6 +14,23 @@ export list; the following modules are the main entry points.
   and SSE helpers.
 - `@llm4ts/core/tools/*`: tool declarations, registry, and bounded tool loop.
 - `@llm4ts/core/eval/*`: checks, judges, evaluators, and suites.
+  `judgeWithJudgment(judgment, dimensions)` is the rubric judge over the
+  Judgment service: one Score question per dimension.
+- `@llm4ts/core/judgment/*` (ADR 0017): typed judgments. `Schemas` holds
+  `State`, the `choice` / `score` / `truth` question constructors, the
+  answers (probabilities, `confidence`, `support`, `origin`), `JudgmentRequest` and
+  `JudgmentResult`; `Judgment` the service, its errors, and the typed
+  accessors `choiceOf` / `scoreOf` / `truthOf`; `LlmJudgment` the layer over
+  any `LlmServiceShape` (per-question label scoring, `concurrency`,
+  `permutations`, verbalized fallback, usage and fallback hooks);
+  `TypeSafeJudgment` the hosted Jev layer (`TYPESAFE_API_KEY`, native
+  batching, `truth` ↔ `noul`, calibration `claimed`); `FakeJudgment` the
+  deterministic test double.
+- `@llm4ts/core/LabelScoring`: `scoreLabels`, the classification primitive
+  every connector offers (a probability per offered label), with the
+  verbalized default derivation, `normalizeLabelProbabilities`, and
+  `unsupportedScoreLabels` for fakes. `mlx-lm` answers it from token
+  log-probabilities in one forward pass.
 - `@llm4ts/core/observability/*`: metrics, tracing, recording, logging,
   redaction.
 
@@ -83,6 +100,18 @@ export list; the following modules are the main entry points.
   from the `contextFor` option; the `BLOCKED_ON:` sentinel ends a story as a
   typed `MissingDependency`.
 - `@llm4ts/flow/PrSummary`: structured pull-request titles and bodies.
+- `@llm4ts/flow/Judgment` (ADR 0017): what a flow does with a judgment.
+  `JudgmentPolicy` (bands keyed by calibration evidence, then by extraction
+  method, verbalized held highest, plus `minSupport`), `decide` (act /
+  caution / hold), `judgeOrEscalate` (held or failed answers re-asked of the
+  reasoning seat, origin `reasoning` with `escalated`), `cachedJudgment`
+  (fingerprinted on state, questions and the judgment identity), and
+  `judgmentOf(context)`.
+  `Review.prescreenReviewers` and the `prescreen` option of
+  `reviewAndFixLoop` are its first consumer: one Truth question per lens
+  over the diff, skipping lenses the screen is confidently negative about;
+  off by default. `ImplementPlanOptions.satisfiedProbe: "judgment"` reads
+  the empty-diff confirmation through it.
 - `@llm4ts/flow/Replay`, `Equiv`, and `EquivReport`: offline replay and
   behavioral proof.
 - `@llm4ts/flow/Artifacts`: resumable per-program extraction and vector
@@ -104,8 +133,14 @@ export list; the following modules are the main entry points.
   rebound to another directory (a story worktree), sharing the run's events
   and cost tracker — what `implementStoriesFlow` needs and the runner's only
   part in parallel story execution.
-- `@llm4ts/runner/Connectors`: API presets, source-compatible environment
-  enrichment, immutable configuration transforms, and edit-capable CLI presets.
+- `@llm4ts/runner/Connectors`: API presets (including `mlxLm`),
+  source-compatible environment enrichment, immutable configuration
+  transforms, edit-capable CLI presets, and `judgmentConnectorFromEnvironment`
+  (`LLM4TS_JUDGMENT_PROVIDER` / `LLM4TS_JUDGMENT_MODEL`).
+- The flow context carries `judgment`: `FlowRunnerOptions.judgment` names
+  the seat (default: the reasoning seat), `judgmentBackend` or
+  `LLM4TS_JUDGMENT_BACKEND=typesafe` selects the hosted model. Its usage is
+  metered as agent `judgment`.
 - `@llm4ts/runner/Kits` and `Packs`: kit discovery across the project,
   global, and built-in tiers, pack name resolution, `openPack`, and the
   kit's pattern deck (ADR 0014).

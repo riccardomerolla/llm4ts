@@ -23,6 +23,7 @@ import {
   type StructuredLogEvent
 } from "@llm4ts/core/observability/StructuredLogger"
 import { makeTracingService } from "@llm4ts/core/observability/Tracing"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const labels = RequestLabels.make({
   provider: "openai",
@@ -100,6 +101,7 @@ describe("metrics and metered LLM service", () => {
             Effect.orDie,
             Effect.map(withUsage)
           ),
+        scoreLabels: unsupportedScoreLabels,
         isAvailable: Effect.succeed(true)
       }
       const metered = meterLlmService(service, collector, {

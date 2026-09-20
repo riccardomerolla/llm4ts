@@ -21,6 +21,9 @@ import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 import { makeMemoryPlainFileStore, makePlanStore } from "@llm4ts/flow/Persistence"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
+import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
+import { origins, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 
 const unused = InvalidRequestError.make({ message: "unused in test" })
 const unusedFlow: Effect.Effect<never, FlowError> = Effect.fail(
@@ -38,6 +41,7 @@ const coderService = (asked: Ref.Ref<ReadonlyArray<string>>): LlmServiceShape =>
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 
@@ -57,6 +61,7 @@ const structuredService = (
       Effect.orDie,
       Effect.map((decoded) => [decoded, usage, model] as const)
     ),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 
@@ -73,6 +78,7 @@ const historyTrackingCoderService = (
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 
@@ -90,6 +96,7 @@ const messageSnapshotCoderService = (
   executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 })
 
@@ -105,6 +112,7 @@ const cleanReviewer: LlmServiceShape = {
       Effect.orDie,
       Effect.map((value) => [value, undefined, undefined] as const)
     ),
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(true)
 }
 
@@ -128,6 +136,7 @@ const dirtyOnceReviewer = (spent: Ref.Ref<boolean>): LlmServiceShape => {
     executeStructured: (_prompt, schema, _jsonSchema) => next(schema),
     executeStructuredWithUsage: (_prompt, schema, _jsonSchema) =>
       next(schema).pipe(Effect.map((value) => [value, undefined, undefined] as const)),
+    scoreLabels: unsupportedScoreLabels,
     isAvailable: Effect.succeed(true)
   }
 }
@@ -833,6 +842,68 @@ describe("Flow gate and diff safety", () => {
       assert.deepStrictEqual(log.commits, [])
       assert.strictEqual(prompts.length, 2)
       assert.match(prompts[1] ?? "", /TASK_ALREADY_SATISFIED/)
+    })
+  )
+
+  it.effect("reads the confirmation through the judgment service when asked to", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const asked = yield* Ref.make<ReadonlyArray<string>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      const plan = Plan.make({
+        epicId: "epic-noop-judged",
+        tasks: [Task.make({ title: "already done", description: "nothing to change" })]
+      })
+      // The coder says so in its own words, without the literal token.
+      const proseCoder: LlmServiceShape = {
+        ...coderService(asked),
+        executeStreamWithHistory: (messages) =>
+          Stream.unwrap(
+            Ref.update(asked, (current) => [...current, messages.at(-1)?.content ?? ""]).pipe(
+              Effect.as(
+                Stream.make(
+                  LlmChunk.make({
+                    delta: "Nothing to do: the guard already exists at line 40.",
+                    finishReason: "stop"
+                  })
+                )
+              )
+            )
+          )
+      }
+      const judgment = yield* makeFakeJudgment({
+        answers: { satisfied: truthAnswer(0.97, origins.llm("logprobs")) }
+      })
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: proseCoder,
+        judgment: judgment.judgment,
+        git: { ...makeFakeGit(gitLog), diffAll: Effect.succeed("") },
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+
+      const completed = yield* implementPlanFlow(context, {
+        store,
+        planPath: ".llm4ts/plan-noop-judged.md",
+        plan: Effect.succeed(plan),
+        satisfiedProbe: "judgment"
+      })
+      const [request] = yield* judgment.recorded
+
+      assert.isTrue(completed.tasks.every((task) => task.completed))
+      assert.deepStrictEqual((yield* Ref.get(gitLog)).commits, [])
+      assert.deepStrictEqual(request?.state, {
+        task: "already done",
+        reply: "Nothing to do: the guard already exists at line 40."
+      })
     })
   )
 

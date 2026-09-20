@@ -14,6 +14,7 @@ import { ApiConnectorConfig, CliConnectorConfig, FallbackChain } from "@llm4ts/c
 import { makeConnectorRegistry, type ConnectorFactory } from "@llm4ts/core/ConnectorRegistry"
 import { InvalidRequestError, ProviderError } from "@llm4ts/core/Errors"
 import { ConnectorId, ConnectorIds, HealthStatus, LlmChunk, Message } from "@llm4ts/core/Models"
+import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 const healthy = HealthStatus.make({
   availability: "Healthy",
@@ -30,6 +31,7 @@ const apiConnector = (
   kind: "Api",
   capabilities: apiConnectorCapabilities(),
   healthCheck,
+  scoreLabels: unsupportedScoreLabels,
   isAvailable: Effect.succeed(available),
   executeStream: (_prompt) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
