@@ -227,6 +227,10 @@ const requestedIssueCount = (prompt: string): number => {
 export const mockStructuredResponse = (prompt: string, schema: JsonSchema): string => {
   const schemaText = JSON.stringify(schema)
   if (schemaText.includes('"summary"') && schemaText.includes('"issues"')) {
+    // Review findings carry severity; issue drafts use the template shape below.
+    if (schemaText.includes('"severity"')) {
+      return JSON.stringify({ summary: "Mock review: no issues.", issues: [] })
+    }
     const count = requestedIssueCount(prompt)
     return JSON.stringify({
       summary: `Generated ${count} issue drafts for Spring Boot microservice demo.`,

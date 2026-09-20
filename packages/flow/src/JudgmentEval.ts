@@ -1,14 +1,67 @@
 import * as Schema from "effect/Schema"
-import { expectedScore, type Answer } from "@llm4ts/core/judgment/Schemas"
-import { decide } from "./Judgment.ts"
-import { DatasetDecision, type LabelledItem } from "./JudgmentDataset.ts"
+import { expectedScore, truth, type Answer } from "@llm4ts/core/judgment/Schemas"
+import { decide, type Decision } from "./Judgment.ts"
+import { candidateId, DatasetDecision, LabelledItem } from "./JudgmentDataset.ts"
+import type { ReviewPrescreenResult, ReviewResult, Severity } from "./Review.ts"
+import type { Reviewer } from "./Reviewer.ts"
 
 export interface EvalItem {
   readonly item: LabelledItem
   readonly answer: Answer | undefined
   readonly latencyMs: number
   readonly failure?: string
+  readonly decision?: Decision
+  readonly severities?: ReadonlyArray<Severity>
 }
+
+/** One completed full-path result per lens; missing screens remain failed eval items. */
+export const replayEvalItems = (
+  commit: { readonly sha: string; readonly diff: string },
+  runs: ReadonlyArray<{ readonly lens: Reviewer; readonly result: ReviewResult }>,
+  observations: ReviewPrescreenResult["observations"],
+  screeningMs: number,
+  labelledAt: string
+): ReadonlyArray<EvalItem> =>
+  runs.map(({ lens, result }) => {
+    const observation = observations.find(({ key }) => key === lens.name)
+    const source = `commit:${commit.sha}:${lens.name}`
+    return {
+      item: LabelledItem.make({
+        id: candidateId("review-prescreen", source),
+        decision: "review-prescreen",
+        source,
+        state: observation?.state ?? { diff: commit.diff },
+        question: observation?.question ?? truth(lens.screeningStatement),
+        label: result.issues.length > 0,
+        labelledBy: "outcome",
+        labelledAt
+      }),
+      answer: observation?.answer,
+      ...(observation === undefined
+        ? { failure: "Pre-screen returned no matching answer." }
+        : { decision: observation.decision }),
+      severities: result.issues.map(({ severity }) => severity),
+      latencyMs: screeningMs / runs.length
+    }
+  })
+
+const SeverityCounts = Schema.Struct({
+  Critical: Schema.Int,
+  Warning: Schema.Int,
+  Info: Schema.Int
+})
+
+/** Lost issues and missed positive lenses have different units; verify both independently. */
+export const replayMissesAgree = (
+  report: EvalReport,
+  lost: typeof SeverityCounts.Type,
+  missedPositiveLenses: number
+): boolean =>
+  report.missedIssues?.count === missedPositiveLenses &&
+  report.missedIssues.severities !== undefined &&
+  (["Critical", "Warning", "Info"] as const).every(
+    (severity) => report.missedIssues?.severities?.[severity] === lost[severity]
+  )
 
 const Metric = Schema.NullOr(Schema.Number)
 export const EvalMemory = Schema.Struct({ restMb: Schema.Number, peakMb: Schema.Number })
@@ -34,12 +87,17 @@ export class EvalReport extends Schema.Class<EvalReport>("EvalReport")({
   overall: EvalMeasures,
   decisions: Schema.Array(Schema.Struct({ decision: DatasetDecision, measures: EvalMeasures })),
   missedIssues: Schema.optionalKey(
-    Schema.Struct({ count: Schema.Int, positiveAnswered: Schema.Int, rate: Metric })
+    Schema.Struct({
+      count: Schema.Int,
+      positiveAnswered: Schema.Int,
+      rate: Metric,
+      severities: Schema.optionalKey(SeverityCounts)
+    })
   ),
   memory: Schema.optionalKey(EvalMemory)
 }) {}
 
-const measured = ({ item, answer, failure, latencyMs }: EvalItem) => {
+const measured = ({ item, answer, failure, latencyMs, decision }: EvalItem) => {
   if (failure !== undefined || answer === undefined) return undefined
   if (
     item.question.type === "truth" &&
@@ -48,6 +106,7 @@ const measured = ({ item, answer, failure, latencyMs }: EvalItem) => {
   ) {
     return {
       answer,
+      decision: decision ?? decide(answer),
       latencyMs,
       correct: answer.truth >= 0.5 === item.label,
       probability: item.label ? answer.truth : 1 - answer.truth
@@ -56,6 +115,7 @@ const measured = ({ item, answer, failure, latencyMs }: EvalItem) => {
   if (item.question.type === "score" && answer.type === "score" && typeof item.label === "number") {
     return {
       answer,
+      decision: decision ?? decide(answer),
       latencyMs,
       correct: Math.round(expectedScore(answer.probabilities)) === item.label,
       probability: answer.probabilities[String(item.label)] ?? 0
@@ -89,7 +149,7 @@ const measures = (items: ReadonlyArray<EvalItem>): typeof EvalMeasures.Type => {
           : members.reduce((sum, member) => sum + member.probability, 0) / members.length
     }
   })
-  const decisions = answered.map(({ answer }) => decide(answer))
+  const decisions = answered.map(({ decision }) => decision)
   const latencies = answered.map(({ latencyMs }) => latencyMs).sort((a, b) => a - b)
   return {
     items: items.length,
@@ -121,11 +181,12 @@ export const evaluateJudgments = (
     .filter(({ item }) => item.decision === "review-prescreen" && item.label === true)
     .flatMap((item) => {
       const value = measured(item)
-      return value === undefined ? [] : [value.answer]
+      return value === undefined ? [] : [{ ...value, severities: item.severities }]
     })
   const missed = positives.filter(
-    (answer) => answer.type === "truth" && answer.truth < 0.5 && decide(answer) === "act"
-  ).length
+    ({ answer, decision }) => answer.type === "truth" && answer.truth < 0.5 && decision === "act"
+  )
+  const severities = missed.flatMap((item) => item.severities ?? [])
   return EvalReport.make({
     overall: measures(items),
     decisions: decisions.map((decision) => ({
@@ -135,9 +196,18 @@ export const evaluateJudgments = (
     ...(decisions.includes("review-prescreen")
       ? {
           missedIssues: {
-            count: missed,
+            count: missed.length,
             positiveAnswered: positives.length,
-            rate: positives.length === 0 ? null : missed / positives.length
+            rate: positives.length === 0 ? null : missed.length / positives.length,
+            ...(items.every((item) => item.severities !== undefined)
+              ? {
+                  severities: {
+                    Critical: severities.filter((severity) => severity === "Critical").length,
+                    Warning: severities.filter((severity) => severity === "Warning").length,
+                    Info: severities.filter((severity) => severity === "Info").length
+                  }
+                }
+              : {})
           }
         }
       : {}),
@@ -151,6 +221,8 @@ export interface EvalReportMeta {
   readonly backend: string
   readonly model: string
   readonly memoryNote?: string
+  readonly title?: string
+  readonly latencyNote?: string
 }
 
 const cell = (value: string): string => value.replace(/\|/g, "&#124;").replace(/[\r\n]/g, " ")
@@ -162,7 +234,7 @@ export const renderEvalReport = (report: EvalReport, meta: EvalReportMeta): stri
     { name: "Overall", measures: report.overall }
   ]
   return [
-    "# Judgment evaluation",
+    `# ${cell(meta.title ?? "Judgment evaluation")}`,
     "",
     `- Date: ${cell(meta.date)}`,
     `- Decision: ${cell(meta.decision)}`,
@@ -183,7 +255,8 @@ export const renderEvalReport = (report: EvalReport, meta: EvalReportMeta): stri
     "ECE bins the labelled-outcome probability p into [0, 0.1), ..., [0.9, 1]; target = 1.",
     "ECE = sum(bin count / answered * |1 - mean p|); Brier = mean((1 - p)^2).",
     "These are labelled-outcome metrics, not predicted-confidence ECE or multiclass Brier.",
-    "Latency uses nearest-rank percentiles per independent question, excluding failures.",
+    meta.latencyNote ??
+      "Latency uses nearest-rank percentiles per independent question, excluding failures.",
     "",
     "## Default policy decisions",
     "",
@@ -204,7 +277,18 @@ export const renderEvalReport = (report: EvalReport, meta: EvalReportMeta): stri
           `| ${report.missedIssues.count} | ${report.missedIssues.positiveAnswered} | ${number(report.missedIssues.rate)} |`,
           "",
           "A miss requires label=true, truth<0.5 and decide=act (the lens would be skipped).",
-          "Severity breakdown unavailable: LabelledItem records presence, not issue counts or severity."
+          ...(report.missedIssues.severities === undefined
+            ? [
+                "Severity breakdown unavailable: LabelledItem records presence, not issue counts or severity."
+              ]
+            : [
+                "",
+                "| Lost Critical issues | Lost Warning issues | Lost Info issues |",
+                "| ---: | ---: | ---: |",
+                `| ${report.missedIssues.severities.Critical} | ${report.missedIssues.severities.Warning} | ${report.missedIssues.severities.Info} |`,
+                "",
+                "Severity counts are issues on missed positive lenses; one lens can report multiple issues."
+              ])
         ]),
     "",
     "## Judgment seat resident memory",

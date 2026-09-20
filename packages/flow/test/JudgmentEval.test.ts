@@ -1,6 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { LlmConfig } from "@llm4ts/core/Models"
+import { makeMockProvider } from "@llm4ts/core/providers/MockProvider"
+import { makeLlmJudgment } from "@llm4ts/core/judgment/LlmJudgment"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
 import {
   origins,
@@ -15,8 +18,23 @@ import {
   EvalReport,
   evaluateJudgments,
   renderEvalReport,
+  replayEvalItems,
+  replayMissesAgree,
   type EvalItem
 } from "../src/JudgmentEval.ts"
+
+import { decide } from "../src/Judgment.ts"
+import { makeCollectingFlowEvents } from "../src/FlowEvents.ts"
+import {
+  prescreenReviewers,
+  reviewWith,
+  correctnessReviewer,
+  securityReviewer,
+  testReviewer,
+  ReviewIssue,
+  ReviewResult,
+  type ReviewPrescreenResult
+} from "../src/Review.ts"
 
 const attribution = { source: "fixture", labelledBy: "test", labelledAt: "2026-09-20T00:00:00Z" }
 const truthItem = (id: string, label: boolean): LabelledItem =>
@@ -49,6 +67,197 @@ const close = (actual: number | null, expected: number) => {
 }
 
 describe("JudgmentEval", () => {
+  it.effect(
+    "evaluates completed mock-provider reviews without inventing a failed-review label",
+    () =>
+      Effect.gen(function* () {
+        const provider = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+        const events = yield* makeCollectingFlowEvents
+        const result = yield* reviewWith(provider, events, correctnessReviewer, "task", "diff")
+        assert.deepStrictEqual(result.issues, [])
+        const screen = yield* prescreenReviewers(
+          { judgment: makeLlmJudgment(provider), mode: "act" },
+          events,
+          "diff",
+          [correctnessReviewer]
+        )
+        const report = evaluateJudgments(
+          replayEvalItems(
+            { sha: "mock", diff: "diff" },
+            [{ lens: correctnessReviewer, result }],
+            screen.observations,
+            10,
+            attribution.labelledAt
+          )
+        )
+        assert.strictEqual(report.overall.answered, 1)
+        assert.strictEqual(report.overall.failed, 0)
+        close(report.overall.ece, 0.6)
+        close(report.overall.brier, 0.36)
+        assert.isTrue(replayMissesAgree(report, { Critical: 0, Warning: 0, Info: 0 }, 0))
+      })
+  )
+
+  it.effect("builds outcome labels from full lenses and reuses actual act-mode observations", () =>
+    Effect.gen(function* () {
+      const lenses = [correctnessReviewer, securityReviewer, testReviewer]
+      const fake = yield* makeFakeJudgment({
+        answers: {
+          [correctnessReviewer.name]: truthAnswer(0, origins.fake()),
+          [securityReviewer.name]: truthAnswer(0, origins.fake(), 0.1),
+          [testReviewer.name]: truthAnswer(0, origins.fake())
+        }
+      })
+      const events = yield* makeCollectingFlowEvents
+      const screen = yield* prescreenReviewers(
+        { judgment: fake.judgment, mode: "act" },
+        events,
+        "diff",
+        lenses
+      )
+      const runs = lenses.map((lens) => ({
+        lens,
+        result: ReviewResult.make({
+          issues:
+            lens === testReviewer
+              ? []
+              : [
+                  ReviewIssue.make({ severity: "Critical", title: "critical" }),
+                  ReviewIssue.make({ severity: "Warning", title: "warning 1" }),
+                  ReviewIssue.make({ severity: "Warning", title: "warning 2" }),
+                  ReviewIssue.make({ severity: "Info", title: "info" })
+                ]
+        })
+      }))
+      // Reverse observations to prove matching is by lens key, not array position.
+      const items = replayEvalItems(
+        { sha: "abc", diff: "diff" },
+        runs,
+        [...screen.observations].reverse(),
+        90,
+        attribution.labelledAt
+      )
+      assert.strictEqual((yield* fake.recorded).length, 1)
+      assert.deepStrictEqual(
+        items.map(({ item }) => item.label),
+        [true, true, false]
+      )
+      assert.deepStrictEqual(
+        items.map(({ item }) => item.source),
+        lenses.map((lens) => `commit:abc:${lens.name}`)
+      )
+      assert.strictEqual(new Set(items.map(({ item }) => item.id)).size, 3)
+      for (const entry of items) {
+        assert.strictEqual(entry.item.labelledBy, "outcome")
+        assert.strictEqual(entry.item.labelledAt, attribution.labelledAt)
+        assert.strictEqual(entry.latencyMs, 30)
+        const original = screen.observations.find(({ key }) =>
+          entry.item.source.endsWith(`:${key}`)
+        )
+        assert.strictEqual(entry.answer, original?.answer)
+        assert.strictEqual(entry.decision, original?.decision)
+        assert.deepStrictEqual(entry.item.question, original?.question)
+        assert.deepStrictEqual(entry.item.state, original?.state)
+        yield* Schema.decodeUnknownEffect(LabelledItem)(entry.item)
+      }
+      const report = evaluateJudgments(items)
+      assert.deepStrictEqual(report.missedIssues, {
+        count: 1,
+        positiveAnswered: 2,
+        rate: 0.5,
+        severities: { Critical: 1, Warning: 2, Info: 1 }
+      })
+      close(report.overall.ece, 2 / 3)
+      close(report.overall.brier, 2 / 3)
+      const skipped = runs.filter(({ lens }) => !screen.reviewers.includes(lens))
+      const lost = skipped.flatMap(({ result }) => result.issues)
+      const counts = {
+        Critical: lost.filter(({ severity }) => severity === "Critical").length,
+        Warning: lost.filter(({ severity }) => severity === "Warning").length,
+        Info: lost.filter(({ severity }) => severity === "Info").length
+      }
+      assert.isTrue(
+        replayMissesAgree(
+          report,
+          counts,
+          skipped.filter(({ result }) => result.issues.length > 0).length
+        )
+      )
+      assert.isFalse(replayMissesAgree(report, { ...counts, Warning: 1 }, 1))
+      assert.isFalse(replayMissesAgree(report, counts, lost.length))
+      const rendered = renderEvalReport(report, {
+        date: "2026-09-20",
+        decision: "review-prescreen",
+        backend: "fake",
+        model: "fake",
+        title: "Outcome-derived labels (lens reported an issue), not human labels"
+      })
+      assert.isTrue(
+        rendered.startsWith("# Outcome-derived labels (lens reported an issue), not human labels")
+      )
+      assert.include(rendered, "| 1 | 2 | 1 |")
+      assert.notInclude(rendered, "Severity breakdown unavailable")
+      const codec = Schema.fromJsonString(EvalReport)
+      assert.deepStrictEqual(
+        yield* Schema.decodeUnknownEffect(codec)(yield* Schema.encodeEffect(codec)(report)),
+        report
+      )
+    })
+  )
+
+  it("retains labels for missing screens, preserves recorded decisions and handles empty runs", () => {
+    const runs = [correctnessReviewer, securityReviewer, testReviewer].map((lens) => ({
+      lens,
+      result: ReviewResult.make({
+        issues: [ReviewIssue.make({ severity: "Critical", title: "issue" })]
+      })
+    }))
+    const answer = truthAnswer(0, origins.fake())
+    assert.strictEqual(decide(answer), "act")
+    const observations: ReviewPrescreenResult["observations"] = [
+      {
+        key: correctnessReviewer.name,
+        answer,
+        decision: "hold",
+        state: { diff: "actual state" },
+        question: truth("Actual question"),
+        judgmentIdentity: "fake"
+      }
+    ]
+    const items = replayEvalItems(
+      { sha: "abc", diff: "diff" },
+      runs,
+      observations,
+      90,
+      attribution.labelledAt
+    )
+    assert.strictEqual(items.length, 3)
+    assert.isTrue(items.every(({ item }) => item.label === true))
+    assert.strictEqual(items[1]?.failure, "Pre-screen returned no matching answer.")
+    assert.deepStrictEqual(items[1]?.item.state, { diff: "diff" })
+    assert.deepStrictEqual(items[1]?.item.question, truth(securityReviewer.screeningStatement))
+    const report = evaluateJudgments(items)
+    assert.strictEqual(report.overall.failed, 2)
+    assert.deepStrictEqual(report.overall.decisions, { act: 0, caution: 0, hold: 1 })
+    assert.deepStrictEqual(report.overall.latencyMs, { p50: 30, p95: 30 })
+    assert.deepStrictEqual(report.missedIssues, {
+      count: 0,
+      positiveAnswered: 1,
+      rate: 0,
+      severities: { Critical: 0, Warning: 0, Info: 0 }
+    })
+    const allFailed = evaluateJudgments(
+      replayEvalItems({ sha: "abc", diff: "diff" }, runs, [], 90, attribution.labelledAt)
+    )
+    assert.strictEqual(allFailed.overall.failed, 3)
+    assert.strictEqual(allFailed.missedIssues?.rate, null)
+    assert.isTrue(replayMissesAgree(allFailed, { Critical: 0, Warning: 0, Info: 0 }, 0))
+    assert.deepStrictEqual(
+      replayEvalItems({ sha: "abc", diff: "diff" }, [], [], 0, attribution.labelledAt),
+      []
+    )
+  })
+
   it("computes Truth accuracy at 0.5 and Score accuracy from rounded expected probabilities", () => {
     const answer = scoreAnswer(scoreQuestion, { "0": 0.5, "1": 0, "2": 0.5 }, origins.fake())
     const report = evaluateJudgments([

@@ -10,55 +10,111 @@
  * the reviewer seat. Acceptance to turn the pre-screen on by default: zero
  * Critical issues lost and at least 40% fewer review tokens.
  */
-import { argValue, commits, lenses } from "./lib.ts"
+import {
+  argValue,
+  commits,
+  lenses,
+  backendFromEnvironment,
+  judgmentBackend,
+  writeReport,
+  JudgmentToolError
+} from "./lib.ts"
+import * as DateTime from "effect/DateTime"
+import * as Schema from "effect/Schema"
+import {
+  evaluateJudgments,
+  renderEvalReport,
+  replayEvalItems,
+  replayMissesAgree,
+  type EvalItem
+} from "@llm4ts/flow/JudgmentEval"
 import * as Effect from "effect/Effect"
-import { makeLlmJudgment } from "@llm4ts/core/judgment/LlmJudgment"
 import { TokensUsed, makeCollectingFlowEvents, type FlowEvent } from "@llm4ts/flow/FlowEvents"
 import { prescreenReviewers, reviewWith, type ReviewResult } from "@llm4ts/flow/Review"
 import type { Reviewer } from "@llm4ts/flow/Reviewer"
-import {
-  apiConnectorFromEnvironment,
-  judgmentConnectorFromEnvironment,
-  prepareConnector
-} from "@llm4ts/runner/Connectors"
+import { apiConnectorFromEnvironment, prepareConnector } from "@llm4ts/runner/Connectors"
 import { nodeFlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
 
-const commitCount = Number.parseInt(argValue("commits", "30"), 10)
-const repo = argValue("repo", process.cwd())
-const diffCap = Number.parseInt(argValue("diff-cap", "60000"), 10)
+const usage =
+  "Usage: pnpm judgment:replay [--commits 30] [--repo .] [--diff-cap 60000] [--out <path>]"
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
+const Arguments = Schema.Struct({
+  commitCount: PositiveInt,
+  repo: Schema.String.check(Schema.isNonEmpty()),
+  diffCap: PositiveInt,
+  out: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty()))
+})
 
 const tokensIn = (events: ReadonlyArray<FlowEvent>): number =>
   events.reduce((sum, event) => (event._tag === "TokensUsed" ? sum + event.usage.total : sum), 0)
 
 interface LensRun {
   readonly lens: Reviewer
-  readonly result: ReviewResult | undefined
+  readonly result: ReviewResult
   readonly tokens: number
   readonly ms: number
 }
 
 const program = Effect.gen(function* () {
+  const args = process.argv.slice(2)
+  if (args.length === 1 && args[0] === "--help") {
+    console.log(usage)
+    return
+  }
+  const seen = new Set<string>()
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index] ?? ""
+    if (
+      !["--commits", "--repo", "--diff-cap", "--out"].includes(flag) ||
+      seen.has(flag) ||
+      args[index + 1] === undefined ||
+      args[index + 1]?.startsWith("--")
+    )
+      return yield* JudgmentToolError.make({ message: usage })
+    seen.add(flag)
+  }
+  const { commitCount, repo, diffCap, out } = yield* Schema.decodeUnknownEffect(Arguments)({
+    commitCount: Number(argValue("commits", "30", args)),
+    repo: argValue("repo", process.cwd(), args),
+    diffCap: Number(argValue("diff-cap", "60000", args)),
+    ...(seen.has("--out") ? { out: argValue("out", "", args) } : {})
+  }).pipe(Effect.mapError(() => JudgmentToolError.make({ message: usage })))
   const environment = process.env
   const dependencies = nodeFlowRunnerDependencies()
   const reviewerConfig = yield* apiConnectorFromEnvironment(environment)
-  const judgmentConfig = (yield* judgmentConnectorFromEnvironment(environment)) ?? reviewerConfig
   const reviewer = yield* dependencies.registry.resolve(
     prepareConnector(reviewerConfig, repo, environment)
   )
-  const judgmentSeat =
-    judgmentConfig === reviewerConfig
-      ? reviewer
-      : yield* dependencies.registry.resolve(prepareConnector(judgmentConfig, repo, environment))
-
-  const sample = commits(repo, commitCount, diffCap)
-  console.log(`# Review pre-screen replay\n`)
-  console.log(
-    `${sample.length} commits from ${repo}; reviewer ${reviewerConfig.connectorId.value}/${reviewerConfig.model ?? "default"}; judgment ${judgmentConfig.connectorId.value}/${judgmentConfig.model ?? "default"}\n`
+  const screenEvents = yield* makeCollectingFlowEvents
+  const backend = yield* judgmentBackend(
+    backendFromEnvironment(environment),
+    environment,
+    repo,
+    dependencies,
+    {
+      onUsage: (usage, model) =>
+        screenEvents.publish(
+          new TokensUsed({ agent: "judgment", usage, ...(model === undefined ? {} : { model }) })
+        )
+    }
   )
-  console.log(
+  const labelledAt = DateTime.formatIso(yield* DateTime.now)
+  const items: Array<EvalItem> = []
+  const markdown: Array<string> = []
+  const print = (line: string) => {
+    markdown.push(line)
+  }
+  const sample = commits(repo, commitCount, diffCap)
+  if (sample.length === 0)
+    return yield* JudgmentToolError.make({ message: "No non-empty commits to replay." })
+  print(`# Review pre-screen replay\n`)
+  print(
+    `${sample.length} commits from ${repo}; reviewer ${reviewerConfig.connectorId.value}/${reviewerConfig.model ?? "default"}; judgment ${backend.judgment.identity}/${backend.model}\n`
+  )
+  print(
     "| commit | full tokens | full ms | screen tokens | screen ms | skipped | kept tokens | lost (C/W/I) |"
   )
-  console.log("| --- | ---: | ---: | ---: | ---: | --- | ---: | --- |")
+  print("| --- | ---: | ---: | ---: | ---: | --- | ---: | --- |")
 
   let fullTokens = 0
   let screenedTokens = 0
@@ -70,6 +126,7 @@ const program = Effect.gen(function* () {
   let lostInfo = 0
   let skippedTotal = 0
   let lensRuns = 0
+  let missedPositiveLenses = 0
 
   for (const commit of sample) {
     const runs: Array<LensRun> = []
@@ -77,30 +134,29 @@ const program = Effect.gen(function* () {
       const events = yield* makeCollectingFlowEvents
       const started = Date.now()
       const result = yield* reviewWith(reviewer, events, lens, commit.title, commit.diff).pipe(
-        Effect.map((value): ReviewResult | undefined => value),
-        Effect.catch(() => Effect.succeed<ReviewResult | undefined>(undefined))
+        Effect.mapError(() =>
+          JudgmentToolError.make({
+            message: `Full review failed for ${commit.sha}:${lens.name}; replay aborted without deriving a label.`
+          })
+        )
       )
       const recorded = yield* events.recorded
       runs.push({ lens, result, tokens: tokensIn(recorded), ms: Date.now() - started })
     }
-    const screenEvents = yield* makeCollectingFlowEvents
-    const judgment = makeLlmJudgment(judgmentSeat, undefined, {
-      onUsage: (usage, model) =>
-        screenEvents.publish(
-          new TokensUsed({ agent: "judgment", usage, ...(model === undefined ? {} : { model }) })
-        )
-    })
+    const tokensBefore = tokensIn(yield* screenEvents.recorded)
     const screenStarted = Date.now()
-    const { reviewers: kept } = yield* prescreenReviewers(
-      { judgment, mode: "act" },
+    const { reviewers: kept, observations } = yield* prescreenReviewers(
+      { judgment: backend.judgment, mode: "act" },
       screenEvents,
       commit.diff,
       lenses
     )
     const screenMs = Date.now() - screenStarted
-    const screenTokens = tokensIn(yield* screenEvents.recorded)
+    const screenTokens = tokensIn(yield* screenEvents.recorded) - tokensBefore
+    items.push(...replayEvalItems(commit, runs, observations, screenMs, labelledAt))
     const skipped = runs.filter((run) => !kept.includes(run.lens))
-    const lost = skipped.flatMap((run) => run.result?.issues ?? [])
+    const lost = skipped.flatMap((run) => run.result.issues)
+    missedPositiveLenses += skipped.filter((run) => run.result.issues.length > 0).length
     const lostC = lost.filter((issue) => issue.severity === "Critical").length
     const lostW = lost.filter((issue) => issue.severity === "Warning").length
     const lostI = lost.filter((issue) => issue.severity === "Info").length
@@ -122,28 +178,79 @@ const program = Effect.gen(function* () {
     lostInfo += lostI
     skippedTotal += skipped.length
     lensRuns += runs.length
-    console.log(
+    print(
       `| ${commit.sha.slice(0, 8)} ${commit.title.slice(0, 40).replace(/\|/g, "/")} | ${commitFull} | ${commitFullMs} | ${screenTokens} | ${screenMs} | ${skipped.map((run) => run.lens.name).join(", ") || "-"} | ${commitKept} | ${lostC}/${lostW}/${lostI} |`
     )
   }
 
-  const saved = fullTokens === 0 ? 0 : 1 - screenedTokens / fullTokens
-  console.log(`\n## Totals\n`)
-  console.log(`- lens runs: ${lensRuns}, skipped by the pre-screen: ${skippedTotal}`)
-  console.log(
-    `- review tokens: full ${fullTokens}, pre-screened ${screenedTokens} (${(saved * 100).toFixed(1)}% fewer)`
+  const report = evaluateJudgments(items)
+  if (
+    !replayMissesAgree(
+      report,
+      { Critical: lostCritical, Warning: lostWarning, Info: lostInfo },
+      missedPositiveLenses
+    )
   )
-  console.log(
+    return yield* JudgmentToolError.make({
+      message: "Replay lost issues and evaluation missed lenses/severities disagree."
+    })
+  const metric = (value: number | null | undefined) => (value == null ? "n/a" : value.toFixed(4))
+  const saved = fullTokens === 0 ? 0 : 1 - screenedTokens / fullTokens
+  print(`\n## Totals\n`)
+  print(`- lens runs: ${lensRuns}, skipped by the pre-screen: ${skippedTotal}`)
+  print(
+    `- reviewer-seat tokens: full ${fullTokens}, pre-screened ${screenedTokens} (${(saved * 100).toFixed(1)}% fewer)`
+  )
+  print(
     `- wall time: full ${(fullMs / 1000).toFixed(1)}s, pre-screened ${(screenedMs / 1000).toFixed(1)}s`
   )
-  console.log(`- issues lost: Critical ${lostCritical}, Warning ${lostWarning}, Info ${lostInfo}`)
+  print(`- issues lost: Critical ${lostCritical}, Warning ${lostWarning}, Info ${lostInfo}`)
+  print(`- judgment-seat tokens: ${judgmentTokens}`)
+  print(
+    `- expected calibration error (10 bins): ${metric(report.overall.ece)}; Brier: ${metric(report.overall.brier)}`
+  )
+  print(
+    `- missed positive lenses: ${report.missedIssues?.count ?? 0}; missed rate: ${metric(report.missedIssues?.rate)}`
+  )
+  print(
+    `- issues on missed positive lenses: Critical ${report.missedIssues?.severities?.Critical ?? 0}, Warning ${report.missedIssues?.severities?.Warning ?? 0}, Info ${report.missedIssues?.severities?.Info ?? 0} (agrees with lost C/W/I)`
+  )
   const passes = lostCritical === 0 && saved >= 0.4
-  console.log(
+  print(
     `\n**Acceptance (zero Critical lost, ≥40% fewer reviewer-seat tokens): ${passes ? "PASS" : "FAIL"}**`
   )
+  print(
+    `Calibration (information only): ECE ${metric(report.overall.ece)}, Brier ${metric(report.overall.brier)}; missed rate ${metric(report.missedIssues?.rate)}.`
+  )
+  print("")
+  print(
+    renderEvalReport(report, {
+      title: "Outcome-derived labels (lens reported an issue), not human labels",
+      date: labelledAt.slice(0, 10),
+      decision: "review-prescreen",
+      backend: backend.judgment.identity,
+      model: backend.model,
+      latencyNote:
+        "Screening-call latency is divided evenly across all lens questions, including unanswered questions; p50/p95 use answered items only. No per-question timing is available."
+    })
+  )
+  yield* writeReport({
+    markdown: markdown.join("\n"),
+    out,
+    root: process.cwd(),
+    tool: "replay",
+    args,
+    environment,
+    files: dependencies.files,
+    commitRange: `${sample.at(-1)?.sha ?? "none"}..${sample[0]?.sha ?? "none"} (inclusive, ${sample.length} non-merge commits; diff cap ${diffCap})`
+  })
 })
 
 Effect.runPromise(program).catch((error: unknown) => {
-  console.error(error)
-  process.exit(1)
+  console.error(
+    error instanceof JudgmentToolError
+      ? error.message
+      : "Replay failed; check provider, repository and output configuration."
+  )
+  process.exitCode = 1
 })

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add outcome-derived calibration and missed-lens/severity measures to `judgment:replay`,
+  separate seat token totals, and shared Markdown output/provenance for judgment tools.
+
 - Add `judgment:eval` with labelled-set accuracy, calibration, policy and missed-issue
   measures, latency and optional server RSS, reproducible Markdown reports, and fake-backend tests.
 

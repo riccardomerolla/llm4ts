@@ -2,22 +2,18 @@ import { execFileSync } from "node:child_process"
 import { resolve } from "node:path"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
-import { LlmJudgmentConfig, makeLlmJudgment } from "@llm4ts/core/judgment/LlmJudgment"
 import { JudgmentBackend } from "@llm4ts/core/judgment/Schemas"
-import { defaultTypeSafeModel, makeTypeSafeJudgment } from "@llm4ts/core/judgment/TypeSafeJudgment"
 import { DatasetDecision, readDataset } from "@llm4ts/flow/JudgmentDataset"
 import { evaluateJudgments, renderEvalReport, type EvalItem } from "@llm4ts/flow/JudgmentEval"
-import {
-  apiConnectorFromEnvironment,
-  judgmentConnectorFromEnvironment,
-  prepareConnector
-} from "@llm4ts/runner/Connectors"
 import { nodeFlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
-import { nodeHttpClient } from "@llm4ts/runner/NodeHttpClient"
-import { argValue } from "./lib.ts"
+import {
+  argValue,
+  backendFromEnvironment,
+  judgmentBackend,
+  writeReport,
+  JudgmentToolError
+} from "./lib.ts"
 
 class EvalToolError extends Schema.TaggedError<EvalToolError>()("EvalToolError", {
   message: Schema.String
@@ -78,9 +74,7 @@ const program = Effect.gen(function* () {
     seen.add(flag)
   }
   const environment = process.env
-  // Match FlowRunner: only an explicit typesafe environment value selects hosted judgment.
-  const defaultBackend =
-    environment.LLM4TS_JUDGMENT_BACKEND?.trim().toLowerCase() === "typesafe" ? "typesafe" : "llm"
+  const defaultBackend = backendFromEnvironment(environment)
   const options = yield* Schema.decodeUnknownEffect(Arguments)({
     decision,
     backend: argValue("backend", defaultBackend, args),
@@ -107,49 +101,7 @@ const program = Effect.gen(function* () {
       message: "Dataset contains an item for a different decision."
     })
   }
-  const backend = yield* Effect.gen(function* () {
-    if (options.backend === "fake") {
-      return { judgment: (yield* makeFakeJudgment()).judgment, model: "deterministic defaults" }
-    }
-    if (options.backend === "typesafe") {
-      // Keep the same trimming, blank-key refusal and Redacted boundary as FlowRunner.
-      const key = environment.TYPESAFE_API_KEY?.trim()
-      if (key === undefined || key.length === 0) {
-        return yield* EvalToolError.make({
-          message: "judgment backend 'typesafe' needs TYPESAFE_API_KEY in the environment"
-        })
-      }
-      return {
-        judgment: makeTypeSafeJudgment(
-          { apiKey: Redacted.make(key) },
-          dependencies.http ?? nodeHttpClient
-        ),
-        model: defaultTypeSafeModel
-      }
-    }
-    const config =
-      (yield* judgmentConnectorFromEnvironment(environment)) ??
-      (yield* apiConnectorFromEnvironment(environment))
-    const seat = yield* dependencies.registry.resolve(prepareConnector(config, root, environment))
-    return {
-      judgment: makeLlmJudgment(
-        seat,
-        LlmJudgmentConfig.make({
-          connector: config.connectorId.value,
-          ...(config.model === undefined ? {} : { model: config.model })
-        })
-      ),
-      model: config.model ?? "default"
-    }
-  }).pipe(
-    Effect.mapError((error) =>
-      error instanceof EvalToolError
-        ? error
-        : EvalToolError.make({
-            message: `Backend initialization failed (${error._tag}). Check provider and model configuration.`
-          })
-    )
-  )
+  const backend = yield* judgmentBackend(options.backend, environment, root, dependencies)
   const restMb = options.pid === undefined ? undefined : yield* residentMb(options.pid)
   const results = yield* Effect.forEach(
     dataset,
@@ -203,9 +155,16 @@ const program = Effect.gen(function* () {
         ? "Memory skipped: no local server PID supplied (--pid); no processes were guessed."
         : `Server PID ${options.pid}: ps RSS / 1024, sampled before and after evaluation. Peak is the larger sample, not a continuous high-water mark.`
   })
-  if (options.out !== undefined)
-    yield* dependencies.files.writeAtomic(resolve(root, options.out), markdown)
-  console.log(markdown)
+  yield* writeReport({
+    markdown,
+    out: options.out,
+    root,
+    tool: "eval",
+    args,
+    environment,
+    files: dependencies.files,
+    dataset: options.dataset
+  })
 })
 
 Effect.runPromise(
@@ -214,7 +173,9 @@ Effect.runPromise(
       Effect.sync(() => {
         // Only our own safe messages and dataset locations may reach the terminal.
         console.error(
-          error instanceof EvalToolError || error._tag === "DatasetParseError"
+          error instanceof EvalToolError ||
+            error instanceof JudgmentToolError ||
+            error._tag === "DatasetParseError"
             ? error.message
             : `Evaluation failed (${error._tag}).`
         )

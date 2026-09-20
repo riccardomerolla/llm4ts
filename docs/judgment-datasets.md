@@ -78,6 +78,20 @@ and after the run. The report marks memory unavailable without a PID and
 describes the sampled-peak limitation. Dataset and backend request failures
 exit non-zero; per-question failures are counted in the report.
 
+`pnpm judgment:replay --commits 30` evaluates the pre-screen against outcome-derived
+labels, not human labels: each commit/lens is positive when its full review reports
+at least one issue. It reuses the act-mode screen's answers and decisions, reports
+ECE, Brier and missed positive lenses, and counts the issues on missed lenses by
+Critical/Warning/Info severity, asserting agreement with the replay's lost issues.
+The missed rate divides missed lenses by answered positive lenses; missing screen
+answers count as failures, and a failed full review aborts because it cannot supply
+a label. Screening latency is divided evenly across all questions; percentiles
+exclude unanswered items. Reviewer-seat and judgment-seat tokens stay separate.
+Calibration is informational; acceptance remains zero Critical lost and at least
+40% fewer reviewer-seat tokens. `--out <path>` saves the complete Markdown; both
+evaluation tools prepend command, environment set/unset status and git provenance
+when saving under `docs/judgment/evals/` (replay adds its inclusive commit range).
+
 See [evaluation baselines](judgment/evals/README.md) for metric definitions,
 severity limitations, and the exact-command/environment record to include
 when committing a report as a fixed baseline.
