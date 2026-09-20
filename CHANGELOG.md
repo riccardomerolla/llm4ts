@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.6.0
 
 - Add `llm4ts costs`: tokens and cost across past runs per day, hour, run,
   and model from the `.llm4ts/` traces, in a chosen time zone, with measured
