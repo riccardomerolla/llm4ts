@@ -134,9 +134,9 @@ New schema, e.g.:
 class GroundingSelection extends Schema.Class<GroundingSelection>("GroundingSelection")({
   selections: Schema.Array(
     Schema.Struct({
-      category: Schema.String,   // matches a pass.heading exactly
-      path: Schema.String,       // must be one of the candidate paths given
-      reason: Schema.String      // one line — feeds provenance.md
+      category: Schema.String, // matches a pass.heading exactly
+      path: Schema.String, // must be one of the candidate paths given
+      reason: Schema.String // one line — feeds provenance.md
     })
   )
 }) {}
@@ -200,7 +200,7 @@ re-run — before clean] → clean → discoverRepoFiles → selectGroundingFile
 per-category grounded passes (feedback-aware) → write
 conventions.md/provenance.md/reviewers/README.md → commit`
 
-Then separately, on the *next* `modernize-implement` run:
+Then separately, on the _next_ `modernize-implement` run:
 `open pack → requireApproval gate → (existing generation flow)`.
 
 ## Error Handling
@@ -249,7 +249,7 @@ Then separately, on the *next* `modernize-implement` run:
 ## Backward Compatibility
 
 - `conventions.md`/`README.md`/`reviewers/target-conventions.md`'s shape is
-  unchanged — only their *content* gets deeper. `provenance.md` is a new,
+  unchanged — only their _content_ gets deeper. `provenance.md` is a new,
   additive file; a pack forked before this change simply lacks it.
 - `LLM4TS_FEEDBACK` is optional and additive; omitting it reproduces
   today's fresh-analysis behavior (now with real per-category grounding).
