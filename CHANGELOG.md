@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.5.0
+
+`pack-fork`: real per-category grounding, live findings, and an enforced
+approval gate — from user feedback on the first real run: only the first of
+four convention passes ever received grounding file content, nothing showed
+the real findings while the flow ran, and no flow enforced the fork's own
+approval marker.
+
+- `workspace.discover("**")` enumerates the target repo's real file tree
+  (plain code, no LLM call), then one toolless structured call
+  (`GroundingSelection`) picks which real paths matter per category — never
+  inventing a path — before all four passes read their own selection's
+  content, not just Tech Stack & Dependencies.
+- Both the selection call and every category pass publish their full
+  findings to the flow's event stream as they complete, not just a
+  checkmark.
+- A new `provenance.md` records which files justified which category and
+  why, alongside `conventions.md`.
+- `LLM4TS_FEEDBACK=<text>` on a re-run targeting an existing fork captures
+  its prior `conventions.md` before "clean" removes it, and feeds both that
+  and the feedback into every pass — including file selection — instead of
+  starting over.
+- `modernize-implement` now calls `requireApproval` against any pack whose
+  own `README.md` carries the draft/approved marker, refusing to run
+  against an unapproved fork before doing anything else — enforced, no
+  override. Generic on the marker's presence, not pack-fork-specific; a
+  pack with no `README.md` is unaffected.
+
 ## 2.4.2
 
 - **`pack-fork`: give the reasoning seat zero tools, not just read-only.**
