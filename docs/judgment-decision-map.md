@@ -41,6 +41,8 @@ Evidence: `packages/core/test/Judgment.test.ts`, `packages/flow/test/Judgment.te
 
 Spec: `specs/pending/judgment-evaluation-baseline.md`.
 
+Workflow: [Labelling a decision](judgment-datasets.md).
+
 Decision: what "good" means for each selected llm4ts decision.
 
 Selected decisions, in order:

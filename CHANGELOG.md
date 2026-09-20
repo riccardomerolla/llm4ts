@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `judgment:label` to seed held-out datasets from commits and observations,
+  track pending human labels, and validate promotion with shared dataset schemas.
+
 - Opt-in judgment observation logs capture complete state, question, answer,
   outcome, and backend identity as schema-validated JSON lines, with sealed
   `Classified` values redacted and scoped draining in the runner.

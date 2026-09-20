@@ -10,22 +10,11 @@
  * the reviewer seat. Acceptance to turn the pre-screen on by default: zero
  * Critical issues lost and at least 40% fewer review tokens.
  */
-import { execFileSync } from "node:child_process"
+import { argValue, commits, lenses } from "./lib.ts"
 import * as Effect from "effect/Effect"
 import { makeLlmJudgment } from "@llm4ts/core/judgment/LlmJudgment"
 import { TokensUsed, makeCollectingFlowEvents, type FlowEvent } from "@llm4ts/flow/FlowEvents"
-import {
-  correctnessReviewer,
-  effectReviewer,
-  performanceReviewer,
-  prescreenReviewers,
-  readabilityReviewer,
-  reviewWith,
-  securityReviewer,
-  structureReviewer,
-  testReviewer,
-  type ReviewResult
-} from "@llm4ts/flow/Review"
+import { prescreenReviewers, reviewWith, type ReviewResult } from "@llm4ts/flow/Review"
 import type { Reviewer } from "@llm4ts/flow/Reviewer"
 import {
   apiConnectorFromEnvironment,
@@ -34,45 +23,9 @@ import {
 } from "@llm4ts/runner/Connectors"
 import { nodeFlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
 
-const lenses: ReadonlyArray<Reviewer> = [
-  correctnessReviewer,
-  readabilityReviewer,
-  testReviewer,
-  structureReviewer,
-  performanceReviewer,
-  securityReviewer,
-  effectReviewer
-]
-
-const argValue = (name: string, fallback: string): string => {
-  const index = process.argv.indexOf(`--${name}`)
-  return index >= 0 ? (process.argv[index + 1] ?? fallback) : fallback
-}
-
 const commitCount = Number.parseInt(argValue("commits", "30"), 10)
 const repo = argValue("repo", process.cwd())
 const diffCap = Number.parseInt(argValue("diff-cap", "60000"), 10)
-
-const git = (...args: ReadonlyArray<string>): string =>
-  execFileSync("git", args, { cwd: repo, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
-
-interface Commit {
-  readonly sha: string
-  readonly title: string
-  readonly diff: string
-}
-
-const commits = (): ReadonlyArray<Commit> =>
-  git("log", "--no-merges", `-${commitCount}`, "--format=%H%x1f%s")
-    .trim()
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const [sha = "", title = ""] = line.split("\x1f")
-      const diff = git("show", "--format=", "--no-color", sha)
-      return { sha, title, diff: diff.length > diffCap ? `${diff.slice(0, diffCap)}\n…` : diff }
-    })
-    .filter((commit) => commit.diff.trim().length > 0)
 
 const tokensIn = (events: ReadonlyArray<FlowEvent>): number =>
   events.reduce((sum, event) => (event._tag === "TokensUsed" ? sum + event.usage.total : sum), 0)
@@ -97,7 +50,7 @@ const program = Effect.gen(function* () {
       ? reviewer
       : yield* dependencies.registry.resolve(prepareConnector(judgmentConfig, repo, environment))
 
-  const sample = commits()
+  const sample = commits(repo, commitCount, diffCap)
   console.log(`# Review pre-screen replay\n`)
   console.log(
     `${sample.length} commits from ${repo}; reviewer ${reviewerConfig.connectorId.value}/${reviewerConfig.model ?? "default"}; judgment ${judgmentConfig.connectorId.value}/${judgmentConfig.model ?? "default"}\n`

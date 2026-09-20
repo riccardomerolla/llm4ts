@@ -71,7 +71,8 @@
     "./Wall": "./dist/Wall.js",
     "./Workspace": "./dist/Workspace.js",
     "./WorkspaceLayout": "./dist/WorkspaceLayout.js",
-    "./WorkspaceTools": "./dist/WorkspaceTools.js"
+    "./WorkspaceTools": "./dist/WorkspaceTools.js",
+    "./JudgmentDataset": "./dist/JudgmentDataset.js"
   },
   "scripts": {
     "clean": "tsc -b tsconfig.json --clean",
