@@ -34,6 +34,7 @@ import {
   makeCostRecord,
   type CostBudget
 } from "@llm4ts/flow/CostLedger"
+import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
 import { FlowLlmError, describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
 import {
   FlowEvents,
@@ -120,6 +121,14 @@ export interface FlowRunnerOptions {
   /** Persist judgment observations under workDir/.llm4ts/judgments; off by default. */
   readonly judgmentLog?: boolean
   /**
+   * Meter every seat with `EstimatedUsage`, so a backend that reports no
+   * token counts still yields usage — counted from characters and
+   * labelled `estimated:<model>`, never mixed with measured usage. Default
+   * `true`; `false`, or `LLM4TS_ESTIMATE_USAGE=0` in the environment, leaves
+   * the seats raw and those runs accrue nothing.
+   */
+  readonly estimateUsage?: boolean
+  /**
    * Where the run's trace goes. Default `workDir/.llm4ts/trace-<start ms>.jsonl`
    * while `persistRun` holds.
    */
@@ -161,6 +170,9 @@ export interface FlowRunnerBundle {
 
 const truthy = (value: string | undefined): boolean =>
   value !== undefined && ["1", "true", "yes"].includes(value.trim().toLowerCase())
+
+const switchedOff = (value: string | undefined): boolean =>
+  value !== undefined && ["0", "false", "no", "off"].includes(value.trim().toLowerCase())
 
 const isPiSeat = (config: ConnectorConfig | undefined): config is CliConnectorConfig =>
   config instanceof CliConnectorConfig && config.connectorId.value === ConnectorIds.Pi.value
@@ -267,15 +279,36 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
           )
         )
       : Effect.void
+  // Every seat is metered, so no run is silently free: a backend that reports
+  // no token counts (`capabilities.usageReporting` false) is estimated from
+  // character counts and labelled `estimated:<model>`, which is what makes
+  // `TokensUsed` — and therefore cost summaries, budgets, the ledger, and
+  // `llm4ts costs` — answer for those seats at all. Measured usage always
+  // wins; the estimate only fills a gap the backend left. Metering here rather
+  // than in each flow also covers the seats a flow never touches directly,
+  // notably the judgment seat and the worktree seats `contextFor` rebinds.
+  const runEnvironment = options.environment ?? process.env
+  const estimateOptions = estimatedUsageOptionsFromEnv(runEnvironment)
+  const meterUsage = options.estimateUsage ?? !switchedOff(runEnvironment.LLM4TS_ESTIMATE_USAGE)
+  const metered = (service: LlmServiceShape): Effect.Effect<LlmServiceShape> =>
+    meterUsage
+      ? Effect.map(makeEstimatedUsageMeter(service, estimateOptions), (meter) => meter.service)
+      : Effect.succeed(service)
   // The spread keeps everything the connector carries beyond the service
-  // methods — notably `capabilities`, which the flow context exposes.
+  // methods — notably `capabilities`, which the flow context exposes. The
+  // meter decorates the retrying seat, so an estimate reflects the attempt
+  // that actually succeeded, and it sees `scoreLabelSequence` when the
+  // connector has one (the retry wrapper does not carry it).
   const resolveSeat = (configuration: ConnectorConfig) =>
     dependencies.registry.resolve(configuration).pipe(
       Effect.mapError(FlowLlmError.from),
       Effect.flatMap((connector) =>
         announceReadOnlyGrade(configuration, connector).pipe(
           Effect.andThen(
-            Effect.map(resilient(connector), (retrying) => ({ ...connector, ...retrying }))
+            Effect.flatMap(resilient(connector), (retrying) => {
+              const seat = { ...connector, ...retrying }
+              return Effect.map(metered(seat), (measured) => ({ ...seat, ...measured }))
+            })
           )
         )
       )

@@ -29,8 +29,13 @@ argv.
 Usage reporting means the connector parses token counts from its backend and
 attaches them to streamed chunks; flows publish them as `TokensUsed` events,
 which feed cost summaries and `CostBudget` enforcement. Connectors marked "no"
-accrue nothing — a cost budget cannot trip for runs driven only by them, and
-their cost summary states that usage was not reported.
+measure nothing of their own. The runner meters every seat with
+`EstimatedUsage`, so those runs still accrue — from character counts, under
+the model label `estimated:<model>`, which no report mixes with a measured
+total. A budget therefore trips on estimates for such a seat; turning the
+meter off (`estimateUsage: false`, or `LLM4TS_ESTIMATE_USAGE=0`) restores the
+older behavior, where those runs accrue nothing at all and their cost summary
+states that usage was not reported.
 
 Read-only (`capabilities.readOnlyEnforcement`) grades how honestly a
 connector's `readOnly` mapping restricts its harness (ADR 0010):

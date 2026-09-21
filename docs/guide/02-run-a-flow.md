@@ -79,8 +79,8 @@ window, `--tz Europe/Rome` cuts the day and hour buckets in your zone, and
 `--runs-per-day 5` adds a projected daily figure for the run rate you
 expect. `--json` emits the same report as data.
 
-Measured token counts and estimates are never mixed: a CLI seat that reports
-no usage is metered from character counts under the model label
+Measured token counts and estimates are never mixed: every seat is metered, so
+a seat that reports no usage is counted from characters under the model label
 `estimated:<model>` (see [configuration](../configuration.md)), and the
 report keeps those in their own column. Costs come from the backend when it
 reports them, otherwise from the pricing table, whose date the report

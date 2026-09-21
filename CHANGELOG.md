@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Every seat the runner resolves is now metered with `EstimatedUsage`, so a
+  backend that reports no token counts (Antigravity, Copilot, Cursor) still
+  accrues: usage is counted from characters and published under the model
+  label `estimated:<model>`, which `llm4ts costs` keeps in its own column and
+  never mixes with a measured total. Before, the meter was opt-in per flow, so
+  a flow that did not wrap its seats left an empty cost summary, no ledger
+  record, and nothing for the cross-run report to read. Measured usage always
+  wins. `FlowRunnerOptions.estimateUsage: false`, or `LLM4TS_ESTIMATE_USAGE=0`
+  in the environment, restores the raw seats.
+- `makeEstimatedUsageMeter` now carries an estimate back on `scoreLabels`'
+  distribution and forwards `scoreLabelSequence` (only when the seat has it),
+  so the judgment seat reports usage on a backend that measures none instead
+  of recording it where only the meter's own totals could see it.
+
 ## 2.6.0
 
 - Add `llm4ts costs`: tokens and cost across past runs per day, hour, run,

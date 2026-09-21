@@ -164,6 +164,18 @@ export list; the following modules are the main entry points.
   assumed run rate; `renderCostReport` prints it. `CostLedger` is the
   run-level companion: the runner appends one `CostRecord` per run to
   `.llm4ts/costs.jsonl`.
+- `@llm4ts/flow/EstimatedUsage`: the meter that makes a seat account for its
+  tokens when the backend reports none. `makeEstimatedUsageMeter` decorates an
+  `LlmServiceShape` so streams, structured calls, and label scoring all carry
+  usage back — measured where the backend gave it, otherwise counted from
+  characters and labelled `estimated:<model>` — and exposes the running
+  `totals` for per-run reports. `estimatedUsageOptionsFromEnv` reads
+  `LLM4TS_ESTIMATE_MODEL` and `LLM4TS_ESTIMATE_CHARS_PER_TOKEN`. The runner
+  applies it to every seat it resolves, so flows inherit it;
+  `FlowRunnerOptions.estimateUsage: false` or `LLM4TS_ESTIMATE_USAGE=0` opts
+  out. Wrapping an already-metered seat is safe — an estimate is only ever
+  filled in where no usage was reported — so a flow that needs its own
+  `totals` still wraps.
 - `@llm4ts/flow/Artifacts`: resumable per-program extraction and vector
   generation; `@llm4ts/flow/Approval`: the draft marker and human gate the
   modernization phases pause on (both moved here from the retired
