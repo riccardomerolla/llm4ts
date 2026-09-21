@@ -262,6 +262,17 @@ reference release.
   run now leaves those files under `workDir/.llm4ts/`, `commitAll` stages the
   tree and then unstages them (`runnerBookkeeping`), so a flow's commits never
   carry the runner's own records.
+- Beyond the source, the runner meters every seat it resolves with
+  `EstimatedUsage`, so a backend that reports no token counts still accrues
+  — from character counts, under the model label `estimated:<model>`, never
+  mixed into a measured total. The source, and llm4ts before this, published
+  no `TokensUsed` at all for such a seat, so its cost summary, ledger record,
+  and cross-run report were empty unless the flow itself wrapped its seats.
+  Estimates now reach `CostBudget` too, so a budget can trip on a seat that
+  measures nothing; `estimateUsage: false` (or `LLM4TS_ESTIMATE_USAGE=0`)
+  restores the source behavior. Label scoring carries the estimate on the
+  returned distribution, which is what lets the judgment seat report usage at
+  all (ADR 0012, ADR 0017).
 - Equivalence observations use the public `type` discriminator from the source
   JSONL contract. Replay commands use the injected process boundary and require
   their exact `Exec` capability before launch.

@@ -3,13 +3,21 @@ import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 import { ApiConnectorConfig, CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { makeConnectorRegistry } from "@llm4ts/core/ConnectorRegistry"
+import type { ConnectorShape } from "@llm4ts/core/Connector"
 import { ProviderError } from "@llm4ts/core/Errors"
-import { ConnectorIds, LlmChunk, LlmConfig, TokenUsage } from "@llm4ts/core/Models"
+import {
+  ConnectorIds,
+  LabelDistribution,
+  LlmChunk,
+  LlmConfig,
+  TokenUsage
+} from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 import { makeFakeProcessExecutor, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import * as Queue from "effect/Queue"
@@ -25,6 +33,7 @@ import {
   TokensUsed
 } from "@llm4ts/flow/FlowEvents"
 import { CostBudget, loadCostLedger } from "@llm4ts/flow/CostLedger"
+import { completeAndPublish } from "@llm4ts/flow/Flow"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { JudgmentObservation, judgmentLogPath } from "@llm4ts/flow/JudgmentLog"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
@@ -834,5 +843,189 @@ describe("judgment observation logging", () => {
       )
       assert.strictEqual(record.runId, "explicit-run")
     })
+  )
+})
+
+// Lifting `EstimatedUsage` into the runner: before this, a seat whose backend
+// reports no token counts left the run with no `TokensUsed` at all, so its
+// cost summary, its ledger record, and `llm4ts costs` were all empty unless
+// the flow itself remembered to wrap its seats.
+describe("seat usage metering", () => {
+  const mock = () => makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+  const noEnvironment: Readonly<Record<string, string | undefined>> = {}
+
+  const setupWith = (service: ConnectorShape) =>
+    Effect.gen(function* () {
+      const process = yield* makeFakeProcessExecutor()
+      const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+      const registry = makeConnectorRegistry([
+        {
+          connectorId: ConnectorIds.Mock,
+          kind: "Api" as const,
+          create: (_c) => Effect.succeed(service)
+        }
+      ])
+      const surface: TerminalSurface = {
+        palette: plainTerminalPalette,
+        log: (_line) => Effect.void,
+        setStatus: (_label) => Effect.void,
+        suspend: (effect) => effect
+      }
+      return {
+        state,
+        dependencies: { registry, process: process.executor, files: files(state) },
+        options: {
+          workDir: "/repo",
+          workspace: "/repo",
+          userPrompt: "meter this run",
+          coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+          surface,
+          runId: "run-meter",
+          persistRun: false,
+          costLedgerPath: "/repo/.llm4ts/costs.jsonl",
+          environment: noEnvironment
+        }
+      }
+    })
+
+  // Antigravity, Copilot, and Cursor stream exactly like this: content, no usage.
+  const silent: ConnectorShape = {
+    ...mock(),
+    executeStream: (_prompt: string) =>
+      Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" }))
+  }
+
+  const reporting: ConnectorShape = {
+    ...mock(),
+    executeStream: (_prompt: string) =>
+      Stream.make(
+        LlmChunk.make({
+          delta: "done",
+          finishReason: "stop",
+          metadata: { model: "mock" },
+          usage: TokenUsage.make({ prompt: 7, completion: 3, total: 10 })
+        })
+      )
+  }
+
+  it.effect("estimates a non-reporting seat and labels it, down to the ledger", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { dependencies, options } = yield* setupWith(silent)
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) => completeAndPublish(context.coder, context.events, "x".repeat(40)),
+          dependencies
+        )
+        const records = yield* loadCostLedger(dependencies.files, options.costLedgerPath)
+
+        assert.strictEqual(records.length, 1)
+        // 40 prompt characters and "done" at the default 4 chars per token.
+        assert.strictEqual(records[0]?.totalPrompt, 10)
+        assert.strictEqual(records[0]?.totalCompletion, 1)
+        assert.deepStrictEqual(
+          records[0]?.cells.map((cell) => cell.model),
+          ["estimated:claude-sonnet-4"]
+        )
+      })
+    )
+  )
+
+  it.effect("leaves a reporting seat measured", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { dependencies, options } = yield* setupWith(reporting)
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) => completeAndPublish(context.coder, context.events, "x".repeat(40)),
+          dependencies
+        )
+        const records = yield* loadCostLedger(dependencies.files, options.costLedgerPath)
+
+        // The backend's own counts, not the 10 the character estimate would give.
+        assert.deepStrictEqual(
+          records[0]?.cells.map((cell) => cell.model),
+          ["mock"]
+        )
+        assert.strictEqual(records[0]?.totalPrompt, 7)
+        assert.strictEqual(records[0]?.totalCompletion, 3)
+      })
+    )
+  )
+
+  it.effect("accrues nothing when metering is switched off", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { state, dependencies, options: base } = yield* setupWith(silent)
+        const options = { ...base, estimateUsage: false }
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) => completeAndPublish(context.coder, context.events, "x".repeat(40)),
+          dependencies
+        )
+
+        assert.strictEqual((yield* Ref.get(state))[options.costLedgerPath], undefined)
+      })
+    )
+  )
+
+  it.effect("reads the off switch from the environment", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { state, dependencies, options: base } = yield* setupWith(silent)
+        const options = { ...base, environment: { LLM4TS_ESTIMATE_USAGE: "0" } }
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) => completeAndPublish(context.coder, context.events, "x".repeat(40)),
+          dependencies
+        )
+
+        assert.strictEqual((yield* Ref.get(state))[options.costLedgerPath], undefined)
+      })
+    )
+  )
+
+  // The decorator returns a bare `LlmServiceShape`: everything else the
+  // connector carries has to survive the seat being metered.
+  it.effect("keeps the connector's capabilities and batched label scoring", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const base = mock()
+        const batching: ConnectorShape = {
+          ...base,
+          scoreLabelSequence: (_prompt, labelSets) =>
+            Effect.succeed({
+              entries: labelSets.map((labels) =>
+                Result.succeed(
+                  LabelDistribution.make({
+                    probabilities: Object.fromEntries(
+                      labels.map((label) => [label, 1 / labels.length])
+                    ),
+                    method: "verbalized",
+                    support: 1
+                  })
+                )
+              )
+            })
+        }
+        const { dependencies, options } = yield* setupWith(batching)
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+
+        assert.deepStrictEqual(bundle.context.coderCapabilities, base.capabilities)
+        assert.isDefined(bundle.context.coder.scoreLabelSequence)
+        // A seat without one must not appear to gain it.
+        const plain = yield* setupWith(silent)
+        const plainBundle = yield* makeFlowRunnerContext(plain.options, plain.dependencies)
+        assert.isUndefined(plainBundle.context.coder.scoreLabelSequence)
+      })
+    )
   )
 })

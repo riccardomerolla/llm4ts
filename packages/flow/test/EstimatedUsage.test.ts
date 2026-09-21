@@ -1,10 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { InvalidRequestError, ProviderError } from "@llm4ts/core/Errors"
+import { InvalidRequestError, ParseError, ProviderError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
-import { LlmChunk, Message, TokenUsage } from "@llm4ts/core/Models"
+import { LabelDistribution, LlmChunk, Message, TokenUsage } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 import {
   estimateUsage,
@@ -143,6 +144,130 @@ describe("EstimatedUsage", () => {
       assert.strictEqual(usage?.prompt, 5)
       assert.strictEqual(model, "estimated:claude-sonnet-4")
       assert.strictEqual(totals?.prompt, 5)
+    })
+  )
+
+  // The judgment layer reads usage off the distribution and reports it through
+  // its own hook, so recording the estimate in the meter's totals alone left
+  // every judgment call on a non-reporting seat invisible to `TokensUsed`.
+  it.effect("fills in label-scoring usage and labels it estimated", () =>
+    Effect.gen(function* () {
+      const service = serviceOf({
+        scoreLabels: (_prompt, _labels) =>
+          Effect.succeed(
+            LabelDistribution.make({
+              probabilities: { yes: 0.75, no: 0.25 },
+              method: "verbalized",
+              support: 1
+            })
+          )
+      })
+      const meter = yield* makeEstimatedUsageMeter(service, options)
+      const distribution = yield* meter.service.scoreLabels("p".repeat(40), ["yes", "no"])
+      const totals = yield* meter.totals
+
+      assert.strictEqual(distribution.usage?.prompt, 10)
+      assert.strictEqual(distribution.model, "estimated:claude-sonnet-4")
+      assert.deepStrictEqual(distribution.probabilities, { yes: 0.75, no: 0.25 })
+      assert.strictEqual(totals?.prompt, 10)
+    })
+  )
+
+  it.effect("leaves a reported label-scoring usage untouched", () =>
+    Effect.gen(function* () {
+      const reported = TokenUsage.make({ prompt: 7, completion: 3, total: 10 })
+      const service = serviceOf({
+        scoreLabels: (_prompt, _labels) =>
+          Effect.succeed(
+            LabelDistribution.make({
+              probabilities: { yes: 1 },
+              method: "logprobs",
+              support: 1,
+              usage: reported,
+              model: "mlx-community/model"
+            })
+          )
+      })
+      const meter = yield* makeEstimatedUsageMeter(service, options)
+      const distribution = yield* meter.service.scoreLabels("p".repeat(400), ["yes"])
+      const totals = yield* meter.totals
+
+      assert.deepStrictEqual(distribution.usage, reported)
+      assert.strictEqual(distribution.model, "mlx-community/model")
+      assert.strictEqual(totals?.total, 10)
+    })
+  )
+
+  // The judgment layer reads the absence of `scoreLabelSequence` as "this
+  // backend cannot batch", so the decorator must neither invent it nor hide it.
+  it.effect("forwards batched label scoring only when the seat has it", () =>
+    Effect.gen(function* () {
+      const without = yield* makeEstimatedUsageMeter(serviceOf({}), options)
+      const withBatching = yield* makeEstimatedUsageMeter(
+        serviceOf({
+          scoreLabelSequence: (_prompt, labelSets) =>
+            Effect.succeed({
+              entries: labelSets.map((labels) =>
+                Result.succeed(
+                  LabelDistribution.make({
+                    probabilities: Object.fromEntries(
+                      labels.map((label) => [label, 1 / labels.length])
+                    ),
+                    method: "verbalized",
+                    support: 1
+                  })
+                )
+              )
+            })
+        }),
+        options
+      )
+
+      assert.isUndefined(without.service.scoreLabelSequence)
+      assert.isDefined(withBatching.service.scoreLabelSequence)
+    })
+  )
+
+  it.effect("estimates a batched call once, for the whole sequence", () =>
+    Effect.gen(function* () {
+      const service = serviceOf({
+        scoreLabelSequence: (_prompt, labelSets) =>
+          Effect.succeed({
+            entries: [
+              ...labelSets.slice(1).map((labels) =>
+                Result.succeed(
+                  LabelDistribution.make({
+                    probabilities: Object.fromEntries(
+                      labels.map((label) => [label, 1 / labels.length])
+                    ),
+                    method: "verbalized",
+                    support: 1
+                  })
+                )
+              ),
+              Result.fail(ParseError.make({ message: "unreadable position", raw: "" }))
+            ]
+          })
+      })
+      const meter = yield* makeEstimatedUsageMeter(service, options)
+      const batched = meter.service.scoreLabelSequence
+      assert.isDefined(batched)
+      const sequence = yield* batched("p".repeat(80), [
+        ["yes", "no"],
+        ["red", "blue"]
+      ])
+      const totals = yield* meter.totals
+
+      assert.strictEqual(sequence.usage?.prompt, 20)
+      assert.strictEqual(sequence.model, "estimated:claude-sonnet-4")
+      // One call, one estimate: the entries themselves stay usage-free, which is
+      // what keeps `LlmJudgment` from counting a batch twice.
+      assert.isTrue(
+        sequence.entries.every(
+          (entry) => !Result.isSuccess(entry) || entry.success.usage === undefined
+        )
+      )
+      assert.strictEqual(totals?.prompt, 20)
     })
   )
 })

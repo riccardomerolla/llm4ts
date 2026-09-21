@@ -160,6 +160,25 @@ Estate reading is bounded by `LLM4TS_MAX_READ_BYTES` (per file, 8 MiB in the
 estate-reading phases), `LLM4TS_MAX_DISCOVER_RESULTS` (20 000 there, 1 000
 elsewhere), and `LLM4TS_EXCLUDE_DIRS` (replaces the pruned directory list).
 
+## Usage estimates
+
+Every seat the runner resolves is metered, so a run always accounts for its
+tokens even when the backend reports none (Antigravity, Copilot, and Cursor on
+the [capability matrix](provider-capabilities.md)). The estimate counts
+characters on both sides of a request and is published under the model label
+`estimated:<model>`, which keeps it in its own column of `llm4ts costs` and out
+of any measured total. Measured usage always wins: the estimate only fills a
+gap the backend left.
+
+| Variable                          | Effect                                                              |
+| --------------------------------- | ------------------------------------------------------------------- |
+| `LLM4TS_ESTIMATE_MODEL`           | Pricing reference for the estimate. Default `claude-sonnet-4`       |
+| `LLM4TS_ESTIMATE_CHARS_PER_TOKEN` | Characters per estimated token. Default 4                           |
+| `LLM4TS_ESTIMATE_USAGE`           | `0`, `false`, `no`, or `off` leaves the seats raw, accruing nothing |
+
+`FlowRunnerOptions.estimateUsage: false` does the same for one run in code and
+takes precedence over the environment.
+
 ## Capabilities
 
 Filesystem, process, network, Git, and forge operations require explicit
