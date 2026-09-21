@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.7.0
 
 - Every seat the runner resolves is now metered with `EstimatedUsage`, so a
   backend that reports no token counts (Antigravity, Copilot, Cursor) still
