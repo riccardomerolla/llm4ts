@@ -37,6 +37,7 @@ import {
 import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
 import { FlowLlmError, describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
 import {
+  defaultDrainTimeout,
   FlowEvents,
   FlowEventsValues,
   Info,
@@ -541,14 +542,31 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
       Effect.all(
         [
           terminal.awaitDrained(),
-          tracker.awaitDrained(bundle.events),
-          recorder === undefined ? Effect.void : recorder.awaitDrained(bundle.events),
-          bundle.judgmentLog === undefined
-            ? Effect.void
-            : bundle.judgmentLog.awaitDrained(bundle.events)
+          Effect.all(
+            [
+              tracker.awaitDrained(bundle.events),
+              recorder === undefined ? Effect.succeed(true) : recorder.awaitDrained(bundle.events),
+              bundle.judgmentLog === undefined
+                ? Effect.succeed(true)
+                : bundle.judgmentLog.awaitDrained(bundle.events)
+            ],
+            { concurrency: "unbounded" }
+          )
         ],
         { concurrency: "unbounded" }
       ).pipe(
+        // A consumer that gave up before catching up leaves the totals below
+        // short. Say so rather than printing a quietly incomplete summary.
+        Effect.flatMap(([, accounted]) =>
+          accounted.every((drained) => drained)
+            ? Effect.void
+            : surface.log(
+                palette.fail(
+                  `some run events were still unconsumed after ${defaultDrainTimeout} — ` +
+                    "the totals below, the ledger, and the trace may be short"
+                )
+              )
+        ),
         Effect.andThen(appendLedger),
         Effect.andThen(surface.setStatus(undefined)),
         Effect.andThen(tracker.summary),

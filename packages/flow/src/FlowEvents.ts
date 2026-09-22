@@ -1,5 +1,7 @@
 import * as Context from "effect/Context"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Layer from "effect/Layer"
 import * as PubSub from "effect/PubSub"
 import * as Ref from "effect/Ref"
@@ -177,9 +179,16 @@ export const makeFlowEventHub = Effect.fn("@llm4ts/flow/FlowEvents.makeHub")(fun
   const events = yield* PubSub.bounded<FlowEvent>(capacity)
   const published = yield* Ref.make(0)
   return {
+    // Counted AFTER delivery, and only when the PubSub accepted the event.
+    // Tallying first meant a publish interrupted while backpressured (a
+    // bounded PubSub suspends when a subscriber is behind) left `published`
+    // permanently above anything a consumer could ever reach, and every
+    // drain waiting on it never finished.
     publish: (event) =>
-      Ref.update(published, (count) => count + 1).pipe(
-        Effect.andThen(PubSub.publish(events, event)),
+      PubSub.publish(events, event).pipe(
+        Effect.flatMap((accepted) =>
+          accepted ? Ref.update(published, (count) => count + 1) : Effect.void
+        ),
         Effect.asVoid
       ),
     subscribe: PubSub.subscribe(events),
@@ -187,3 +196,34 @@ export const makeFlowEventHub = Effect.fn("@llm4ts/flow/FlowEvents.makeHub")(fun
     publishedCount: Ref.get(published)
   }
 })
+
+/** How long a consumer waits to catch up before the run moves on regardless. */
+export const defaultDrainTimeout = "3 seconds"
+
+/**
+ * The shared drain: wait until `consumed` has caught up with everything the
+ * hub published, and report whether it did.
+ *
+ * Bounded on purpose, and the single copy of this loop. A consumer can fall
+ * permanently short of the count — a subscription torn down early, an
+ * event the PubSub refused — and an unbounded wait then pegs a core forever.
+ * In the runner that swallowed the end of a run: every stage printed and
+ * ticked green, and no cost summary ever following, because the summary is
+ * written only once every consumer reports drained.
+ */
+export const awaitConsumed = (
+  hub: FlowEventHub,
+  consumed: Ref.Ref<number>,
+  timeout: Duration.Input = defaultDrainTimeout
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const target = yield* hub.publishedCount
+    const drain: Effect.Effect<void> = Effect.suspend(() =>
+      Ref.get(consumed).pipe(
+        Effect.flatMap((count) =>
+          count >= target ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(drain))
+        )
+      )
+    )
+    return Option.isSome(yield* Effect.timeoutOption(drain, timeout))
+  })
