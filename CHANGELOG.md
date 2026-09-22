@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.7.2
 
 - Fix a run that completed every stage and then never finished: the event
   count a consumer drains towards was incremented before the event reached the
