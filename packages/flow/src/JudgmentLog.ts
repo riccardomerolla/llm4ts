@@ -1,11 +1,12 @@
 import * as Clock from "effect/Clock"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import { JudgmentObserved, type FlowEvent, type FlowEventHub } from "./FlowEvents.ts"
+import { awaitConsumed, JudgmentObserved, type FlowEvent, type FlowEventHub } from "./FlowEvents.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
 
 export class JudgmentObservation extends Schema.Class<JudgmentObservation>("JudgmentObservation")({
@@ -29,7 +30,8 @@ export const judgmentLogPath = (root: string, consumer: JudgmentObservation["con
 export interface JudgmentLogShape {
   readonly record: (event: FlowEvent) => Effect.Effect<void>
   readonly consume: (hub: FlowEventHub) => Effect.Effect<void, never, Scope.Scope>
-  readonly awaitDrained: (hub: FlowEventHub) => Effect.Effect<void>
+  /** Waits for this log to catch up; `false` means it gave up first. */
+  readonly awaitDrained: (hub: FlowEventHub, timeout?: Duration.Input) => Effect.Effect<boolean>
 }
 
 const codec = Schema.fromJsonString(JudgmentObservation)
@@ -63,18 +65,8 @@ export const makeJudgmentLog = Effect.fn("@llm4ts/flow/JudgmentLog.make")(functi
           }).pipe(Effect.catch(() => Ref.set(degraded, true)))
         )
 
-  const awaitDrained = (hub: FlowEventHub): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const target = yield* hub.publishedCount
-      const drain: Effect.Effect<void> = Effect.suspend(() =>
-        Ref.get(consumed).pipe(
-          Effect.flatMap((count) =>
-            count >= target ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(drain))
-          )
-        )
-      )
-      yield* drain
-    })
+  const awaitDrained = (hub: FlowEventHub, timeout?: Duration.Input): Effect.Effect<boolean> =>
+    awaitConsumed(hub, consumed, timeout)
 
   return {
     record,

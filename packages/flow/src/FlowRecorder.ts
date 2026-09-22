@@ -1,4 +1,5 @@
 import * as Clock from "effect/Clock"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
@@ -7,7 +8,7 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { StreamRecorder } from "@llm4ts/core/observability/StreamRecorder"
 import type { JsonValue } from "@llm4ts/core/providers/CliSupport"
-import type { FlowEvent, FlowEventHub } from "./FlowEvents.ts"
+import { awaitConsumed, type FlowEvent, type FlowEventHub } from "./FlowEvents.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
 
 export class TraceLine extends Schema.Class<TraceLine>("TraceLine")({
@@ -24,7 +25,8 @@ export interface FlowRecorderShape extends StreamRecorder {
   readonly tracePath: string
   readonly record: (event: FlowEvent) => Effect.Effect<void>
   readonly consume: (hub: FlowEventHub) => Effect.Effect<void, never, Scope.Scope>
-  readonly awaitDrained: (hub: FlowEventHub) => Effect.Effect<void>
+  /** Waits for this recorder to catch up; `false` means it gave up first. */
+  readonly awaitDrained: (hub: FlowEventHub, timeout?: Duration.Input) => Effect.Effect<boolean>
 }
 
 const encode = (line: TraceLine): string =>
@@ -99,18 +101,7 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
           Effect.asVoid
         )
       }),
-    awaitDrained: (hub) =>
-      Effect.gen(function* () {
-        const target = yield* hub.publishedCount
-        const drain: Effect.Effect<void> = Effect.suspend(() =>
-          Ref.get(consumed).pipe(
-            Effect.flatMap((count) =>
-              count >= target ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(drain))
-            )
-          )
-        )
-        yield* drain
-      })
+    awaitDrained: (hub, timeout) => awaitConsumed(hub, consumed, timeout)
   }
   return recorder
 })

@@ -6,7 +6,7 @@ import * as Semaphore from "effect/Semaphore"
 import type * as Scope from "effect/Scope"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import type { FlowEvent, FlowEventHub } from "@llm4ts/flow/FlowEvents"
+import { awaitConsumed, type FlowEvent, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
 
 export const Verbosity = Schema.Literals(["Quiet", "Normal", "Verbose", "Debug"])
 export type Verbosity = typeof Verbosity.Type
@@ -380,17 +380,9 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
     ),
     Effect.forkScoped
   )
-  const awaitDrained = (timeout: Duration.Input = "3 seconds"): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const target = yield* events.publishedCount
-      const drain: Effect.Effect<void> = Effect.suspend(() =>
-        Ref.get(consumed).pipe(
-          Effect.flatMap((count) =>
-            count >= target ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(drain))
-          )
-        )
-      )
-      yield* Effect.timeoutOption(drain, timeout)
-    })
+  // Display only, so a drain that gives up just means a trailing line was
+  // never printed; the shared helper already bounds the wait.
+  const awaitDrained = (timeout?: Duration.Input): Effect.Effect<void> =>
+    Effect.asVoid(awaitConsumed(events, consumed, timeout))
   return { consumed, stats: Ref.get(statsRef), awaitDrained }
 })

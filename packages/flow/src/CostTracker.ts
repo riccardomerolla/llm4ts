@@ -1,10 +1,11 @@
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
 import { CostCell } from "./CostLedger.ts"
-import type { FlowEvent, FlowEventHub } from "./FlowEvents.ts"
+import { awaitConsumed, type FlowEvent, type FlowEventHub } from "./FlowEvents.ts"
 import { estimateCostUsd, PricesAsOf } from "./PriceList.ts"
 
 interface CostState {
@@ -20,7 +21,8 @@ export interface CostTracker {
   readonly cells: Effect.Effect<ReadonlyArray<CostCell>>
   readonly summary: Effect.Effect<string>
   readonly consume: (hub: FlowEventHub) => Effect.Effect<void, never, Scope.Scope>
-  readonly awaitDrained: (hub: FlowEventHub) => Effect.Effect<void>
+  /** Waits for this tracker to catch up; `false` means it gave up first. */
+  readonly awaitDrained: (hub: FlowEventHub, timeout?: Duration.Input) => Effect.Effect<boolean>
 }
 
 const emptyState: CostState = {
@@ -175,18 +177,7 @@ export const makeCostTracker = Effect.fn("@llm4ts/flow/CostTracker.make")(
             Effect.asVoid
           )
         }),
-      awaitDrained: (hub) =>
-        Effect.gen(function* () {
-          const target = yield* hub.publishedCount
-          const drain: Effect.Effect<void> = Effect.suspend(() =>
-            Ref.get(consumed).pipe(
-              Effect.flatMap((count) =>
-                count >= target ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(drain))
-              )
-            )
-          )
-          yield* drain
-        })
+      awaitDrained: (hub, timeout) => awaitConsumed(hub, consumed, timeout)
     }
   }
 )

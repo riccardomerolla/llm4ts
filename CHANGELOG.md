@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Fix a run that completed every stage and then never finished: the event
+  count a consumer drains towards was incremented before the event reached the
+  PubSub, so a publish interrupted while backpressured left a target no
+  consumer could ever reach, and the cost tracker, trace recorder, and
+  judgment log each spun on it forever. The runner writes its cost summary
+  only once every consumer reports drained, so the run hung with all its
+  stages printed and ticked green and no summary following. `publish` now
+  counts an event only once the PubSub accepts it, and all four consumers
+  share one bounded drain (`awaitConsumed`, `defaultDrainTimeout`) that
+  reports whether it caught up; the runner says so when it did not, rather
+  than printing quietly incomplete totals. The terminal consumer was already
+  bounded, which is why stage lines kept printing while the summary never did.
+
 ## 2.7.0
 
 - Every seat the runner resolves is now metered with `EstimatedUsage`, so a
