@@ -13,6 +13,7 @@ import { makeTypeSafeJudgment } from "@llm4ts/core/judgment/TypeSafeJudgment"
 import * as Redacted from "effect/Redacted"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import type { ConnectorCapabilities, TokenUsage } from "@llm4ts/core/Models"
+import { ConnectorCapabilities as ConnectorCapabilitiesClass } from "@llm4ts/core/Models"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { TemporaryFilesShape } from "@llm4ts/core/TemporaryFiles"
 import type { GeminiCliExecutorShape } from "@llm4ts/core/providers/GeminiCliProvider"
@@ -35,7 +36,12 @@ import {
   type CostBudget
 } from "@llm4ts/flow/CostLedger"
 import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
-import { FlowLlmError, describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
+import {
+  FlowLlmError,
+  RosterInvalid,
+  describeFlowError,
+  type FlowError
+} from "@llm4ts/flow/FlowError"
 import {
   defaultDrainTimeout,
   FlowEvents,
@@ -45,13 +51,35 @@ import {
   makeFlowEventHub,
   type FlowEventHub
 } from "@llm4ts/flow/FlowEvents"
-import { FlowContext, type FlowContextShape } from "@llm4ts/flow/FlowContext"
+import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
 import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog"
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
 import { makeGitTool } from "@llm4ts/flow/GitTool"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { makeTransientRetry } from "@llm4ts/flow/TransientRetry"
+import {
+  Exclusion,
+  makeRoster,
+  makeRosterStateStore,
+  priorityOf,
+  rolesOf,
+  type ExecutorSpec,
+  type Role,
+  type RosterDocument,
+  type RosterShape
+} from "@llm4ts/flow/Roster"
+import {
+  makeHeldCoder,
+  rosterSeat,
+  type HeldCoder,
+  type RosterSeat,
+  type RosterView,
+  type SeatSource
+} from "@llm4ts/flow/RosterSeats"
+import * as Semaphore from "effect/Semaphore"
+import * as ScopeModule from "effect/Scope"
+import { executorConfig, httpProbe, loadRosterDocument, rosterStatePath } from "./ExecutorRoster.ts"
 import { nodeHttpClient } from "./NodeHttpClient.ts"
 import { nodeGeminiCliExecutor } from "./NodeGeminiCliExecutor.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
@@ -158,10 +186,19 @@ export interface FlowRunnerOptions {
    * nothing (see the connector capability matrix).
    */
   readonly budget?: CostBudget
+  /**
+   * The executor roster (ADR 0019): every seat is then served from it and
+   * the coder/reasoning/reviewer configs above are ignored. Omitted, the
+   * runner loads one (`LLM4TS_ROSTER`, the user's and the repository's
+   * roster files); `"none"` runs with one executor per seat.
+   */
+  readonly roster?: RosterDocument | "none"
 }
 
 export interface FlowRunnerBundle {
   readonly context: FlowContextShape
+  /** The executor roster in force (ADR 0019), when the run has one. */
+  readonly roster?: RosterDocument
   readonly events: FlowEventHub
   /** The run's cost tracker, already subscribed to `events`. */
   readonly tracker: CostTracker
@@ -430,6 +467,222 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
           }
         : {})
     })
+  /**
+   * One look at every executor before the first lease: a health URL that
+   * does not answer waits in the round for its engine; a harness that cannot
+   * start (not installed, not signed in) sits the run out.
+   */
+  const probeExecutors = (
+    roster: RosterShape,
+    seatFor: (
+      executor: ExecutorSpec,
+      role: Role,
+      workDir: string
+    ) => Effect.Effect<RosterSeat, FlowError>,
+    workDir: string
+  ): Effect.Effect<void> =>
+    Effect.forEach(
+      roster.executors,
+      (executor) =>
+        Effect.gen(function* () {
+          if (executor.health !== undefined) {
+            if (!(yield* httpProbe(executor.health))) {
+              yield* roster.exclude(
+                Exclusion.make({
+                  id: executor.id,
+                  kind: "health",
+                  until: yield* Clock.currentTimeMillis,
+                  reason: `its health check ${executor.health} does not answer`
+                })
+              )
+            }
+            return
+          }
+          const role = rolesOf(executor)[0] ?? "coder"
+          const seat = yield* Effect.result(seatFor(executor, role, workDir))
+          if (seat._tag === "Failure") {
+            yield* roster.exclude(
+              Exclusion.make({
+                id: executor.id,
+                kind: "run",
+                reason: `could not start: ${describeFlowError(seat.failure)}`
+              })
+            )
+            return
+          }
+          if (!(yield* seat.success.isAvailable)) {
+            yield* roster.exclude(
+              Exclusion.make({
+                id: executor.id,
+                kind: "run",
+                reason: `its harness '${executor.harness}' is not available (not installed, or not signed in)`
+              })
+            )
+          }
+        }),
+      { discard: true, concurrency: "unbounded" }
+    )
+
+  /**
+   * Every seat from the roster (ADR 0019): a lazily held coder at the root,
+   * an eagerly held one per `contextFor` (a story waits there for a slot),
+   * and reasoning seats leased per call, independent of the coder.
+   */
+  const rosterContext = Effect.fn("@llm4ts/runner/FlowRunner.rosterContext")(function* (
+    document: RosterDocument
+  ): Effect.fn.Return<FlowContextShape, FlowError, Scope.Scope> {
+    const runScope = yield* Effect.scope
+    const roster = yield* makeRoster({
+      executors: document.executors,
+      events,
+      state: makeRosterStateStore(dependencies.files, rosterStatePath(runEnvironment)),
+      probe: httpProbe
+    })
+    const seatCache = new Map<string, RosterSeat>()
+    const cacheLock = yield* Semaphore.make(1)
+    const seatFor = (
+      executor: ExecutorSpec,
+      role: Role,
+      workDir: string
+    ): Effect.Effect<RosterSeat, FlowError> =>
+      cacheLock.withPermit(
+        Effect.gen(function* () {
+          const readOnly = role !== "coder"
+          const key = `${executor.id}\u0000${readOnly ? "ro" : "rw"}\u0000${workDir}`
+          const cached = seatCache.get(key)
+          if (cached !== undefined) {
+            return cached
+          }
+          const configuration = executorConfig(executor, readOnly, runEnvironment)
+          if (configuration === undefined) {
+            return yield* RosterInvalid.make({
+              violations: [`executor '${executor.id}' has an unknown harness '${executor.harness}'`]
+            })
+          }
+          const seat: RosterSeat = yield* resolveSeat(
+            prepareConnector(bridged(configuration), workDir, runEnvironment)
+          ).pipe(ScopeModule.provide(runScope))
+          seatCache.set(key, seat)
+          return seat
+        })
+      )
+    const source: SeatSource = { seatFor }
+    yield* probeExecutors(roster, seatFor, options.workDir)
+
+    const judgmentConfig =
+      options.judgment ??
+      document.executors
+        .filter((spec) => rolesOf(spec).includes("judge"))
+        .flatMap((spec) => {
+          const configuration = executorConfig(spec, true, runEnvironment)
+          return configuration === undefined ? [] : [configuration]
+        })[0] ??
+      reasoning
+    const coderCapabilities = (workDir: string, held: HeldCoder) =>
+      Effect.gen(function* () {
+        const current = yield* held.lease
+        const first =
+          current ??
+          [...document.executors]
+            .filter((spec) => rolesOf(spec).includes("coder"))
+            .sort((left, right) => priorityOf(left, "coder") - priorityOf(right, "coder"))[0]
+        if (first === undefined) {
+          return ConnectorCapabilitiesClass.make({})
+        }
+        return yield* Effect.map(Effect.result(seatFor(first, "coder", workDir)), (result) =>
+          result._tag === "Success"
+            ? result.success.capabilities
+            : ConnectorCapabilitiesClass.make({})
+        )
+      })
+    const viewFor = (held: HeldCoder, workDir: string, label: string): RosterView => ({
+      forRole: (role) =>
+        rosterSeat(roster, source, role, workDir, {
+          events,
+          avoid: Effect.map(held.executor, (id) => (id === undefined ? [] : [id])),
+          borrow: held.lease,
+          label
+        }),
+      available: roster.available,
+      slots: roster.slots,
+      executor: held.executor,
+      history: held.history
+    })
+    const contextIn = (
+      workDir: string,
+      held: HeldCoder,
+      label: string,
+      rebind: boolean
+    ): Effect.Effect<FlowContextShape, FlowError> =>
+      Effect.gen(function* () {
+        const view = viewFor(held, workDir, label)
+        const judgmentSeat =
+          options.judgment === undefined
+            ? view.forRole("judge")
+            : yield* resolveSeat(
+                prepareConnector(bridged(options.judgment), workDir, runEnvironment)
+              ).pipe(ScopeModule.provide(runScope))
+        const judgment = yield* judgmentFor(judgmentSeat, judgmentConfig, runEnvironment)
+        return FlowContext.of({
+          reasoning: view.forRole(rebind ? "planner" : "reviewer"),
+          coder: held.service,
+          judgment,
+          git: makeGitTool(dependencies.process, workDir, events),
+          hosting: makeGitHubTool(dependencies.process, workDir, events),
+          events,
+          reviewers: [view.forRole("reviewer")],
+          coderCapabilities: yield* coderCapabilities(workDir, held),
+          userPrompt: options.userPrompt,
+          workDir,
+          workspace: options.workspace,
+          roster: view,
+          ...(rebind
+            ? {
+                contextFor: (directory: string, contextOptions?: ContextOptions) =>
+                  Effect.gen(function* () {
+                    const label = contextOptions?.label ?? directory
+                    const storyCoder = yield* makeHeldCoder(roster, source, directory, {
+                      events,
+                      eager: true,
+                      label,
+                      ...(contextOptions?.prefer === undefined
+                        ? {}
+                        : { prefer: contextOptions.prefer })
+                    })
+                    return yield* contextIn(directory, storyCoder, label, false)
+                  })
+              }
+            : {})
+        })
+      })
+    const rootCoder = yield* makeHeldCoder(roster, source, options.workDir, {
+      events,
+      eager: false,
+      label: "the run"
+    })
+    return yield* contextIn(options.workDir, rootCoder, "the run", true)
+  })
+
+  const rosterDocument =
+    options.roster === "none"
+      ? undefined
+      : (options.roster ??
+        (yield* loadRosterDocument({
+          files: dependencies.files,
+          environment: runEnvironment,
+          workDir: options.workDir
+        })))
+  if (rosterDocument !== undefined) {
+    const context = yield* rosterContext(rosterDocument)
+    return {
+      events,
+      tracker,
+      runId,
+      roster: rosterDocument,
+      ...(judgmentLog === undefined ? {} : { judgmentLog }),
+      context
+    }
+  }
   const seats = yield* seatsFor(options.workDir)
   return {
     events,
@@ -439,6 +692,10 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     context: contextAt(options.workDir, seats, true)
   }
 })
+
+/** `claude (coder·reviewer·judge ×3)` — how the run header names an executor. */
+const describeExecutor = (spec: ExecutorSpec): string =>
+  `${spec.id} (${rolesOf(spec).join("·")} ×${spec.slots ?? 1})`
 
 export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle")(function* <
   A,
@@ -468,11 +725,16 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   })
   if (verbosity !== "Quiet") {
     const reviewers = options.reviewers ?? []
-    const seats = [
-      `coder ${describeSeat(options.coder)}`,
-      `reasoning ${describeSeat(defaultReasoningConfig(options.coder, options.reasoning))}`,
-      ...(reviewers.length === 0 ? [] : [`reviewers ${reviewers.map(describeSeat).join(", ")}`])
-    ].join(" · ")
+    const seats =
+      bundle.roster === undefined
+        ? [
+            `coder ${describeSeat(options.coder)}`,
+            `reasoning ${describeSeat(defaultReasoningConfig(options.coder, options.reasoning))}`,
+            ...(reviewers.length === 0
+              ? []
+              : [`reviewers ${reviewers.map(describeSeat).join(", ")}`])
+          ].join(" · ")
+        : `executors ${bundle.roster.executors.map(describeExecutor).join(", ")} (roster in force: the flow's own seat choices are not used)`
     yield* surface.log(palette.info(`${seats} · ${options.workDir}`))
     if (tracePath !== undefined) {
       yield* surface.log(

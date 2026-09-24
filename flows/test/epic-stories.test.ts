@@ -15,6 +15,8 @@ import {
   ProcessResult
 } from "@llm4ts/core/ProcessExecutor"
 import { makeLocalBoardSync } from "@llm4ts/flow/BoardSync"
+import { makeRoster } from "@llm4ts/flow/Roster"
+import { loadRosterDocument } from "@llm4ts/runner/ExecutorRoster"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import { makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
@@ -402,6 +404,56 @@ describe("epic-stories worktrees, outages and blocked claims", () => {
         "### src/features/conta/ContoScreen.tsx\n(does not exist in the working tree)"
       )
       assert.include(asked, "- home (depends on: conto-overview")
+    })
+  )
+})
+
+describe("the demo roster", () => {
+  it.effect("loads and validates, with the agreed coder order and reasoning order", () =>
+    Effect.gen(function* () {
+      const text = readFileSync(
+        join(
+          dirname(fileURLToPath(import.meta.url)),
+          "..",
+          "..",
+          "examples",
+          "internet-banking",
+          "roster.example.json"
+        ),
+        "utf8"
+      )
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic("/cfg/roster.json", text)
+      const document = yield* loadRosterDocument({
+        files: memory.store,
+        environment: { HOME: "/home/me", LLM4TS_ROSTER: "/cfg/roster.json" },
+        workDir: "/repo"
+      })
+      assert.isDefined(document)
+      const events = yield* makeFlowEventHub()
+      const roster = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const made = yield* makeRoster({ executors: document?.executors ?? [], events })
+          const coders: Array<string> = []
+          for (let index = 0; index < 5; index += 1) {
+            coders.push((yield* made.lease("coder")).executor.id)
+          }
+          const judge = (yield* made.lease("judge")).executor.id
+          const planner = (yield* made.lease("planner")).executor.id
+          return { coders, judge, planner, slots: made.slots("coder") }
+        })
+      )
+      // The self-hosted models first, taking turns; then codex; then claude.
+      assert.deepStrictEqual(roster.coders, [
+        "pi-lmstudio",
+        "lemonade-ornith",
+        "lemonade-deepseek",
+        "codex",
+        "claude"
+      ])
+      assert.strictEqual(roster.slots, 1 + 1 + 1 + 1 + 2)
+      assert.strictEqual(roster.judge, "claude")
+      assert.strictEqual(roster.planner, "claude")
     })
   )
 })

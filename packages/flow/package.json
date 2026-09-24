@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/flow",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "Effect-native LLM workflow, persistence, review, and repository automation",
   "license": "MIT",
   "type": "module",
@@ -64,6 +64,8 @@
     "./ReviewCache": "./dist/ReviewCache.js",
     "./Reviewer": "./dist/Reviewer.js",
     "./SpecChecks": "./dist/SpecChecks.js",
+    "./Roster": "./dist/Roster.js",
+    "./RosterSeats": "./dist/RosterSeats.js",
     "./Stories": "./dist/Stories.js",
     "./StoryPlan": "./dist/StoryPlan.js",
     "./Survey": "./dist/Survey.js",

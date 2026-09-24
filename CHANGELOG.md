@@ -1,5 +1,38 @@
 # Changelog
 
+## 2.9.0
+
+An executor roster (ADR 0019): a run's seats can be served from a pool of
+executors instead of one connector per seat. Additive: without a roster
+file, every run behaves exactly as before.
+
+- `@llm4ts/flow/Roster`: executors (a harness and a model) with roles
+  (`planner`, `coder`, `reviewer`, `judge`, `verifier`), slots, reserved
+  reasoning slots (`coderSlots`) and per-role priorities. Leases are scoped
+  and wait when nobody is free. Exclusions come from infrastructure signals
+  only (usage limit until its reset, repeated rate limits, a serving engine
+  that is down until its health URL answers, a harness not signed in) and
+  are persisted across runs. `RosterExhausted` when no executor can ever
+  take a role.
+- `@llm4ts/flow/RosterSeats`: a coder held per context that hands over to
+  the next executor when its own is taken out (at most twice, with a
+  takeover note), and reasoning seats leased per call away from the
+  context's coder.
+- The runner loads `~/.config/llm4ts/roster.json` and
+  `<repo>/.llm4ts/roster.json` (`LLM4TS_ROSTER`, `LLM4TS_EXECUTORS`),
+  probes every executor at start, serves every seat and `contextFor` from
+  the roster, and prints the executors in the run header.
+- Shell: `llm4ts roster`, `llm4ts roster pause <id> [--for …]`,
+  `llm4ts roster resume <id>`, and `llm4ts run --roster … --executors …`.
+- `epic-stories`: launches as many stories as there are free coders, leases
+  each story's judge and `BLOCKED_ON` verifier away from its coder, names
+  the coder on the board, and sums the estimates per executor in
+  `report.md`. `StoriesOptions.judge` and `verifyBlocked` receive the
+  story's seats; `contextFor` takes the executor to prefer on resume.
+- pi, antigravity and copilot usage limits are typed `UsageLimitError`s.
+- The demo roster: `examples/internet-banking/roster.example.json`, with a
+  runbook section.
+
 ## 2.8.0
 
 Findings of the 2026-09-22/24 `epic-stories` rehearsal on a local coder

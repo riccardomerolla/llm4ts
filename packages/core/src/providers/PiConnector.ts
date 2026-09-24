@@ -6,6 +6,7 @@ import { ProviderError } from "../Errors.ts"
 import { ConnectorCapabilities, ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
+  failClassifiedCliError,
   jsonBooleanField,
   jsonField,
   jsonIntField,
@@ -123,9 +124,11 @@ export const makePiConnector = (
       // pi explains a refusal on stderr (a usage error, a missing model, an
       // auth failure); stdout is empty then, so both streams are reported.
       const detail = [...result.stdout, ...result.stderr].join("\n").trim()
-      return yield* ProviderError.make({
-        message: `pi exited with code ${result.exitCode}${detail.length === 0 ? "" : `: ${detail}`}`
-      })
+      if (detail.length === 0) {
+        return yield* ProviderError.make({ message: `pi exited with code ${result.exitCode}` })
+      }
+      // A usage limit is typed, so a roster can take pi out of the round (ADR 0019).
+      return yield* failClassifiedCliError("pi", `pi exited with code ${result.exitCode}`, detail)
     }
     return result.stdout.join("\n")
   })
@@ -144,11 +147,7 @@ export const makePiConnector = (
           const message = chunk.metadata.piError
           return message === undefined
             ? Effect.succeed(chunk)
-            : Effect.fail(
-                ProviderError.make({
-                  message: `pi error: ${message}`
-                })
-              )
+            : failClassifiedCliError("pi", "pi error", message)
         })
       )
 

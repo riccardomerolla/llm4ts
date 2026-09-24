@@ -24,6 +24,19 @@ const genericQuotaSignals: ReadonlyArray<string> = [
   "too many requests"
 ]
 
+// Harnesses that relay many providers (pi) or wrap one (antigravity,
+// copilot): only exhausted quota counts. Their "rate limited" is the
+// harness's own retries giving up on a short limit, which stays a
+// retryable provider error rather than a half-hour usage limit.
+const relayedQuotaSignals: ReadonlyArray<string> = [
+  "usage limit",
+  "out of credits",
+  "out of extra usage",
+  "credit balance is too low",
+  "insufficient_quota",
+  "exceeded your current quota"
+]
+
 const includesSignal = (text: string, signals: ReadonlyArray<string>): boolean => {
   const normalized = text.toLowerCase()
   return signals.some((signal) => normalized.includes(signal))
@@ -32,6 +45,8 @@ const includesSignal = (text: string, signals: ReadonlyArray<string>): boolean =
 export const isGeminiQuota = (text: string): boolean => includesSignal(text, geminiQuotaSignals)
 
 const isGenericQuota = (text: string): boolean => includesSignal(text, genericQuotaSignals)
+
+const isRelayedQuota = (text: string): boolean => includesSignal(text, relayedQuotaSignals)
 
 const resetDuration = (specification: string): Duration.Duration => {
   let milliseconds = 0
@@ -227,6 +242,15 @@ export const classifyUsageLimit = (
           })
         : undefined
     }
+    case "pi":
+    case "antigravity":
+    case "copilot":
+      return isRelayedQuota(text)
+        ? UsageLimitError.make({
+            provider,
+            message: text
+          })
+        : undefined
     case "grok":
     case "cursor":
     case "opencode":

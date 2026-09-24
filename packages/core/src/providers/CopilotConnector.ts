@@ -2,9 +2,9 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ProviderError } from "../Errors.ts"
 import { ConnectorCapabilities, ConnectorIds, LlmChunk } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
+import { failClassifiedCliError } from "./CliSupport.ts"
 
 export const buildCopilotArgv = (prompt: string): ReadonlyArray<string> => [
   "gh",
@@ -25,9 +25,11 @@ export const makeCopilotConnector = (
     const argv = buildCopilotArgv(prompt)
     const result = yield* executor.run(argv, ".", config.envVars)
     if (result.exitCode !== 0) {
-      return yield* ProviderError.make({
-        message: `gh copilot exited with code ${result.exitCode}: ${result.stdout.join("\n")}`
-      })
+      return yield* failClassifiedCliError(
+        "copilot",
+        `gh copilot exited with code ${result.exitCode}`,
+        result.stdout.join("\n")
+      )
     }
     return result.stdout.join("\n")
   })

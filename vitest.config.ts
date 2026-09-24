@@ -23,6 +23,9 @@ export default defineConfig({
     ],
     exclude: [".repos/**", "repos/**", "**/node_modules/**"],
     passWithNoTests: true,
+    // A developer's own executor roster (~/.config/llm4ts/roster.json) must
+    // never reach a test run: tests that want a roster pass one explicitly.
+    env: { LLM4TS_ROSTER: "none" },
     reporters: ["dot"],
     coverage: {
       provider: "v8",

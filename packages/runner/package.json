@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/runner",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "Node runner, CLI, terminal, and MCP composition for llm4ts",
   "license": "MIT",
   "type": "module",
@@ -19,6 +19,7 @@
     "./Connectors": "./dist/Connectors.js",
     "./Costs": "./dist/Costs.js",
     "./Doctor": "./dist/Doctor.js",
+    "./ExecutorRoster": "./dist/ExecutorRoster.js",
     "./FlowArgs": "./dist/FlowArgs.js",
     "./FlowRunner": "./dist/FlowRunner.js",
     "./Kits": "./dist/Kits.js",

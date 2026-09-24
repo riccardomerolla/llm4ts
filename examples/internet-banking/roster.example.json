@@ -1,0 +1,47 @@
+{
+  "executors": [
+    {
+      "id": "pi-lmstudio",
+      "harness": "pi",
+      "model": "lmstudio/qwen/qwen3.6-35b-a3b:medium",
+      "roles": ["coder"],
+      "slots": 1,
+      "priority": 1,
+      "health": "http://127.0.0.1:1234/v1/models"
+    },
+    {
+      "id": "lemonade-ornith",
+      "harness": "opencode",
+      "model": "tinbota-lemonade-server/Ornith-1.5-35B-A3B-GGUF-Q5_K_M",
+      "roles": ["coder"],
+      "slots": 1,
+      "priority": 1,
+      "health": "http://100.99.224.30:13305/v1/models"
+    },
+    {
+      "id": "lemonade-deepseek",
+      "harness": "opencode",
+      "model": "tinbota-lemonade-server/DeepSeek-V4-Flash-0731-GGUF-UD-IQ3_XXS",
+      "roles": ["coder"],
+      "slots": 1,
+      "priority": 1,
+      "health": "http://100.99.224.30:13305/v1/models"
+    },
+    {
+      "id": "codex",
+      "harness": "codex",
+      "model": "gpt-6-astra",
+      "roles": ["coder", "reviewer", "judge", "verifier"],
+      "slots": 2,
+      "priority": { "coder": 2, "default": 2 }
+    },
+    {
+      "id": "claude",
+      "harness": "claude",
+      "model": "claude-sonnet-5",
+      "roles": ["coder", "reviewer", "judge", "verifier", "planner"],
+      "slots": 3,
+      "priority": { "coder": 3, "default": 1 }
+    }
+  ]
+}

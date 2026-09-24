@@ -18,6 +18,14 @@ import {
   type CostsOptions
 } from "@llm4ts/runner/Costs"
 import { makeDoctorProgram } from "@llm4ts/runner/Doctor"
+import {
+  pauseExecutor,
+  renderRosterReport,
+  resumeExecutor,
+  rosterReport
+} from "@llm4ts/runner/ExecutorRoster"
+import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
+import { describeExclusion } from "@llm4ts/flow/Roster"
 import { builtinKitsDir, discoverKits, kitTierPaths, type DiscoveredKit } from "@llm4ts/runner/Kits"
 import {
   defaultTierPaths,
@@ -186,6 +194,18 @@ const runCommand = Command.make(
     verbose: Flag.Boolean("verbose").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Stream verbose flow output")
+    ),
+    roster: Flag.String("roster").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Executor roster for this run, forwarded as LLM4TS_ROSTER: a roster file, or `none` for one executor per seat"
+      )
+    ),
+    executors: Flag.String("executors").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Only these roster executors (comma-separated ids), forwarded as LLM4TS_EXECUTORS"
+      )
     )
   },
   (config) =>
@@ -195,6 +215,12 @@ const runCommand = Command.make(
       const environment: Record<string, string | undefined> = { ...process.env }
       if (config.verbose) {
         environment.LLM4TS_VERBOSITY = "verbose"
+      }
+      if (config.roster._tag === "Some") {
+        environment.LLM4TS_ROSTER = config.roster.value
+      }
+      if (config.executors._tag === "Some") {
+        environment.LLM4TS_EXECUTORS = config.executors.value
       }
       if (config.pack._tag === "Some") {
         environment.LLM4TS_PACK = config.pack.value
@@ -441,6 +467,63 @@ const costsCommand = Command.make(
   )
 )
 
+const rosterSource = (repo: Option.Option<string>) => ({
+  files: nodePlainFileStore,
+  environment: process.env,
+  workDir: resolve(Option.getOrElse(repo, () => process.cwd()))
+})
+
+const rosterRepo = Flag.String("repo").pipe(
+  Flag.optional,
+  Flag.withDescription("Repository whose .llm4ts/roster.json overrides the user roster")
+)
+
+const rosterPauseCommand = Command.make(
+  "pause",
+  {
+    id: Argument.String("executor").pipe(Argument.withDescription("Executor id")),
+    for: Flag.String("for").pipe(
+      Flag.optional,
+      Flag.withDescription('How long ("2h", "30 minutes"); until resumed when omitted')
+    ),
+    repo: rosterRepo
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const exclusion = yield* pauseExecutor(
+        rosterSource(config.repo),
+        config.id,
+        Option.getOrUndefined(config.for)
+      )
+      yield* Console.log(`${config.id} out ${describeExclusion(exclusion)}`)
+    })
+).pipe(Command.withDescription("Take an executor out of every run's pick-up round"))
+
+const rosterResumeCommand = Command.make(
+  "resume",
+  {
+    id: Argument.String("executor").pipe(Argument.withDescription("Executor id")),
+    repo: rosterRepo
+  },
+  (config) =>
+    Effect.gen(function* () {
+      yield* resumeExecutor(rosterSource(config.repo), config.id)
+      yield* Console.log(`${config.id} back in the round`)
+    })
+).pipe(Command.withDescription("Put an executor back in the pick-up round"))
+
+const rosterCommand = Command.make("roster", { repo: rosterRepo }, (config) =>
+  Effect.gen(function* () {
+    const report = yield* rosterReport(rosterSource(config.repo))
+    yield* Console.log(renderRosterReport(report))
+  })
+).pipe(
+  Command.withDescription(
+    "The executor roster (ADR 0019): executors, their roles and slots, and who is out of the round"
+  ),
+  Command.withSubcommands([rosterPauseCommand, rosterResumeCommand])
+)
+
 const doctorCommand = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const report = yield* makeDoctorProgram()
@@ -469,6 +552,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     askCommand,
     refineCommand,
     costsCommand,
+    rosterCommand,
     doctorCommand
   ])
 )

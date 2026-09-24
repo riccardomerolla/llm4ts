@@ -205,6 +205,36 @@ export class EpicCheckoutDirty extends Schema.TaggedError<EpicCheckoutDirty>()(
   }
 }
 
+/** A roster file that failed to load or validate — every violation, not the first (ADR 0019). */
+export class RosterInvalid extends Schema.TaggedError<RosterInvalid>()("RosterInvalid", {
+  path: Schema.optionalKey(Schema.String),
+  violations: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const where = this.path === undefined ? "" : ` (${this.path})`
+    return `roster invalid${where}:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** The start of every `RosterExhausted` message, so it is recognisable once wrapped. */
+export const rosterExhaustedPrefix = "roster exhausted: no executor can ever take the role"
+
+/**
+ * No executor of the roster can ever take `role` in this run: none has the
+ * role, or every one that has it is excluded for the run (ADR 0019). A
+ * roster waits for an executor that will come back; this is the case where
+ * none will.
+ */
+export class RosterExhausted extends Schema.TaggedError<RosterExhausted>()("RosterExhausted", {
+  role: Schema.String,
+  reasons: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const why = this.reasons.length === 0 ? "" : `: ${this.reasons.join("; ")}`
+    return `${rosterExhaustedPrefix} '${this.role}'${why}`
+  }
+}
+
 /** One story failed; carries the story id so a fail-fast run names its cause. */
 export class StoryFailed extends Schema.TaggedError<StoryFailed>()("StoryFailed", {
   story: Schema.String,
@@ -270,6 +300,8 @@ export const FlowError = Schema.Union([
   MissingDependency,
   MergeConflict,
   EpicCheckoutDirty,
+  RosterExhausted,
+  RosterInvalid,
   StoryFailed,
   DecisionsInvalid,
   OpenPointsPending,

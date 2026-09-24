@@ -178,6 +178,57 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   `story/<epic-id>/<story-id>`, the board and `report.md` under
   `.llm4ts/epics/<epic-id>/`. Every usage figure is an estimate.
 
+### A pool of executors
+
+With a roster file (`~/.config/llm4ts/roster.json`, overridden by id by
+`<repo>/.llm4ts/roster.json`), every seat of every flow is served from a
+pool of executors (ADR 0019). Each executor is a harness plus a model, with
+the roles it takes (`planner`, `coder`, `reviewer`, `judge`, `verifier`),
+its slots and a priority per role:
+
+```json
+{
+  "executors": [
+    {
+      "id": "pi-lmstudio",
+      "harness": "pi",
+      "model": "lmstudio/qwen/qwen3.6-35b-a3b:medium",
+      "roles": ["coder"],
+      "slots": 1,
+      "priority": 1,
+      "health": "http://127.0.0.1:1234/v1/models"
+    },
+    {
+      "id": "claude",
+      "harness": "claude",
+      "model": "claude-sonnet-5",
+      "roles": ["coder", "reviewer", "judge", "verifier", "planner"],
+      "slots": 3,
+      "priority": { "coder": 3, "default": 1 }
+    }
+  ]
+}
+```
+
+- A story holds one coder for its lifetime. Reviewer, judge and verifier
+  calls lease an executor per call, never the one coding the story, unless
+  nobody else can take the role (then the run says "not independent").
+- Lower priority first; equal priorities take turns. An executor that codes
+  and reasons keeps one slot for reasoning (`coderSlots`).
+- A usage limit, three rate limits in 10 minutes, a serving engine that is
+  down, or a harness that is not signed in takes an executor out of the
+  round, for the right time (`cooldown` per executor). A story whose coder
+  goes out hands over to the next coder, at most twice. When nobody can
+  serve, the run waits for the first to come back.
+- `llm4ts roster` shows the pool and who is out; `llm4ts roster pause <id>
+[--for 2h]` and `resume <id>` control it across runs. `llm4ts run
+--roster none` ignores it, `--executors a,b` narrows it.
+- `env` values reference variables (`"${LEMONADE_API_KEY}"`), never secrets;
+  provider settings stay in each harness's own config. API providers
+  (`lm-studio`, `ollama`, `openai`, …) may reason but not code.
+
+The demo roster is `examples/internet-banking/roster.example.json`.
+
 ### Local models
 
 A local server (LM Studio, Ollama) generates one reply at a time. Run with

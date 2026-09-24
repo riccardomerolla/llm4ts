@@ -18,9 +18,10 @@ import type { LlmError } from "@llm4ts/core/Errors"
 import { BoardItem, type BoardSyncShape } from "./BoardSync.ts"
 import { makeChat } from "./Chat.ts"
 import { implementPlanFlow } from "./Flow.ts"
-import type { FlowContextShape } from "./FlowContext.ts"
+import type { ContextOptions, FlowContextShape } from "./FlowContext.ts"
 import {
   describeFlowError,
+  rosterExhaustedPrefix,
   EpicCheckoutDirty,
   MissingDependency,
   PerimeterViolation,
@@ -89,7 +90,9 @@ export class StoryState extends Schema.Class<StoryState>("StoryState")({
   hash: Schema.String,
   branch: Schema.String,
   worktree: Schema.String,
-  status: StoryStatus
+  status: StoryStatus,
+  /** The roster executor that last held the story's coder (ADR 0019); preferred on resume. */
+  executor: Schema.optionalKey(Schema.String)
 }) {}
 
 export const EpicReportVersion = 1
@@ -106,6 +109,8 @@ export class StoryOutcome extends Schema.Class<StoryOutcome>("StoryOutcome")({
   /** Failure reason, or what a waiting story waits for. */
   reason: Schema.optionalKey(Schema.String),
   judge: Schema.optionalKey(Schema.String),
+  /** The roster executor(s) that coded the story, in order ("codex → claude"). */
+  executor: Schema.optionalKey(Schema.String),
   /** ESTIMATES, never measurements (ADR 0012). */
   estimatedTokens: Schema.optionalKey(Schema.Int),
   estimatedCostUsd: Schema.optionalKey(Schema.Number)
@@ -158,6 +163,27 @@ export const renderEpicReport = (report: EpicReport): string => {
   }
   if (cost.length > 0) {
     lines.push(`- Estimated cost: ${money(cost.reduce((sum, value) => sum + value, 0))}`)
+  }
+  const coded = report.stories.filter((story) => story.executor !== undefined)
+  if (coded.length > 0) {
+    // A story is counted for the executor that finished it; a handover chain
+    // is shown in full next to the story.
+    const byExecutor = new Map<string, { stories: Array<string>; tokens: number; cost: number }>()
+    for (const story of coded) {
+      const chain = story.executor ?? ""
+      const last = chain.split(" → ").at(-1) ?? chain
+      const entry = byExecutor.get(last) ?? { stories: [], tokens: 0, cost: 0 }
+      entry.stories.push(chain === last ? story.id : `${story.id} (${chain})`)
+      entry.tokens += story.estimatedTokens ?? 0
+      entry.cost += story.estimatedCostUsd ?? 0
+      byExecutor.set(last, entry)
+    }
+    lines.push("", "## By executor", "")
+    for (const [executor, entry] of byExecutor) {
+      lines.push(
+        `- ${executor}: ${entry.stories.join(", ")} — ~${entry.tokens} tokens, ${money(entry.cost)} (estimated)`
+      )
+    }
   }
   lines.push("")
   return lines.join("\n")
@@ -423,7 +449,10 @@ export interface StoriesOptions {
   /** Default `epic/<epicId>`. */
   readonly epicBranch?: string
   /** Seats rooted in a worktree; the executor never resolves seats itself. */
-  readonly contextFor: (workDir: string) => Effect.Effect<StorySeats, FlowError, Scope.Scope>
+  readonly contextFor: (
+    workDir: string,
+    options?: ContextOptions
+  ) => Effect.Effect<StorySeats, FlowError, Scope.Scope>
   readonly board: BoardSyncShape
   /**
    * Prepares a worktree before its coder runs — a fresh checkout has no
@@ -434,7 +463,11 @@ export interface StoriesOptions {
   /** The target's gates, run in a worktree per task and on the epic checkout after each merge. */
   readonly gates: (workDir: string) => Effect.Effect<ReviewResult, FlowError>
   /** Story-level judge over the branch's diff against the epic branch; omit to skip. */
-  readonly judge?: (story: Story, diff: string) => Effect.Effect<ReviewResult, FlowError>
+  readonly judge?: (
+    story: Story,
+    diff: string,
+    seats: StorySeats
+  ) => Effect.Effect<ReviewResult, FlowError>
   /** Judge attempts, each but the last followed by one coder feedback round. Default 2. */
   readonly judgeRounds?: number
   /** Extra system context per story (house rules, shared read-only excerpts). */
@@ -459,7 +492,8 @@ export interface StoriesOptions {
   readonly verifyBlocked?: (
     story: Story,
     need: string,
-    workDir: string
+    workDir: string,
+    seats: StorySeats
   ) => Effect.Effect<BlockedVerdict, FlowError>
   /**
    * Waits until a serving engine that went down (`isOutageMessage`) is back;
@@ -675,11 +709,29 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     story: Story,
     state: StoryState
   ): Effect.fn.Return<
-    { readonly judge: string | undefined; readonly totals: TokenUsage | undefined },
+    {
+      readonly judge: string | undefined
+      readonly totals: TokenUsage | undefined
+      readonly executor: string | undefined
+    },
     FlowError,
     Scope.Scope
   > {
-    const seats = yield* options.contextFor(state.worktree)
+    const seats = yield* options.contextFor(state.worktree, {
+      label: `story ${story.id}`,
+      ...(state.executor === undefined ? {} : { prefer: state.executor })
+    })
+    const roster = seats.context.roster
+    const coderExecutor = roster === undefined ? undefined : yield* roster.executor
+    if (coderExecutor !== undefined && coderExecutor !== state.executor) {
+      yield* saveVersioned(
+        files,
+        statePath(story),
+        StoryStateVersion,
+        StoryState,
+        StoryState.make({ ...state, executor: coderExecutor })
+      )
+    }
     const blocked = yield* Ref.make<string | undefined>(undefined)
     const pushbacks = yield* Ref.make(0)
     const storyContext: FlowContextShape = {
@@ -750,7 +802,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         let rebuttal = blockedRebuttal(plan, story, need)
         if (rebuttal === undefined && options.verifyBlocked !== undefined) {
           const verdict = yield* options
-            .verifyBlocked(story, need, state.worktree)
+            .verifyBlocked(story, need, state.worktree, watchedSeats)
             .pipe(Effect.catch(() => Effect.succeed(undefined)))
           rebuttal = verdict === undefined || verdict.real ? undefined : verdict.reason
         }
@@ -861,7 +913,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           // a model asked to score an empty diff scores the prompt instead.
           return yield* failed(story, "the story branch has no changes against the epic branch")
         }
-        const verdict = yield* judge(story, diff)
+        const verdict = yield* judge(story, diff, watchedSeats)
         if (verdict.isClean) {
           judgeNote = `judge cleared (round ${round})`
           break
@@ -890,7 +942,12 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     const changed = yield* git.changedFilesVsBase(epicBranch)
     yield* enforcePerimeter(changed, story)
     const totals = seats.totals === undefined ? undefined : yield* seats.totals
-    return { judge: judgeNote, totals }
+    const history = roster === undefined ? [] : yield* roster.history
+    return {
+      judge: judgeNote,
+      totals,
+      executor: history.length === 0 ? undefined : history.join(" → ")
+    }
   })
 
   const runStory = Effect.fn("@llm4ts/flow/Stories.runStory")(function* (
@@ -910,12 +967,17 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     }
     const result = yield* Effect.scoped(implementStory(story, state))
     yield* integrate(story, state.branch)
+    const last = result.executor?.split(" → ").at(-1)
     yield* saveVersioned(
       files,
       statePath(story),
       StoryStateVersion,
       StoryState,
-      StoryState.make({ ...state, status: "merged" })
+      StoryState.make({
+        ...state,
+        status: "merged",
+        ...(last === undefined ? {} : { executor: last })
+      })
     )
     return StoryOutcome.make({
       id: story.id,
@@ -923,6 +985,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       status: "done",
       branch: state.branch,
       ...(result.judge === undefined ? {} : { judge: result.judge }),
+      ...(result.executor === undefined ? {} : { executor: result.executor }),
       ...(result.totals === undefined ? {} : { estimatedTokens: result.totals.total }),
       ...(result.totals?.costUsd === undefined ? {} : { estimatedCostUsd: result.totals.costUsd })
     })
@@ -949,7 +1012,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             ).pipe(Effect.ignore)
           }
           const interruption: Interruption | undefined =
-            error._tag === "EpicCheckoutDirty"
+            error._tag === "EpicCheckoutDirty" ||
+            error._tag === "RosterExhausted" ||
+            reason.includes(rosterExhaustedPrefix)
               ? "halt"
               : isOutageMessage(reason)
                 ? "outage"
@@ -1020,7 +1085,16 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         if (halted === undefined) {
           const current = yield* progress
           const ready = readyStories(plan, current)
-          const slots = concurrency - current.running.size
+          // With a roster, never launch more stories than there are free
+          // coders; with nothing running, launch one anyway — its lease waits
+          // for the first executor to come back (ADR 0019).
+          const free =
+            context.roster === undefined
+              ? Number.POSITIVE_INFINITY
+              : yield* context.roster.available("coder")
+          const budget = Math.min(concurrency - current.running.size, free)
+          const slots =
+            current.running.size === 0 && ready.length > 0 ? Math.max(1, budget) : budget
           for (const story of ready.slice(0, Math.max(0, slots))) {
             yield* Ref.update(running, (set) => new Set([...set, story.id]))
             yield* Effect.forkScoped(
@@ -1066,7 +1140,16 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         if (outcome.status === "done") {
           yield* board.complete(outcome.id, {
             ...(outcome.branch === undefined ? {} : { branch: outcome.branch }),
-            ...(outcome.judge === undefined ? {} : { detail: outcome.judge }),
+            ...(outcome.judge === undefined && outcome.executor === undefined
+              ? {}
+              : {
+                  detail: [
+                    outcome.judge,
+                    outcome.executor === undefined ? undefined : `coder ${outcome.executor}`
+                  ]
+                    .filter((part): part is string => part !== undefined)
+                    .join(" · ")
+                }),
             ...(outcome.estimatedTokens === undefined
               ? {}
               : { estimatedTokens: outcome.estimatedTokens }),

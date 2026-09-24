@@ -228,12 +228,8 @@ export const serverHealthUrl = (
   }
 }
 
-/** Whether `url` answers 2xx within five seconds. */
-export const httpProbe = (url: string): Effect.Effect<boolean> =>
-  Effect.tryPromise(() => fetch(url, { signal: AbortSignal.timeout(5_000) })).pipe(
-    Effect.map((response) => response.ok),
-    Effect.catch(() => Effect.succeed(false))
-  )
+/** Whether `url` answers 2xx within five seconds (the roster's health check). */
+export { httpProbe } from "@llm4ts/runner/ExecutorRoster"
 
 export interface RecoveryTiming {
   readonly interval: Duration.Input

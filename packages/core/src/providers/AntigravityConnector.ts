@@ -2,10 +2,9 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ProviderError } from "../Errors.ts"
 import { ConnectorCapabilities, ConnectorIds, HealthStatus, LlmChunk } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
-import { optionalModelArgs, sortedFlagArgs } from "./CliSupport.ts"
+import { failClassifiedCliError, optionalModelArgs, sortedFlagArgs } from "./CliSupport.ts"
 
 const healthy = HealthStatus.make({
   availability: "Healthy",
@@ -50,9 +49,11 @@ export const makeAntigravityConnector = (
     const result = yield* executor.run(buildAntigravityArgv(config, prompt), cwd, config.envVars)
     if (result.exitCode !== 0) {
       const detail = [...result.stderr, ...result.stdout].join("\n")
-      return yield* ProviderError.make({
-        message: `agy exited with code ${result.exitCode}: ${detail}`
-      })
+      return yield* failClassifiedCliError(
+        "antigravity",
+        `agy exited with code ${result.exitCode}`,
+        detail
+      )
     }
     return result.stdout.join("\n")
   })

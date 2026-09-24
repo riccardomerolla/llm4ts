@@ -90,6 +90,36 @@ generates one reply at a time. Load the model with at least 128K of context
 and no idle TTL. If the engine crashes mid-run, the flow waits for it to
 answer again and retries the story instead of failing the rest.
 
+### With a pool of executors (ADR 0019)
+
+Instead of one coder, give the run a roster: the self-hosted models code
+first, codex and then claude take the overflow, and claude (then codex)
+reviews and judges, never the story it coded itself.
+
+```bash
+mkdir -p ~/.config/llm4ts
+cp examples/internet-banking/roster.example.json ~/.config/llm4ts/roster.json
+llm4ts roster
+llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 3
+```
+
+What to show while it runs:
+
+- the run header lists the executors instead of a coder;
+- `roster:` lines say who takes which story, who judges it, and who is out
+  of the round (a usage limit, until its reset time; an LM Studio or
+  Lemonade engine that is down, until its health URL answers);
+- a story whose coder is taken out mid-task hands over to the next one,
+  which continues in the same worktree;
+- the board names each story's coder, and `report.md` sums the estimates
+  per executor;
+- `llm4ts roster pause codex --for 2h` keeps codex out of this run and the
+  next; `llm4ts roster resume codex` brings it back.
+
+`--roster none` runs with one executor per seat as before;
+`--executors pi-lmstudio,claude` narrows the roster for one run. One server
+is one executor: never point two executors at the same LM Studio.
+
 ## Act 3 — the result
 
 ```bash

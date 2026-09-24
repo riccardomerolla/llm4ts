@@ -506,6 +506,13 @@ reference release.
   `epic-stories` flow. Every llm4zio flow runs one coder at a time; this
   runs several, each confined to a declared story in its own worktree.
   Additive; back-porting is out of scope.
+- Executor roster beyond the pinned source (ADR 0019, 2026-09-24): the
+  flow modules `Roster` and `RosterSeats`, the runner's `ExecutorRoster`
+  (roster files, harness mapping, `llm4ts roster`), role-based seats with
+  per-call reasoning leases and coder handover, and typed usage limits for
+  pi, antigravity and copilot. llm4zio binds one connector per seat.
+  Additive: without a roster file a run is unchanged; back-porting is out
+  of scope.
 - Refinement overlays beyond the pinned source (ADR 0015, 2026-09-15):
   the `modernize-refine` flow and `llm4ts refine` verb, the `Decisions`
   and `Domains` flow modules, the pack `## Consolidate` section with its

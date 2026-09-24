@@ -142,8 +142,9 @@ const program = Effect.gen(function* () {
         if (flags.planOnly) {
           return
         }
-        const concurrency = flags.concurrency ?? 3
-        if (localServer !== undefined && concurrency > 1) {
+        // With a roster, the default is every coder slot it has; the flag caps it.
+        const concurrency = flags.concurrency ?? context.roster?.slots("coder") ?? 3
+        if (context.roster === undefined && localServer !== undefined && concurrency > 1) {
           yield* events.publish(
             Info.make({
               message:
@@ -172,9 +173,9 @@ const program = Effect.gen(function* () {
             stateDir,
             worktreeRoot: worktreeRootFor(input.workDir, plan.epicId, process.env),
             board: makeLocalBoardSync(files, stateDir, `Epic: ${plan.epicId}`),
-            contextFor: (workDir) =>
+            contextFor: (workDir, contextOptions) =>
               Effect.gen(function* () {
-                const rebound = yield* contextFor(workDir)
+                const rebound = yield* contextFor(workDir, contextOptions)
                 const coderMeter = yield* makeEstimatedUsageMeter(rebound.coder, estimateOptions)
                 const reviewMeter = yield* makeEstimatedUsageMeter(
                   rebound.reasoning,
@@ -194,12 +195,28 @@ const program = Effect.gen(function* () {
               ? {}
               : { setup: setupIn(nodeProcessExecutor, events, setupCommand) }),
             gates,
-            judge: (story, diff) => judgeStory(reasoningMeter.service, story, diff, contextBudget),
-            verifyBlocked: verifyBlockedOn(reasoningMeter.service, events, files, plan),
-            awaitRecovery: awaitServer(
-              healthUrl === undefined ? undefined : httpProbe(healthUrl),
-              events
-            ),
+            // With a roster, the judge and the verifier are leased per story,
+            // away from the executor coding it (ADR 0019).
+            judge: (story, diff, seats) =>
+              judgeStory(
+                seats.context.roster?.forRole("judge") ?? reasoningMeter.service,
+                story,
+                diff,
+                contextBudget
+              ),
+            verifyBlocked: (story, need, workDir, seats) =>
+              verifyBlockedOn(
+                seats.context.roster?.forRole("verifier") ?? reasoningMeter.service,
+                events,
+                files,
+                plan
+              )(story, need, workDir),
+            // A roster waits for its own executors (the story's next lease
+            // does); without one, poll the single coder's engine.
+            awaitRecovery:
+              context.roster === undefined
+                ? awaitServer(healthUrl === undefined ? undefined : httpProbe(healthUrl), events)
+                : () => Effect.void,
             system: (story) =>
               Effect.succeed(
                 [
@@ -209,7 +226,7 @@ const program = Effect.gen(function* () {
                   `Imitate the exemplar feature before inventing anything. Story id: ${story.id}.`
                 ].join("\n")
               ),
-            ...(flags.concurrency === undefined ? {} : { concurrency: flags.concurrency }),
+            concurrency,
             failFast: flags.failFast
           }
         )

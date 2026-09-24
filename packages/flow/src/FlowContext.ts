@@ -8,6 +8,15 @@ import type { FlowError } from "./FlowError.ts"
 import type { FlowEventsShape } from "./FlowEvents.ts"
 import type { GitToolShape } from "./GitTool.ts"
 import type { GitHubToolShape } from "./GitHubTool.ts"
+import type { RosterView } from "./RosterSeats.ts"
+
+/** How a rebound context wants its coder (ADR 0019); ignored without a roster. */
+export interface ContextOptions {
+  /** The executor this context held before (a resumed story), taken first while free. */
+  readonly prefer?: string
+  /** Who the context is for, in the roster's events ("story conto-overview"). */
+  readonly label?: string
+}
 
 export interface FlowContextShape {
   readonly reasoning: LlmServiceShape
@@ -32,7 +41,16 @@ export interface FlowContextShape {
    * events and cost tracking shared. Absent when the runner cannot rebind
    * (an embedded context built by hand).
    */
-  readonly contextFor?: (workDir: string) => Effect.Effect<FlowContextShape, FlowError, Scope.Scope>
+  readonly contextFor?: (
+    workDir: string,
+    options?: ContextOptions
+  ) => Effect.Effect<FlowContextShape, FlowError, Scope.Scope>
+  /**
+   * The executor roster behind the seats (ADR 0019), when the run has one:
+   * a seat per role, free and configured slots, and the executor holding
+   * this context's coder. Absent on a run with one executor per seat.
+   */
+  readonly roster?: RosterView
 }
 
 export class FlowContext extends Context.Service<FlowContext, FlowContextShape>()(

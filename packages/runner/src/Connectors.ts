@@ -171,36 +171,39 @@ export const prepareConnector = (
     ? enrichApiConnector(config, environment)
     : CliConnectorConfig.make({ ...config, workingDir: workDir })
 
+/** The API provider a name stands for (`LLM4TS_PROVIDER`, a roster executor's `harness`). */
+export const apiPresetFor = (name: string): ApiConnectorConfig | undefined => {
+  switch (name.trim().toLowerCase()) {
+    case "mock":
+      return mock
+    case "openai":
+      return openAI
+    case "anthropic":
+      return anthropic
+    case "gemini":
+    case "gemini-api":
+      return geminiApi
+    case "lm-studio":
+    case "lmstudio":
+      return lmStudio
+    case "ollama":
+      return ollama
+    case "mlx-lm":
+    case "mlxlm":
+    case "mlx":
+      return mlxLm
+    default:
+      return undefined
+  }
+}
+
 export const apiConnectorFromEnvironment = Effect.fn(
   "@llm4ts/runner/Connectors.apiConnectorFromEnvironment"
 )(function* (
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): Effect.fn.Return<ApiConnectorConfig, ScriptUsage> {
   const provider = environment.LLM4TS_PROVIDER?.trim().toLowerCase() ?? "mock"
-  const preset = (() => {
-    switch (provider) {
-      case "mock":
-        return mock
-      case "openai":
-        return openAI
-      case "anthropic":
-        return anthropic
-      case "gemini":
-      case "gemini-api":
-        return geminiApi
-      case "lm-studio":
-      case "lmstudio":
-        return lmStudio
-      case "ollama":
-        return ollama
-      case "mlx-lm":
-      case "mlxlm":
-      case "mlx":
-        return mlxLm
-      default:
-        return undefined
-    }
-  })()
+  const preset = apiPresetFor(provider)
   if (preset === undefined) {
     return yield* ScriptUsage.make({
       message:
