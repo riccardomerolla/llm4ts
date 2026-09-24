@@ -6,7 +6,8 @@ import { Message, type LlmResponse } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 import { withToolActivity } from "./Activity.ts"
 import { FlowLlmError } from "./FlowError.ts"
-import { TokensUsed, type FlowEventsShape } from "./FlowEvents.ts"
+import { Info, TokensUsed, type FlowEventsShape } from "./FlowEvents.ts"
+import { isContextOverflow } from "./TransientRetry.ts"
 
 export const gitOwnershipInstruction =
   "The flow runtime owns git operations. Do not create or switch branches, commit, push, or open pull requests."
@@ -60,15 +61,53 @@ export const makeChat = Effect.fn("@llm4ts/flow/Chat.make")(function* (
   const history = yield* Ref.make(initialHistory(options))
   const gate = yield* Semaphore.make(1)
 
+  const send = (messages: ReadonlyArray<Message>) => {
+    const stream = service.executeStreamWithHistory(messages)
+    return collect(options.events === undefined ? stream : withToolActivity(options.events, stream))
+  }
+
   const askRound = Effect.fn("@llm4ts/flow/Chat.ask")(function* (
     prompt: string
   ): Effect.fn.Return<string, FlowLlmError> {
     const userTurn = Message.make({ role: "User", content: prompt })
-    const messages = [...(yield* Ref.get(history)), userTurn]
-    const stream = service.executeStreamWithHistory(messages)
-    const response = yield* collect(
-      options.events === undefined ? stream : withToolActivity(options.events, stream)
-    ).pipe(Effect.mapError(FlowLlmError.from))
+    const earlier = yield* Ref.get(history)
+    const full = [...earlier, userTurn]
+    const system = earlier.filter((message) => message.role === "System")
+    let messages = full
+    // Every ask replays the whole conversation, so a long review loop can
+    // outgrow the model's window. The earlier turns are the cheapest thing to
+    // drop: a coding agent's work is in the working tree, not in the
+    // transcript — so on overflow, retry once with the system prompt and
+    // this turn alone, and continue the conversation from there.
+    const response = yield* send(full).pipe(
+      Effect.catchIf(
+        (error) => isContextOverflow(error) && full.length > system.length + 1,
+        (error) =>
+          Effect.gen(function* () {
+            messages = [
+              ...system,
+              Message.make({
+                role: "User",
+                content: [
+                  "(Earlier turns of this conversation were dropped to fit the model's context",
+                  "window. Your previous work is in the working tree: inspect it there.)",
+                  "",
+                  prompt
+                ].join("\n")
+              })
+            ]
+            if (options.events !== undefined) {
+              yield* options.events.publish(
+                Info.make({
+                  message: `⚠ context: ${options.agent ?? "chat"} history did not fit (${error.message}); retrying with the current turn only`
+                })
+              )
+            }
+            return yield* send(messages)
+          })
+      ),
+      Effect.mapError(FlowLlmError.from)
+    )
     yield* publishUsage(options, response)
     yield* Ref.set(history, [
       ...messages,

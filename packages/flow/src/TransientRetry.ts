@@ -25,7 +25,27 @@ const transientSignals: ReadonlyArray<string> = [
   " 500",
   " 502",
   " 503",
-  " 504"
+  " 504",
+  // A local single-model server (LM Studio) under parallel load: a request
+  // queued behind another generation is cut off ("terminated"), or a stream
+  // dies mid-way. Both recover on a prompt retry.
+  "terminated",
+  "stream disconnected"
+]
+
+// The serving engine itself is down: a local server restarting after a GPU
+// backend crash, or unable to (re)load its model. It comes back, but in
+// minutes, not seconds — a one-second backoff spends every retry while the
+// engine is still recovering, so these get their own, slower budget.
+const outageSignals: ReadonlyArray<string> = [
+  "engine is recovering",
+  "engine_recovering",
+  "backend is unhealthy",
+  "runtime_unavailable",
+  "server is shutting down",
+  "server_shutdown",
+  "failed to load model",
+  "engine protocol startup was aborted"
 ]
 
 // An "empty response" is ambiguous: gemini returns one both for a random mid-stream
@@ -55,6 +75,8 @@ const deterministic4xxSignals: ReadonlyArray<string> = [
 // message string when no typed cause survived. Two copies of this list would drift.
 const contextOverflowSignals: ReadonlyArray<string> = [
   "exceeds the maximum number of tokens",
+  "exceeds the context window",
+  "context_length_exceeded",
   "input token count exceeds",
   "context length exceeded",
   "maximum context length",
@@ -88,6 +110,12 @@ export const isContextOverflowMessage = (message: string): boolean =>
 export const isContextOverflow = (error: LlmError): boolean =>
   error._tag === "ProviderError" && isContextOverflowMessage(error.message)
 
+/** The serving engine is down or restarting (see `outageSignals`). */
+export const isOutageMessage = (message: string): boolean => includesSignal(message, outageSignals)
+
+export const isOutage = (error: LlmError): boolean =>
+  error._tag === "ProviderError" && !isContextOverflow(error) && isOutageMessage(error.message)
+
 export const isTransient = (error: LlmError): boolean => {
   switch (error._tag) {
     case "TimeoutError":
@@ -96,6 +124,7 @@ export const isTransient = (error: LlmError): boolean => {
     case "ProviderError":
       return (
         !isFlakyStream(error) &&
+        !isOutage(error) &&
         !isDeterministic4xx(error.message) &&
         includesSignal(error.message, transientSignals)
       )
@@ -127,6 +156,12 @@ export interface TransientRetryOptions {
    * time, so this budget is small (default 2) and independent of the others.
    */
   readonly parseRetries?: number
+  /** Retries while the serving engine is down (`isOutage`). Default 5. */
+  readonly outageRetries?: number
+  /** First outage wait, doubled per attempt up to `outageMaxDelay`. Default 15 seconds. */
+  readonly outageDelay?: Duration.Input
+  /** Default 2 minutes: five attempts wait about six minutes in all. */
+  readonly outageMaxDelay?: Duration.Input
 }
 
 interface ResolvedTransientRetryOptions {
@@ -135,6 +170,9 @@ interface ResolvedTransientRetryOptions {
   readonly flakyRetries: number
   readonly flakyDelay: Duration.Duration
   readonly parseRetries: number
+  readonly outageRetries: number
+  readonly outageDelay: Duration.Duration
+  readonly outageMaxDelay: Duration.Duration
 }
 
 const resolveOptions = (options: TransientRetryOptions): ResolvedTransientRetryOptions => ({
@@ -142,8 +180,17 @@ const resolveOptions = (options: TransientRetryOptions): ResolvedTransientRetryO
   baseDelay: Duration.fromInputUnsafe(options.baseDelay ?? "1 second"),
   flakyRetries: options.flakyRetries ?? 6,
   flakyDelay: Duration.fromInputUnsafe(options.flakyDelay ?? "1 second"),
-  parseRetries: options.parseRetries ?? 2
+  parseRetries: options.parseRetries ?? 2,
+  outageRetries: options.outageRetries ?? 5,
+  outageDelay: Duration.fromInputUnsafe(options.outageDelay ?? "15 seconds"),
+  outageMaxDelay: Duration.fromInputUnsafe(options.outageMaxDelay ?? "2 minutes")
 })
+
+const outageBackoff = (
+  options: ResolvedTransientRetryOptions,
+  attempt: number
+): Duration.Duration =>
+  Duration.min(Duration.times(options.outageDelay, 2 ** attempt), options.outageMaxDelay)
 
 /** A structured call whose text came back but did not decode as the requested JSON. */
 export const isStructuredParseFailure = (error: LlmError): boolean => error._tag === "ParseError"
@@ -203,11 +250,30 @@ const retryEffect = <A, R>(
   options: ResolvedTransientRetryOptions,
   events: FlowEvents["Service"]
 ): Effect.Effect<A, LlmError, R> => {
-  const loop = (transientAttempt: number, flakyAttempt: number): Effect.Effect<A, LlmError, R> =>
+  const loop = (
+    transientAttempt: number,
+    flakyAttempt: number,
+    outageAttempt = 0
+  ): Effect.Effect<A, LlmError, R> =>
     Effect.catchIf(
       effect,
       () => true,
       (error) => {
+        if (isOutage(error) && outageAttempt < options.outageRetries) {
+          return waitForRetry(
+            events,
+            `serving engine down (${what}) — waiting for it to recover`,
+            outageAttempt,
+            options.outageRetries,
+            error,
+            outageBackoff(options, outageAttempt)
+          ).pipe(
+            Effect.andThen(
+              Effect.suspend(() => loop(transientAttempt, flakyAttempt, outageAttempt + 1))
+            )
+          )
+        }
+
         if (isFlakyStream(error) && flakyAttempt < options.flakyRetries) {
           return waitForRetry(
             events,
@@ -216,7 +282,11 @@ const retryEffect = <A, R>(
             options.flakyRetries,
             error,
             options.flakyDelay
-          ).pipe(Effect.andThen(Effect.suspend(() => loop(transientAttempt, flakyAttempt + 1))))
+          ).pipe(
+            Effect.andThen(
+              Effect.suspend(() => loop(transientAttempt, flakyAttempt + 1, outageAttempt))
+            )
+          )
         }
 
         if (isTransient(error) && transientAttempt < options.maxRetries) {
@@ -227,7 +297,11 @@ const retryEffect = <A, R>(
             options.maxRetries,
             error,
             transientDelay(error, backoff(options.baseDelay, transientAttempt))
-          ).pipe(Effect.andThen(Effect.suspend(() => loop(transientAttempt + 1, flakyAttempt))))
+          ).pipe(
+            Effect.andThen(
+              Effect.suspend(() => loop(transientAttempt + 1, flakyAttempt, outageAttempt))
+            )
+          )
         }
 
         return Effect.fail(error)
@@ -251,12 +325,27 @@ const retryStream = <R>(
 
   const loop = (
     transientAttempt: number,
-    flakyAttempt: number
+    flakyAttempt: number,
+    outageAttempt = 0
   ): Stream.Stream<LlmChunk, LlmError, R> =>
     Stream.catchIf(
       stream,
       () => true,
       (error) => {
+        if (isOutage(error) && outageAttempt < options.outageRetries) {
+          return waitThenRetry(
+            waitForRetry(
+              events,
+              `serving engine down (${what}) — waiting for it to recover`,
+              outageAttempt,
+              options.outageRetries,
+              error,
+              outageBackoff(options, outageAttempt)
+            ),
+            () => loop(transientAttempt, flakyAttempt, outageAttempt + 1)
+          )
+        }
+
         if (isFlakyStream(error) && flakyAttempt < options.flakyRetries) {
           return waitThenRetry(
             waitForRetry(
@@ -267,7 +356,7 @@ const retryStream = <R>(
               error,
               options.flakyDelay
             ),
-            () => loop(transientAttempt, flakyAttempt + 1)
+            () => loop(transientAttempt, flakyAttempt + 1, outageAttempt)
           )
         }
 
@@ -281,7 +370,7 @@ const retryStream = <R>(
               error,
               transientDelay(error, backoff(options.baseDelay, transientAttempt))
             ),
-            () => loop(transientAttempt + 1, flakyAttempt)
+            () => loop(transientAttempt + 1, flakyAttempt, outageAttempt)
           )
         }
 

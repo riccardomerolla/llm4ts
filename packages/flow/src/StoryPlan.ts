@@ -216,6 +216,79 @@ export const dependentsOf = (plan: StoryPlan, id: string): ReadonlyArray<string>
     .filter((candidate) => candidate !== id && blocked.has(candidate))
 }
 
+/** Every story `id` waits for, directly or through another dependency. */
+export const dependenciesOf = (plan: StoryPlan, id: string): ReadonlyArray<string> => {
+  const needed = new Set<string>()
+  const pending = [...(plan.story(id)?.dependsOn ?? [])]
+  while (pending.length > 0) {
+    const next = pending.pop()
+    if (next === undefined || needed.has(next)) {
+      continue
+    }
+    needed.add(next)
+    pending.push(...(plan.story(next)?.dependsOn ?? []))
+  }
+  return plan.stories.map((story) => story.id).filter((candidate) => needed.has(candidate))
+}
+
+/** How `other` stands to `story` in the plan's order. */
+export type StoryRelation = "self" | "dependency" | "dependent" | "parallel"
+
+export const relationOf = (plan: StoryPlan, story: Story, other: Story): StoryRelation =>
+  other.id === story.id
+    ? "self"
+    : dependenciesOf(plan, story.id).includes(other.id)
+      ? "dependency"
+      : dependentsOf(plan, story.id).includes(other.id)
+        ? "dependent"
+        : "parallel"
+
+/** The story that owns `path`, if any (owned sets are disjoint). */
+export const ownerOf = (plan: StoryPlan, path: string): Story | undefined =>
+  plan.stories.find((story) => story.owned.some((prefix) => pathWithin(path, prefix)))
+
+const fileLike = /\.[A-Za-z0-9]{1,5}$/
+
+const basename = (path: string): string => normalizePath(path).split("/").at(-1) ?? ""
+
+/**
+ * The repository paths a piece of prose names: tokens that start under one
+ * of the plan's top-level directories (`src/App.tsx`), plus a bare file name
+ * that is exactly the file name of an owned path (`App.tsx`), which resolves
+ * to that path. Prose paths are guesses, never proofs — callers use them to
+ * ask again or to explain, not to fail.
+ */
+export const pathsNamedIn = (plan: StoryPlan, text: string): ReadonlyArray<string> => {
+  const known = plan.stories.flatMap((story) => [...story.owned, ...story.sharedReadOnly])
+  const roots = new Set(
+    known.map((path) => normalizePath(path).split("/")[0] ?? "").filter((root) => root.length > 0)
+  )
+  const ownedFiles = plan.stories.flatMap((story) =>
+    story.owned.filter((path) => fileLike.test(normalizePath(path)))
+  )
+  const found: Array<string> = []
+  for (const raw of text.match(/[A-Za-z0-9_.@/\\-]+/g) ?? []) {
+    const token = normalizePath(raw.replace(/[.,:;]+$/, ""))
+    if (token.length === 0 || token.includes("://")) {
+      continue
+    }
+    if (token.includes("/")) {
+      if (roots.has(token.split("/")[0] ?? "")) {
+        found.push(token)
+      }
+      continue
+    }
+    if (fileLike.test(token)) {
+      for (const path of ownedFiles) {
+        if (basename(path) === token) {
+          found.push(normalizePath(path))
+        }
+      }
+    }
+  }
+  return [...new Set(found)]
+}
+
 /** Stable over the story entry's content — a changed entry means a fresh branch. */
 export const storyHash = (story: Story): string =>
   stableHash(

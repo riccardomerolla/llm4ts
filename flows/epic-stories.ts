@@ -9,13 +9,15 @@
 // their models (pi: "provider/model"). The story plan is persisted under
 // .llm4ts/epics/<epic-id>/plan.md BEFORE any coder runs, and an existing
 // file wins over regeneration — editing it is the approval and the re-plan
-// path. Stories run in .llm4ts/worktrees/<story-id> under --concurrency
-// (default 3); a failed story skips its dependents (--fail-fast stops
-// instead). The epic branch is left in place; the board and the report
-// under .llm4ts/epics/<epic-id>/ carry ESTIMATED usage figures (ADR 0013).
+// path. Stories run in worktrees BESIDE the repository (<repo>.worktrees/
+// <epic-id>/<story-id>, LLM4TS_WORKTREE_ROOT to move them) under
+// --concurrency (default 3); a failed story puts its dependents on hold
+// (--fail-fast stops instead). The epic branch is left in place; the board
+// and the report under .llm4ts/epics/<epic-id>/ carry ESTIMATED usage
+// figures (ADR 0013).
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import type { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { budget, cap } from "@llm4ts/flow/Context"
 import { makeLocalBoardSync } from "@llm4ts/flow/BoardSync"
 import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
@@ -34,16 +36,23 @@ import {
 import { implementStoriesFlow, type StorySeats } from "@llm4ts/flow/Stories"
 import { makeStoryPlanStore, validateStoryPlan } from "@llm4ts/flow/StoryPlan"
 import {
+  awaitServer,
   combineTotals,
   epicIdFor,
+  flagsFromEnvironment,
   gateCommands,
   gatesIn,
   generateStoryPlan,
+  httpProbe,
   judgeStory,
+  localCoderServer,
   parseEpicArgs,
   reasonerFromEnvironment,
+  serverHealthUrl,
   setupIn,
   storyCoderFromEnvironment,
+  verifyBlockedOn,
+  worktreeRootFor,
   worktreeSetupCommand
 } from "./lib/epic-stories.ts"
 
@@ -56,6 +65,15 @@ const withOptionalModel = (
   return trimmed === undefined || trimmed.length === 0 ? config : withModel(config, trimmed)
 }
 
+/** Extra CLI flags on top of a preset's own (`LLM4TS_CODER_FLAGS`). */
+const withExtraFlags = (
+  config: CliConnectorConfig,
+  flags: Readonly<Record<string, string>>
+): CliConnectorConfig =>
+  Object.keys(flags).length === 0
+    ? config
+    : CliConnectorConfig.make({ ...config, flags: { ...config.flags, ...flags } })
+
 const defaultEpic =
   "Add the retail customer's current account (Conto) with balance and movements, and wire " +
   "transfers (Bonifico) with beneficiary, review, SCA confirmation, and history."
@@ -63,14 +81,22 @@ const defaultEpic =
 const program = Effect.gen(function* () {
   const flags = yield* parseEpicArgs(process.argv.slice(2))
   const input = yield* resolveFlowInput(defaultEpic, flags.rest)
-  const reasoning = withOptionalModel(
-    yield* reasonerFromEnvironment(process.env),
-    process.env.LLM4TS_REASONING_MODEL
+  const coderFlags = flagsFromEnvironment(process.env.LLM4TS_CODER_FLAGS)
+  const reasoning = withExtraFlags(
+    withOptionalModel(
+      yield* reasonerFromEnvironment(process.env),
+      process.env.LLM4TS_REASONING_MODEL
+    ),
+    flagsFromEnvironment(process.env.LLM4TS_REASONING_FLAGS)
   )
-  const coder = withOptionalModel(
-    yield* storyCoderFromEnvironment(process.env),
-    process.env.LLM4TS_CODER_MODEL
+  const coder = withExtraFlags(
+    withOptionalModel(
+      yield* storyCoderFromEnvironment(process.env),
+      process.env.LLM4TS_CODER_MODEL
+    ),
+    coderFlags
   )
+  const localServer = localCoderServer(process.env.LLM4TS_CODER_MODEL, coderFlags, process.env)
   const files = nodePlainFileStore
   const epicId = epicIdFor(input.prompt)
   const stateDir = join(input.workDir, ".llm4ts", "epics", epicId)
@@ -116,6 +142,18 @@ const program = Effect.gen(function* () {
         if (flags.planOnly) {
           return
         }
+        const concurrency = flags.concurrency ?? 3
+        if (localServer !== undefined && concurrency > 1) {
+          yield* events.publish(
+            Info.make({
+              message:
+                `⚠ the coder is served by a local single-model server (${localServer}): it generates one ` +
+                `reply at a time, so ${concurrency} parallel coders queue behind each other and a queued ` +
+                'request is cut off after a few minutes ("terminated"). Prefer --concurrency 1, or give ' +
+                "the server parallel slots."
+            })
+          )
+        }
 
         const contextFor = context.contextFor
         if (contextFor === undefined) {
@@ -125,13 +163,14 @@ const program = Effect.gen(function* () {
         }
         const gates = gatesIn(nodeProcessExecutor, events, gateCommands(process.env))
         const setupCommand = worktreeSetupCommand(process.env)
+        const healthUrl = serverHealthUrl(localServer, process.env)
         const report = yield* implementStoriesFlow(
           { ...context, reasoning: reasoningMeter.service },
           {
             plan,
             files,
             stateDir,
-            worktreeRoot: join(input.workDir, ".llm4ts", "worktrees"),
+            worktreeRoot: worktreeRootFor(input.workDir, plan.epicId, process.env),
             board: makeLocalBoardSync(files, stateDir, `Epic: ${plan.epicId}`),
             contextFor: (workDir) =>
               Effect.gen(function* () {
@@ -156,6 +195,11 @@ const program = Effect.gen(function* () {
               : { setup: setupIn(nodeProcessExecutor, events, setupCommand) }),
             gates,
             judge: (story, diff) => judgeStory(reasoningMeter.service, story, diff, contextBudget),
+            verifyBlocked: verifyBlockedOn(reasoningMeter.service, events, files, plan),
+            awaitRecovery: awaitServer(
+              healthUrl === undefined ? undefined : httpProbe(healthUrl),
+              events
+            ),
             system: (story) =>
               Effect.succeed(
                 [

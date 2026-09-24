@@ -75,6 +75,54 @@ describe("Chat", () => {
     })
   )
 
+  it.effect("drops earlier turns once when the replayed history outgrows the window", () =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make<ReadonlyArray<ReadonlyArray<Message>>>([])
+      const overflow = ProviderError.make({
+        message:
+          'pi error: 400: {"error":{"message":"prompt exceeds the context window","code":"context_length_exceeded"}}'
+      })
+      // Fits with at most three messages; the third ask replays five.
+      const service: LlmServiceShape = {
+        ...recordingService(calls),
+        executeStreamWithHistory: (messages) =>
+          Stream.unwrap(
+            Ref.update(calls, (recorded) => [...recorded, messages]).pipe(
+              Effect.as(
+                messages.length > 3
+                  ? Stream.fail(overflow)
+                  : Stream.make(LlmChunk.make({ delta: "ok", finishReason: "stop" }))
+              )
+            )
+          )
+      }
+      const events = yield* makeCollectingFlowEvents
+      const chat = yield* makeChat(service, { system: "Be terse.", events, agent: "coder" })
+      yield* chat.ask("first")
+      assert.strictEqual(yield* chat.ask("third"), "ok")
+
+      const seen = yield* Ref.get(calls)
+      const retried = seen.at(-1) ?? []
+      assert.deepStrictEqual(
+        retried.map((message) => message.role),
+        ["System", "User"]
+      )
+      assert.include(retried[1]?.content ?? "", "Earlier turns of this conversation were dropped")
+      assert.include(retried[1]?.content ?? "", "third")
+      // The conversation continues from the compacted history.
+      assert.deepStrictEqual(
+        (yield* chat.messages).map((message) => message.role),
+        ["System", "User", "Assistant"]
+      )
+      const recorded = yield* events.recorded
+      assert.isTrue(
+        recorded.some(
+          (event) => event._tag === "Info" && event.message.includes("coder history did not fit")
+        )
+      )
+    })
+  )
+
   it.effect("serializes concurrent asks so turns cannot interleave", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make<ReadonlyArray<ReadonlyArray<Message>>>([])

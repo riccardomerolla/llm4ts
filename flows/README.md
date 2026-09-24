@@ -142,16 +142,62 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   task and judges every story; `LLM4TS_CODER` (default `pi`) implements.
   `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi
   takes `provider/model`, e.g. `openai-codex/gpt-5.5`).
-  `LLM4TS_GATES="cmd; cmd"` overrides the four default `pnpm` gates;
-  `LLM4TS_WORKTREE_SETUP` (default `pnpm install --offline`) prepares each
-  story worktree, which starts as a fresh checkout without dependencies.
-- A story that needs unplanned work replies `BLOCKED_ON: …` and fails
-  typed; a story that changes paths outside its `owned` set fails the
-  perimeter check; a merge conflict fails typed and is aborted. Rerunning
-  skips merged stories and resumes the rest.
+  `LLM4TS_CODER_FLAGS` / `LLM4TS_REASONING_FLAGS` add CLI flags to a seat
+  (`key=value;key`). `LLM4TS_GATES="cmd; cmd"` overrides the four default
+  `pnpm` gates; `LLM4TS_WORKTREE_SETUP` (default `pnpm install --offline`)
+  prepares each story worktree, which starts as a fresh checkout without
+  dependencies.
+- Story worktrees live BESIDE the repository, in
+  `<repo>.worktrees/<epic-id>/<story-id>` (`LLM4TS_WORKTREE_ROOT` moves
+  them). Nested inside it, a coder's parent directory was the epic checkout,
+  and coders ran commands there. A worktree left under an older root moves
+  on resume, uncommitted work included. The epic checkout must stay clean:
+  the run refuses to start on a dirty one, and a change that appears there
+  mid-run stops new stories from starting, naming the stray paths.
+- A resumed story first merges the epic branch in (conflicting hunks take
+  the epic's side), and does so again before its judge: a story is never
+  built on, or judged against, code the epic no longer has.
+- The perimeter is a gate: each task's stray paths go back to the coder
+  before anything is committed. The task plan is checked too: a task that
+  names another story's paths (registering a screen in `src/App.tsx`) is
+  re-planned, then dropped. Before the judge, stray paths the coder does not
+  revert are restored from the epic branch.
+- A story that needs unplanned work replies `BLOCKED_ON: …`. A claim the
+  plan refutes (the path is the story's own, a merged dependency's, or a
+  later story's) and a claim the reasoning seat rejects after reading the
+  named files send the coder back once with the reason. Any other claim fails
+  typed as a missing dependency. A merge conflict fails typed and is aborted.
+  Rerunning skips merged stories and resumes the rest.
+- When the coder's serving engine goes down (a local server restarting after
+  a GPU crash, or failing to load its model), requests wait on a slower
+  retry budget (15 s doubling to 2 min, five tries). If the story still
+  fails, the flow polls the engine (LM Studio `127.0.0.1:1234/v1/models`,
+  Ollama `:11434/api/tags`, or `LLM4TS_CODER_HEALTH_URL`) and retries the
+  story once it answers. It does not fail the next story on the same outage.
 - Output: the epic branch `epic/<epic-id>` left in place, story branches
   `story/<epic-id>/<story-id>`, the board and `report.md` under
-  `.llm4ts/epics/<epic-id>/` — every usage figure an estimate.
+  `.llm4ts/epics/<epic-id>/`. Every usage figure is an estimate.
+
+### Local models
+
+A local server (LM Studio, Ollama) generates one reply at a time. Run with
+`--concurrency 1` (the flow warns otherwise), load the model with a context
+of at least 128K, and keep it loaded (no idle TTL):
+
+```sh
+# pi on LM Studio
+LLM4TS_CODER_MODEL=lmstudio/qwen/qwen3.6-35b-a3b:medium \
+  llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 1 "…"
+
+# claude CLI on LM Studio's Anthropic-compatible endpoint (both seats go
+# local unless LLM4TS_REASONER names another CLI)
+ANTHROPIC_BASE_URL=http://127.0.0.1:1234 ANTHROPIC_AUTH_TOKEN=lmstudio \
+LLM4TS_CODER=claude LLM4TS_CODER_MODEL=qwen/qwen3.6-35b-a3b \
+  llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 1 "…"
+```
+
+When a chat's replayed history outgrows the window, the coder is retried
+once with the current turn only. Its earlier work is in the working tree.
 
 The demo epic and its target are in
 [`examples/internet-banking/RUNBOOK.md`](../examples/internet-banking/RUNBOOK.md);

@@ -32,16 +32,22 @@ import {
   type StoryPlan
 } from "@llm4ts/flow/StoryPlan"
 import {
+  awaitServer,
   defaultGateCommands,
   epicIdFor,
+  flagsFromEnvironment,
   gateCommands,
   gatesIn,
   judgeStory,
+  localCoderServer,
   parseEpicArgs,
   reasonerFromEnvironment,
+  serverHealthUrl,
   setupIn,
   storyCoderFromEnvironment,
   storyPlanInstructions,
+  verifyBlockedOn,
+  worktreeRootFor,
   worktreeSetupCommand
 } from "../lib/epic-stories.ts"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
@@ -117,6 +123,7 @@ const gitOver = (log: Ref.Ref<ReadonlyArray<string>>, prefix: string): GitToolSh
     initBare: Effect.void,
     config: () => Effect.void,
     status: Effect.succeed(""),
+    uncommittedFiles: Effect.succeed([]),
     currentBranch: Effect.succeed("main"),
     diff: Effect.succeed(""),
     diffAll: Effect.succeed("diff --git a/file b/file\n+work"),
@@ -136,6 +143,8 @@ const gitOver = (log: Ref.Ref<ReadonlyArray<string>>, prefix: string): GitToolSh
     addWorktree: () => Effect.void,
     addWorktreeNewBranch: (_path, branch) => note(`worktree:${branch}`),
     removeWorktree: () => Effect.void,
+    moveWorktree: () => Effect.void,
+    restorePaths: () => Effect.void,
     branchExists: () => Effect.succeed(false),
     deleteBranch: () => Effect.void,
     isAncestor: () => Effect.succeed(false),
@@ -178,6 +187,32 @@ describe("epic-stories flags and seats", () => {
       assert.include(bad.message, "unknown LLM4TS_REASONER")
     })
   )
+
+  it("parses seat flags and recognises a local single-model server", () => {
+    assert.deepStrictEqual(
+      flagsFromEnvironment("config=model_provider=lmstudio; profile=fast;yolo"),
+      {
+        config: "model_provider=lmstudio",
+        profile: "fast",
+        yolo: ""
+      }
+    )
+    assert.deepStrictEqual(flagsFromEnvironment(undefined), {})
+    assert.strictEqual(localCoderServer("lmstudio/qwen/qwen3.6-35b-a3b:medium", {}, {}), "lmstudio")
+    assert.strictEqual(localCoderServer("ollama/qwen3", {}, {}), "ollama")
+    assert.strictEqual(
+      localCoderServer(undefined, { config: "model_provider=lmstudio" }, {}),
+      "lmstudio"
+    )
+    assert.strictEqual(
+      localCoderServer("qwen/qwen3.6-35b-a3b", {}, { ANTHROPIC_BASE_URL: "http://127.0.0.1:1234" }),
+      "local"
+    )
+    assert.isUndefined(localCoderServer("openai-codex/gpt-6-astra:low", {}, {}))
+    assert.isUndefined(
+      localCoderServer(undefined, {}, { ANTHROPIC_BASE_URL: "https://api.anthropic.com" })
+    )
+  })
 
   it("derives a readable, stable epic id and lists the gates", () => {
     const id = epicIdFor("Add the retail customer's current account (Conto)")
@@ -268,6 +303,105 @@ describe("epic-stories flags and seats", () => {
       const verdict = yield* judgeStory(strict, story, "diff", 1000)
       assert.strictEqual(verdict.issues.length, 1)
       assert.include(verdict.issues[0]?.title ?? "", "scope scored 1")
+    })
+  )
+})
+
+describe("epic-stories worktrees, outages and blocked claims", () => {
+  it("puts worktrees beside the repository and finds a local engine's health URL", () => {
+    assert.strictEqual(
+      worktreeRootFor("/Users/me/demo/portal/", "conto-bonifico", {}),
+      "/Users/me/demo/portal.worktrees/conto-bonifico"
+    )
+    assert.strictEqual(
+      worktreeRootFor("/Users/me/demo/portal", "e", { LLM4TS_WORKTREE_ROOT: "/tmp/trees" }),
+      "/tmp/trees/e"
+    )
+    assert.strictEqual(serverHealthUrl("lmstudio", {}), "http://127.0.0.1:1234/v1/models")
+    assert.strictEqual(serverHealthUrl("ollama", {}), "http://127.0.0.1:11434/api/tags")
+    assert.strictEqual(
+      serverHealthUrl("local", { ANTHROPIC_BASE_URL: "http://127.0.0.1:1234/v1/" }),
+      "http://127.0.0.1:1234/v1/models"
+    )
+    assert.strictEqual(
+      serverHealthUrl(undefined, { LLM4TS_CODER_HEALTH_URL: "http://gpu:8080/health" }),
+      "http://gpu:8080/health"
+    )
+    assert.isUndefined(serverHealthUrl(undefined, {}))
+  })
+
+  it.effect("waits until the engine answers, and gives up typed when it never does", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const probes = yield* Ref.make(0)
+      const timing = { interval: "0 millis", attempts: 5, grace: "0 millis" } as const
+      const upOnThird = Effect.map(
+        Ref.updateAndGet(probes, (n) => n + 1),
+        (n) => n >= 3
+      )
+      yield* awaitServer(upOnThird, events, timing)("engine is recovering")
+      assert.strictEqual(yield* Ref.get(probes), 3)
+
+      const never = yield* Effect.flip(
+        awaitServer(Effect.succeed(false), events, timing)("engine is recovering")
+      )
+      assert.include(never.message, "did not answer after 5 probes")
+    })
+  )
+
+  it.effect("the verifier reads the named files from the story's worktree", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic(
+        "/trees/conto-movimenti/src/contracts/accounts.fake.ts",
+        "export const accountsDomain = domain(routes, connect)"
+      )
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const reasoning: LlmServiceShape = {
+        ...structured({ real: false, reason: "accountsDomain is in accounts.fake.ts" }),
+        executeStructured: (prompt, schema) =>
+          Ref.update(prompts, (all) => [...all, prompt]).pipe(
+            Effect.andThen(
+              Schema.decodeUnknownEffect(schema)({
+                real: false,
+                reason: "accountsDomain is in accounts.fake.ts"
+              }).pipe(Effect.orDie)
+            )
+          ),
+        executeStructuredWithUsage: (prompt, schema) =>
+          Ref.update(prompts, (all) => [...all, prompt]).pipe(
+            Effect.andThen(
+              Schema.decodeUnknownEffect(schema)({
+                real: false,
+                reason: "accountsDomain is in accounts.fake.ts"
+              }).pipe(Effect.orDie)
+            ),
+            Effect.map((decoded) => [decoded, undefined, undefined] as const)
+          )
+      }
+      const movimenti = parsedFixture.story("conto-movimenti")
+      if (movimenti === undefined) {
+        throw new Error("conto-movimenti")
+      }
+      const verdict = yield* verifyBlockedOn(
+        reasoning,
+        events,
+        memory.store,
+        parsedFixture
+      )(
+        movimenti,
+        "src/contracts/accounts.fake.ts must export accountsDomain; src/features/conta/ContoScreen.tsx",
+        "/trees/conto-movimenti"
+      )
+      assert.isFalse(verdict.real)
+      const asked = (yield* Ref.get(prompts)).join("\n")
+      assert.include(asked, "export const accountsDomain = domain(routes, connect)")
+      assert.include(
+        asked,
+        "### src/features/conta/ContoScreen.tsx\n(does not exist in the working tree)"
+      )
+      assert.include(asked, "- home (depends on: conto-overview")
     })
   )
 })

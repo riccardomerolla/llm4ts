@@ -168,11 +168,40 @@ export class MissingDependency extends Schema.TaggedError<MissingDependency>()(
 export class MergeConflict extends Schema.TaggedError<MergeConflict>()("MergeConflict", {
   branch: Schema.String,
   into: Schema.String,
-  paths: Schema.Array(Schema.String)
+  paths: Schema.Array(Schema.String),
+  /** What git said when no path is in conflict — a merge refused before it started. */
+  detail: Schema.optionalKey(Schema.String)
 }) {
   get message(): string {
-    const where = this.paths.length === 0 ? "" : `: ${this.paths.join(", ")}`
-    return `merging '${this.branch}' into '${this.into}' conflicted${where}`
+    if (this.paths.length > 0) {
+      return `merging '${this.branch}' into '${this.into}' conflicted: ${this.paths.join(", ")}`
+    }
+    const why = this.detail === undefined || this.detail.length === 0 ? "" : `: ${this.detail}`
+    return `merging '${this.branch}' into '${this.into}' failed${why}`
+  }
+}
+
+/**
+ * The epic checkout holds changes no story may make there — a coder worked
+ * outside its worktree. Every later merge and epic gate would inherit them,
+ * so the executor stops launching stories until an operator cleans it.
+ */
+export class EpicCheckoutDirty extends Schema.TaggedError<EpicCheckoutDirty>()(
+  "EpicCheckoutDirty",
+  {
+    checkout: Schema.String,
+    paths: Schema.Array(Schema.String),
+    /** The story that had just finished when the change was found. */
+    story: Schema.optionalKey(Schema.String)
+  }
+) {
+  get message(): string {
+    const suspect = this.story === undefined ? "" : ` (found after story '${this.story}' finished)`
+    return [
+      `the epic checkout ${this.checkout} has uncommitted changes${suspect} — a coder worked outside its worktree:`,
+      ...this.paths.map((path) => `- ${path}`),
+      "Move each change into the owning story's worktree or discard it, then rerun."
+    ].join("\n")
   }
 }
 
@@ -240,6 +269,7 @@ export const FlowError = Schema.Union([
   PerimeterViolation,
   MissingDependency,
   MergeConflict,
+  EpicCheckoutDirty,
   StoryFailed,
   DecisionsInvalid,
   OpenPointsPending,

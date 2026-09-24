@@ -71,14 +71,24 @@ What to show while it runs:
   waiting, done, failed. Wave 1 (two contracts and the IBAN field) runs
   three at once; the four screens follow under the cap; `home` waits for
   all of them.
-- `git -C ~/demo/portal worktree list` — one worktree per active story.
+- `git -C ~/demo/portal worktree list` — one worktree per active story,
+  under `~/demo/portal.worktrees/<epic-id>/` beside the repository (never
+  inside it: the epic checkout must stay clean, and the run stops launching
+  stories if a coder writes there).
 - `git -C ~/demo/portal log --oneline epic/<epic-id>` — a merge commit per
   story, in dependency order, each one gated.
 
 Talk track: the coder never waits — dependencies were declared up front,
 and a story starts only after what it needs has merged. A story that finds
-it needs something unplanned stops with `BLOCKED_ON:` and fails typed; you
-edit the plan and rerun, and everything already merged is skipped.
+it needs something unplanned stops with `BLOCKED_ON:`. The flow checks the
+claim against the plan (and the reasoner reads the named files). A wrong
+claim sends the coder back once; a real one fails typed. You edit the plan
+and rerun, and everything already merged is skipped.
+
+With a local coder (LM Studio, Ollama) use `--concurrency 1`: the server
+generates one reply at a time. Load the model with at least 128K of context
+and no idle TTL. If the engine crashes mid-run, the flow waits for it to
+answer again and retries the story instead of failing the rest.
 
 ## Act 3 — the result
 

@@ -6,7 +6,7 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { Grants, allGrants, restricted } from "@llm4ts/core/Capability"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
-import { makeGitTool } from "@llm4ts/flow/GitTool"
+import { makeGitTool, statusPaths } from "@llm4ts/flow/GitTool"
 import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 
 const temporaryRepository = Effect.acquireRelease(
@@ -264,5 +264,79 @@ describe("GitTool", () => {
         )
       })
     )
+  )
+
+  it("reads paths from git status, even with the first line's blank trimmed", () => {
+    assert.deepStrictEqual(
+      statusPaths(
+        "M src/App.tsx\n M src/kit/a.ts\nA  src/x.ts\n?? src/features/conto/\nR  old.ts -> new.ts\n?? .llm4ts/epics/e/board.md"
+      ),
+      ["src/App.tsx", "src/kit/a.ts", "src/x.ts", "src/features/conto/", "new.ts"]
+    )
+    assert.deepStrictEqual(statusPaths(""), [])
+  })
+
+  it.effect(
+    "catches a story worktree up, moves it, restores strays, and explains a refused merge",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const root = yield* temporaryRepository
+          const repo = join(root, "portal")
+          yield* Effect.promise(() => mkdir(repo))
+          const events = yield* makeCollectingFlowEvents
+          const epic = makeGitTool(nodeProcessExecutor, repo, events)
+          yield* epic.init
+          yield* epic.config("user.name", "llm4ts test")
+          yield* epic.config("user.email", "llm4ts@example.invalid")
+          const write = (dir: string, path: string, text: string) =>
+            Effect.promise(async () => {
+              await mkdir(join(dir, path, ".."), { recursive: true })
+              await writeFile(join(dir, path), text)
+            })
+          yield* write(repo, "src/shared.ts", "a\nb\nc\n")
+          yield* epic.commitAll("seed")
+          yield* epic.checkoutOrCreate("epic")
+
+          const nested = join(repo, ".llm4ts", "worktrees", "s")
+          yield* epic.addWorktreeNewBranch(nested, "story", "epic")
+          const inside = makeGitTool(nodeProcessExecutor, nested, events)
+          yield* write(nested, "src/shared.ts", "a\nSTORY\nc\n")
+          yield* write(nested, "src/own/x.ts", "mine\n")
+          yield* inside.commitAll("story work")
+
+          yield* write(repo, "src/shared.ts", "a\nEPIC\nc\n")
+          yield* epic.commitAll("epic moved on")
+
+          // Move out of the repository, parents created on the way.
+          const outside = join(root, "portal.worktrees", "e", "s")
+          yield* epic.moveWorktree(nested, outside)
+          const story = makeGitTool(nodeProcessExecutor, outside, events)
+          assert.isFalse(yield* story.isAncestor("epic", "HEAD"))
+
+          yield* story.merge("epic", "catch up", { preferIncoming: true })
+          assert.isTrue(yield* story.isAncestor("epic", "HEAD"))
+          assert.strictEqual(
+            yield* Effect.promise(() => readFile(join(outside, "src/shared.ts"), "utf8")),
+            "a\nEPIC\nc\n"
+          )
+
+          yield* write(outside, "src/stray/new.ts", "stray\n")
+          yield* write(outside, "src/shared.ts", "changed again\n")
+          assert.deepStrictEqual([...(yield* story.uncommittedFiles)].sort(), [
+            "src/shared.ts",
+            "src/stray/new.ts"
+          ])
+          yield* story.restorePaths("epic", ["src/shared.ts", "src/stray/new.ts"])
+          assert.deepStrictEqual(yield* story.uncommittedFiles, [])
+
+          // A merge git refuses before starting names git's reason, not "conflicted".
+          yield* write(repo, "src/own/x.ts", "leaked into the epic checkout\n")
+          const refused = yield* Effect.flip(epic.merge("story", "merge story"))
+          assert.strictEqual(refused._tag, "MergeConflict")
+          assert.include(refused.message, "untracked working tree files would be overwritten")
+          assert.include(refused.message, "src/own/x.ts")
+        })
+      )
   )
 })

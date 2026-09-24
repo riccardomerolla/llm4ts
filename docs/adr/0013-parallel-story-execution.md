@@ -81,3 +81,36 @@ most fragile one to build.
 - If runtime dependency discovery is ever wanted, it must be added as a
   separate executor mode with its own ADR; this design deliberately keeps
   the coder unable to wait.
+
+## Addendum (2026-09-24): hardening after the local-coder rehearsal
+
+Twelve runs with pi on a local LM Studio model merged no wave-2 story. The
+causes, and what changed:
+
+- **Worktrees leave the repository.** Nested under `.llm4ts/worktrees/`, a
+  coder's parent directory was the epic checkout, and it ran commands there,
+  git writes included. The stray files failed every later merge and the epic
+  gates. Worktrees now live beside the repository (`<repo>.worktrees/`). The
+  coder's rules name the checkout it must not touch. A dirty epic checkout
+  is a typed `EpicCheckoutDirty` that stops new stories from starting,
+  because every later story would fail the same way.
+- **Story branches catch up.** A branch is merged with the epic head (the
+  epic side wins conflicting hunks: those paths belong to merged stories)
+  when the story starts or resumes, and again before its judge. Decision 2's
+  "a story starts only after its predecessors merged" held only for the
+  first attempt. A dependency re-merged later left its dependents building on
+  the old contract.
+- **The perimeter is enforced where it is cheap.** It is part of every
+  task's gate, and task plans are checked against it, so a stray path is
+  fixed before commit rather than failing the story after the judge. Before
+  judging, a stray the coder does not revert is restored from the epic
+  branch.
+- **`BLOCKED_ON` stays terminal, but only once it is checked.** A claim the
+  plan refutes (own path, merged dependency, later story), or one the
+  reasoning seat rejects after reading the named files, sends the coder back
+  once with the reason. Half of the rehearsal's claims were wrong in exactly
+  these ways. This is still no runtime discovery: the plan is unchanged, and
+  a claim that survives the check fails typed as before.
+- **An outage is not a story failure.** A serving engine that is down gets a
+  slower retry budget. A story it still fails waits for the engine and runs
+  again once, instead of each next story failing on the same outage.

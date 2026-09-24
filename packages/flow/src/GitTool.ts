@@ -24,6 +24,11 @@ export interface GitToolShape {
   readonly initBare: Effect.Effect<void, FlowError>
   readonly config: (key: string, value: string) => Effect.Effect<void, FlowError>
   readonly status: Effect.Effect<string, FlowError>
+  /**
+   * Every path with uncommitted changes, untracked files listed one by one
+   * (not collapsed into their directory), minus the runner's `.llm4ts/`.
+   */
+  readonly uncommittedFiles: Effect.Effect<ReadonlyArray<string>, FlowError>
   readonly currentBranch: Effect.Effect<string, FlowError>
   readonly diff: Effect.Effect<string, FlowError>
   readonly diffAll: Effect.Effect<string, FlowError>
@@ -66,6 +71,16 @@ export interface GitToolShape {
   ) => Effect.Effect<void, FlowError>
   /** `force` also removes a worktree holding untracked or modified files. */
   readonly removeWorktree: (path: string, force?: boolean) => Effect.Effect<void, FlowError>
+  /** Moves an existing worktree to `to`, keeping its branch and uncommitted work. */
+  readonly moveWorktree: (from: string, to: string) => Effect.Effect<void, FlowError>
+  /**
+   * Puts `paths` back as they are on `source`: a path `source` has is checked
+   * out from it, a path it lacks is deleted (tracked or not). Uncommitted.
+   */
+  readonly restorePaths: (
+    source: string,
+    paths: ReadonlyArray<string>
+  ) => Effect.Effect<void, FlowError>
   readonly branchExists: (name: string) => Effect.Effect<boolean, FlowError>
   readonly deleteBranch: (name: string) => Effect.Effect<void, FlowError>
   /** Whether `commit` is reachable from `of` — a merged story branch is an ancestor of the epic head. */
@@ -73,10 +88,40 @@ export interface GitToolShape {
   /**
    * Merges `branch` into the checked-out branch with a merge commit. A
    * conflict fails typed with the conflicting paths and leaves the tree as it
-   * was (the merge is aborted), so the next merge can proceed.
+   * was (the merge is aborted), so the next merge can proceed. A merge git
+   * refuses before it starts (a dirty tree) fails typed with git's words.
+   * `preferIncoming` resolves conflicting hunks to `branch`'s side
+   * (`-X theirs`): the catch-up of a story branch with its epic, where the
+   * epic side is authoritative for every path the story does not own.
    */
-  readonly merge: (branch: string, message: string) => Effect.Effect<void, FlowError>
+  readonly merge: (
+    branch: string,
+    message: string,
+    options?: MergeOptions
+  ) => Effect.Effect<void, FlowError>
 }
+
+export interface MergeOptions {
+  readonly preferIncoming?: boolean
+}
+
+/**
+ * The paths `git status --short` reports, minus the runner's own state under
+ * `.llm4ts/`. A rename reports its destination.
+ */
+export const statusPaths = (status: string): ReadonlyArray<string> =>
+  status
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      // `status` trims its output, so the first line may have lost the
+      // leading blank of its two-letter code: match the code, not a column.
+      const path = (/^[ MADRCTU?!]{1,2}\s+(.+)$/.exec(line)?.[1] ?? "").trim()
+      const arrow = path.indexOf(" -> ")
+      const target = arrow < 0 ? path : path.slice(arrow + 4)
+      return target.replace(/^"|"$/g, "")
+    })
+    .filter((path) => path.length > 0 && !path.startsWith(".llm4ts/") && path !== ".llm4ts")
 
 const nonInteractiveEnvironment = Object.freeze({
   GIT_TERMINAL_PROMPT: "0",
@@ -265,6 +310,10 @@ export const makeGitTool = (
     config: (key, value) =>
       write("git config", runOrFail(["config", key, value]).pipe(Effect.asVoid)),
     status: read("git status", runOrFail(["status", "--short"])),
+    uncommittedFiles: read(
+      "git uncommittedFiles",
+      runOrFail(["status", "--porcelain", "--untracked-files=all"]).pipe(Effect.map(statusPaths))
+    ),
     currentBranch: read("git currentBranch", runOrFail(["rev-parse", "--abbrev-ref", "HEAD"])),
     diff: read("git diff", runOrFail(["diff"])),
     diffAll: read(
@@ -328,6 +377,39 @@ export const makeGitTool = (
         "git worktree add -b",
         runOrFail(["worktree", "add", "-b", branch, path, startPoint]).pipe(Effect.asVoid)
       ),
+    moveWorktree: (from, to) =>
+      write(
+        "git worktree move",
+        Effect.gen(function* () {
+          // git creates a new worktree's parents but not a moved one's.
+          const parent = to.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "")
+          if (parent.length > 0 && parent !== to) {
+            yield* process
+              .run(["mkdir", "-p", parent], workDir, nonInteractiveEnvironment)
+              .pipe(
+                Effect.mapError((error) =>
+                  ProcessError.make({ message: `mkdir -p ${parent}`, detail: error.message })
+                )
+              )
+          }
+          yield* runOrFail(["worktree", "move", from, to])
+        })
+      ),
+    restorePaths: (source, paths) =>
+      write(
+        "git restorePaths",
+        Effect.gen(function* () {
+          for (const path of paths) {
+            const known = yield* run(["cat-file", "-e", `${source}:${path}`])
+            if (known.exitCode === 0) {
+              yield* runOrFail(["checkout", source, "--", path])
+            } else {
+              yield* runOrFail(["rm", "-r", "-f", "-q", "--ignore-unmatch", "--", path])
+              yield* runOrFail(["clean", "-f", "-d", "-q", "--", path])
+            }
+          }
+        })
+      ),
     removeWorktree: (path, force = false) =>
       write(
         "git worktree remove",
@@ -356,11 +438,18 @@ export const makeGitTool = (
                 )
         )
       ),
-    merge: (branch, message) =>
+    merge: (branch, message, options = {}) =>
       write(
         "git merge",
         Effect.gen(function* () {
-          const result = yield* run(["merge", "--no-ff", "-m", message, branch])
+          const result = yield* run([
+            "merge",
+            "--no-ff",
+            ...(options.preferIncoming === true ? ["-X", "theirs"] : []),
+            "-m",
+            message,
+            branch
+          ])
           if (result.exitCode === 0) {
             return
           }
@@ -374,7 +463,12 @@ export const makeGitTool = (
           // next story; a merge that failed before starting has nothing to
           // abort and git says so, which is not a second failure.
           yield* run(["merge", "--abort"])
-          return yield* MergeConflict.make({ branch, into, paths })
+          return yield* MergeConflict.make({
+            branch,
+            into,
+            paths,
+            ...(paths.length === 0 ? { detail: problem(result) } : {})
+          })
         })
       )
   }

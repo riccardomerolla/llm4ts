@@ -1,5 +1,46 @@
 # Changelog
 
+## 2.8.0
+
+Findings of the 2026-09-22/24 `epic-stories` rehearsal on a local coder
+(pi on LM Studio) with a claude reasoner:
+
+- Story worktrees move out of the repository, to
+  `<repo>.worktrees/<epic-id>/<story-id>` (`LLM4TS_WORKTREE_ROOT`). Coders
+  ran `cd <repo> && …` in the epic checkout, even `git stash` and
+  `git checkout`, which left stray files that failed every later merge
+  ("conflicted", no paths) and the epic gates. Existing worktrees move on
+  resume. The coder's rules now name its working directory, the epic
+  checkout it must not touch, and every other story's paths with how they
+  relate. A dirty epic checkout fails the run up front
+  (`EpicCheckoutDirty`), and one dirtied mid-run stops new stories from
+  starting. `MergeConflict` carries git's words when no path conflicts.
+- A resumed story merges the epic branch in first (`-X theirs`), and again
+  before its judge. A story branched before a dependency was re-merged no
+  longer builds on, or is judged against, the old contract.
+- The perimeter is part of every task's gate, so a stray path goes back to
+  the coder before it is committed, not after the judge. Task plans naming
+  another story's paths (a screen registering itself in `src/App.tsx`) are
+  re-planned once, then those tasks are dropped. Before the judge, strays
+  the coder does not revert are restored from the epic branch
+  (`GitTool.restorePaths`).
+- `BLOCKED_ON` is checked before it ends a story. A claim the plan refutes
+  (own path, merged dependency, later story) and a claim the reasoning seat
+  rejects after reading the named files (`verifyBlocked`) send the coder
+  back once with the reason.
+- A serving engine that is down (LM Studio "engine is recovering", "Metal
+  backend is unhealthy", "Failed to load model") gets its own retry budget,
+  15 s doubling to 2 min, instead of three retries inside five seconds. A
+  story that still fails waits for the engine (`awaitRecovery`: the flow
+  polls the local server) and is retried once. The next story is not failed
+  on the same outage.
+- LM Studio's context overflow (`context_length_exceeded`, "exceeds the
+  context window") is recognised. A chat whose replayed history overflows is
+  retried once with the current turn alone.
+- `LLM4TS_CODER_FLAGS` / `LLM4TS_REASONING_FLAGS` add CLI flags to a seat,
+  and the flow warns when a local single-model server backs more than one
+  parallel coder.
+
 ## 2.7.2
 
 - Fix a run that completed every stage and then never finished: the event

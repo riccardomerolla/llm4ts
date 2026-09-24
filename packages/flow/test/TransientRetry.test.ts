@@ -22,6 +22,7 @@ import {
   isContextOverflow,
   isContextOverflowMessage,
   isFlakyStream,
+  isOutage,
   isStructuredParseFailure,
   isTransient,
   makeTransientRetry,
@@ -78,6 +79,8 @@ describe("TransientRetry", () => {
     assert.isTrue(isTransient(TimeoutError.make({ duration: Duration.seconds(1) })))
     assert.isTrue(isTransient(RateLimitError.make({})))
     assert.isTrue(isTransient(ProviderError.make({ message: "connection reset by peer" })))
+    // LM Studio under parallel load (rehearsal of 2026-09-23).
+    assert.isTrue(isTransient(ProviderError.make({ message: "pi error: terminated" })))
     assert.isTrue(
       isTransient(
         ProviderError.make({
@@ -390,6 +393,57 @@ describe("TransientRetry", () => {
           (event) => event._tag === "Info" && event.message.includes("transient error")
         ).length,
         2
+      )
+    })
+  )
+
+  it("classifies a serving engine that is down as an outage, not a transient blip", () => {
+    // LM Studio after a GPU backend crash (rehearsal of 2026-09-23/24).
+    for (const message of [
+      'pi error: Engine protocol predict request returned 503: {"error":{"message":"engine is recovering; retry shortly","type":"server_error","code":"engine_recovering"}}',
+      'pi error: Engine protocol predict stream returned an error: {"message":"Metal backend is unhealthy: Metal command completion timed out after 120 seconds","code":"runtime_unavailable"}',
+      'pi error: 400: {"message":"Failed to load model \\"qwen3.6-35b-a3b-splash\\". Error: Engine protocol startup was aborted."}',
+      'pi error: {"message":"server is shutting down","type":"server_error","code":"server_shutdown"}'
+    ]) {
+      const error = ProviderError.make({ message })
+      assert.isTrue(isOutage(error), message)
+      assert.isFalse(isTransient(error), message)
+    }
+    // An oversized prompt is never an outage, whatever else the message says.
+    const overflow = ProviderError.make({
+      message:
+        'pi error: Engine protocol predict request returned 400: {"error":{"message":"prompt exceeds the context window","type":"invalid_request_error","code":"context_length_exceeded"}}'
+    })
+    assert.isTrue(isContextOverflow(overflow))
+    assert.isFalse(isOutage(overflow))
+    assert.isFalse(isTransient(overflow))
+  })
+
+  it.effect("waits out an outage on its own budget, apart from the transient one", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const counted = yield* makeCountingService(
+        3,
+        ProviderError.make({ message: "503: engine is recovering; retry shortly" })
+      )
+      const retrying = yield* makeTransientRetry(counted.service, {
+        maxRetries: 0,
+        outageRetries: 3,
+        outageDelay: Duration.zero
+      }).pipe(Effect.provideService(FlowEvents, events))
+
+      const result = yield* Stream.runCollect(retrying.executeStream("hello"))
+      assert.deepStrictEqual(
+        result.map((chunk) => chunk.delta),
+        ["ok"]
+      )
+      assert.strictEqual(yield* Ref.get(counted.attempts), 4)
+      const recorded = yield* events.recorded
+      assert.strictEqual(
+        recorded.filter(
+          (event) => event._tag === "Info" && event.message.includes("serving engine down")
+        ).length,
+        3
       )
     })
   )

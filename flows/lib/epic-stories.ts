@@ -1,6 +1,8 @@
 // Shared core of the epic-stories flow (ADR 0013): the operator flags, the
 // story-plan generator prompt and schema, the story judge, the gate runner,
 // and seat selection. The executor itself is `@llm4ts/flow/Stories`.
+import { join } from "node:path"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
@@ -11,10 +13,12 @@ import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import { cap } from "@llm4ts/flow/Context"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { type FlowError } from "@llm4ts/flow/FlowError"
-import type { FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { BlockedVerdict } from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
 import { ReviewIssue } from "@llm4ts/flow/Review"
-import { StoryPlan, type Story } from "@llm4ts/flow/StoryPlan"
+import { StoryPlan, pathsNamedIn, type Story } from "@llm4ts/flow/StoryPlan"
 import { claude, coderIds, pi } from "@llm4ts/runner/Connectors"
 import {
   FlowAborted,
@@ -43,8 +47,11 @@ export const epicUsage = [
   "  --fail-fast         stop the epic at the first failed story",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
   "       LLM4TS_CODER (default pi) implements; LLM4TS_REASONING_MODEL / LLM4TS_CODER_MODEL",
-  "       pick their models (pi: provider/model). LLM4TS_GATES overrides the gate commands;",
-  "       LLM4TS_WORKTREE_SETUP (default: pnpm install --offline) prepares each worktree."
+  "       pick their models (pi: provider/model); LLM4TS_CODER_FLAGS / LLM4TS_REASONING_FLAGS",
+  "       add CLI flags (key=value;key=value). LLM4TS_GATES overrides the gate commands;",
+  "       LLM4TS_WORKTREE_SETUP (default: pnpm install --offline) prepares each worktree;",
+  "       LLM4TS_WORKTREE_ROOT (default: <repo>.worktrees beside the repository) holds them;",
+  "       LLM4TS_CODER_HEALTH_URL is polled after the coder's serving engine goes down."
 ].join("\n")
 
 /** The flow's own flags, taken out before the shared `--repo`/prompt parsing sees the rest. */
@@ -114,6 +121,248 @@ export const storyCoderFromEnvironment = (
       })
     : Effect.succeed(preset)
 }
+
+// ---- Seat flags and local servers --------------------------------------------------
+
+/**
+ * `LLM4TS_CODER_FLAGS` / `LLM4TS_REASONING_FLAGS`: extra CLI flags for a seat as
+ * `key=value;key=value` (a bare `key` is a boolean flag). The first `=` splits, so
+ * a value may itself carry `=`: `config=model_provider=lmstudio` is codex's
+ * `--config model_provider=lmstudio`.
+ */
+export const flagsFromEnvironment = (raw: string | undefined): Readonly<Record<string, string>> => {
+  const flags: Record<string, string> = {}
+  for (const part of (raw ?? "").split(";")) {
+    const entry = part.trim()
+    if (entry.length === 0) {
+      continue
+    }
+    const at = entry.indexOf("=")
+    if (at < 0) {
+      flags[entry] = ""
+    } else {
+      flags[entry.slice(0, at).trim()] = entry.slice(at + 1).trim()
+    }
+  }
+  return flags
+}
+
+/**
+ * The local single-model server a coder seat points at, if any: pi's
+ * `lmstudio/…` and `ollama/…` model specs, codex's `--config model_provider=lmstudio`,
+ * a claude seat with `ANTHROPIC_BASE_URL` on a loopback host. Such a server serves
+ * one generation at a time, so parallel coders queue and a queued request is cut
+ * off after a few minutes — the flow warns when concurrency is above one.
+ */
+export const localCoderServer = (
+  model: string | undefined,
+  flags: Readonly<Record<string, string>>,
+  environment: Readonly<Record<string, string | undefined>>
+): string | undefined => {
+  const spec = (model ?? "").trim().toLowerCase()
+  for (const provider of ["lmstudio", "lm-studio", "ollama", "mlx"]) {
+    if (spec.startsWith(`${provider}/`)) {
+      return provider
+    }
+  }
+  const configured = Object.entries(flags).find(
+    ([key, value]) => key === "config" && /^model_provider=(lmstudio|ollama)/.test(value)
+  )
+  if (configured !== undefined) {
+    return configured[1].slice("model_provider=".length)
+  }
+  const base = environment.ANTHROPIC_BASE_URL ?? environment.OPENAI_BASE_URL ?? ""
+  return /^(https?:\/\/)?(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(:|\/|$)/.test(base)
+    ? "local"
+    : undefined
+}
+
+// ---- Worktrees and the serving engine -------------------------------------------
+
+/**
+ * Where an epic's story worktrees live: `LLM4TS_WORKTREE_ROOT/<epicId>`, by
+ * default `<repo>.worktrees/<epicId>` BESIDE the repository. Nested inside
+ * it, a coder's parent directory is the epic checkout, and coders cd there.
+ */
+export const worktreeRootFor = (
+  workDir: string,
+  epicId: string,
+  environment: Readonly<Record<string, string | undefined>>
+): string => {
+  const configured = environment.LLM4TS_WORKTREE_ROOT?.trim()
+  const root =
+    configured === undefined || configured.length === 0
+      ? `${workDir.replace(/[\\/]+$/, "")}.worktrees`
+      : configured
+  return join(root, epicId)
+}
+
+/**
+ * The URL that answers when a local serving engine is up:
+ * `LLM4TS_CODER_HEALTH_URL`, else the server's model list at its default
+ * address. Undefined for a hosted provider — there is nothing to poll.
+ */
+export const serverHealthUrl = (
+  server: string | undefined,
+  environment: Readonly<Record<string, string | undefined>>
+): string | undefined => {
+  const configured = environment.LLM4TS_CODER_HEALTH_URL?.trim()
+  if (configured !== undefined && configured.length > 0) {
+    return configured
+  }
+  switch (server) {
+    case "lmstudio":
+    case "lm-studio":
+      return "http://127.0.0.1:1234/v1/models"
+    case "ollama":
+      return "http://127.0.0.1:11434/api/tags"
+    case "local": {
+      const base = (environment.ANTHROPIC_BASE_URL ?? environment.OPENAI_BASE_URL ?? "")
+        .trim()
+        .replace(/\/+$/, "")
+        .replace(/\/v1$/, "")
+      return base.length === 0 ? undefined : `${base}/v1/models`
+    }
+    default:
+      return undefined
+  }
+}
+
+/** Whether `url` answers 2xx within five seconds. */
+export const httpProbe = (url: string): Effect.Effect<boolean> =>
+  Effect.tryPromise(() => fetch(url, { signal: AbortSignal.timeout(5_000) })).pipe(
+    Effect.map((response) => response.ok),
+    Effect.catch(() => Effect.succeed(false))
+  )
+
+export interface RecoveryTiming {
+  readonly interval: Duration.Input
+  readonly attempts: number
+  /** Extra wait once the probe answers: an engine lists models before it can serve them. */
+  readonly grace: Duration.Input
+}
+
+export const defaultRecoveryTiming: RecoveryTiming = {
+  interval: "15 seconds",
+  attempts: 60,
+  grace: "30 seconds"
+}
+
+/**
+ * The executor's `awaitRecovery`: polls `probe` until the engine answers
+ * (then waits the grace period), or fails after `attempts`. Without a probe
+ * (a hosted provider) it waits one interval-times-eight and lets the retry
+ * find out.
+ */
+export const awaitServer =
+  (
+    probe: Effect.Effect<boolean> | undefined,
+    events: FlowEventsShape,
+    timing: RecoveryTiming = defaultRecoveryTiming
+  ) =>
+  (reason: string): Effect.Effect<void, FlowError> =>
+    Effect.gen(function* () {
+      yield* events.publish(
+        Info.make({ message: `⏸ waiting for the coder's serving engine to recover: ${reason}` })
+      )
+      if (probe === undefined) {
+        yield* Effect.sleep(Duration.times(Duration.fromInputUnsafe(timing.interval), 8))
+        return
+      }
+      for (let attempt = 0; attempt < timing.attempts; attempt += 1) {
+        if (yield* probe) {
+          yield* Effect.sleep(timing.grace)
+          yield* events.publish(
+            Info.make({ message: "▶ the coder's serving engine answers again" })
+          )
+          return
+        }
+        yield* Effect.sleep(timing.interval)
+      }
+      return yield* FlowAborted.make({
+        message: `the coder's serving engine did not answer after ${timing.attempts} probes`
+      })
+    })
+
+// ---- BLOCKED_ON second opinion ----------------------------------------------------
+
+export const blockedVerdictJsonSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    real: { type: "boolean" },
+    reason: { type: "string" }
+  },
+  required: ["real", "reason"]
+}
+
+const excerptLimit = 6_000
+
+/**
+ * The executor's `verifyBlocked`: the reasoning seat reads the claim, the
+ * plan, and the named files as they are in the story's worktree, and decides
+ * whether the plan really has a gap. Only claims the plan alone cannot
+ * settle reach it.
+ */
+export const verifyBlockedOn =
+  (
+    reasoning: LlmServiceShape,
+    events: FlowEventsShape,
+    files: PlainFileStoreShape,
+    plan: StoryPlan
+  ) =>
+  (story: Story, need: string, workDir: string): Effect.Effect<BlockedVerdict, FlowError> =>
+    Effect.gen(function* () {
+      const excerpts: Array<string> = []
+      for (const path of pathsNamedIn(plan, need).slice(0, 4)) {
+        const text = yield* files
+          .read(join(workDir, path))
+          .pipe(Effect.catch(() => Effect.succeed("(a directory, or unreadable)")))
+        excerpts.push(
+          `### ${path}`,
+          text === undefined ? "(does not exist in the working tree)" : cap(text, excerptLimit).text
+        )
+      }
+      const others = plan.stories
+        .filter((other) => other.id !== story.id)
+        .map(
+          (other) =>
+            `- ${other.id} (depends on: ${other.dependsOn.join(", ") || "nothing"}) owns ${other.owned.join(", ")}; provides ${other.provides.join("; ")}`
+        )
+      const prompt = [
+        "A coding agent implementing ONE story of a parallel epic stopped and claimed it is blocked",
+        "on work another story owns. Decide whether the claim is REAL.",
+        "",
+        "It is real only when the needed work is absent from the agent's working tree, is not",
+        "within its own owned paths, and no story it depends on provides it: the plan has a gap.",
+        "It is NOT real when the thing exists (perhaps in another file or under another name), when",
+        "the agent can build it inside its owned paths, when a later story owns it, or when the",
+        "problem is tooling or a type error the agent can fix itself.",
+        "",
+        `Story ${story.id}: ${story.title}`,
+        story.description,
+        `Depends on: ${story.dependsOn.join(", ") || "nothing"}`,
+        `Owns: ${story.owned.join(", ")}`,
+        `Reads: ${story.sharedReadOnly.join(", ") || "nothing"}`,
+        "",
+        "The other stories:",
+        ...others,
+        "",
+        `The claim: BLOCKED_ON: ${need}`,
+        "",
+        "The paths the claim names, as they are in the agent's working tree:",
+        ...(excerpts.length === 0 ? ["(the claim names no repository path)"] : excerpts),
+        "",
+        'Respond only with JSON: {"real": true|false, "reason": "..."}. The reason is shown to the',
+        "agent when the claim is rejected: say concretely where to look or what to do."
+      ].join("\n")
+      return yield* structuredAndPublish(
+        reasoning,
+        events,
+        prompt,
+        BlockedVerdict,
+        blockedVerdictJsonSchema
+      )
+    })
 
 // ---- Story plan generation -----------------------------------------------------
 
