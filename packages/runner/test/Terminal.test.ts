@@ -12,6 +12,8 @@ import {
   ToolUse,
   TokensUsed,
   UsageProgress,
+  ReviewFinding,
+  ReviewFindings,
   makeFlowEventHub,
   withLane
 } from "@llm4ts/flow/FlowEvents"
@@ -377,6 +379,60 @@ describe("terminal rendering", () => {
       })
     )
   )
+
+  it("lists a review round's findings, most severe first, all of them when verbose", () => {
+    const issue = (
+      severity: "Critical" | "Warning" | "Info",
+      title: string,
+      file?: string,
+      line?: number
+    ) =>
+      ReviewFinding.make({
+        severity,
+        title,
+        ...(file === undefined ? {} : { file }),
+        ...(line === undefined ? {} : { line })
+      })
+    const round = ReviewFindings.make({
+      round: 1,
+      settled: false,
+      issues: [
+        issue("Info", "name could be clearer"),
+        issue("Warning", "quick action lacks a test", "src/features/home/HomeScreen.tsx"),
+        issue("Critical", "profiloFeature missing from FEATURES", "src/App.tsx", 12),
+        ...Array.from({ length: 5 }, (_, index) => issue("Warning", `warning ${index}`))
+      ]
+    })
+    const normal = terminalLine(round, plainTerminalPalette).split("\n")
+    assert.strictEqual(
+      normal[0],
+      "· review round 1: 8 issues (1 critical, 6 warning, 1 info), fixing"
+    )
+    assert.strictEqual(normal[1], "  ✖ src/App.tsx:12 — profiloFeature missing from FEATURES")
+    assert.strictEqual(
+      normal[2],
+      "  ▲ src/features/home/HomeScreen.tsx — quick action lacks a test"
+    )
+    assert.strictEqual(normal.length, 1 + 5 + 1)
+    assert.strictEqual(normal.at(-1), "  … 3 more (--verbose lists them all)")
+    const verbose = terminalLine(round, plainTerminalPalette, "Verbose").split("\n")
+    assert.strictEqual(verbose.length, 1 + 8)
+    assert.strictEqual(verbose.at(-1), "  · name could be clearer")
+    assert.strictEqual(
+      terminalLine(
+        ReviewFindings.make({ round: 3, settled: true, issues: [] }),
+        plainTerminalPalette
+      ),
+      "· review settled after round 3: clean"
+    )
+    assert.strictEqual(
+      terminalLine(
+        ReviewFindings.make({ round: 3, settled: true, issues: [issue("Warning", "left over")] }),
+        plainTerminalPalette
+      ).split("\n")[0],
+      "· review settled after round 3: 1 issue left (1 warning)"
+    )
+  })
 
   it("formats durations for humans", () => {
     assert.strictEqual(formatDurationMs(0), "0ms")

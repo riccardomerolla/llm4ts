@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.9.6
+
+- A review round says what it found, not only how much. The review loop
+  publishes `ReviewFindings` (round, settled, each issue's severity, title
+  and file:line) instead of an "N issue(s), fixing" line; the terminal
+  prints the count per severity and the five most severe issues with where
+  they are (`--verbose` lists them all), and the trace records them for
+  reading back after a run.
+
 ## 2.9.5
 
 - Token counts move while a turn runs. A harness that reports usage per

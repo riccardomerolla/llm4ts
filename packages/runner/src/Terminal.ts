@@ -7,7 +7,12 @@ import * as Semaphore from "effect/Semaphore"
 import type * as Scope from "effect/Scope"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { awaitConsumed, type FlowEvent, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
+import {
+  awaitConsumed,
+  type FlowEvent,
+  type FlowEventHub,
+  type ReviewFindings
+} from "@llm4ts/flow/FlowEvents"
 
 export const Verbosity = Schema.Literals(["Quiet", "Normal", "Verbose", "Debug"])
 export type Verbosity = typeof Verbosity.Type
@@ -108,6 +113,7 @@ export interface TerminalPalette {
   readonly stageStart: (label: string) => string
   readonly stageDone: (label: string) => string
   readonly fail: (label: string) => string
+  readonly warn: (label: string) => string
   readonly info: (label: string) => string
   readonly dim: (text: string) => string
   readonly assistant: (text: string) => string
@@ -127,6 +133,7 @@ export const makeTerminalPalette = (enabled: boolean): TerminalPalette => {
     stageStart: (label) => `${paint(Ansi.boldMagenta, "▶ ")}${label}`,
     stageDone: (label) => `${paint(Ansi.green, "✔ ")}${label}`,
     fail: (label) => `${paint(Ansi.red, "✖ ")}${label}`,
+    warn: (label) => `${paint(Ansi.yellowBold, "▲ ")}${label}`,
     info: (label) => paint(Ansi.darkGray, `· ${label}`),
     dim: (text) => paint(Ansi.darkGray, text),
     assistant: (text) => `${paint(Ansi.boldMagenta, "● ")}${text}`,
@@ -154,12 +161,77 @@ export const formatDurationMs = (milliseconds: number): string => {
 
 export const plainTerminalPalette = makeTerminalPalette(false)
 
+/** Issues listed under a review line at normal verbosity; `--verbose` lists all. */
+export const reviewFindingsShown = 5
+
+const severityRank = { Critical: 0, Warning: 1, Info: 2 } as const
+
+const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`
+
+/**
+ * A review round as the operator reads it: how many issues of each severity
+ * and whether the coder is now fixing them, then the most severe ones with
+ * where they are.
+ */
+export const reviewFindingsText = (
+  event: ReviewFindings,
+  palette: TerminalPalette,
+  shown: number
+): string => {
+  const safe = terminalSafe
+  const count = (severity: "Critical" | "Warning" | "Info"): number =>
+    event.issues.filter((issue) => issue.severity === severity).length
+  const breakdown = [
+    [count("Critical"), "critical"],
+    [count("Warning"), "warning"],
+    [count("Info"), "info"]
+  ]
+    .filter(([n]) => n !== 0)
+    .map(([n, label]) => `${n} ${label}`)
+    .join(", ")
+  const total = plural(event.issues.length, "issue")
+  const head = event.settled
+    ? event.issues.length === 0
+      ? `review settled after round ${event.round}: clean`
+      : `review settled after round ${event.round}: ${total} left (${breakdown})`
+    : `review round ${event.round}: ${total} (${breakdown}), fixing`
+  const sorted = [...event.issues].sort(
+    (left, right) => severityRank[left.severity] - severityRank[right.severity]
+  )
+  const listed = sorted.slice(0, Math.max(0, shown)).map((issue) => {
+    const where =
+      issue.file === undefined
+        ? ""
+        : `${safe(issue.file)}${issue.line === undefined ? "" : `:${issue.line}`} — `
+    const title = safe(issue.title).replace(/\s+/g, " ").trim()
+    const text = `${where}${title.length > 160 ? `${title.slice(0, 159)}…` : title}`
+    return issue.severity === "Critical"
+      ? palette.fail(text)
+      : issue.severity === "Warning"
+        ? palette.warn(text)
+        : palette.info(text)
+  })
+  const rest = sorted.length - listed.length
+  return [
+    palette.info(head),
+    ...listed.map((line) => `  ${line}`),
+    ...(rest > 0 ? [`  ${palette.dim(`… ${rest} more (--verbose lists them all)`)}`] : [])
+  ].join("\n")
+}
+
 export const terminalLine = (
   event: FlowEvent,
-  palette: TerminalPalette = plainTerminalPalette
+  palette: TerminalPalette = plainTerminalPalette,
+  verbosity: Verbosity = "Normal"
 ): string => {
   const safe = terminalSafe
   switch (event._tag) {
+    case "ReviewFindings":
+      return reviewFindingsText(
+        event,
+        palette,
+        verbosity === "Verbose" || verbosity === "Debug" ? event.issues.length : reviewFindingsShown
+      )
     case "JudgmentObserved":
     case "UsageProgress":
       return ""
@@ -440,6 +512,7 @@ export const laneOfEvent = (
     case "AssistantMessage":
     case "TokensUsed":
     case "UsageProgress":
+    case "ReviewFindings":
       return event.lane === undefined
         ? undefined
         : {
@@ -712,7 +785,7 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
           }
           if (rendersLanedEvent(verbosity, event)) {
             const tag = palette.lane(state.index, `[${laneLabel(tagged.lane, state.executor)}]`)
-            const line = yield* withDuration(event, terminalLine(event, palette), closed)
+            const line = yield* withDuration(event, terminalLine(event, palette, verbosity), closed)
             const prefix = yield* timestampPrefix
             yield* surface.log(`${prefix}${tag} ${indentBlock(lineDepth, line)}`)
           }
@@ -742,7 +815,11 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
           yield* countStage(event)
         }
         if (rendersEvent(verbosity, event)) {
-          const line = yield* withDuration(event, terminalLine(event, palette), closedStage)
+          const line = yield* withDuration(
+            event,
+            terminalLine(event, palette, verbosity),
+            closedStage
+          )
           const prefix = yield* timestampPrefix
           yield* surface.log(`${prefix}${indentBlock(currentDepth, line)}`)
         }

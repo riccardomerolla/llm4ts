@@ -11,6 +11,8 @@ import { FlowLlmError, ProcessError, describeFlowError, type FlowError } from ".
 import {
   Info,
   JudgmentObserved,
+  ReviewFinding,
+  ReviewFindings,
   publishJudgmentObserved,
   type FlowEventsShape
 } from "./FlowEvents.ts"
@@ -507,16 +509,24 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
     Effect.gen(function* () {
       yield* format
       const result = yield* reviewOnce(round, previous)
-      const verdict = result.isClean ? "clean" : `${result.issues.length} issue(s)`
-      if (result.isClean || round >= maxRounds) {
-        yield* options.events.publish(
-          Info.make({ message: `review settled after round ${round}: ${verdict}` })
-        )
+      const settled = result.isClean || round >= maxRounds
+      yield* options.events.publish(
+        ReviewFindings.make({
+          round,
+          settled,
+          issues: result.issues.map((issue) =>
+            ReviewFinding.make({
+              severity: issue.severity,
+              title: issue.title,
+              ...(issue.file === undefined ? {} : { file: issue.file }),
+              ...(issue.line === undefined ? {} : { line: issue.line })
+            })
+          )
+        })
+      )
+      if (settled) {
         return result
       }
-      yield* options.events.publish(
-        Info.make({ message: `review round ${round}: ${verdict}, fixing` })
-      )
       yield* options.coder.ask(fixPrompt(result))
       return yield* loop(round + 1, result)
     })

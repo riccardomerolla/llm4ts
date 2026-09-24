@@ -8,7 +8,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import { makeChat } from "@llm4ts/flow/Chat"
 import { ProcessError } from "@llm4ts/flow/FlowError"
-import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
+import { makeCollectingFlowEvents, ReviewFinding } from "@llm4ts/flow/FlowEvents"
 import { Reviewer } from "@llm4ts/flow/Pack"
 import { ReviewIssue, ReviewResult, llmDriven, reviewAndFixLoop } from "@llm4ts/flow/Review"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
@@ -197,6 +197,61 @@ describe("reviewAndFixLoop", () => {
 
   // Reviewer lenses are structured calls, and their usage went unpublished:
   // every flow whose cost is dominated by review reported none of it.
+  it.effect("publishes what each round found: the issues being fixed, then what is left", () =>
+    Effect.gen(function* () {
+      const values = yield* Ref.make<ReadonlyArray<unknown>>([
+        {
+          issues: [
+            {
+              severity: "Warning",
+              title: "quick action lacks a test",
+              file: "src/features/home/HomeScreen.tsx"
+            },
+            {
+              severity: "Critical",
+              title: "profiloFeature missing from FEATURES",
+              file: "src/App.tsx",
+              line: 12
+            }
+          ],
+          summary: "two"
+        },
+        { issues: [], summary: "clean" }
+      ])
+      const calls = yield* Ref.make(0)
+      const asks = yield* Ref.make(0)
+      const events = yield* makeCollectingFlowEvents
+      const coder = yield* makeChat(coderService(asks))
+      yield* reviewAndFixLoop({
+        reviewers: [lens()],
+        reviewerService: reviewerService(values, calls),
+        coder,
+        taskTitle: "task",
+        currentDiff: Effect.succeed("diff"),
+        events
+      })
+      const findings = (yield* events.recorded).flatMap((event) =>
+        event._tag === "ReviewFindings" ? [event] : []
+      )
+      assert.deepStrictEqual(
+        findings.map((event) => [event.round, event.settled, event.issues.length]),
+        [
+          [1, false, 2],
+          [2, true, 0]
+        ]
+      )
+      assert.deepStrictEqual(
+        findings[0]?.issues[1],
+        ReviewFinding.make({
+          severity: "Critical",
+          title: "profiloFeature missing from FEATURES",
+          file: "src/App.tsx",
+          line: 12
+        })
+      )
+    })
+  )
+
   it.effect("publishes the token usage each reviewer lens reported", () =>
     Effect.gen(function* () {
       const values = yield* Ref.make<ReadonlyArray<unknown>>([{ issues: [], summary: "clean" }])

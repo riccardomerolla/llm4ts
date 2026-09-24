@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/runner",
-  "version": "2.9.5",
+  "version": "2.9.6",
   "description": "Node runner, CLI, terminal, and MCP composition for llm4ts",
   "license": "MIT",
   "type": "module",

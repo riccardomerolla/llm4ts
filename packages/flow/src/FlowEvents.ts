@@ -101,6 +101,27 @@ export class TokensUsed extends Schema.TaggedClass<TokensUsed>()("TokensUsed", {
   executor: Schema.optionalKey(Schema.String)
 }) {}
 
+/** One issue a review round found, as the operator sees it. */
+export class ReviewFinding extends Schema.Class<ReviewFinding>("ReviewFinding")({
+  severity: Schema.Literals(["Critical", "Warning", "Info"]),
+  title: Schema.String,
+  file: Schema.optionalKey(Schema.String),
+  line: Schema.optionalKey(Schema.Int)
+}) {}
+
+/**
+ * What a review round found: the issues the coder is now asked to fix, or,
+ * `settled`, what is left when the review stops. A bare count said the round
+ * took long without saying why.
+ */
+export class ReviewFindings extends Schema.TaggedClass<ReviewFindings>()("ReviewFindings", {
+  round: Schema.Int,
+  settled: Schema.Boolean,
+  issues: Schema.Array(ReviewFinding),
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
 /**
  * Display only: a model call's running usage while it is still streaming
  * (a harness that reports usage per model message, such as pi), and `done`
@@ -154,6 +175,7 @@ export const FlowEvent = Schema.Union([
   AssistantMessage,
   TokensUsed,
   UsageProgress,
+  ReviewFindings,
   CapabilityUsedEvent,
   CapabilityDeniedEvent,
   CapabilityUnenforceable,
@@ -222,6 +244,15 @@ const stamped = (
           })
     case "AssistantMessage":
       return event.lane !== undefined ? event : AssistantMessage.make({ text: event.text, ...tags })
+    case "ReviewFindings":
+      return event.lane !== undefined
+        ? event
+        : ReviewFindings.make({
+            round: event.round,
+            settled: event.settled,
+            issues: event.issues,
+            ...tags
+          })
     case "UsageProgress":
       return event.lane !== undefined
         ? event
