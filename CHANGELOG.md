@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.9.2
+
+- The `epic-stories` judge reads what the story's dependencies provide
+  (`storyJudgeQuery`), and that using it as declared is correct. Without it,
+  the judge failed bonifici-list's house style for importing
+  `paymentsDomain` from `payments.fake.ts`, exactly where the payments
+  contract story declared it. `judgeStory` takes the plan as an optional
+  last argument.
+
 ## 2.9.1
 
 - Concurrent stories stay apart on screen. Every stage, message, tool call

@@ -202,7 +202,8 @@ const program = Effect.gen(function* () {
                 seats.context.roster?.forRole("judge") ?? reasoningMeter.service,
                 story,
                 diff,
-                contextBudget
+                contextBudget,
+                plan
               ),
             verifyBlocked: (story, need, workDir, seats) =>
               verifyBlockedOn(

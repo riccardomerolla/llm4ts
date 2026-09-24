@@ -47,6 +47,7 @@ import {
   serverHealthUrl,
   setupIn,
   storyCoderFromEnvironment,
+  storyJudgeQuery,
   storyPlanInstructions,
   verifyBlockedOn,
   worktreeRootFor,
@@ -406,6 +407,24 @@ describe("epic-stories worktrees, outages and blocked claims", () => {
       assert.include(asked, "- home (depends on: conto-overview")
     })
   )
+})
+
+describe("the story judge", () => {
+  it("reads what the story's dependencies provide, and that using it is correct", () => {
+    const list = parsedFixture.story("bonifici-list")
+    const home = parsedFixture.story("home")
+    if (list === undefined || home === undefined) {
+      throw new Error("fixture")
+    }
+    const query = storyJudgeQuery(list, parsedFixture)
+    assert.include(query, "- payments-contract: paymentsDomain from src/contracts/payments.fake.ts")
+    assert.include(query, "never a house-style or scope problem")
+    assert.notInclude(query, "accounts-contract")
+    // Transitive: home sees the contracts behind the screens it composes.
+    assert.include(storyJudgeQuery(home, parsedFixture), "- accounts-contract: accountsDomain from")
+    // Without a plan, the query is the story alone.
+    assert.notInclude(storyJudgeQuery(list), "Already merged")
+  })
 })
 
 describe("the demo roster", () => {

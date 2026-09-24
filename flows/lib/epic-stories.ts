@@ -18,7 +18,7 @@ import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { BlockedVerdict } from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
 import { ReviewIssue } from "@llm4ts/flow/Review"
-import { StoryPlan, pathsNamedIn, type Story } from "@llm4ts/flow/StoryPlan"
+import { StoryPlan, dependenciesOf, pathsNamedIn, type Story } from "@llm4ts/flow/StoryPlan"
 import { claude, coderIds, pi } from "@llm4ts/runner/Connectors"
 import {
   FlowAborted,
@@ -514,24 +514,54 @@ const subBar = (scored: EvalResult, story: Story): ReviewResult =>
     summary: `judge:${story.id}`
   })
 
+/**
+ * What the story judge reads beside the diff: the story, and what every
+ * story it depends on provides. Without the dependencies the judge cannot
+ * tell the house pattern from a mistake — it once failed a screen for
+ * importing `paymentsDomain` from `payments.fake.ts`, exactly where the
+ * payments contract story declared it.
+ */
+export const storyJudgeQuery = (story: Story, plan?: StoryPlan): string => {
+  const dependencies =
+    plan === undefined
+      ? []
+      : dependenciesOf(plan, story.id).flatMap((id) => {
+          const dependency = plan.story(id)
+          return dependency === undefined
+            ? []
+            : [`- ${dependency.id}: ${dependency.provides.join("; ") || "(nothing declared)"}`]
+        })
+  return [
+    `Story: ${story.title}`,
+    story.description,
+    "",
+    `Provides: ${story.provides.join(", ") || "(none)"}`,
+    `Owned paths: ${story.owned.join(", ")}`,
+    `Shared read-only: ${story.sharedReadOnly.join(", ") || "(none)"}`,
+    ...(dependencies.length === 0
+      ? []
+      : [
+          "",
+          "Already merged, from the stories this one depends on (their declared interface):",
+          ...dependencies,
+          "Using these exactly as declared (the same module, the same export) is correct and is",
+          "never a house-style or scope problem, even where the module is a fake transport."
+        ])
+  ].join("\n")
+}
+
 /** The story-level judge over the branch diff, bounded by the character budget. */
 export const judgeStory = (
   reasoning: LlmServiceShape,
   story: Story,
   diff: string,
-  budget: number
+  budget: number,
+  plan?: StoryPlan
 ): Effect.Effect<ReviewResult, FlowError> =>
   judge(reasoning, storyDimensions)
     .evaluate(
       Sample.make({
-        query: [
-          `Story: ${story.title}`,
-          story.description,
-          "",
-          `Provides: ${story.provides.join(", ") || "(none)"}`,
-          `Owned paths: ${story.owned.join(", ")}`,
-          `Shared read-only: ${story.sharedReadOnly.join(", ") || "(none)"}`
-        ].join("\n"),
+        query: storyJudgeQuery(story, plan),
         response: cap(diff, budget).text
       })
     )
