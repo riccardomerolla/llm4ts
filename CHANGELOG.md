@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.9.5
+
+- Token counts move while a turn runs. A harness that reports usage per
+  model call (pi) now has each report published as a display-only
+  `UsageProgress` event, which the status rows add to the completed total,
+  so a long agent turn shows its tokens growing instead of only elapsed
+  time. The call's final `TokensUsed` stays what costs, the ledger and
+  budgets count; the trace does not record progress.
+
 ## 2.9.4
 
 - The live status block no longer leaves stale rows ending in `^[`. A

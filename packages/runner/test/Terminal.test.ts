@@ -11,6 +11,7 @@ import {
   StageStarted,
   ToolUse,
   TokensUsed,
+  UsageProgress,
   makeFlowEventHub,
   withLane
 } from "@llm4ts/flow/FlowEvents"
@@ -252,6 +253,45 @@ describe("terminal rendering", () => {
         )
         // Once bonifici-list ended, only bonifico-form has a row.
         assert.notInclude(seen.at(-1) ?? "", "bonifici-list")
+      })
+    )
+  )
+
+  it.effect("shows a lane's tokens growing while a call streams, then its final count", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const lines = yield* Ref.make<ReadonlyArray<string>>([])
+        const statuses = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+        const surface: TerminalSurface = {
+          palette: plainTerminalPalette,
+          log: (line) => Ref.update(lines, (current) => [...current, line]),
+          setStatus: (label) => Ref.update(statuses, (current) => [...current, label]),
+          suspend: (effect) => effect
+        }
+        const hub = yield* makeFlowEventHub()
+        const consumer = yield* consumeTerminalEvents(hub, surface)
+        const home = withLane(hub, { lane: "home", executor: Effect.succeed("deepseek") })
+        const usage = (prompt: number, completion: number) =>
+          TokenUsage.make({ prompt, completion, total: prompt + completion })
+        yield* home.publish(StageStarted.make({ stage: "Rewrite App.tsx" }))
+        yield* home.publish(UsageProgress.make({ call: "c1", usage: usage(1_000, 12_000) }))
+        yield* home.publish(UsageProgress.make({ call: "c1", usage: usage(1_100, 12_400) }))
+        yield* home.publish(UsageProgress.make({ call: "c1", done: true }))
+        yield* home.publish(TokensUsed.make({ agent: "coder", usage: usage(1_100, 12_400) }))
+        yield* consumer.awaitDrained()
+
+        const rows = (yield* Ref.get(statuses)).filter(
+          (status): status is string => status !== undefined
+        )
+        // Mid-call: 13.0k, then 13.5k — never double-counted once the call ends.
+        assert.isTrue(
+          rows.some((row) => row.includes("13.0k tokens")),
+          JSON.stringify(rows)
+        )
+        assert.strictEqual(rows.at(-1)?.includes("13.5k tokens"), true, JSON.stringify(rows))
+        assert.isFalse(rows.some((row) => row.includes("27.0k")))
+        // Progress never prints a line of its own.
+        assert.deepStrictEqual(yield* Ref.get(lines), ["[home · deepseek] ▶ Rewrite App.tsx"])
       })
     )
   )

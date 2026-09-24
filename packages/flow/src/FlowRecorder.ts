@@ -95,7 +95,10 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
         const subscription = yield* hub.subscribe
         yield* Stream.fromSubscription(subscription).pipe(
           Stream.runForEach((event) =>
-            record(event).pipe(Effect.andThen(Ref.update(consumed, (count) => count + 1)))
+            // Progress is for the screen; the call's TokensUsed is the record.
+            (event._tag === "UsageProgress" ? Effect.void : record(event)).pipe(
+              Effect.andThen(Ref.update(consumed, (count) => count + 1))
+            )
           ),
           Effect.forkScoped,
           Effect.asVoid

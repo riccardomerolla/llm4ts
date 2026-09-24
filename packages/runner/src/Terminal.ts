@@ -27,8 +27,10 @@ export const parseVerbosity = (value: string | undefined): Verbosity => {
 
 export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean => {
   switch (event._tag) {
+    // Advise mode publishes a separate Info event for the operator; progress
+    // feeds the status rows. Neither is a line of its own.
     case "JudgmentObserved":
-      // Advise mode publishes a separate Info event for the operator.
+    case "UsageProgress":
       return false
     case "StageStarted":
     case "StageCompleted":
@@ -159,6 +161,7 @@ export const terminalLine = (
   const safe = terminalSafe
   switch (event._tag) {
     case "JudgmentObserved":
+    case "UsageProgress":
       return ""
     case "StageStarted":
       return palette.stageStart(safe(event.stage))
@@ -436,6 +439,7 @@ export const laneOfEvent = (
     case "ToolUse":
     case "AssistantMessage":
     case "TokensUsed":
+    case "UsageProgress":
       return event.lane === undefined
         ? undefined
         : {
@@ -469,6 +473,7 @@ interface LaneState {
   executor: string | undefined
   readonly startedAt: number
   readonly tokens: TokenTally
+  readonly inFlight: Map<string, TokenTally>
   lastTool: { readonly tool: string; readonly at: number } | undefined
 }
 
@@ -480,6 +485,33 @@ export interface TokenTally {
 }
 
 const emptyTally = (): TokenTally => ({ input: 0, output: 0, estimated: false })
+
+/** The completed calls' tally plus every call still streaming. */
+const withInFlight = (tally: TokenTally, inFlight: ReadonlyMap<string, TokenTally>): TokenTally => {
+  let input = tally.input
+  let output = tally.output
+  for (const call of inFlight.values()) {
+    input += call.input
+    output += call.output
+  }
+  return { input, output, estimated: tally.estimated }
+}
+
+/** A progress event's effect on the calls in flight. */
+const trackProgress = (inFlight: Map<string, TokenTally>, event: FlowEvent): void => {
+  if (event._tag !== "UsageProgress") {
+    return
+  }
+  if (event.done === true || event.usage === undefined) {
+    inFlight.delete(event.call)
+    return
+  }
+  inFlight.set(event.call, {
+    input: event.usage.prompt,
+    output: event.usage.completion,
+    estimated: false
+  })
+}
 
 const addTokens = (tally: TokenTally, event: FlowEvent): void => {
   if (event._tag !== "TokensUsed") {
@@ -572,6 +604,7 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
   const lanes = new Map<string, LaneState>()
   // Tokens of events outside any lane: the whole run, for a flow with one coder.
   const runTokens = emptyTally()
+  const runInFlight = new Map<string, TokenTally>()
   const consumed = yield* Ref.make(0)
   const statsRef = yield* Ref.make<TerminalRunStats>({ stagesCompleted: 0, stagesFailed: 0 })
   const subscription = yield* events.subscribe
@@ -595,10 +628,10 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
           stage: state.stages.at(-1)?.name,
           elapsedMs: now - state.startedAt,
           tools: state.tools,
-          tokens: state.tokens,
+          tokens: withInFlight(state.tokens, state.inFlight),
           activity: activityOf(state.lastTool, now)
         })),
-        runTokens
+        withInFlight(runTokens, runInFlight)
       )
     )
   })
@@ -632,6 +665,11 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
     Stream.runForEach((event) =>
       Effect.gen(function* () {
         const tagged = laneOfEvent(event)
+        if (tagged !== undefined && event._tag === "UsageProgress" && !lanes.has(tagged.lane)) {
+          // A call that ends after its story's row closed: nothing to show.
+          yield* Ref.update(consumed, (count) => count + 1)
+          return
+        }
         if (tagged !== undefined) {
           const now = yield* Clock.currentTimeMillis
           const state =
@@ -644,6 +682,7 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
               executor: undefined,
               startedAt: now,
               tokens: emptyTally(),
+              inFlight: new Map(),
               lastTool: undefined
             } satisfies LaneState)
           lanes.set(tagged.lane, state)
@@ -667,6 +706,7 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
             state.lastTool = { tool: terminalSafe(event.tool), at: now }
           }
           addTokens(state.tokens, event)
+          trackProgress(state.inFlight, event)
           if (state.stages.length === 0 && closesChild(event)) {
             lanes.delete(tagged.lane)
           }
@@ -680,8 +720,9 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
           yield* Ref.update(consumed, (count) => count + 1)
           return
         }
-        if (event._tag === "TokensUsed") {
+        if (event._tag === "TokensUsed" || event._tag === "UsageProgress") {
           addTokens(runTokens, event)
+          trackProgress(runInFlight, event)
           yield* refreshStatus
         }
         const currentDepth = closesChild(event)

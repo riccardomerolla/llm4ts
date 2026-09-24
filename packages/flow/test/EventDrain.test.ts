@@ -4,7 +4,13 @@ import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import { makeCostTracker } from "@llm4ts/flow/CostTracker"
-import { awaitConsumed, Info, makeFlowEventHub, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
+import {
+  awaitConsumed,
+  Info,
+  makeFlowEventHub,
+  type FlowEventHub,
+  UsageProgress
+} from "@llm4ts/flow/FlowEvents"
 import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 
@@ -41,6 +47,26 @@ describe("event drain", () => {
         yield* recorder.consume(hub)
 
         assert.isFalse(yield* recorder.awaitDrained(unreachable(hub), "20 millis"))
+      })
+    )
+  )
+
+  it.live("records every event but display-only progress", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const hub = yield* makeFlowEventHub()
+        const files = yield* makeMemoryPlainFileStore()
+        const recorder = yield* makeFlowRecorder(files.store, "/trace.jsonl", "run-1")
+        yield* recorder.consume(hub)
+        yield* hub.publish(Info.make({ message: "one" }))
+        yield* hub.publish(UsageProgress.make({ call: "c1", done: true }))
+        yield* hub.publish(Info.make({ message: "two" }))
+
+        assert.isTrue(yield* recorder.awaitDrained(hub, "2 seconds"))
+        const trace = (yield* files.files)["/trace.jsonl"] ?? ""
+        assert.include(trace, "one")
+        assert.include(trace, "two")
+        assert.notInclude(trace, "UsageProgress")
       })
     )
   )

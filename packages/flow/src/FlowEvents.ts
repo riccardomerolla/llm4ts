@@ -101,6 +101,21 @@ export class TokensUsed extends Schema.TaggedClass<TokensUsed>()("TokensUsed", {
   executor: Schema.optionalKey(Schema.String)
 }) {}
 
+/**
+ * Display only: a model call's running usage while it is still streaming
+ * (a harness that reports usage per model message, such as pi), and `done`
+ * when the call's stream ends. The call's final `TokensUsed` is what costs,
+ * ledgers and budgets count; the trace does not record progress.
+ */
+export class UsageProgress extends Schema.TaggedClass<UsageProgress>()("UsageProgress", {
+  /** One streaming call: progress of the same call replaces, never adds. */
+  call: Schema.String,
+  usage: Schema.optionalKey(TokenUsage),
+  done: Schema.optionalKey(Schema.Boolean),
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
 export class CapabilityUsedEvent extends Schema.TaggedClass<CapabilityUsedEvent>()(
   "CapabilityUsed",
   {
@@ -138,6 +153,7 @@ export const FlowEvent = Schema.Union([
   ToolUse,
   AssistantMessage,
   TokensUsed,
+  UsageProgress,
   CapabilityUsedEvent,
   CapabilityDeniedEvent,
   CapabilityUnenforceable,
@@ -206,6 +222,15 @@ const stamped = (
           })
     case "AssistantMessage":
       return event.lane !== undefined ? event : AssistantMessage.make({ text: event.text, ...tags })
+    case "UsageProgress":
+      return event.lane !== undefined
+        ? event
+        : UsageProgress.make({
+            call: event.call,
+            ...(event.usage === undefined ? {} : { usage: event.usage }),
+            ...(event.done === undefined ? {} : { done: event.done }),
+            ...tags
+          })
     case "TokensUsed":
       return event.lane !== undefined
         ? event

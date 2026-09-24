@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import { LlmChunk } from "@llm4ts/core/Models"
+import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import { summariseToolArgs, toolUseFrom, withToolActivity } from "@llm4ts/flow/Activity"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 
@@ -88,5 +88,37 @@ describe("withToolActivity", () => {
         ["update_topic|Reverse-Engineering Complete", "run_shell_command|ls -R docs/modernization"]
       )
     })
+  )
+
+  it.effect(
+    "publishes a streaming call's usage as progress, and closes it when the call ends",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const usage = (output: number) =>
+          LlmChunk.make({
+            delta: "",
+            usage: TokenUsage.make({ prompt: 100, completion: output, total: 100 + output })
+          })
+        yield* Stream.runDrain(
+          withToolActivity(
+            events,
+            Stream.make(usage(400), toolChunk("bash", '{"command":"pnpm test"}'), usage(900))
+          )
+        )
+        const progress = (yield* events.recorded).flatMap((event) =>
+          event._tag === "UsageProgress" ? [event] : []
+        )
+        assert.deepStrictEqual(
+          progress.map((event) => [event.usage?.completion, event.done]),
+          [
+            [400, undefined],
+            [900, undefined],
+            [undefined, true]
+          ]
+        )
+        // One call, one id.
+        assert.strictEqual(new Set(progress.map((event) => event.call)).size, 1)
+      })
   )
 })

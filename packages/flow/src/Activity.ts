@@ -1,8 +1,9 @@
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import type { LlmError } from "@llm4ts/core/Errors"
 import type { LlmChunk } from "@llm4ts/core/Models"
-import { ToolUse, type FlowEventsShape } from "./FlowEvents.ts"
+import { ToolUse, UsageProgress, type FlowEventsShape } from "./FlowEvents.ts"
 
 /**
  * Live agent activity.
@@ -109,6 +110,13 @@ export const toolUseFrom = (chunk: LlmChunk): ToolUse | undefined => {
   })
 }
 
+let calls = 0
+/** A process-unique id for one streaming call's progress. */
+const nextCall: Effect.Effect<string> = Effect.sync(() => {
+  calls += 1
+  return `call-${calls}`
+})
+
 /**
  * Republishes the stream unchanged, publishing a `ToolUse` event for every
  * tool call it carries. Wrap a connector stream with this before `collect` so
@@ -118,7 +126,26 @@ export const withToolActivity = <R>(
   events: FlowEventsShape,
   stream: Stream.Stream<LlmChunk, LlmError, R>
 ): Stream.Stream<LlmChunk, LlmError, R> =>
-  Stream.tap(stream, (chunk) => {
-    const event = toolUseFrom(chunk)
-    return event === undefined ? Effect.void : events.publish(event)
-  })
+  // Usage a harness reports mid-turn (pi per model message) is published as
+  // display-only progress, so a long agent turn shows its tokens growing; a
+  // call that reported any closes with `done` so the display drops it.
+  Stream.unwrap(
+    Effect.map(Effect.all([nextCall, Ref.make(false)]), ([call, reported]) =>
+      Stream.tap(stream, (chunk) => {
+        const event = toolUseFrom(chunk)
+        const tool = event === undefined ? Effect.void : events.publish(event)
+        return chunk.usage === undefined
+          ? tool
+          : tool.pipe(
+              Effect.andThen(events.publish(UsageProgress.make({ call, usage: chunk.usage }))),
+              Effect.andThen(Ref.set(reported, true))
+            )
+      }).pipe(
+        Stream.ensuring(
+          Effect.flatMap(Ref.get(reported), (any) =>
+            any ? events.publish(UsageProgress.make({ call, done: true })) : Effect.void
+          )
+        )
+      )
+    )
+  )
