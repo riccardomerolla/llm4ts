@@ -7,6 +7,7 @@ import {
   JudgmentObserved,
   StageCompleted,
   StageFailed,
+  CapabilityUsedEvent,
   StageStarted,
   ToolUse,
   TokensUsed,
@@ -17,7 +18,9 @@ import { TestClock } from "effect/testing"
 import { origins, truth, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 import {
   consumeTerminalEvents,
+  activityOf,
   fitToWidth,
+  formatCount,
   formatDurationMs,
   statusBlock,
   indentBlock,
@@ -194,6 +197,16 @@ describe("terminal rendering", () => {
         yield* form.publish(StageStarted.make({ stage: "story bonifico-form" }))
         yield* list.publish(StageStarted.make({ stage: "story bonifici-list" }))
         yield* form.publish(StageStarted.make({ stage: "Write the tests" }))
+        yield* form.publish(
+          TokensUsed.make({
+            agent: "coder",
+            model: "estimated:qwen",
+            usage: TokenUsage.make({ prompt: 12_000, completion: 800, total: 12_800 })
+          })
+        )
+        yield* hub.publish(
+          CapabilityUsedEvent.make({ capability: "GitRead", operation: "git status" })
+        )
         yield* list.publish(ToolUse.make({ tool: "shell", args: "cd /wt/list && pnpm test" }))
         yield* list.publish(ToolUse.make({ tool: "read", args: "/wt/list/src/a.tsx" }))
         // bonifici-list ends while bonifico-form is still inside a task.
@@ -214,17 +227,26 @@ describe("terminal rendering", () => {
             line.startsWith("[bonifico-form · pi-lmstudio]   ✔ Write the tests")
           )
         )
-        // Tool calls are counted, not printed, at normal verbosity.
+        // Tool calls are counted, not printed, at normal verbosity; so are
+        // capability events.
         assert.isFalse(printed.some((line) => line.includes("pnpm test")))
+        assert.isFalse(printed.some((line) => line.includes("capability")))
+        assert.isTrue(
+          (yield* Ref.get(statuses)).some(
+            (status) =>
+              status?.includes("Write the tests") === true && status.includes("~12.8k tokens")
+          )
+        )
         const seen = (yield* Ref.get(statuses)).filter(
           (status): status is string => status !== undefined
         )
         assert.isTrue(
           seen.some(
             (status) =>
-              status.includes("bonifico-form · pi-lmstudio · Write the tests") &&
-              status.includes("bonifici-list · lemonade-deepseek · story bonifici-list") &&
-              status.includes("2 tool calls")
+              status.includes("bonifico-form · pi-lmstudio · ") &&
+              status.includes("Write the tests") &&
+              status.includes("bonifici-list · lemonade-deepseek · ") &&
+              status.includes("Running read…")
           ),
           JSON.stringify(seen)
         )
@@ -276,8 +298,11 @@ describe("terminal rendering", () => {
         assert.include(rendered, "first row\n")
         // The second row was cut to fit, so the redraw arithmetic holds.
         assert.include(rendered, `${"x".repeat(35)}…`)
-        // Clearing a two-row block moves up one line.
-        assert.include(rendered, "\r\u001b[2K\u001b[1A\r\u001b[2K")
+        // The block is drawn with line wrap off, and a two-row block is
+        // cleared by moving up one line and clearing to the end of the screen.
+        assert.include(rendered, "\u001b[?7l")
+        assert.include(rendered, "\u001b[?7h")
+        assert.include(rendered, "\u001b[1A\r\u001b[2K\u001b[J")
         assert.include(rendered, "a line\n")
         assert.strictEqual(fitToWidth("short", 40), "short")
         assert.strictEqual(
@@ -285,8 +310,30 @@ describe("terminal rendering", () => {
             { lane: "a", executor: "pi", stage: "task 1", elapsedMs: 65_000, tools: 1 },
             { lane: "b", executor: undefined, stage: undefined, elapsedMs: 0, tools: 0 }
           ]),
-          "epic branch\na · pi · task 1 · 1m05s · 1 tool call"
+          "epic branch\na · pi · 1m05s · task 1"
         )
+        assert.strictEqual(
+          statusBlock(
+            "build",
+            [
+              {
+                lane: "a",
+                executor: "pi",
+                stage: "task 1",
+                elapsedMs: 5_000,
+                tools: 3,
+                tokens: { input: 3_000, output: 500, estimated: true },
+                activity: "Running shell…"
+              }
+            ],
+            { input: 950, output: 12, estimated: false }
+          ),
+          "build · 962 tokens\na · pi · 5.0s · ~3.5k tokens · Running shell… · task 1"
+        )
+        assert.strictEqual(activityOf({ tool: "shell", at: 1_000 }, 10_000), "Running shell…")
+        assert.strictEqual(activityOf({ tool: "shell", at: 1_000 }, 60_000), "Thinking…")
+        assert.strictEqual(activityOf(undefined, 0), "Thinking…")
+        assert.strictEqual(formatCount(1_250_000), "1.3M")
       })
     )
   )

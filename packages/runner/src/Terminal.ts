@@ -36,7 +36,10 @@ export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean =>
     case "CapabilityDenied":
     case "CapabilityUnenforceable":
       return true
+    // Every git read and gate command is a capability event: useful in a
+    // trace, noise on screen once several stories run.
     case "TokensUsed":
+    case "CapabilityUsed":
       return verbosity === "Verbose" || verbosity === "Debug"
     default:
       return verbosity !== "Quiet"
@@ -229,6 +232,9 @@ export const makePlainTerminalSurface = (
 
 const spinnerFrames = Object.freeze(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
 const clearLine = "\r\u001b[2K"
+const clearToEnd = "\u001b[J"
+const wrapOff = "\u001b[?7l"
+const wrapOn = "\u001b[?7h"
 
 export interface TerminalOutput {
   readonly isTTY?: boolean
@@ -263,8 +269,11 @@ export const makeLiveTerminalSurface = Effect.fn("@llm4ts/runner/Terminal.makeLi
   // block (one row per concurrent story) is cleared line by line upwards.
   const drawn = yield* Ref.make(0)
   const emit = (text: string): Effect.Effect<void> => Effect.sync(() => write(text))
+  // Back to the block's first line, then clear to the end of the screen.
+  // Counting on the rows we drew (not on how the terminal wrapped them) is
+  // safe because the block is drawn with line wrap off.
   const clearStatus = Effect.flatMap(Ref.getAndSet(drawn, 0), (lines) =>
-    emit(lines <= 1 ? clearLine : `${clearLine}${`\u001b[1A${clearLine}`.repeat(lines - 1)}`)
+    emit(lines <= 1 ? `${clearLine}${clearToEnd}` : `\u001b[${lines - 1}A${clearLine}${clearToEnd}`)
   )
   const drawStatus = Effect.gen(function* () {
     if (yield* Ref.get(suspended)) {
@@ -275,15 +284,19 @@ export const makeLiveTerminalSurface = Effect.fn("@llm4ts/runner/Terminal.makeLi
       const currentFrame = yield* Ref.get(frame)
       const width = columns()
       const rows = label.split("\n")
+      // Line wrap is off while the block is drawn: a row wider than the
+      // terminal (an ambiguous-width character such as "·" counts two
+      // columns in some terminals) is clipped instead of wrapping onto a
+      // line the next redraw would not clear.
       yield* emit(
-        rows
+        `${wrapOff}${rows
           .map((row, index) =>
             palette.status(
               index === 0 ? (spinnerFrames[currentFrame % spinnerFrames.length] ?? "·") : " ",
               fitToWidth(row, width === undefined ? undefined : width - 2)
             )
           )
-          .join("\n")
+          .join("\n")}${wrapOn}`
       )
       yield* Ref.set(drawn, rows.length)
     }
@@ -394,7 +407,57 @@ interface LaneState {
   tools: number
   executor: string | undefined
   readonly startedAt: number
+  readonly tokens: TokenTally
+  lastTool: { readonly tool: string; readonly at: number } | undefined
 }
+
+/** Tokens in and out so far; `estimated` once any report was an estimate. */
+export interface TokenTally {
+  input: number
+  output: number
+  estimated: boolean
+}
+
+const emptyTally = (): TokenTally => ({ input: 0, output: 0, estimated: false })
+
+const addTokens = (tally: TokenTally, event: FlowEvent): void => {
+  if (event._tag !== "TokensUsed") {
+    return
+  }
+  tally.input += event.usage.prompt
+  tally.output += event.usage.completion
+  if (event.model?.startsWith("estimated:") === true) {
+    tally.estimated = true
+  }
+}
+
+/** 950 → "950", 12_400 → "12.4k", 1_250_000 → "1.3M". */
+export const formatCount = (value: number): string =>
+  value < 1_000
+    ? `${Math.max(0, Math.round(value))}`
+    : value < 1_000_000
+      ? `${(value / 1_000).toFixed(1)}k`
+      : `${(value / 1_000_000).toFixed(1)}M`
+
+/** `3.5k tokens` (in and out together), `~` when estimated; empty before any report. */
+export const formatTally = (tally: TokenTally | undefined): string => {
+  if (tally === undefined || (tally.input === 0 && tally.output === 0)) {
+    return ""
+  }
+  return `${tally.estimated ? "~" : ""}${formatCount(tally.input + tally.output)} tokens`
+}
+
+/** How long after a tool call a lane still reads as "Running <tool>…". */
+export const toolActivityWindowMs = 15_000
+
+/** What a lane is doing right now, in two words. */
+export const activityOf = (
+  lastTool: { readonly tool: string; readonly at: number } | undefined,
+  now: number
+): string =>
+  lastTool !== undefined && now - lastTool.at <= toolActivityWindowMs
+    ? `Running ${lastTool.tool}…`
+    : "Thinking…"
 
 /** One status row per active lane, the run's own stage (if any) first. */
 export const statusBlock = (
@@ -405,17 +468,32 @@ export const statusBlock = (
     readonly stage: string | undefined
     readonly elapsedMs: number
     readonly tools: number
-  }>
+    readonly tokens?: TokenTally
+    readonly activity?: string
+  }>,
+  globalTokens?: TokenTally
 ): string | undefined => {
+  // Time, tokens and what it is doing first — the stage title last, so a
+  // narrow terminal cuts the title, not the signs of life.
   const rows = lanes
     .filter((lane) => lane.stage !== undefined)
-    .map(
-      (lane) =>
-        `${laneLabel(lane.lane, lane.executor)} · ${lane.stage ?? ""} · ${formatDurationMs(lane.elapsedMs)}${
-          lane.tools === 0 ? "" : ` · ${lane.tools} tool call${lane.tools === 1 ? "" : "s"}`
-        }`
+    .map((lane) =>
+      [
+        laneLabel(lane.lane, lane.executor),
+        formatDurationMs(lane.elapsedMs),
+        formatTally(lane.tokens),
+        lane.activity ?? "",
+        lane.stage ?? ""
+      ]
+        .filter((part) => part.length > 0)
+        .join(" · ")
     )
-  const block = [...(globalStage === undefined ? [] : [globalStage]), ...rows]
+  const tally = formatTally(globalTokens)
+  const head =
+    globalStage === undefined
+      ? []
+      : [tally.length === 0 ? globalStage : `${globalStage} · ${tally}`]
+  const block = [...head, ...rows]
   return block.length === 0 ? undefined : block.join("\n")
 }
 
@@ -431,6 +509,8 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
   // interleaves their stages, closes the wrong one, and shows whichever
   // story started last as the only thing running.
   const lanes = new Map<string, LaneState>()
+  // Tokens of events outside any lane: the whole run, for a flow with one coder.
+  const runTokens = emptyTally()
   const consumed = yield* Ref.make(0)
   const statsRef = yield* Ref.make<TerminalRunStats>({ stagesCompleted: 0, stagesFailed: 0 })
   const subscription = yield* events.subscribe
@@ -453,8 +533,11 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
           executor: state.executor,
           stage: state.stages.at(-1)?.name,
           elapsedMs: now - state.startedAt,
-          tools: state.tools
-        }))
+          tools: state.tools,
+          tokens: state.tokens,
+          activity: activityOf(state.lastTool, now)
+        })),
+        runTokens
       )
     )
   })
@@ -498,7 +581,9 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
               stages: [],
               tools: 0,
               executor: undefined,
-              startedAt: now
+              startedAt: now,
+              tokens: emptyTally(),
+              lastTool: undefined
             } satisfies LaneState)
           lanes.set(tagged.lane, state)
           if (tagged.executor !== undefined) {
@@ -518,7 +603,9 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
             yield* countStage(event)
           } else if (event._tag === "ToolUse") {
             state.tools += 1
+            state.lastTool = { tool: terminalSafe(event.tool), at: now }
           }
+          addTokens(state.tokens, event)
           if (state.stages.length === 0 && closesChild(event)) {
             lanes.delete(tagged.lane)
           }
@@ -531,6 +618,10 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
           yield* refreshStatus
           yield* Ref.update(consumed, (count) => count + 1)
           return
+        }
+        if (event._tag === "TokensUsed") {
+          addTokens(runTokens, event)
+          yield* refreshStatus
         }
         const currentDepth = closesChild(event)
           ? yield* Ref.updateAndGet(depth, (value) => Math.max(0, value - 1))
@@ -556,6 +647,12 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
         yield* Ref.update(consumed, (count) => count + 1)
       })
     ),
+    Effect.forkScoped
+  )
+  // Elapsed time and "Running <tool>…" age between events too.
+  yield* Effect.sleep("1 second").pipe(
+    Effect.andThen(Effect.suspend(() => (lanes.size === 0 ? Effect.void : refreshStatus))),
+    Effect.forever,
     Effect.forkScoped
   )
   // Display only, so a drain that gives up just means a trailing line was

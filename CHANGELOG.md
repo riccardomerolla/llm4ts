@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.9.3
+
+- Each running story's status row reads like a coding agent's: elapsed
+  time, tokens so far (`~3.5k tokens`, `~` when estimated), what it is doing
+  (`Running shell…`, `Thinking…`) and, last, the stage title. Rows refresh
+  every second, not only on events. A run without stories shows its token
+  total on its status line.
+- The status block no longer leaves stale rows behind: it is drawn with line
+  wrap off and cleared to the end of the screen, so a row wider than the
+  terminal (ambiguous-width characters count two columns in some terminals)
+  is clipped instead of wrapping onto a line the redraw would miss.
+- Capability events (`capability GitRead: git status`, gate commands) print
+  only at `--verbose`; they stay in the trace.
+
 ## 2.9.2
 
 - The `epic-stories` judge reads what the story's dependencies provide
