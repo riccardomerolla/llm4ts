@@ -85,6 +85,11 @@ export const terminalSafe = (value: string): string => {
 
 const Ansi = Object.freeze({
   reset: "\u001b[0m",
+  cyan: "\u001b[36m",
+  blue: "\u001b[34m",
+  magenta: "\u001b[35m",
+  yellow: "\u001b[33m",
+  greenBold: "\u001b[1;32m",
   boldMagenta: "\u001b[1;35m",
   green: "\u001b[32m",
   red: "\u001b[31m",
@@ -102,7 +107,11 @@ export interface TerminalPalette {
   readonly assistant: (text: string) => string
   readonly toolCall: (tool: string, args: string) => string
   readonly status: (frame: string, label: string) => string
+  /** A lane's tag, in the lane's own colour (`index` picks it). */
+  readonly lane: (index: number, text: string) => string
 }
+
+const laneColours = [Ansi.cyan, Ansi.yellow, Ansi.blue, Ansi.greenBold, Ansi.magenta]
 
 export const makeTerminalPalette = (enabled: boolean): TerminalPalette => {
   const paint = (code: string, text: string): string =>
@@ -119,7 +128,8 @@ export const makeTerminalPalette = (enabled: boolean): TerminalPalette => {
       const head = paint(Ansi.yellowBold, `● ${tool}`)
       return args.length === 0 ? head : `${head} ${paint(Ansi.darkGray, `(${args})`)}`
     },
-    status: (frame, label) => `${paint(Ansi.boldMagenta, frame)} ${label}`
+    status: (frame, label) => `${paint(Ansi.boldMagenta, frame)} ${label}`,
+    lane: (index, text) => paint(laneColours[index % laneColours.length] ?? Ansi.cyan, text)
   }
 }
 
@@ -222,8 +232,15 @@ const clearLine = "\r\u001b[2K"
 
 export interface TerminalOutput {
   readonly isTTY?: boolean
+  readonly columns?: number
   readonly write: (text: string) => unknown
 }
+
+/** Cuts a plain status line to the terminal's width, so a wrapped line never breaks the redraw. */
+export const fitToWidth = (line: string, columns: number | undefined): string =>
+  columns === undefined || columns < 8 || line.length <= columns - 2
+    ? line
+    : `${line.slice(0, columns - 3)}…`
 
 export const terminalSupportsColor = (
   output: TerminalOutput,
@@ -235,13 +252,20 @@ export const makeLiveTerminalSurface = Effect.fn("@llm4ts/runner/Terminal.makeLi
     process.stdout.write(text)
   },
   palette: TerminalPalette = makeTerminalPalette(true),
-  tick: Duration.Input = "100 millis"
+  tick: Duration.Input = "100 millis",
+  columns: () => number | undefined = () => process.stdout.columns
 ): Effect.fn.Return<TerminalSurface, never, Scope.Scope> {
   const lock = yield* Semaphore.make(1)
   const status = yield* Ref.make<string | undefined>(undefined)
   const frame = yield* Ref.make(0)
   const suspended = yield* Ref.make(false)
+  // How many lines the status block took when last drawn: a multi-line
+  // block (one row per concurrent story) is cleared line by line upwards.
+  const drawn = yield* Ref.make(0)
   const emit = (text: string): Effect.Effect<void> => Effect.sync(() => write(text))
+  const clearStatus = Effect.flatMap(Ref.getAndSet(drawn, 0), (lines) =>
+    emit(lines <= 1 ? clearLine : `${clearLine}${`\u001b[1A${clearLine}`.repeat(lines - 1)}`)
+  )
   const drawStatus = Effect.gen(function* () {
     if (yield* Ref.get(suspended)) {
       return
@@ -249,24 +273,34 @@ export const makeLiveTerminalSurface = Effect.fn("@llm4ts/runner/Terminal.makeLi
     const label = yield* Ref.get(status)
     if (label !== undefined) {
       const currentFrame = yield* Ref.get(frame)
+      const width = columns()
+      const rows = label.split("\n")
       yield* emit(
-        `${clearLine}${palette.status(spinnerFrames[currentFrame % spinnerFrames.length], label)}`
+        rows
+          .map((row, index) =>
+            palette.status(
+              index === 0 ? (spinnerFrames[currentFrame % spinnerFrames.length] ?? "·") : " ",
+              fitToWidth(row, width === undefined ? undefined : width - 2)
+            )
+          )
+          .join("\n")
       )
+      yield* Ref.set(drawn, rows.length)
     }
   })
   const surface: TerminalSurface = {
     palette,
     log: (line) =>
       lock.withPermit(
-        emit(clearLine).pipe(Effect.andThen(emit(`${line}\n`)), Effect.andThen(drawStatus))
+        clearStatus.pipe(Effect.andThen(emit(`${line}\n`)), Effect.andThen(drawStatus))
       ),
     setStatus: (label) =>
       lock.withPermit(
-        Ref.set(status, label).pipe(Effect.andThen(emit(clearLine)), Effect.andThen(drawStatus))
+        clearStatus.pipe(Effect.andThen(Ref.set(status, label)), Effect.andThen(drawStatus))
       ),
     suspend: (effect) =>
       lock
-        .withPermit(Ref.set(suspended, true).pipe(Effect.andThen(emit(clearLine))))
+        .withPermit(Ref.set(suspended, true).pipe(Effect.andThen(clearStatus)))
         .pipe(
           Effect.andThen(effect),
           Effect.ensuring(
@@ -276,11 +310,11 @@ export const makeLiveTerminalSurface = Effect.fn("@llm4ts/runner/Terminal.makeLi
   }
   yield* Effect.sleep(tick).pipe(
     Effect.andThen(Ref.update(frame, (current) => current + 1)),
-    Effect.andThen(lock.withPermit(drawStatus)),
+    Effect.andThen(lock.withPermit(clearStatus.pipe(Effect.andThen(drawStatus)))),
     Effect.forever,
     Effect.forkScoped
   )
-  yield* Effect.addFinalizer(() => lock.withPermit(emit(clearLine)))
+  yield* Effect.addFinalizer(() => lock.withPermit(clearStatus))
   return surface
 })
 
@@ -292,7 +326,7 @@ export const makeTerminalSurface = (
     output.write(text)
   }
   return terminalSupportsColor(output, environment)
-    ? makeLiveTerminalSurface(write)
+    ? makeLiveTerminalSurface(write, makeTerminalPalette(true), "100 millis", () => output.columns)
     : Effect.succeed(makePlainTerminalSurface((line) => write(`${line}\n`)))
 }
 
@@ -316,6 +350,75 @@ interface OpenStage {
   readonly startedAt: number
 }
 
+/** The lane an event belongs to (a concurrent story), if it carries one. */
+export const laneOfEvent = (
+  event: FlowEvent
+): { readonly lane: string; readonly executor?: string } | undefined => {
+  switch (event._tag) {
+    case "StageStarted":
+    case "StageCompleted":
+    case "StageFailed":
+    case "Info":
+    case "ToolUse":
+    case "AssistantMessage":
+    case "TokensUsed":
+      return event.lane === undefined
+        ? undefined
+        : {
+            lane: event.lane,
+            ...(event.executor === undefined ? {} : { executor: event.executor })
+          }
+    default:
+      return undefined
+  }
+}
+
+/** `bonifici-list · lemonade-deepseek` — how a lane is named on screen. */
+export const laneLabel = (lane: string, executor: string | undefined): string =>
+  executor === undefined ? lane : `${lane} · ${executor}`
+
+/**
+ * Whether a laned event is printed as its own line. With several stories
+ * running, tool calls are counted on each story's status row instead;
+ * `Verbose` prints them all, tagged.
+ */
+export const rendersLanedEvent = (verbosity: Verbosity, event: FlowEvent): boolean =>
+  event._tag === "ToolUse"
+    ? verbosity === "Verbose" || verbosity === "Debug"
+    : rendersEvent(verbosity, event)
+
+interface LaneState {
+  readonly index: number
+  depth: number
+  stages: ReadonlyArray<OpenStage>
+  tools: number
+  executor: string | undefined
+  readonly startedAt: number
+}
+
+/** One status row per active lane, the run's own stage (if any) first. */
+export const statusBlock = (
+  globalStage: string | undefined,
+  lanes: ReadonlyArray<{
+    readonly lane: string
+    readonly executor: string | undefined
+    readonly stage: string | undefined
+    readonly elapsedMs: number
+    readonly tools: number
+  }>
+): string | undefined => {
+  const rows = lanes
+    .filter((lane) => lane.stage !== undefined)
+    .map(
+      (lane) =>
+        `${laneLabel(lane.lane, lane.executor)} · ${lane.stage ?? ""} · ${formatDurationMs(lane.elapsedMs)}${
+          lane.tools === 0 ? "" : ` · ${lane.tools} tool call${lane.tools === 1 ? "" : "s"}`
+        }`
+    )
+  const block = [...(globalStage === undefined ? [] : [globalStage]), ...rows]
+  return block.length === 0 ? undefined : block.join("\n")
+}
+
 export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume")(function* (
   events: FlowEventHub,
   surface: TerminalSurface,
@@ -324,6 +427,10 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
 ): Effect.fn.Return<TerminalConsumer, never, Scope.Scope> {
   const depth = yield* Ref.make(0)
   const stages = yield* Ref.make<ReadonlyArray<OpenStage>>([])
+  // Concurrent stories keep their own stage stacks: one shared stack
+  // interleaves their stages, closes the wrong one, and shows whichever
+  // story started last as the only thing running.
+  const lanes = new Map<string, LaneState>()
   const consumed = yield* Ref.make(0)
   const statsRef = yield* Ref.make<TerminalRunStats>({ stagesCompleted: 0, stagesFailed: 0 })
   const subscription = yield* events.subscribe
@@ -334,9 +441,97 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
           Effect.map((now) => `${palette.dim(new Date(now).toISOString().slice(11, 19))} `)
         )
       : Effect.succeed("")
+
+  const refreshStatus = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis
+    const global = (yield* Ref.get(stages)).at(-1)?.name
+    yield* surface.setStatus(
+      statusBlock(
+        global,
+        [...lanes.entries()].map(([lane, state]) => ({
+          lane,
+          executor: state.executor,
+          stage: state.stages.at(-1)?.name,
+          elapsedMs: now - state.startedAt,
+          tools: state.tools
+        }))
+      )
+    )
+  })
+
+  const countStage = (event: FlowEvent): Effect.Effect<void> =>
+    event._tag === "StageCompleted"
+      ? Ref.update(statsRef, (current) => ({
+          ...current,
+          stagesCompleted: current.stagesCompleted + 1
+        }))
+      : event._tag === "StageFailed"
+        ? Ref.update(statsRef, (current) => ({
+            ...current,
+            stagesFailed: current.stagesFailed + 1
+          }))
+        : Effect.void
+
+  const withDuration = (event: FlowEvent, line: string, closed: OpenStage | undefined) =>
+    Effect.gen(function* () {
+      if (
+        closed === undefined ||
+        (event._tag !== "StageCompleted" && event._tag !== "StageFailed")
+      ) {
+        return line
+      }
+      const now = yield* Clock.currentTimeMillis
+      return `${line} ${palette.dim(`(${formatDurationMs(now - closed.startedAt)})`)}`
+    })
+
   yield* Stream.fromSubscription(subscription).pipe(
     Stream.runForEach((event) =>
       Effect.gen(function* () {
+        const tagged = laneOfEvent(event)
+        if (tagged !== undefined) {
+          const now = yield* Clock.currentTimeMillis
+          const state =
+            lanes.get(tagged.lane) ??
+            ({
+              index: lanes.size,
+              depth: 0,
+              stages: [],
+              tools: 0,
+              executor: undefined,
+              startedAt: now
+            } satisfies LaneState)
+          lanes.set(tagged.lane, state)
+          if (tagged.executor !== undefined) {
+            state.executor = tagged.executor
+          }
+          let closed: OpenStage | undefined
+          if (closesChild(event)) {
+            state.depth = Math.max(0, state.depth - 1)
+          }
+          const lineDepth = state.depth
+          if (event._tag === "StageStarted") {
+            state.depth += 1
+            state.stages = [...state.stages, { name: terminalSafe(event.stage), startedAt: now }]
+          } else if (closesChild(event)) {
+            closed = state.stages.at(-1)
+            state.stages = state.stages.slice(0, -1)
+            yield* countStage(event)
+          } else if (event._tag === "ToolUse") {
+            state.tools += 1
+          }
+          if (state.stages.length === 0 && closesChild(event)) {
+            lanes.delete(tagged.lane)
+          }
+          if (rendersLanedEvent(verbosity, event)) {
+            const tag = palette.lane(state.index, `[${laneLabel(tagged.lane, state.executor)}]`)
+            const line = yield* withDuration(event, terminalLine(event, palette), closed)
+            const prefix = yield* timestampPrefix
+            yield* surface.log(`${prefix}${tag} ${indentBlock(lineDepth, line)}`)
+          }
+          yield* refreshStatus
+          yield* Ref.update(consumed, (count) => count + 1)
+          return
+        }
         const currentDepth = closesChild(event)
           ? yield* Ref.updateAndGet(depth, (value) => Math.max(0, value - 1))
           : yield* Ref.get(depth)
@@ -346,32 +541,15 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
           const active = terminalSafe(event.stage)
           const startedAt = yield* Clock.currentTimeMillis
           yield* Ref.update(stages, (current) => [...current, { name: active, startedAt }])
-          yield* surface.setStatus(active)
+          yield* refreshStatus
         } else if (closesChild(event)) {
           closedStage = (yield* Ref.get(stages)).at(-1)
-          const remaining = yield* Ref.updateAndGet(stages, (current) => current.slice(0, -1))
-          yield* surface.setStatus(remaining.at(-1)?.name)
-          if (event._tag === "StageCompleted") {
-            yield* Ref.update(statsRef, (current) => ({
-              ...current,
-              stagesCompleted: current.stagesCompleted + 1
-            }))
-          } else if (event._tag === "StageFailed") {
-            yield* Ref.update(statsRef, (current) => ({
-              ...current,
-              stagesFailed: current.stagesFailed + 1
-            }))
-          }
+          yield* Ref.update(stages, (current) => current.slice(0, -1))
+          yield* refreshStatus
+          yield* countStage(event)
         }
         if (rendersEvent(verbosity, event)) {
-          let line = terminalLine(event, palette)
-          if (
-            closedStage !== undefined &&
-            (event._tag === "StageCompleted" || event._tag === "StageFailed")
-          ) {
-            const now = yield* Clock.currentTimeMillis
-            line = `${line} ${palette.dim(`(${formatDurationMs(now - closedStage.startedAt)})`)}`
-          }
+          const line = yield* withDuration(event, terminalLine(event, palette), closedStage)
           const prefix = yield* timestampPrefix
           yield* surface.log(`${prefix}${indentBlock(currentDepth, line)}`)
         }

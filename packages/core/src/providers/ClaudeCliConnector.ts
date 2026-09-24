@@ -58,6 +58,17 @@ export const claudeCliInitModel = (line: string): string | undefined => {
     : undefined
 }
 
+/** The text of a `result` event that reports an error, if the line is one. */
+export const claudeCliErrorResult = (line: string): string | undefined => {
+  const json = parseJsonLine(line)
+  if (json === undefined || jsonStringField(json, "type") !== "result") {
+    return undefined
+  }
+  const failed = jsonField(json, "is_error") === true
+  const text = jsonStringField(json, "result")
+  return failed && text !== undefined && text.trim().length > 0 ? text : undefined
+}
+
 export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
   const json = parseJsonLine(line)
   if (json === undefined) {
@@ -137,7 +148,10 @@ export const makeClaudeCliConnector = (
       prompt
     )
     if (result.exitCode !== 0) {
-      const raw = result.stdout.join("\n")
+      // claude explains most refusals on stdout (a usage limit), but a
+      // startup failure only on stderr: an empty reason is useless, so both
+      // streams are reported.
+      const raw = [...result.stdout, ...result.stderr].join("\n").trim()
       return yield* failClassifiedCliError(
         "claude",
         `claude exited with code ${result.exitCode}`,
@@ -149,38 +163,63 @@ export const makeClaudeCliConnector = (
 
   const completeStream = (prompt: string) =>
     Stream.unwrap(
-      Effect.map(Ref.make<string | undefined>(undefined), (model) =>
-        executor
-          .runStreamingWithStdin(
-            ["claude", "--print", "--output-format", "stream-json", "--verbose", ...extraArgs],
-            cwd,
-            config.envVars,
-            prompt
-          )
-          .pipe(
-            Stream.mapEffect((line) => {
-              const initializedModel = claudeCliInitModel(line)
-              return initializedModel === undefined
-                ? Effect.succeed(line)
-                : Ref.set(model, initializedModel).pipe(Effect.as(line))
-            }),
-            Stream.flatMap((line) => Stream.fromIterable(parseClaudeCliStreamLine(line))),
-            Stream.mapEffect((chunk) =>
-              chunk.usage === undefined
-                ? Effect.succeed(chunk)
-                : Effect.map(Ref.get(model), (servedModel) =>
-                    servedModel === undefined
-                      ? chunk
-                      : LlmChunk.make({
-                          ...chunk,
-                          metadata: {
-                            ...chunk.metadata,
-                            model: servedModel
-                          }
-                        })
-                  )
+      Effect.map(
+        Effect.all([Ref.make<string | undefined>(undefined), Ref.make("")]),
+        ([model, said]) =>
+          executor
+            .runStreamingWithStdin(
+              ["claude", "--print", "--output-format", "stream-json", "--verbose", ...extraArgs],
+              cwd,
+              config.envVars,
+              prompt
             )
-          )
+            .pipe(
+              Stream.mapEffect((line) => {
+                const initializedModel = claudeCliInitModel(line)
+                const refusal = claudeCliErrorResult(line)
+                const noted = refusal === undefined ? Effect.void : Ref.set(said, refusal)
+                return initializedModel === undefined
+                  ? Effect.as(noted, line)
+                  : Ref.set(model, initializedModel).pipe(Effect.andThen(noted), Effect.as(line))
+              }),
+              Stream.flatMap((line) => Stream.fromIterable(parseClaudeCliStreamLine(line))),
+              // What claude last said is the reason when it then exits non-zero
+              // with an empty stderr (a bad model name, a usage limit): kept so
+              // the failure can name it instead of "exited with code 1".
+              Stream.tap((chunk) =>
+                chunk.delta.length === 0
+                  ? Effect.void
+                  : Ref.update(said, (text) => `${text}${chunk.delta}`.slice(-2_000))
+              ),
+              Stream.catchIf(
+                () => true,
+                (error) =>
+                  Stream.unwrap(
+                    Effect.map(Ref.get(said), (text) =>
+                      text.trim().length === 0
+                        ? Stream.fail(error)
+                        : Stream.fromEffect(
+                            failClassifiedCliError("claude", error.message, text.trim())
+                          )
+                    )
+                  )
+              ),
+              Stream.mapEffect((chunk) =>
+                chunk.usage === undefined
+                  ? Effect.succeed(chunk)
+                  : Effect.map(Ref.get(model), (servedModel) =>
+                      servedModel === undefined
+                        ? chunk
+                        : LlmChunk.make({
+                            ...chunk,
+                            metadata: {
+                              ...chunk.metadata,
+                              model: servedModel
+                            }
+                          })
+                    )
+              )
+            )
       )
     )
 

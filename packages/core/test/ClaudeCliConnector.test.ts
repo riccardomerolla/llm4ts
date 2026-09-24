@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { CliContext } from "@llm4ts/core/Connector"
 import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import { ProviderError } from "@llm4ts/core/Errors"
 import { ConnectorIds } from "@llm4ts/core/Models"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import {
@@ -150,6 +151,35 @@ describe("ClaudeCliConnector", () => {
       })
       assert.strictEqual(usage?.cached, 1000)
       assert.strictEqual(model, "claude-sonnet-4-6")
+    })
+  )
+
+  it.effect("a stream that exits non-zero names what claude said, not just the exit code", () =>
+    Effect.gen(function* () {
+      const connector = makeClaudeCliConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.ClaudeCli, model: "claude-opus-5.5" }),
+        makeProcessExecutor({
+          run: () => Effect.succeed(ProcessResult.make({ stdout: [], exitCode: 0 })),
+          runStreaming: () => Stream.empty,
+          // A bad model name: claude answers with an explanation, then exits 1
+          // with nothing on stderr (observed 2026-09-24).
+          runStreamingWithStdin: () =>
+            Stream.concat(
+              Stream.make(
+                '{"type":"assistant","message":{"content":[{"type":"text","text":"There\'s an issue with the selected model (claude-opus-5.5). It may not exist or you may not have access to it."}]}}',
+                '{"type":"result","subtype":"success","is_error":true,"result":"There\'s an issue with the selected model (claude-opus-5.5)."}'
+              ),
+              Stream.fail(
+                ProviderError.make({ message: "claude failed: claude exited with code 1" })
+              )
+            )
+        })
+      )
+      const error = yield* Effect.flip(
+        connector.executeStructuredWithUsage("triage", triageSchema, triageJsonSchema)
+      )
+      assert.include(error.message, "claude exited with code 1")
+      assert.include(error.message, "issue with the selected model (claude-opus-5.5)")
     })
   )
 

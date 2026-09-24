@@ -233,6 +233,24 @@ export const narrowRoster = (
 
 const describeUntil = (until: number): string => new Date(until).toISOString()
 
+// The executor names a model its harness cannot serve (a typo, a model the
+// account has no access to): every call will fail the same way, so it sits
+// the run out. claude says "There's an issue with the selected model".
+const modelUnavailableSignals: ReadonlyArray<string> = [
+  "issue with the selected model",
+  "may not exist or you may not have access",
+  "model not found",
+  "model_not_found",
+  "unknown model",
+  "invalid model",
+  "does not exist or you do not have access"
+]
+
+export const isModelUnavailableMessage = (message: string): boolean => {
+  const normalized = message.toLowerCase()
+  return modelUnavailableSignals.some((signal) => normalized.includes(signal))
+}
+
 /**
  * The exclusion a failure earns, or none. `recentRateLimits` holds the
  * executor's rate-limit instants inside the window, this one included.
@@ -243,6 +261,13 @@ export const exclusionFor = (
   now: number,
   recentRateLimits: number
 ): Exclusion | undefined => {
+  if (isModelUnavailableMessage(error.message)) {
+    return Exclusion.make({
+      id: spec.id,
+      kind: "run",
+      reason: `its model${spec.model === undefined ? "" : ` '${spec.model}'`} is unavailable (${error.message.slice(0, 200)})`
+    })
+  }
   switch (error._tag) {
     case "UsageLimitError": {
       const reset = error.resetAt === undefined ? undefined : error.resetAt.epochMilliseconds

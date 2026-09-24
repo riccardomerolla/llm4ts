@@ -38,16 +38,28 @@ export class JudgmentObserved extends Schema.TaggedClass<JudgmentObserved>()("Ju
 }) {}
 
 export class StageStarted extends Schema.TaggedClass<StageStarted>()("StageStarted", {
-  stage: Schema.String
+  stage: Schema.String,
+  /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
+  lane: Schema.optionalKey(Schema.String),
+  /** The roster executor working that lane, when there is one (ADR 0019). */
+  executor: Schema.optionalKey(Schema.String)
 }) {}
 
 export class StageCompleted extends Schema.TaggedClass<StageCompleted>()("StageCompleted", {
-  stage: Schema.String
+  stage: Schema.String,
+  /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
+  lane: Schema.optionalKey(Schema.String),
+  /** The roster executor working that lane, when there is one (ADR 0019). */
+  executor: Schema.optionalKey(Schema.String)
 }) {}
 
 export class StageFailed extends Schema.TaggedClass<StageFailed>()("StageFailed", {
   stage: Schema.String,
-  message: Schema.String
+  message: Schema.String,
+  /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
+  lane: Schema.optionalKey(Schema.String),
+  /** The roster executor working that lane, when there is one (ADR 0019). */
+  executor: Schema.optionalKey(Schema.String)
 }) {}
 
 export class Aborted extends Schema.TaggedClass<Aborted>()("Aborted", {
@@ -55,22 +67,38 @@ export class Aborted extends Schema.TaggedClass<Aborted>()("Aborted", {
 }) {}
 
 export class Info extends Schema.TaggedClass<Info>()("Info", {
-  message: Schema.String
+  message: Schema.String,
+  /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
+  lane: Schema.optionalKey(Schema.String),
+  /** The roster executor working that lane, when there is one (ADR 0019). */
+  executor: Schema.optionalKey(Schema.String)
 }) {}
 
 export class ToolUse extends Schema.TaggedClass<ToolUse>()("ToolUse", {
   tool: Schema.String,
-  args: Schema.String
+  args: Schema.String,
+  /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
+  lane: Schema.optionalKey(Schema.String),
+  /** The roster executor working that lane, when there is one (ADR 0019). */
+  executor: Schema.optionalKey(Schema.String)
 }) {}
 
 export class AssistantMessage extends Schema.TaggedClass<AssistantMessage>()("AssistantMessage", {
-  text: Schema.String
+  text: Schema.String,
+  /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
+  lane: Schema.optionalKey(Schema.String),
+  /** The roster executor working that lane, when there is one (ADR 0019). */
+  executor: Schema.optionalKey(Schema.String)
 }) {}
 
 export class TokensUsed extends Schema.TaggedClass<TokensUsed>()("TokensUsed", {
   agent: Schema.String,
   model: Schema.optionalKey(Schema.String),
-  usage: TokenUsage
+  usage: TokenUsage,
+  /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
+  lane: Schema.optionalKey(Schema.String),
+  /** The roster executor working that lane, when there is one (ADR 0019). */
+  executor: Schema.optionalKey(Schema.String)
 }) {}
 
 export class CapabilityUsedEvent extends Schema.TaggedClass<CapabilityUsedEvent>()(
@@ -130,6 +158,79 @@ export const FlowEventsValues = Object.freeze({
 export interface FlowEventsShape {
   readonly publish: (event: FlowEvent) => Effect.Effect<void>
 }
+
+/** A concurrent unit of work whose events should say so (a story, ADR 0013/0019). */
+export interface Lane {
+  /** Stable key: the story id. */
+  readonly lane: string
+  /** The executor working it now; read at every publish, so a handover shows. */
+  readonly executor?: Effect.Effect<string | undefined>
+  /** The lane's working directory, dropped from tool arguments (the lane already names it). */
+  readonly workDir?: string
+}
+
+/** Tool arguments without the lane's own directory: `cd <dir> && x` → `x`, `<dir>/src/a` → `src/a`. */
+export const shortenLaneArgs = (args: string, workDir: string | undefined): string => {
+  if (workDir === undefined || workDir.length === 0) {
+    return args
+  }
+  const root = workDir.replace(/\/+$/, "")
+  return args.split(`cd ${root} && `).join("").split(`${root}/`).join("")
+}
+
+const stamped = (
+  event: FlowEvent,
+  lane: string,
+  executor: string | undefined,
+  workDir: string | undefined
+): FlowEvent => {
+  const tags = { lane, ...(executor === undefined ? {} : { executor }) }
+  switch (event._tag) {
+    case "StageStarted":
+      return event.lane !== undefined ? event : StageStarted.make({ stage: event.stage, ...tags })
+    case "StageCompleted":
+      return event.lane !== undefined ? event : StageCompleted.make({ stage: event.stage, ...tags })
+    case "StageFailed":
+      return event.lane !== undefined
+        ? event
+        : StageFailed.make({ stage: event.stage, message: event.message, ...tags })
+    case "Info":
+      return event.lane !== undefined ? event : Info.make({ message: event.message, ...tags })
+    case "ToolUse":
+      return event.lane !== undefined
+        ? event
+        : ToolUse.make({
+            tool: event.tool,
+            args: shortenLaneArgs(event.args, workDir),
+            ...tags
+          })
+    case "AssistantMessage":
+      return event.lane !== undefined ? event : AssistantMessage.make({ text: event.text, ...tags })
+    case "TokensUsed":
+      return event.lane !== undefined
+        ? event
+        : TokensUsed.make({
+            agent: event.agent,
+            usage: event.usage,
+            ...(event.model === undefined ? {} : { model: event.model }),
+            ...tags
+          })
+    default:
+      return event
+  }
+}
+
+/**
+ * The same events, stamped with a lane: every stage, message, tool call and
+ * token report says which story it belongs to and which executor works it.
+ * An event already stamped (a nested context) keeps its own lane.
+ */
+export const withLane = (events: FlowEventsShape, lane: Lane): FlowEventsShape => ({
+  publish: (event) =>
+    Effect.flatMap(lane.executor ?? Effect.succeed(undefined), (executor) =>
+      events.publish(stamped(event, lane.lane, executor, lane.workDir))
+    )
+})
 
 /** Publish an observation, rendering the same decision and outcome in advise mode. */
 export const publishJudgmentObserved = Effect.fn("@llm4ts/flow/FlowEvents.publishJudgmentObserved")(

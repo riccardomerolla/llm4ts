@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import type * as Scope from "effect/Scope"
 import type { ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { CliConnectorConfig, defaultReasoningConfig } from "@llm4ts/core/ConnectorConfig"
@@ -49,7 +50,9 @@ import {
   Info,
   TokensUsed,
   makeFlowEventHub,
-  type FlowEventHub
+  withLane,
+  type FlowEventHub,
+  type FlowEventsShape
 } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
@@ -444,15 +447,16 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       readonly reviewers: ReadonlyArray<LlmServiceShape>
       readonly judgment: JudgmentShape
     },
-    rebind: boolean
+    rebind: boolean,
+    laneEvents: FlowEventsShape = events
   ): FlowContextShape =>
     FlowContext.of({
       reasoning: seats.reasoning,
       coder: seats.coder,
       judgment: seats.judgment,
-      git: makeGitTool(dependencies.process, workDir, events),
-      hosting: makeGitHubTool(dependencies.process, workDir, events),
-      events,
+      git: makeGitTool(dependencies.process, workDir, laneEvents),
+      hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
+      events: laneEvents,
       reviewers: seats.reviewers,
       coderCapabilities: seats.coder.capabilities,
       userPrompt: options.userPrompt,
@@ -462,8 +466,17 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       // `contextFor` of its own — nothing in the design nests worktrees.
       ...(rebind
         ? {
-            contextFor: (directory: string) =>
-              Effect.map(seatsFor(directory), (rebound) => contextAt(directory, rebound, false))
+            contextFor: (directory: string, contextOptions?: ContextOptions) =>
+              Effect.map(seatsFor(directory), (rebound) =>
+                contextAt(
+                  directory,
+                  rebound,
+                  false,
+                  contextOptions?.label === undefined
+                    ? events
+                    : withLane(events, { lane: contextOptions.label, workDir: directory })
+                )
+              )
           }
         : {})
     })
@@ -595,10 +608,15 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             : ConnectorCapabilitiesClass.make({})
         )
       })
-    const viewFor = (held: HeldCoder, workDir: string, label: string): RosterView => ({
+    const viewFor = (
+      held: HeldCoder,
+      workDir: string,
+      label: string,
+      laneEvents: FlowEventsShape
+    ): RosterView => ({
       forRole: (role) =>
         rosterSeat(roster, source, role, workDir, {
-          events,
+          events: laneEvents,
           avoid: Effect.map(held.executor, (id) => (id === undefined ? [] : [id])),
           borrow: held.lease,
           label
@@ -612,10 +630,11 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       workDir: string,
       held: HeldCoder,
       label: string,
-      rebind: boolean
+      rebind: boolean,
+      laneEvents: FlowEventsShape
     ): Effect.Effect<FlowContextShape, FlowError> =>
       Effect.gen(function* () {
-        const view = viewFor(held, workDir, label)
+        const view = viewFor(held, workDir, label, laneEvents)
         const judgmentSeat =
           options.judgment === undefined
             ? view.forRole("judge")
@@ -627,9 +646,9 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
           reasoning: view.forRole(rebind ? "planner" : "reviewer"),
           coder: held.service,
           judgment,
-          git: makeGitTool(dependencies.process, workDir, events),
-          hosting: makeGitHubTool(dependencies.process, workDir, events),
-          events,
+          git: makeGitTool(dependencies.process, workDir, laneEvents),
+          hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
+          events: laneEvents,
           reviewers: [view.forRole("reviewer")],
           coderCapabilities: yield* coderCapabilities(workDir, held),
           userPrompt: options.userPrompt,
@@ -641,15 +660,26 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
                 contextFor: (directory: string, contextOptions?: ContextOptions) =>
                   Effect.gen(function* () {
                     const label = contextOptions?.label ?? directory
+                    // The lane's executor is read at every event, so a
+                    // handover shows on the next line it prints.
+                    const executorRef = yield* Ref.make<Effect.Effect<string | undefined>>(
+                      Effect.succeed(undefined)
+                    )
+                    const laneEvents = withLane(events, {
+                      lane: label,
+                      executor: Effect.flatten(Ref.get(executorRef)),
+                      workDir: directory
+                    })
                     const storyCoder = yield* makeHeldCoder(roster, source, directory, {
-                      events,
+                      events: laneEvents,
                       eager: true,
                       label,
                       ...(contextOptions?.prefer === undefined
                         ? {}
                         : { prefer: contextOptions.prefer })
                     })
-                    return yield* contextIn(directory, storyCoder, label, false)
+                    yield* Ref.set(executorRef, storyCoder.executor)
+                    return yield* contextIn(directory, storyCoder, label, false, laneEvents)
                   })
               }
             : {})
@@ -660,7 +690,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       eager: false,
       label: "the run"
     })
-    return yield* contextIn(options.workDir, rootCoder, "the run", true)
+    return yield* contextIn(options.workDir, rootCoder, "the run", true, events)
   })
 
   const rosterDocument =

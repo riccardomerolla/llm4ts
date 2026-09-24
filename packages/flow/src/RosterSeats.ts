@@ -125,49 +125,103 @@ export const rosterSeat = (
   workDir: string,
   options: RosterSeatOptions
 ): LlmServiceShape => {
-  const acquire: Effect.Effect<ExecutorSpec, LlmError, Scope.Scope> = Effect.gen(function* () {
-    const avoid = options.avoid === undefined ? [] : yield* options.avoid
-    if (avoid.length > 0 && !(yield* roster.canEverServe(role, avoid))) {
-      const borrowed = options.borrow === undefined ? undefined : yield* options.borrow
-      if (borrowed !== undefined && hasRole(borrowed, role)) {
-        yield* say(
-          options.events,
-          `${borrowed.id} takes ${role}${options.label === undefined ? "" : ` for ${options.label}`} on its own coder's slot — not independent (no other executor can take ${role})`
-        )
-        return borrowed
+  const acquire = (
+    alsoAvoid: ReadonlyArray<string>
+  ): Effect.Effect<ExecutorSpec, LlmError, Scope.Scope> =>
+    Effect.gen(function* () {
+      const avoid = [...(options.avoid === undefined ? [] : yield* options.avoid), ...alsoAvoid]
+      if (avoid.length > 0 && !(yield* roster.canEverServe(role, avoid))) {
+        const borrowed = options.borrow === undefined ? undefined : yield* options.borrow
+        if (borrowed !== undefined && hasRole(borrowed, role)) {
+          yield* say(
+            options.events,
+            `${borrowed.id} takes ${role}${options.label === undefined ? "" : ` for ${options.label}`} on its own coder's slot — not independent (no other executor can take ${role})`
+          )
+          return borrowed
+        }
       }
-    }
-    const lease = yield* roster
-      .lease(role, { avoid, ...(options.label === undefined ? {} : { label: options.label }) })
-      .pipe(Effect.mapError(asLlmError))
-    return lease.executor
-  })
+      const lease = yield* roster
+        .lease(role, { avoid, ...(options.label === undefined ? {} : { label: options.label }) })
+        .pipe(Effect.mapError(asLlmError))
+      return lease.executor
+    })
 
   const seatOf = (executor: ExecutorSpec): Effect.Effect<RosterSeat, LlmError> =>
     source.seatFor(executor, role, workDir).pipe(Effect.mapError(asLlmError))
 
-  const reportOn =
-    (executor: ExecutorSpec) =>
-    (error: LlmError): Effect.Effect<void> =>
-      Effect.asVoid(roster.report(executor.id, error))
+  /**
+   * After a failure that took `executor` out of the round, whether another
+   * executor can still take the call: the call moves once, never twice — a
+   * second failure is the call's own, not the executor's.
+   */
+  const retryElsewhere = (
+    executor: ExecutorSpec,
+    error: LlmError,
+    tried: ReadonlyArray<string>
+  ): Effect.Effect<boolean> =>
+    Effect.gen(function* () {
+      const exclusion = yield* roster.report(executor.id, error)
+      if (exclusion === undefined || tried.length > 0) {
+        return false
+      }
+      const avoid = options.avoid === undefined ? [] : yield* options.avoid
+      const other = yield* roster.canEverServe(role, [...avoid, executor.id])
+      if (other) {
+        yield* say(
+          options.events,
+          `${role}${options.label === undefined ? "" : ` for ${options.label}`} moves off ${executor.id} (${describeExclusion(exclusion)})`
+        )
+      }
+      return other
+    })
+
+  const runOn = <A, R>(
+    use: (seat: RosterSeat, note: string | undefined) => Effect.Effect<A, LlmError, R>,
+    tried: ReadonlyArray<string>
+  ): Effect.Effect<A, LlmError, R> =>
+    // The slot is held for the call and released before any retry.
+    Effect.scoped(
+      Effect.gen(function* () {
+        const executor = yield* acquire(tried)
+        const seat = yield* seatOf(executor)
+        const outcome = yield* Effect.result(use(seat, undefined))
+        return { executor, outcome }
+      })
+    ).pipe(
+      Effect.flatMap(({ executor, outcome }) =>
+        outcome._tag === "Success"
+          ? Effect.succeed(outcome.success)
+          : Effect.flatMap(retryElsewhere(executor, outcome.failure, tried), (again) =>
+              again ? runOn(use, [...tried, executor.id]) : Effect.fail(outcome.failure)
+            )
+      )
+    )
+
+  const streamOn = (
+    use: (seat: RosterSeat, note: string | undefined) => Stream.Stream<LlmChunk, LlmError>,
+    tried: ReadonlyArray<string>
+  ): Stream.Stream<LlmChunk, LlmError> =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const executor = yield* acquire(tried)
+        const seat = yield* seatOf(executor)
+        return use(seat, undefined).pipe(
+          Stream.catchIf(
+            () => true,
+            (error) =>
+              Stream.unwrap(
+                Effect.map(retryElsewhere(executor, error, tried), (again) =>
+                  again ? streamOn(use, [...tried, executor.id]) : Stream.fail(error)
+                )
+              )
+          )
+        )
+      })
+    )
 
   return serviceOver({
-    run: (use) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const executor = yield* acquire
-          const seat = yield* seatOf(executor)
-          return yield* use(seat, undefined).pipe(Effect.tapError(reportOn(executor)))
-        })
-      ),
-    stream: (use) =>
-      Stream.unwrap(
-        Effect.gen(function* () {
-          const executor = yield* acquire
-          const seat = yield* seatOf(executor)
-          return use(seat, undefined).pipe(Stream.tapError(reportOn(executor)))
-        })
-      ),
+    run: (use) => runOn(use, []),
+    stream: (use) => streamOn(use, []),
     isAvailable: roster.canEverServe(role)
   })
 }

@@ -8,14 +8,18 @@ import {
   StageCompleted,
   StageFailed,
   StageStarted,
+  ToolUse,
   TokensUsed,
-  makeFlowEventHub
+  makeFlowEventHub,
+  withLane
 } from "@llm4ts/flow/FlowEvents"
 import { TestClock } from "effect/testing"
 import { origins, truth, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 import {
   consumeTerminalEvents,
+  fitToWidth,
   formatDurationMs,
+  statusBlock,
   indentBlock,
   indentDepths,
   makeLiveTerminalSurface,
@@ -160,6 +164,129 @@ describe("terminal rendering", () => {
         yield* consumer.awaitDrained()
 
         assert.deepStrictEqual(yield* Ref.get(statuses), ["outer", "inner", "outer", undefined])
+      })
+    )
+  )
+
+  it.effect("keeps concurrent stories apart: tagged lines, own stages, one status row each", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const lines = yield* Ref.make<ReadonlyArray<string>>([])
+        const statuses = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+        const surface: TerminalSurface = {
+          palette: plainTerminalPalette,
+          log: (line) => Ref.update(lines, (current) => [...current, line]),
+          setStatus: (label) => Ref.update(statuses, (current) => [...current, label]),
+          suspend: (effect) => effect
+        }
+        const hub = yield* makeFlowEventHub()
+        const consumer = yield* consumeTerminalEvents(hub, surface)
+        const form = withLane(hub, {
+          lane: "bonifico-form",
+          executor: Effect.succeed("pi-lmstudio"),
+          workDir: "/wt/form"
+        })
+        const list = withLane(hub, {
+          lane: "bonifici-list",
+          executor: Effect.succeed("lemonade-deepseek"),
+          workDir: "/wt/list"
+        })
+        yield* form.publish(StageStarted.make({ stage: "story bonifico-form" }))
+        yield* list.publish(StageStarted.make({ stage: "story bonifici-list" }))
+        yield* form.publish(StageStarted.make({ stage: "Write the tests" }))
+        yield* list.publish(ToolUse.make({ tool: "shell", args: "cd /wt/list && pnpm test" }))
+        yield* list.publish(ToolUse.make({ tool: "read", args: "/wt/list/src/a.tsx" }))
+        // bonifici-list ends while bonifico-form is still inside a task.
+        yield* list.publish(StageCompleted.make({ stage: "story bonifici-list" }))
+        yield* form.publish(StageCompleted.make({ stage: "Write the tests" }))
+        yield* consumer.awaitDrained()
+
+        const printed = yield* Ref.get(lines)
+        assert.include(printed, "[bonifico-form · pi-lmstudio] ▶ story bonifico-form")
+        assert.include(printed, "[bonifico-form · pi-lmstudio]   ▶ Write the tests")
+        assert.isTrue(
+          printed.some((line) =>
+            line.startsWith("[bonifici-list · lemonade-deepseek] ✔ story bonifici-list")
+          )
+        )
+        assert.isTrue(
+          printed.some((line) =>
+            line.startsWith("[bonifico-form · pi-lmstudio]   ✔ Write the tests")
+          )
+        )
+        // Tool calls are counted, not printed, at normal verbosity.
+        assert.isFalse(printed.some((line) => line.includes("pnpm test")))
+        const seen = (yield* Ref.get(statuses)).filter(
+          (status): status is string => status !== undefined
+        )
+        assert.isTrue(
+          seen.some(
+            (status) =>
+              status.includes("bonifico-form · pi-lmstudio · Write the tests") &&
+              status.includes("bonifici-list · lemonade-deepseek · story bonifici-list") &&
+              status.includes("2 tool calls")
+          ),
+          JSON.stringify(seen)
+        )
+        // Once bonifici-list ended, only bonifico-form has a row.
+        assert.notInclude(seen.at(-1) ?? "", "bonifici-list")
+      })
+    )
+  )
+
+  it.effect("prints every tool call, tagged and without the worktree path, when verbose", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const lines = yield* Ref.make<ReadonlyArray<string>>([])
+        const surface: TerminalSurface = {
+          palette: plainTerminalPalette,
+          log: (line) => Ref.update(lines, (current) => [...current, line]),
+          setStatus: (_label) => Effect.void,
+          suspend: (effect) => effect
+        }
+        const hub = yield* makeFlowEventHub()
+        const consumer = yield* consumeTerminalEvents(hub, surface, "Verbose")
+        const list = withLane(hub, { lane: "bonifici-list", workDir: "/wt/list" })
+        yield* list.publish(ToolUse.make({ tool: "shell", args: "cd /wt/list && pnpm test" }))
+        yield* list.publish(ToolUse.make({ tool: "read", args: "/wt/list/src/a.tsx" }))
+        yield* consumer.awaitDrained()
+        assert.deepStrictEqual(yield* Ref.get(lines), [
+          "[bonifici-list] ● shell (pnpm test)",
+          "[bonifici-list] ● read (src/a.tsx)"
+        ])
+      })
+    )
+  )
+
+  it.effect("draws and clears a multi-line status block, cut to the terminal's width", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const output: Array<string> = []
+        const surface = yield* makeLiveTerminalSurface(
+          (text) => {
+            output.push(text)
+          },
+          makeTerminalPalette(false),
+          "1 hour",
+          () => 40
+        )
+        yield* surface.setStatus(`first row\n${"x".repeat(80)}`)
+        yield* surface.log("a line")
+        const rendered = output.join("")
+        assert.include(rendered, "first row\n")
+        // The second row was cut to fit, so the redraw arithmetic holds.
+        assert.include(rendered, `${"x".repeat(35)}…`)
+        // Clearing a two-row block moves up one line.
+        assert.include(rendered, "\r\u001b[2K\u001b[1A\r\u001b[2K")
+        assert.include(rendered, "a line\n")
+        assert.strictEqual(fitToWidth("short", 40), "short")
+        assert.strictEqual(
+          statusBlock("epic branch", [
+            { lane: "a", executor: "pi", stage: "task 1", elapsedMs: 65_000, tools: 1 },
+            { lane: "b", executor: undefined, stage: undefined, elapsedMs: 0, tools: 0 }
+          ]),
+          "epic branch\na · pi · task 1 · 1m05s · 1 tool call"
+        )
       })
     )
   )

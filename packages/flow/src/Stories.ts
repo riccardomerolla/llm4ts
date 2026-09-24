@@ -28,7 +28,7 @@ import {
   StoryFailed,
   type FlowError
 } from "./FlowError.ts"
-import { Info } from "./FlowEvents.ts"
+import { Info, withLane, type FlowEventsShape } from "./FlowEvents.ts"
 import { statusPaths, type GitToolShape } from "./GitTool.ts"
 import {
   checkPerimeter,
@@ -562,6 +562,18 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       }
     })
 
+  /** A story's own events say so (a lane), so concurrent stories stay apart on screen. */
+  const lanes = new Map<string, FlowEventsShape>()
+  const laneOf = (story: Story): FlowEventsShape => {
+    const known = lanes.get(story.id)
+    if (known !== undefined) {
+      return known
+    }
+    const lane = withLane(events, { lane: story.id })
+    lanes.set(story.id, lane)
+    return lane
+  }
+
   yield* epicCheckoutClean()
   yield* stage(events, "epic branch", context.git.checkoutOrCreate(epicBranch))
 
@@ -600,7 +612,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             `epic gates failed after merging; merge undone:\n${issueLines(gate)}`
           )
         }
-        yield* events.publish(
+        yield* laneOf(story).publish(
           Info.make({ message: `story ${story.id}: merged into ${epicBranch}` })
         )
       })
@@ -616,7 +628,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     const path = statePath(story)
     let stored = yield* loadVersioned(files, path, StoryStateVersion, StoryState)
     if (stored !== undefined && stored.hash !== hash) {
-      yield* events.publish(
+      yield* laneOf(story).publish(
         Info.make({
           message: `story ${story.id}: plan entry changed since its branch was created; starting over`
         })
@@ -627,7 +639,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         .removeWorktree(stored.worktree, true)
         .pipe(
           Effect.catch((error) =>
-            events.publish(Info.make({ message: `story ${story.id}: ${describeFlowError(error)}` }))
+            laneOf(story).publish(
+              Info.make({ message: `story ${story.id}: ${describeFlowError(error)}` })
+            )
           )
         )
       if (yield* context.git.branchExists(stored.branch)) {
@@ -655,7 +669,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     if (stored.worktree !== worktree) {
       if ((yield* files.read(join(stored.worktree, ".git"))) !== undefined) {
         yield* context.git.moveWorktree(stored.worktree, worktree)
-        yield* events.publish(
+        yield* laneOf(story).publish(
           Info.make({ message: `story ${story.id}: moved its worktree to ${worktree}` })
         )
       }
@@ -666,7 +680,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     if (marker === undefined) {
       yield* context.git.addWorktree(state.worktree, state.branch)
     }
-    yield* events.publish(Info.make({ message: `story ${story.id}: resuming ${state.branch}` }))
+    yield* laneOf(story).publish(
+      Info.make({ message: `story ${story.id}: resuming ${state.branch}` })
+    )
     return { state, alreadyMerged: false }
   })
 
@@ -688,7 +704,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       yield* git.merge(epicBranch, `${story.id}: catch up with ${epicBranch}`, {
         preferIncoming: true
       })
-      yield* events.publish(
+      yield* laneOf(story).publish(
         Info.make({ message: `story ${story.id}: caught up with ${epicBranch}` })
       )
     })
@@ -718,7 +734,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     Scope.Scope
   > {
     const seats = yield* options.contextFor(state.worktree, {
-      label: `story ${story.id}`,
+      label: story.id,
       ...(state.executor === undefined ? {} : { prefer: state.executor })
     })
     const roster = seats.context.roster
@@ -752,7 +768,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     // Catch up before setup: the epic may have changed the manifest too.
     yield* catchUp(story, git)
     if (options.setup !== undefined) {
-      yield* stage(events, `story ${story.id}: setup`, options.setup(state.worktree))
+      yield* stage(laneOf(story), `story ${story.id}: setup`, options.setup(state.worktree))
     }
 
     // The target's gates plus the perimeter: a stray path is a gate failure
@@ -811,7 +827,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         }
         yield* Ref.set(blocked, undefined)
         yield* Ref.update(pushbacks, (count) => count + 1)
-        yield* events.publish(
+        yield* laneOf(story).publish(
           Info.make({ message: `story ${story.id}: BLOCKED_ON rejected — ${rebuttal}` })
         )
         yield* coderTurn(
@@ -864,7 +880,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       if (!isWithinPerimeter(second)) {
         const stray = [...second.sharedReadOnly, ...second.outside]
         yield* git.restorePaths(epicBranch, stray)
-        yield* events.publish(
+        yield* laneOf(story).publish(
           Info.make({
             message: `story ${story.id}: restored ${stray.length} path(s) outside its perimeter from ${epicBranch}: ${stray.join(", ")}`
           })
@@ -882,7 +898,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         story,
         (text) => planTasks(watchedSeats, story, text),
         prompt,
-        events
+        laneOf(story)
       ),
       system,
       chatPerTask: true,
@@ -956,7 +972,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     yield* board.start(story.id)
     const { state, alreadyMerged } = yield* prepareWorktree(story)
     if (alreadyMerged) {
-      yield* events.publish(Info.make({ message: `story ${story.id}: already merged; skipping` }))
+      yield* laneOf(story).publish(
+        Info.make({ message: `story ${story.id}: already merged; skipping` })
+      )
       return StoryOutcome.make({
         id: story.id,
         title: story.title,
@@ -993,7 +1011,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
   /** A story's run as a completion — failures become outcomes, never fiber deaths. */
   const attempt = (story: Story): Effect.Effect<Completion> =>
-    stage(events, `story ${story.id}`, runStory(story)).pipe(
+    stage(laneOf(story), `story ${story.id}`, runStory(story)).pipe(
       Effect.map((outcome): Completion => ({ story, outcome })),
       Effect.catch((error) =>
         Effect.gen(function* () {
@@ -1117,7 +1135,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         if (completion.interruption === "outage" && halted === undefined) {
           if (options.awaitRecovery !== undefined && !recovered.has(completion.story.id)) {
             recovered.add(completion.story.id)
-            yield* events.publish(
+            yield* laneOf(completion.story).publish(
               Info.make({
                 message: `story ${completion.story.id}: the serving engine is down; waiting for it to recover, then retrying the story`
               })

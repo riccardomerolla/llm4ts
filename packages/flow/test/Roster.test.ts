@@ -150,6 +150,18 @@ describe("exclusionFor", () => {
       exclusionFor(AuthenticationError.make({ message: "not logged in" }), claude, now, 0)?.kind,
       "run"
     )
+    // A model the harness cannot serve sits the run out.
+    const badModel = exclusionFor(
+      ProviderError.make({
+        message:
+          "claude exited with code 1: There's an issue with the selected model (claude-opus-5.5)."
+      }),
+      claude,
+      now,
+      0
+    )
+    assert.strictEqual(badModel?.kind, "run")
+    assert.include(badModel?.reason ?? "", "is unavailable")
     // The quality of the work never excludes the executor.
     assert.isUndefined(exclusionFor(ProviderError.make({ message: "tests failed" }), local, now, 0))
     assert.isUndefined(exclusionFor(InvalidRequestError.make({ message: "bad" }), local, now, 0))
@@ -395,6 +407,48 @@ describe("Roster seats", () => {
         )
         // Everyone else is out now: the next hold goes straight to claude.
         assert.strictEqual(yield* text(cleared.service, "go"), "claude ok")
+      })
+    )
+  )
+
+  it.effect("a per-call seat moves once to another executor when its own is taken out", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const roster = yield* makeRoster({ executors: [codex, claude], events })
+        const badModel = ProviderError.make({
+          message: "There's an issue with the selected model (claude-opus-5.5)."
+        })
+        const judge = rosterSeat(
+          roster,
+          { seatFor: seatFor(log, (id) => (id === "claude" ? badModel : undefined)) },
+          "judge",
+          "/wt/a",
+          { events, label: "story a" }
+        )
+        // claude is the judge's first choice, fails, is out for the run; codex answers.
+        assert.strictEqual(yield* text(judge, "judge a"), "codex ok")
+        const snapshot = yield* roster.snapshot
+        assert.strictEqual(
+          snapshot.find((status) => status.executor.id === "claude")?.exclusion?.kind,
+          "run"
+        )
+        const recorded = (yield* events.recorded).flatMap((event) =>
+          event._tag === "Info" ? [event.message] : []
+        )
+        assert.isTrue(
+          recorded.some((message) => message.includes("judge for story a moves off claude"))
+        )
+        // A failure that says nothing about the executor is the call's own.
+        const flaky = rosterSeat(
+          roster,
+          { seatFor: seatFor(log, () => ProviderError.make({ message: "bad JSON" })) },
+          "judge",
+          "/wt/a",
+          { events }
+        )
+        assert.include(String(yield* Effect.flip(text(flaky, "judge again"))), "bad JSON")
       })
     )
   )

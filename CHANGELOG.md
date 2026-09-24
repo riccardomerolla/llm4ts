@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.9.1
+
+- Concurrent stories stay apart on screen. Every stage, message, tool call
+  and token report of a story carries its lane (the story id, and the roster
+  executor working it: `FlowEvents` `lane`/`executor`, `withLane`), set once
+  by `contextFor`, so every flow that rebinds contexts gets it. The terminal
+  tags each line (`[bonifici-list · lemonade-deepseek]`, one colour per
+  story), strips the worktree path from tool arguments, keeps a stage stack
+  per story (one shared stack interleaved concurrent stages, closed the wrong
+  one and showed only the story that started last), and pins one status row
+  per running story with its current stage, elapsed time and tool-call
+  count. At normal verbosity a story's tool calls are counted on its row
+  instead of printed; `--verbose` prints them all, tagged. The trace records
+  the lanes too.
+- A claude call that fails in streaming mode now names what claude said
+  (a bad model name, a usage limit) instead of only "exited with code 1":
+  claude prints the reason as its reply and exits with an empty stderr.
+  The non-streaming path reports stderr too. A streamed usage limit is now
+  typed as well.
+- Roster: an executor whose model its harness cannot serve ("There's an
+  issue with the selected model") sits the run out, and a reviewer, judge,
+  verifier or planner call whose executor is taken out moves once to
+  another executor instead of failing the story.
+
 ## 2.9.0
 
 An executor roster (ADR 0019): a run's seats can be served from a pool of
