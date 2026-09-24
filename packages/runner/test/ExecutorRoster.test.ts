@@ -138,7 +138,7 @@ describe("roster files", () => {
       ExecutorSpec.make({
         id: "lemonade",
         harness: "opencode",
-        model: "tinbota-lemonade-server/Ornith-1.5-35B-A3B-GGUF-Q5_K_M",
+        model: "lemonade/Ornith-1.5-35B-A3B-GGUF-Q5_K_M",
         roles: ["coder", "judge"],
         flags: { variant: "high" },
         env: { LEMONADE_API_KEY: "${LEMONADE_API_KEY}", MODE: "fast" }
@@ -149,7 +149,7 @@ describe("roster files", () => {
     assert.instanceOf(opencode, CliConnectorConfig)
     if (opencode instanceof CliConnectorConfig) {
       assert.strictEqual(opencode.connectorId.value, ConnectorIds.OpenCode.value)
-      assert.strictEqual(opencode.model, "tinbota-lemonade-server/Ornith-1.5-35B-A3B-GGUF-Q5_K_M")
+      assert.strictEqual(opencode.model, "lemonade/Ornith-1.5-35B-A3B-GGUF-Q5_K_M")
       assert.strictEqual(opencode.flags.variant, "high")
       assert.strictEqual(opencode.envVars.LEMONADE_API_KEY, "sk-lemonade")
       assert.strictEqual(opencode.envVars.MODE, "fast")

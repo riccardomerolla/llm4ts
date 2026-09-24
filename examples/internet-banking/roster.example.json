@@ -12,20 +12,20 @@
     {
       "id": "lemonade-ornith",
       "harness": "opencode",
-      "model": "tinbota-lemonade-server/Ornith-1.5-35B-A3B-GGUF-Q5_K_M",
+      "model": "lemonade/Ornith-1.5-35B-A3B-GGUF-Q5_K_M",
       "roles": ["coder"],
       "slots": 1,
       "priority": 1,
-      "health": "http://100.99.224.30:13305/v1/models"
+      "health": "http://192.0.2.10:13305/v1/models"
     },
     {
       "id": "lemonade-deepseek",
       "harness": "opencode",
-      "model": "tinbota-lemonade-server/DeepSeek-V4-Flash-0731-GGUF-UD-IQ3_XXS",
+      "model": "lemonade/DeepSeek-V4-Flash-0731-GGUF-UD-IQ3_XXS",
       "roles": ["coder"],
       "slots": 1,
       "priority": 1,
-      "health": "http://100.99.224.30:13305/v1/models"
+      "health": "http://192.0.2.10:13305/v1/models"
     },
     {
       "id": "codex",

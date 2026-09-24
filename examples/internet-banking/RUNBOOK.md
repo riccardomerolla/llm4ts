@@ -116,6 +116,11 @@ What to show while it runs:
 - `llm4ts roster pause codex --for 2h` keeps codex out of this run and the
   next; `llm4ts roster resume codex` brings it back.
 
+The example assumes an opencode provider named `lemonade` for an on-prem
+Lemonade Server at `192.0.2.10:13305`: change the host in the two `health`
+URLs, and the `lemonade/` prefix of the two models, to the provider id and
+address in your `~/.config/opencode/opencode.json`.
+
 `--roster none` runs with one executor per seat as before;
 `--executors pi-lmstudio,claude` narrows the roster for one run. One server
 is one executor: never point two executors at the same LM Studio.
