@@ -1,9 +1,11 @@
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { ProviderError, type LlmError } from "../Errors.ts"
-import { LlmChunk, type TokenUsage } from "../Models.ts"
+import { LlmChunk, TokenUsage } from "../Models.ts"
 import { classifyUsageLimit } from "../UsageLimits.ts"
 
 export type JsonValue = typeof Schema.Json.Type
@@ -75,6 +77,53 @@ export const toolEventChunk = (name: string, input: JsonValue | undefined): LlmC
       tool_input: input === undefined ? "{}" : jsonText(input)
     }
   })
+
+/** Two usage reports as one: counts add up, and so do cache reads and costs when either has them. */
+export const addTokenUsage = (sum: TokenUsage | undefined, next: TokenUsage): TokenUsage => {
+  if (sum === undefined) {
+    return next
+  }
+  const cached =
+    sum.cached === undefined && next.cached === undefined
+      ? undefined
+      : (sum.cached ?? 0) + (next.cached ?? 0)
+  const costUsd =
+    sum.costUsd === undefined && next.costUsd === undefined
+      ? undefined
+      : (sum.costUsd ?? 0) + (next.costUsd ?? 0)
+  return TokenUsage.make({
+    prompt: sum.prompt + next.prompt,
+    completion: sum.completion + next.completion,
+    total: sum.total + next.total,
+    ...(cached === undefined ? {} : { cached }),
+    ...(costUsd === undefined ? {} : { costUsd })
+  })
+}
+
+/**
+ * For a harness that reports usage per model message or step (pi's
+ * `message_end`, opencode's `step_finish`): every usage chunk carries the
+ * running total instead of its own share. A reply is read as its last usage
+ * chunk, so without this an agent turn of thirty model calls counted as one.
+ */
+export const cumulativeUsage = <E, R>(
+  stream: Stream.Stream<LlmChunk, E, R>
+): Stream.Stream<LlmChunk, E, R> =>
+  Stream.unwrap(
+    Effect.map(Ref.make<TokenUsage | undefined>(undefined), (total) =>
+      stream.pipe(
+        Stream.mapEffect((chunk) => {
+          const usage = chunk.usage
+          return usage === undefined
+            ? Effect.succeed(chunk)
+            : Effect.map(
+                Ref.updateAndGet(total, (sum) => addTokenUsage(sum, usage)),
+                (sum) => (sum === undefined ? chunk : LlmChunk.make({ ...chunk, usage: sum }))
+              )
+        })
+      )
+    )
+  )
 
 export const usageEventChunk = (model: string | undefined, usage: TokenUsage): LlmChunk =>
   LlmChunk.make({

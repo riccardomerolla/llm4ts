@@ -6,6 +6,7 @@ import { ProviderError } from "../Errors.ts"
 import { ConnectorCapabilities, ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
+  cumulativeUsage,
   failClassifiedCliError,
   jsonBooleanField,
   jsonField,
@@ -68,13 +69,15 @@ export const parsePiStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
       }
       const prompt = jsonIntField(usage, "input") ?? 0
       const completion = jsonIntField(usage, "output") ?? 0
+      const cached = jsonIntField(usage, "cacheRead")
       return [
         usageEventChunk(
           undefined,
           TokenUsage.make({
             prompt,
             completion,
-            total: prompt + completion
+            total: prompt + completion,
+            ...(cached === undefined || cached === 0 ? {} : { cached })
           })
         )
       ]
@@ -143,6 +146,8 @@ export const makePiConnector = (
       )
       .pipe(
         Stream.flatMap((line) => Stream.fromIterable(parsePiStreamLine(line))),
+        // pi reports usage per assistant message; a turn is all of them.
+        cumulativeUsage,
         Stream.mapEffect((chunk) => {
           const message = chunk.metadata.piError
           return message === undefined

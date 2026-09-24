@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { constants } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -54,6 +54,21 @@ export interface LaunchFlowOptions {
 }
 
 /**
+ * A flow's live status display turns input echo off and hides the cursor;
+ * a flow killed by a signal cannot turn them back on, so the shell does it
+ * once the child is gone. Harmless when they were never changed.
+ */
+const restoreTerminal = (stdio: "inherit" | "ignore"): void => {
+  if (stdio !== "inherit" || process.platform === "win32" || process.stdin.isTTY !== true) {
+    return
+  }
+  spawnSync("stty", ["echo"], { stdio: ["inherit", "ignore", "ignore"] })
+  if (process.stdout.isTTY === true) {
+    process.stdout.write("\u001b[?25h")
+  }
+}
+
+/**
  * Runs a flow script as a child `node` process with type stripping, the
  * terminal inherited, and the task text appended to argv. While the child
  * runs, SIGINT is ignored in the parent so Ctrl-C reaches the whole
@@ -86,6 +101,7 @@ export const launchFlow = (options: LaunchFlowOptions): Effect.Effect<number, Fl
     })
     child.on("exit", (code, signal) => {
       restoreSigint()
+      restoreTerminal(options.stdio ?? "inherit")
       if (signal !== null) {
         resume(Effect.succeed(128 + (constants.signals[signal] ?? 15)))
       } else {

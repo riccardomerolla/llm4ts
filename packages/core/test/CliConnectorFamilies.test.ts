@@ -5,6 +5,7 @@ import * as Stream from "effect/Stream"
 import { CliContext } from "@llm4ts/core/Connector"
 import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { ConnectorIds } from "@llm4ts/core/Models"
+import { collect } from "@llm4ts/core/Streaming"
 import {
   ProcessResult,
   makeProcessExecutor,
@@ -137,6 +138,35 @@ describe("PiConnector", () => {
   )
 })
 
+describe("PiConnector usage", () => {
+  it.effect("counts a turn's usage across all its assistant messages", () =>
+    Effect.gen(function* () {
+      const connector = makePiConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.Pi }),
+        makeProcessExecutor({
+          run: () => Effect.succeed(ProcessResult.make({ stdout: [], exitCode: 0 })),
+          runStreaming: () => Stream.empty,
+          runStreamingWithStdin: () =>
+            Stream.make(
+              '{"type":"message_end","message":{"role":"user","content":"go"}}',
+              '{"type":"message_end","message":{"role":"assistant","usage":{"input":51,"output":12000,"cacheRead":59000}}}',
+              '{"type":"tool_execution_start","toolName":"bash","args":{"command":"pnpm test"}}',
+              '{"type":"message_end","message":{"role":"assistant","usage":{"input":40,"output":413,"cacheRead":60000}}}',
+              '{"type":"agent_end","messages":[],"willRetry":false}'
+            )
+        })
+      )
+      const response = yield* collect(connector.completeStream("go"))
+      // Two model calls, not the last one alone (the rehearsal of 2026-09-24
+      // counted a 39-minute turn as 51 in / 413 out).
+      assert.deepStrictEqual(
+        [response.usage?.prompt, response.usage?.completion, response.usage?.cached],
+        [91, 12413, 119000]
+      )
+    })
+  )
+})
+
 describe("OpenCodeCliConnector", () => {
   it("maps edit and read-only modes while keeping the prompt positional", () => {
     const edit = CliConnectorConfig.make({
@@ -176,6 +206,29 @@ describe("OpenCodeCliConnector", () => {
       assert.strictEqual(chunks[1]?.delta, "Adding multiply.")
       assert.strictEqual(chunks[2]?.usage?.prompt, 8401)
       assert.strictEqual(chunks[2]?.usage?.cached, 1792)
+    })
+  )
+
+  it.effect("counts a turn's usage across all its steps", () =>
+    Effect.gen(function* () {
+      const connector = makeOpenCodeCliConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.OpenCode }),
+        executorWithStream([
+          '{"type":"step_finish","part":{"tokens":{"total":1100,"input":1000,"output":100,"cache":{"read":500}}}}',
+          '{"type":"tool_use","part":{"tool":"bash","state":{"input":{"command":"pnpm test"}}}}',
+          '{"type":"step_finish","part":{"tokens":{"total":2300,"input":2000,"output":300,"cache":{"read":1500}}}}'
+        ])
+      )
+      const response = yield* collect(connector.completeStream("go"))
+      assert.deepStrictEqual(
+        [
+          response.usage?.prompt,
+          response.usage?.completion,
+          response.usage?.total,
+          response.usage?.cached
+        ],
+        [3000, 400, 3400, 2000]
+      )
     })
   )
 

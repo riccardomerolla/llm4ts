@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import * as Clock from "effect/Clock"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -331,6 +332,58 @@ export const makeLiveTerminalSurface = Effect.fn("@llm4ts/runner/Terminal.makeLi
   return surface
 })
 
+const hideCursor = "\u001b[?25l"
+const showCursor = "\u001b[?25h"
+
+/**
+ * While the live status block is on screen, keystrokes must not be echoed:
+ * an arrow key (or a trackpad scroll the terminal turns into one) echoes as
+ * `^[[A` at the cursor, which sits at the end of the last status row, wraps
+ * onto a new line, and leaves the row behind as a stale copy. Echo goes off
+ * (Ctrl-C still interrupts: only echo changes) and the cursor is hidden;
+ * both come back when the surface closes or the process exits.
+ */
+const quietTerminalInput = (
+  write: (text: string) => void
+): Effect.Effect<void, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const input = process.stdin
+    const stty = (setting: string): void => {
+      if (process.platform !== "win32" && input.isTTY === true) {
+        spawnSync("stty", [setting], { stdio: ["inherit", "ignore", "ignore"] })
+      }
+    }
+    let restored = false
+    const restore = (): void => {
+      if (!restored) {
+        restored = true
+        stty("echo")
+        write(showCursor)
+      }
+    }
+    // A signal kills the process without an "exit" event: restore first,
+    // then let the signal do what it would have done.
+    const onSignal = (signal: NodeJS.Signals): void => {
+      restore()
+      process.kill(process.pid, signal)
+    }
+    yield* Effect.sync(() => {
+      stty("-echo")
+      write(hideCursor)
+      process.once("exit", restore)
+      process.once("SIGINT", onSignal)
+      process.once("SIGTERM", onSignal)
+    })
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        process.off("exit", restore)
+        process.off("SIGINT", onSignal)
+        process.off("SIGTERM", onSignal)
+        restore()
+      })
+    )
+  })
+
 export const makeTerminalSurface = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
   output: TerminalOutput = process.stdout
@@ -339,7 +392,15 @@ export const makeTerminalSurface = (
     output.write(text)
   }
   return terminalSupportsColor(output, environment)
-    ? makeLiveTerminalSurface(write, makeTerminalPalette(true), "100 millis", () => output.columns)
+    ? Effect.andThen(
+        quietTerminalInput(write),
+        makeLiveTerminalSurface(
+          write,
+          makeTerminalPalette(true),
+          "100 millis",
+          () => output.columns
+        )
+      )
     : Effect.succeed(makePlainTerminalSurface((line) => write(`${line}\n`)))
 }
 

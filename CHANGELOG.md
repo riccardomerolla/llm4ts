@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.9.4
+
+- The live status block no longer leaves stale rows ending in `^[`. A
+  keystroke (an arrow key, or a trackpad scroll the terminal turns into one)
+  was echoed at the end of the last status row, wrapped onto a new line and
+  stranded the row there. While the block is on screen, input echo is off
+  and the cursor hidden; both come back when the run ends, on Ctrl-C too,
+  and `llm4ts run` restores them after its flow exits in any case.
+- pi and opencode turns count all their tokens. Both report usage per model
+  message or step, and a reply was read as its last report, so an agent
+  turn of many model calls counted as one: a 39-minute pi turn on the demo
+  was recorded as 51 tokens in and 413 out while the server generated over
+  13,000 in a single reply. Every usage chunk from these harnesses now
+  carries the turn's running total (`cumulativeUsage`), which reaches the
+  status rows, cost summaries, the ledger and budgets. pi's cache reads are
+  recorded as `cached`.
+
 ## 2.9.3
 
 - Each running story's status row reads like a coding agent's: elapsed

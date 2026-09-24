@@ -12,6 +12,7 @@ import {
   optionalModelArgs,
   parseJsonLine,
   sortedFlagArgs,
+  cumulativeUsage,
   toolEventChunk,
   usageEventChunk
 } from "./CliSupport.ts"
@@ -127,6 +128,8 @@ export const makeOpenCodeCliConnector = (
       )
       .pipe(
         Stream.flatMap((line) => Stream.fromIterable(parseOpenCodeCliStreamLine(line))),
+        // opencode reports usage per step; a turn is all of them.
+        cumulativeUsage,
         Stream.mapEffect((chunk) => {
           const message = chunk.metadata.opencodeError
           return message === undefined
