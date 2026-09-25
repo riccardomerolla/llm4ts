@@ -119,12 +119,18 @@ masked before it is written. `LLM4TS_SOAP_STUB=<dir>` answers calls from
 `<dir>/<operation>.xml` instead of the network, for rehearsals; the fixture's
 `responses/` directory is one.
 
-## soap-design: analyse
+## soap-design
 
 ```bash
-llm4ts run soap-design --repo . "analyse"                  # every operation
-llm4ts run soap-design --repo . "analyse cercaMovimenti"
+llm4ts run soap-design --repo . "analyse"     # evidence per operation (no model)
+llm4ts run soap-design --repo . mapping       # the 1:1 XSD ↔ JSON mapping (no model)
+llm4ts run soap-design --repo . design        # the reasoning seat drafts design/api-design.md
+llm4ts run soap-design --repo . check         # deterministic review; rerun after every edit
+llm4ts run soap-design --repo . revise        # redraft against the check's findings
+llm4ts run soap-design --repo . openapi       # design/openapi.yaml from an approved design
 ```
+
+### analyse
 
 Reads the recorded exchanges (calls and SoapUI mocks) and writes
 `analysis/<operation>.md` with a typed `analysis/<operation>.json` beside it.
@@ -145,6 +151,49 @@ No model is involved; the report is the evidence the REST design must cite:
 - **schema findings**: every place a response broke its WSDL;
 - fields **never observed**, optional **request fields no sample used**,
   and **latency** across real calls.
+
+### mapping, design, check, openapi
+
+`mapping` writes `design/mapping.json` and `mapping.md`: every request and
+response field with the JSON path and type a literal facade would use
+(decimals stay strings). It is the traceability base: the only paths a
+design may cite.
+
+`design` asks the reasoning seat (`LLM4TS_REASONER`, default `claude`) for a
+resource-oriented design, giving it the style guide as hard rules, the
+confirmed classes, the mapping, the named XSD types, and the analysis
+evidence. The draft is written to `design/api-design.md` under
+`Status: proposed`, with the check's findings above the design of record, a
+` ```json apidesign ` block:
+
+- **endpoints** name their SOAP `sources`, parameters cite request paths,
+  responses name a model and the response path it comes from (`list`/`paged`
+  for collections), **errors** list the outcome codes and fault elements they
+  map, and **evidence** cites the analysis;
+- **models** bind to an XSD element or named type (`sourceType`); each
+  property cites a path within it (`saldo.valore`) or a `derivation`, and an
+  `enumMap` translates SOAP values to REST values;
+- **excluded** lists operations deliberately not exposed, with reasons.
+
+`check` is the deterministic reviewer, run on every draft and after every
+edit. Errors: an operation neither exposed nor excluded, `GET` over a
+mutating operation, a source path that is not in the XSD, a model rendered
+from a type it is not bound to, an `enumMap` missing a declared value or a
+value the samples showed (`SOSPESO`), and style violations (paths, names,
+`esito` in payloads, problem codes). Warnings: REST promising a field the
+XSD leaves optional, business errors or faults seen in samples but not
+mapped, unused models. `revise` hands the findings back to the seat.
+
+The file is the approval: edit the JSON block, rerun `check`, and set
+`Status: approved`. `design` never overwrites it. `openapi` refuses a design
+that is not approved or still has errors, then projects `design/openapi.yaml`
+(OpenAPI 3.1): component schemas per model, `{ items, page }` wrappers for
+collections, RFC 9457 problems per error status with their codes
+(`x-problem-codes`), a `Location` header on creations, a default `502`, and
+`x-soap-*` extensions tracing every operation, parameter, and property to the
+SOAP service. Nobody edits it; the ACE pack implements it. The fixture's
+[`design/api-design.md`](fixtures/demo-bank-soap/design/api-design.md) is a
+reviewed example.
 
 ## Auth profile
 
@@ -217,7 +266,7 @@ soap-ace/
   api-style.md                  default REST style guide (a project-tier copy overrides it)
   flows/soap-discover.ts        catalog + open questions + proposed operation classes
   flows/soap-sample.ts          request files, calls, SoapUI import, scenario proposals
-  flows/soap-design.ts          response analysis (the REST design lands here next)
+  flows/soap-design.ts          analysis, 1:1 mapping, design draft and check, OpenAPI projection
   flows/lib/soap/               the SOAP library (XML, WSDL/XSD, auth, transport, masking, samples)
   fixtures/demo-bank-soap/      synthetic service: WSDL/XSD, canned responses, a SoapUI project
   test/

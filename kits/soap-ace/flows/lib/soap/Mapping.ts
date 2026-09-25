@@ -1,0 +1,150 @@
+import * as Schema from "effect/Schema"
+import {
+  type ElementDecl,
+  elementByName,
+  localName,
+  type QName,
+  type WsdlCatalog
+} from "./Catalog.ts"
+import { schemaPaths } from "./Analysis.ts"
+import { simpleView } from "./Instance.ts"
+
+// The deterministic 1:1 mapping: every XSD path of every request and
+// response, with the JSON path and JSON type a literal facade would give it.
+// It is the traceability base the REST design overlays: a design property
+// cites one of these paths, and the design check verifies the path exists.
+
+export class MappedField extends Schema.Class<MappedField>("MappedField")({
+  /** XSD path relative to the message element, `[]` for repeated elements. */
+  xsd: Schema.String,
+  /** The same field in a literal JSON facade, `$.a[*].b`. */
+  json: Schema.String,
+  jsonType: Schema.Literals(["string", "integer", "number", "boolean", "object", "array"]),
+  format: Schema.optionalKey(Schema.String),
+  xsdType: Schema.String,
+  required: Schema.Boolean,
+  repeated: Schema.Boolean,
+  enumeration: Schema.optionalKey(Schema.Array(Schema.String))
+}) {}
+
+export class OperationMapping extends Schema.Class<OperationMapping>("OperationMapping")({
+  operation: Schema.String,
+  request: Schema.String,
+  response: Schema.optionalKey(Schema.String),
+  requestFields: Schema.Array(MappedField),
+  responseFields: Schema.Array(MappedField)
+}) {}
+
+export class ServiceMapping extends Schema.Class<ServiceMapping>("ServiceMapping")({
+  version: Schema.Literal(1),
+  operations: Schema.Array(OperationMapping)
+}) {}
+
+const integerBuiltins = new Set([
+  "int",
+  "integer",
+  "short",
+  "byte",
+  "nonNegativeInteger",
+  "positiveInteger",
+  "nonPositiveInteger",
+  "negativeInteger",
+  "unsignedInt",
+  "unsignedShort",
+  "unsignedByte"
+])
+
+/** JSON type and format for an XSD type; decimals stay strings (exact amounts). */
+export const jsonTypeOf = (
+  catalog: WsdlCatalog,
+  type: QName
+): { readonly jsonType: MappedField["jsonType"]; readonly format?: string } => {
+  const builtin = simpleView(catalog, type).builtin
+  if (integerBuiltins.has(builtin)) return { jsonType: "integer", format: "int32" }
+  if (builtin === "long" || builtin === "unsignedLong")
+    return { jsonType: "integer", format: "int64" }
+  if (builtin === "decimal") return { jsonType: "string", format: "decimal" }
+  if (builtin === "float" || builtin === "double") return { jsonType: "number", format: builtin }
+  if (builtin === "boolean") return { jsonType: "boolean" }
+  if (builtin === "date") return { jsonType: "string", format: "date" }
+  if (builtin === "dateTime") return { jsonType: "string", format: "date-time" }
+  if (builtin === "base64Binary") return { jsonType: "string", format: "byte" }
+  return { jsonType: "string" }
+}
+
+const jsonPath = (xsd: string): string => `$.${xsd.replace(/\[\]/g, "[*]").replace(/@/g, "")}`
+
+export const mapElement = (
+  catalog: WsdlCatalog,
+  element: ElementDecl
+): ReadonlyArray<MappedField> =>
+  schemaPaths(catalog, element).map((path) => {
+    const container = !path.leaf
+    const typed = container ? { jsonType: "object" as const } : jsonTypeOf(catalog, path.type)
+    const enumeration = container
+      ? undefined
+      : simpleView(catalog, path.type).facets.find((facets) => facets.enumeration !== undefined)
+          ?.enumeration
+    return new MappedField({
+      xsd: path.path,
+      json: jsonPath(path.path),
+      jsonType: path.repeated ? "array" : typed.jsonType,
+      ...("format" in typed && typed.format !== undefined ? { format: typed.format } : {}),
+      xsdType: localName(path.type).replace(/^~/, ""),
+      required: !path.optional,
+      repeated: path.repeated,
+      ...(enumeration === undefined ? {} : { enumeration })
+    })
+  })
+
+export const mapService = (catalog: WsdlCatalog): ServiceMapping =>
+  new ServiceMapping({
+    version: 1,
+    operations: catalog.operations.map((operation) => {
+      const input = elementByName(catalog, operation.input)
+      const output =
+        operation.output === undefined ? undefined : elementByName(catalog, operation.output)
+      return new OperationMapping({
+        operation: operation.name,
+        request: localName(operation.input),
+        ...(operation.output === undefined ? {} : { response: localName(operation.output) }),
+        requestFields: input === undefined ? [] : mapElement(catalog, input),
+        responseFields: output === undefined ? [] : mapElement(catalog, output)
+      })
+    })
+  })
+
+const row = (field: MappedField): string =>
+  `| ${field.xsd} | ${field.json} | ${field.jsonType}${field.format === undefined ? "" : ` (${field.format})`} | ${field.xsdType} | ${field.required ? "yes" : "no"} | ${field.enumeration?.join(", ") ?? ""} |`
+
+export const renderMapping = (mapping: ServiceMapping): string =>
+  [
+    "# 1:1 mapping",
+    "",
+    "Every request and response field with the JSON path and type a literal facade would use.",
+    "The REST design cites these XSD paths; generated by soap-design, regenerate rather than edit.",
+    "",
+    ...mapping.operations.flatMap((operation) => [
+      `## ${operation.operation}`,
+      "",
+      `Request \`${operation.request}\`:`,
+      "",
+      "| XSD path | JSON path | JSON type | XSD type | required | enumeration |",
+      "| --- | --- | --- | --- | --- | --- |",
+      ...operation.requestFields.map(row),
+      "",
+      ...(operation.response === undefined
+        ? ["One-way operation: no response.", ""]
+        : [
+            `Response \`${operation.response}\`:`,
+            "",
+            "| XSD path | JSON path | JSON type | XSD type | required | enumeration |",
+            "| --- | --- | --- | --- | --- | --- |",
+            ...operation.responseFields.map(row),
+            ""
+          ])
+    ])
+  ].join("\n")
+
+export const encodeMapping = (mapping: ServiceMapping): string =>
+  `${JSON.stringify(Schema.encodeSync(ServiceMapping)(mapping), null, 2)}\n`
