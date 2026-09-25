@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!-- Latin-1 on purpose: older estates ship their schemas in ISO-8859-1. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:cmn="http://demobank.example/soap/common"
+           xmlns:tns="http://demobank.example/soap/banking"
+           targetNamespace="http://demobank.example/soap/banking"
+           elementFormDefault="qualified">
+  <xs:import namespace="http://demobank.example/soap/common" schemaLocation="common.xsd"/>
+
+  <xs:complexType name="MovimentoType">
+    <xs:annotation><xs:documentation>Movimento contabile: la città della filiale è facoltativa.</xs:documentation></xs:annotation>
+    <xs:sequence>
+      <xs:element name="idMovimento" type="xs:string"/>
+      <xs:element name="dataContabile" type="xs:date"/>
+      <xs:element name="dataValuta" type="xs:date"/>
+      <xs:element name="importo" type="cmn:ImportoType"/>
+      <xs:element name="segno">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:enumeration value="D"/>
+            <xs:enumeration value="A"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="causale" type="xs:string"/>
+      <xs:element name="descrizione" type="xs:string" minOccurs="0"/>
+      <xs:element name="cittaFiliale" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="cercaMovimenti">
+    <xs:annotation><xs:documentation>Movimenti di un conto, dal più recente, a pagine.</xs:documentation></xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="iban" type="cmn:IbanType"/>
+        <xs:element name="dataDa" type="xs:date"/>
+        <xs:element name="dataA" type="xs:date"/>
+        <xs:element name="paginazione" type="cmn:PaginazioneRichiesta"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="cercaMovimentiResponse">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="cmn:RispostaBase">
+          <xs:sequence>
+            <xs:element name="movimento" type="tns:MovimentoType" minOccurs="0" maxOccurs="unbounded"/>
+            <xs:element name="paginazione" type="cmn:PaginazioneRisposta" minOccurs="0"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

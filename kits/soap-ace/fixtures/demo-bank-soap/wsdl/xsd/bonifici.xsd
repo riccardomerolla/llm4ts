@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:cmn="http://demobank.example/soap/common"
+           xmlns:tns="http://demobank.example/soap/banking"
+           targetNamespace="http://demobank.example/soap/banking"
+           elementFormDefault="qualified">
+  <xs:import namespace="http://demobank.example/soap/common" schemaLocation="common.xsd"/>
+
+  <xs:simpleType name="StatoBonifico">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="INSERITO"/>
+      <xs:enumeration value="CONFERMATO"/>
+      <xs:enumeration value="ESEGUITO"/>
+      <xs:enumeration value="REVOCATO"/>
+      <xs:enumeration value="RIFIUTATO"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="BeneficiarioType">
+    <xs:sequence>
+      <xs:element name="nome" type="xs:string"/>
+      <xs:element name="iban" type="cmn:IbanType"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="inserisciBonifico">
+    <xs:annotation><xs:documentation>Registers a SEPA credit transfer awaiting SCA confirmation.</xs:documentation></xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="ibanOrdinante" type="cmn:IbanType"/>
+        <xs:element name="beneficiario" type="tns:BeneficiarioType"/>
+        <xs:element name="importo" type="cmn:ImportoType"/>
+        <xs:element name="causale">
+          <xs:simpleType>
+            <xs:restriction base="xs:string">
+              <xs:maxLength value="140"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:element>
+        <xs:element name="dataEsecuzione" type="xs:date" minOccurs="0"/>
+        <xs:element name="datiAggiuntivi" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:any namespace="##other" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="inserisciBonificoResponse">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="cmn:RispostaBase">
+          <xs:sequence>
+            <xs:element name="idBonifico" type="xs:string" minOccurs="0"/>
+            <xs:element name="stato" type="tns:StatoBonifico" minOccurs="0"/>
+            <xs:element name="commissioni" type="cmn:ImportoType" minOccurs="0"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="confermaBonifico">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="idBonifico" type="xs:string"/>
+        <xs:element name="codiceOtp" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="confermaBonificoResponse">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="cmn:RispostaBase">
+          <xs:sequence>
+            <xs:element name="stato" type="tns:StatoBonifico" minOccurs="0"/>
+            <xs:element name="cro" type="xs:string" minOccurs="0"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="revocaBonifico">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="idBonifico" type="xs:string"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="revocaBonificoResponse">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="cmn:RispostaBase">
+          <xs:sequence>
+            <xs:element name="stato" type="tns:StatoBonifico" minOccurs="0"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
