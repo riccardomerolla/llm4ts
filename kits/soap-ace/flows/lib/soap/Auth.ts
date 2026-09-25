@@ -73,7 +73,13 @@ export class MutatingPolicies extends Schema.Class<MutatingPolicies>("MutatingPo
 export class AuthProfile extends Schema.Class<AuthProfile>("AuthProfile")({
   environment: Environment,
   /** Overrides the WSDL's address for calls (the WSDL often names another environment). */
-  endpoint: Schema.optionalKey(Schema.String),
+  endpoint: Schema.optionalKey(
+    Schema.String.check(
+      Schema.isPattern(/^https?:\/\/[^/?#@]+(?:[/?#][^@]*)?$/i, {
+        message: "an http(s) URL without credentials; secrets go in references"
+      })
+    )
+  ),
   /** Fetching the WSDL and its schemas. */
   fetch: Schema.optionalKey(HttpSide),
   /** Calling operations. */

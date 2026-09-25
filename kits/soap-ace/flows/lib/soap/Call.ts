@@ -116,9 +116,9 @@ const maskEnvelope = (
   root: XmlElement,
   key: Uint8Array,
   options: Omit<Parameters<typeof maskDocument>[1], "key">
-): { readonly xml: string; readonly report: MaskingReport } => {
+): { readonly document: XmlElement; readonly xml: string; readonly report: MaskingReport } => {
   const masked = maskDocument(stripSecurity(root), { key, ...options })
-  return { xml: renderXml(masked.document), report: masked.report }
+  return { document: masked.document, xml: renderXml(masked.document), report: masked.report }
 }
 
 export const callOperation = (options: CallOptions): Effect.Effect<CallResult, CallError> =>
@@ -211,6 +211,9 @@ export const callOperation = (options: CallOptions): Effect.Effect<CallResult, C
       xml: "",
       report: new MaskingReport({ entries: [], kept: [] })
     }
+    // Everything recorded about the response (fault text, schema findings,
+    // which quote values) is read from the masked, security-stripped tree:
+    // nothing unmasked reaches the exchange.
     let fault: Exchange["fault"]
     if (parsedResponse._tag === "None") {
       responseIssues.push({
@@ -218,8 +221,9 @@ export const callOperation = (options: CallOptions): Effect.Effect<CallResult, C
         detail: `HTTP ${response.status} with a body that is not XML (${response.body.length} bytes)`
       })
     } else {
-      maskedResponse = maskEnvelope(parsedResponse.value, key, maskOptions)
-      const read = yield* readEnvelope(parsedResponse.value).pipe(Effect.option)
+      const masked = maskEnvelope(parsedResponse.value, key, maskOptions)
+      maskedResponse = masked
+      const read = yield* readEnvelope(masked.document).pipe(Effect.option)
       if (read._tag === "None") {
         responseIssues.push({ path: "(response)", detail: "XML that is not a SOAP envelope" })
       } else if (read.value.fault !== undefined) {

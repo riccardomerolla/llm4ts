@@ -160,17 +160,21 @@ const readEnvelopeSync = (root: XmlElement): ReadEnvelope | EnvelopeError => {
   const fault =
     version === "1.1"
       ? new SoapFault({
-          code: textOf(unqualified("faultcode") ?? payload).trim(),
-          reason: textOf(unqualified("faultstring") ?? payload).trim(),
+          code: optionalText(unqualified("faultcode")),
+          reason: optionalText(unqualified("faultstring")),
           ...detailOf(unqualified("detail"))
         })
       : new SoapFault({
-          code: textOf(deep(payload, "Code", "Value") ?? payload).trim(),
-          reason: textOf(deep(payload, "Reason", "Text") ?? payload).trim(),
+          code: optionalText(deep(payload, "Code", "Value")),
+          reason: optionalText(deep(payload, "Reason", "Text")),
           ...detailOf(unqualified("Detail"))
         })
   return { version, payload, fault }
 }
+
+/** A fault part's text; absent parts are empty, never the whole fault's text. */
+const optionalText = (element: XmlElement | undefined): string =>
+  element === undefined ? "" : textOf(element).trim()
 
 const detailOf = (detail: XmlElement | undefined) => {
   const first = detail === undefined ? undefined : elements(detail)[0]

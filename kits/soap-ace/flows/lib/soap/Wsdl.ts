@@ -107,6 +107,28 @@ export const makeFileDocumentLoader = (): DocumentLoaderShape => ({
         })
 })
 
+/**
+ * A location as it may be recorded or shown: URL credentials removed and
+ * query parameters named like secrets redacted. The loader still gets the
+ * real location; catalogs, questions, and errors only ever see this one.
+ */
+export const safeLocation = (location: string): string => {
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(location)) return location
+  try {
+    const url = new URL(location)
+    url.username = ""
+    url.password = ""
+    const sensitive = [...url.searchParams.keys()].filter((name) =>
+      /token|key|secret|pass|auth|sig|session|code/i.test(name)
+    )
+    if (sensitive.length === 0) return `${url.origin}${url.pathname}${url.search}${url.hash}`
+    for (const name of sensitive) url.searchParams.set(name, "REDACTED")
+    return url.toString()
+  } catch {
+    return "(unreadable location)"
+  }
+}
+
 const isUrl = (location: string): boolean => /^[a-z][a-z0-9+.-]*:\/\//i.test(location)
 
 /** Resolve a relative `location`/`schemaLocation` against the referring document. */
@@ -231,9 +253,11 @@ class Discovery {
   }
 
   load(location: string): Effect.Effect<XmlElement, DocumentLoadError | XmlError> {
-    this.documents.push(location)
-    return Effect.flatMap(this.loader.load(location), (bytes) =>
-      parseXmlBytes(bytes, { source: location })
+    const shown = safeLocation(location)
+    this.documents.push(shown)
+    return this.loader.load(location).pipe(
+      Effect.mapError((error) => new DocumentLoadError({ location: shown, detail: error.detail })),
+      Effect.flatMap((bytes) => parseXmlBytes(bytes, { source: shown }))
     )
   }
 
@@ -307,7 +331,7 @@ class Discovery {
     namespaceOverride: string | undefined
   ): Effect.Effect<void, DocumentLoadError | XmlError> {
     return Effect.gen({ self: this }, function* () {
-      const read = collectSchema(schema, location, this.schemas, namespaceOverride)
+      const read = collectSchema(schema, safeLocation(location), this.schemas, namespaceOverride)
       for (const reference of read.references) {
         const resolved = resolveLocation(location, reference.location)
         const key = reference.kind === "include" ? `${resolved}#${read.targetNamespace}` : resolved
@@ -325,7 +349,7 @@ class Discovery {
   }
 
   private read11(root: XmlElement, location: string, targetNamespace: string): void {
-    const at = (element: XmlElement) => `${location}:${element.line}`
+    const at = (element: XmlElement) => `${safeLocation(location)}:${element.line}`
     for (const message of childrenNamed(root, Wsdl11Namespace, "message")) {
       const name = attribute(message, "name")
       if (name === undefined) continue
@@ -462,7 +486,7 @@ class Discovery {
           name: attribute(endpoint, "name") ?? "",
           binding: refOf(endpoint, "binding"),
           address: attribute(endpoint, "address"),
-          location: `${location}:${endpoint.line}`
+          location: `${safeLocation(location)}:${endpoint.line}`
         })
       }
     }
@@ -580,12 +604,12 @@ const operations11 = (
         ? new WsdlError({
             reason: "unsupported-binding",
             detail: `only document/literal bindings are supported; rejected: ${rejected.join("; ")}`,
-            location: rootLocation
+            location: safeLocation(rootLocation)
           })
         : new WsdlError({
             reason: "no-operations",
             detail: "no SOAP operation could be read from the WSDL",
-            location: rootLocation
+            location: safeLocation(rootLocation)
           })
     )
   }
@@ -660,7 +684,7 @@ const operations20 = (
       new WsdlError({
         reason: "no-operations",
         detail: "no SOAP operation could be read from the WSDL 2.0 description",
-        location: rootLocation
+        location: safeLocation(rootLocation)
       })
     )
   }
@@ -691,13 +715,21 @@ export const readCatalog = (
 ): Effect.Effect<WsdlCatalog, DocumentLoadError | XmlError | WsdlError, DocumentLoader> =>
   Effect.gen(function* () {
     const loader = yield* DocumentLoader
+    if (/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(location)) {
+      return yield* new DocumentLoadError({
+        location: safeLocation(location),
+        detail: "credentials in the URL are refused; put references in auth.json"
+      })
+    }
+    // Normalized so the root is recognized when an import cycles back to it.
+    const rootLocation = isUrl(location) ? location : posix.normalize(location)
     const discovery = new Discovery(loader)
-    const root = yield* discovery.wsdl(location)
+    const root = yield* discovery.wsdl(rootLocation)
     const schemas = finishSchemas(discovery.schemas)
     const read =
       root.version === "1.1"
-        ? yield* operations11(discovery, location)
-        : yield* operations20(discovery, location)
+        ? yield* operations11(discovery, rootLocation)
+        : yield* operations20(discovery, rootLocation)
     return new WsdlCatalog({
       version: CatalogVersion,
       wsdlVersion: root.version,

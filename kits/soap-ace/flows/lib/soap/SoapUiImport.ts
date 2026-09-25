@@ -2,11 +2,12 @@ import * as Effect from "effect/Effect"
 import type { WorkspaceError, WorkspaceShape } from "@llm4ts/flow/Workspace"
 import { elementByName, operationByName, type WsdlCatalog } from "./Catalog.ts"
 import { readIfPresent } from "./Discover.ts"
-import { readEnvelope } from "./Envelope.ts"
+import { readEnvelope, stripSecurity } from "./Envelope.ts"
 import { instanceFromXml, type Issue } from "./Instance.ts"
 import {
   kindsFromCatalog,
   maskDocument,
+  maskText,
   type MaskingOverrides,
   MaskingReport,
   mergeReports
@@ -178,7 +179,10 @@ export const importSoapUiProject = (
     const reports: Array<MaskingReport> = []
     const used = new Set<string>()
 
-    for (const message of messages) {
+    for (const found of messages) {
+      // SoapUI labels are free text people type ("Conti di Mario Rossi …"):
+      // they reach file names and headers, so they are masked like values.
+      const message = { ...found, label: maskText(options.key, found.label).text }
       const operation = operationByName(catalog, message.operation)
       if (operation === undefined) {
         skipped.push(`${message.label}: operation ${message.operation} is not in the catalog`)
@@ -193,7 +197,7 @@ export const importSoapUiProject = (
         skipped.push(`${message.operation} ${message.label}: not well-formed XML`)
         continue
       }
-      const masked = maskDocument(parsed.value, maskOptions)
+      const masked = maskDocument(stripSecurity(parsed.value), maskOptions)
       reports.push(masked.report)
       const envelope = yield* readEnvelope(masked.document).pipe(Effect.option)
       const payload = envelope._tag === "Some" ? envelope.value.payload : undefined

@@ -320,6 +320,12 @@ const wordRules: ReadonlyArray<readonly [MaskKind, ReadonlyArray<string>]> = [
       "cognome",
       "intestatario",
       "cointestatario",
+      "cointestatari",
+      "nominativo",
+      "nominativi",
+      "firmatario",
+      "delegato",
+      "referente",
       "beneficiario",
       "ordinante",
       "titolare",
@@ -383,31 +389,49 @@ export const kindsFromCatalog = (catalog: WsdlCatalog): ReadonlyMap<string, Mask
   return kinds
 }
 
+const compact = (value: string): string => value.replace(/\s+/g, "").toUpperCase()
+
+// Identifiers as people type them: upper or lower case, IBANs in groups of
+// four. A match is normalized (spaces out, upper case) before the checksum
+// and the pseudonym, so every spelling of one IBAN maps to one pseudonym.
 const valueDetectors: ReadonlyArray<{
   readonly kind: MaskKind
   readonly pattern: RegExp
-  readonly accept: (match: string) => boolean
+  readonly normalize: (match: string) => string
+  readonly accept: (normalized: string) => boolean
 }> = [
-  { kind: "iban", pattern: /\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/g, accept: isValidIban },
+  {
+    kind: "iban",
+    // Compact, or in groups of four as printed on statements.
+    pattern:
+      /\b[A-Za-z]{2}\d{2}(?:(?: [A-Za-z0-9]{4}){2,7}(?: [A-Za-z0-9]{1,3})?|[A-Za-z0-9]{11,30})\b/g,
+    normalize: compact,
+    accept: isValidIban
+  },
   {
     kind: "codice-fiscale",
-    pattern: /\b[A-Z]{6}[0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{2}[A-Z][0-9LMNPQRSTUV]{3}[A-Z]\b/g,
+    pattern:
+      /\b[A-Za-z]{6}[0-9LMNPQRSTUVlmnpqrstuv]{2}[A-Za-z][0-9LMNPQRSTUVlmnpqrstuv]{2}[A-Za-z][0-9LMNPQRSTUVlmnpqrstuv]{3}[A-Za-z]\b/g,
+    normalize: compact,
     accept: isValidCodiceFiscale
   },
-  { kind: "pan", pattern: /\b[2-6]\d{12,18}\b/g, accept: isValidPan },
+  { kind: "pan", pattern: /\b[2-6]\d{12,18}\b/g, normalize: (match) => match, accept: isValidPan },
   {
     kind: "partita-iva",
-    pattern: /(?<=\bIT ?)\d{11}\b/g,
+    pattern: /(?<=\bIT ?)\d{11}\b/gi,
+    normalize: (match) => match,
     accept: isValidPartitaIva
   },
   {
     kind: "email",
     pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g,
+    normalize: (match) => match,
     accept: () => true
   },
   {
     kind: "phone",
-    pattern: /(?:\+39|0039)[\s-]?\d{2,4}[\s-]?\d{5,8}/g,
+    pattern: /(?:\+39|0039)[\s-]?(?:\d[\s-]?){6,11}\d/g,
+    normalize: (match) => match,
     accept: () => true
   }
 ]
@@ -449,21 +473,34 @@ class Tally {
   }
 }
 
-/** Mask detected identifiers inside free text; returns the text and what was found. */
+/**
+ * Mask detected identifiers inside free text; returns the text and what was
+ * found. Every detector runs on the original text and overlapping matches
+ * go to the earlier detector, so a pseudonym is never masked again.
+ */
 export const maskText = (
   key: Uint8Array,
   text: string
 ): { readonly text: string; readonly kinds: ReadonlyArray<MaskKind> } => {
-  const kinds: Array<MaskKind> = []
-  let result = text
+  const found: Array<{ start: number; end: number; kind: MaskKind; normalized: string }> = []
   for (const detector of valueDetectors) {
-    result = result.replace(detector.pattern, (match) => {
-      if (!detector.accept(match)) return match
-      kinds.push(detector.kind)
-      return pseudonymize(key, detector.kind, match)
-    })
+    for (const match of text.matchAll(detector.pattern)) {
+      const start = match.index
+      const end = start + match[0].length
+      const normalized = detector.normalize(match[0])
+      if (!detector.accept(normalized)) continue
+      if (found.some((other) => start < other.end && end > other.start)) continue
+      found.push({ start, end, kind: detector.kind, normalized })
+    }
   }
-  return { text: result, kinds }
+  found.sort((left, right) => left.start - right.start)
+  let result = ""
+  let cursor = 0
+  for (const match of found) {
+    result += text.slice(cursor, match.start) + pseudonymize(key, match.kind, match.normalized)
+    cursor = match.end
+  }
+  return { text: result + text.slice(cursor), kinds: found.map((match) => match.kind) }
 }
 
 interface FieldRule {
