@@ -49,8 +49,10 @@ import {
   combineTotals,
   epicIdFor,
   flagsFromEnvironment,
+  appDirFor,
   gateCommands,
   gatesIn,
+  inAppDir,
   generateStoryPlan,
   httpProbe,
   judgeStory,
@@ -170,6 +172,13 @@ const program = Effect.gen(function* () {
         if (flags.planOnly) {
           return
         }
+        // Setup and gates run where the application is, in every checkout.
+        const appDir = yield* appDirFor(input.workDir, process.env)
+        if (appDir !== ".") {
+          yield* events.publish(
+            Info.make({ message: `app dir: ${appDir} (setup and gates run there; LLM4TS_APP_DIR)` })
+          )
+        }
         if (flags.land !== undefined) {
           const landed = yield* landEpic(context, {
             plan,
@@ -177,7 +186,10 @@ const program = Effect.gen(function* () {
             stateDir,
             target: flags.land,
             keepWorktrees: flags.keepWorktrees,
-            gates: gatesIn(nodeProcessExecutor, events, gateCommands(process.env)),
+            gates: inAppDir(
+              appDir,
+              gatesIn(nodeProcessExecutor, events, gateCommands(process.env))
+            ),
             system: ["House rules of the target repository (CONTRIBUTING.md):", guidance].join("\n")
           })
           yield* events.publish(
@@ -207,7 +219,16 @@ const program = Effect.gen(function* () {
             message: "this runner cannot rebind seats to a worktree (no contextFor)"
           })
         }
-        const gates = gatesIn(nodeProcessExecutor, events, gateCommands(process.env))
+        const appDirNote =
+          appDir === "."
+            ? []
+            : [
+                `The application lives in ${appDir}/ — its package.json, sources and tests; the gates run there.`
+              ]
+        const gates = inAppDir(
+          appDir,
+          gatesIn(nodeProcessExecutor, events, gateCommands(process.env))
+        )
         const setupCommand = worktreeSetupCommand(process.env)
         const healthUrl = serverHealthUrl(localServer, process.env)
         const report = yield* implementStoriesFlow(
@@ -238,7 +259,7 @@ const program = Effect.gen(function* () {
               }),
             ...(setupCommand === undefined
               ? {}
-              : { setup: setupIn(nodeProcessExecutor, events, setupCommand) }),
+              : { setup: inAppDir(appDir, setupIn(nodeProcessExecutor, events, setupCommand)) }),
             gates,
             // With a roster, the judge and the verifier are leased per story,
             // away from the executor coding it (ADR 0019).
@@ -269,7 +290,8 @@ const program = Effect.gen(function* () {
                   "House rules of the target repository (CONTRIBUTING.md):",
                   guidance,
                   "",
-                  `Imitate the exemplar feature before inventing anything. Story id: ${story.id}.`
+                  `Imitate the exemplar feature before inventing anything. Story id: ${story.id}.`,
+                  ...appDirNote
                 ].join("\n")
               ),
             concurrency,

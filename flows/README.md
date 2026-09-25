@@ -160,6 +160,10 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   `pnpm` gates; `LLM4TS_WORKTREE_SETUP` (default `pnpm install --offline`)
   prepares each story worktree, which starts as a fresh checkout without
   dependencies.
+- Setup and gates run in the application folder: `LLM4TS_APP_DIR`
+  (e.g. `frontend`) when set; otherwise the repository root when it has a
+  `package.json`, else its one first-level subfolder that has one (a Next.js
+  app under `frontend/`). The coder is told where the application lives.
 - Story worktrees live BESIDE the repository, in
   `<repo>.worktrees/<epic-id>/<story-id>` (`LLM4TS_WORKTREE_ROOT` moves
   them). Nested inside it, a coder's parent directory was the epic checkout,

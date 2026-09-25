@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `epic-stories` supports an application in a subfolder (a Next.js app under
+  `frontend/`). Worktree setup, the gates (per task, per story and on
+  landing) run in `LLM4TS_APP_DIR`; unset, a repository without a root
+  `package.json` uses its one first-level subfolder that has one. Before,
+  such a repository failed every story at setup with
+  `ERR_PNPM_NO_PKG_MANIFEST`; that error now names `LLM4TS_APP_DIR`.
+
 ## 2.11.0
 
 - `epic-stories` chooses its epic explicitly. `--list` shows this
