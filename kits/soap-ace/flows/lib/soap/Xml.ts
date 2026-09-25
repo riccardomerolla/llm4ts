@@ -500,3 +500,56 @@ export const escapeText = (value: string): string =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 export const escapeAttribute = (value: string): string => escapeText(value).replace(/"/g, "&quot;")
+
+const qualifiedName = (prefix: string, local: string): string =>
+  prefix === "" ? local : `${prefix}:${local}`
+
+/**
+ * Serialize an element tree. Namespace declarations are re-emitted where an
+ * element's scope differs from its parent's, so a parsed tree round-trips to
+ * an equivalent document (whitespace and prefixes kept, comments dropped).
+ */
+export const renderXml = (
+  root: XmlElement,
+  options: { readonly declaration?: boolean } = {}
+): string => {
+  const out: Array<string> = []
+  if (options.declaration === true) out.push('<?xml version="1.0" encoding="UTF-8"?>\n')
+  const walk = (element: XmlElement, parentScope: ReadonlyMap<string, string>): void => {
+    const declarations: Array<string> = []
+    for (const [prefix, namespace] of element.scope) {
+      if (prefix === "xml") continue
+      if (parentScope.get(prefix) !== namespace) {
+        declarations.push(
+          prefix === ""
+            ? ` xmlns="${escapeAttribute(namespace)}"`
+            : ` xmlns:${prefix}="${escapeAttribute(namespace)}"`
+        )
+      }
+    }
+    const attributes = element.attributes.map(
+      (attribute) =>
+        ` ${qualifiedName(attribute.prefix, attribute.name.local)}="${escapeAttribute(attribute.value)}"`
+    )
+    const name = qualifiedName(element.prefix, element.name.local)
+    out.push(`<${name}${declarations.join("")}${attributes.join("")}`)
+    if (element.children.length === 0) {
+      out.push("/>")
+      return
+    }
+    out.push(">")
+    for (const child of element.children) {
+      if (child._tag === "text") out.push(escapeText(child.value))
+      else walk(child, element.scope)
+    }
+    out.push(`</${name}>`)
+  }
+  walk(
+    root,
+    new Map([
+      ["xml", XmlNamespace],
+      ["", ""]
+    ])
+  )
+  return out.join("")
+}

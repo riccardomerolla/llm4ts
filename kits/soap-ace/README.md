@@ -62,6 +62,30 @@ with the auth-aware transport; until then pass a local path.
 - `<!DOCTYPE` is refused outright: no external entities, no entity expansion.
   Schemas in ISO-8859-1 and windows-1252 are decoded by their declaration.
 
+## Masking
+
+Every SOAP sample is masked before it is written anywhere or shown to a
+model; there is no switch. Personal data is found two ways:
+
+- **by field**: element and attribute names (Italian and English words:
+  `iban`, `codiceFiscale`, `partitaIva`, `numeroCarta`, `intestatario`,
+  `indirizzo`, `dataNascita`, `codiceOtp`, ...) and the XSD type a field is
+  declared with (`IbanType`, `CodiceFiscaleType`);
+- **by value**, anywhere in text: IBANs (mod-97), codici fiscali (check
+  letter), PANs (Luhn, issuer range), partite IVA after `IT`, emails, and
+  `+39` phone numbers.
+
+Replacements are keyed HMAC pseudonyms that keep the format and stay valid:
+an Italian IBAN keeps its ABI/CAB and gets a correct CIN and check digits, a
+codice fiscale keeps the holder's sex and a valid check letter, a PAN keeps
+its BIN and Luhn digit, a partita IVA its office code. One key per service
+maps the same input to the same pseudonym everywhere, so relationships
+between request and response survive. Free-text fields (`causale`,
+`descrizione`) are only scanned for identifiers; a name written inside them
+needs a `mask` override in `masking.json` (`{ "fields": { "causale": "mask" } }`),
+which also accepts `keep` for a field wrongly caught by a name rule. Every
+replacement is reported by path, kind, and reason.
+
 ## Layout
 
 ```text

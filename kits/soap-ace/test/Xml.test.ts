@@ -7,6 +7,7 @@ import {
   elements,
   parseXml,
   parseXmlBytes,
+  renderXml,
   resolveQName,
   textOf
 } from "../flows/lib/soap/Xml.ts"
@@ -106,6 +107,16 @@ describe("Xml", () => {
       const deep = "<a>".repeat(10) + "</a>".repeat(10)
       const error = yield* failure(parseXml(deep, { limits: { maxDepth: 5, maxChars: 1000 } }))
       assert.strictEqual(error.reason, "limit")
+    })
+  )
+
+  it.effect("renders a parsed tree back to an equivalent document", () =>
+    Effect.gen(function* () {
+      const source =
+        '<s:E xmlns:s="urn:s"><s:B><r xmlns="urn:r" a="x &amp; &quot;y&quot;">1 &lt; 2<i/></r></s:B></s:E>'
+      const once = renderXml(yield* parseXml(source))
+      assert.strictEqual(once, source)
+      assert.strictEqual(renderXml(yield* parseXml(once)), once)
     })
   )
 
