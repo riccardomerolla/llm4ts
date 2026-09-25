@@ -16,11 +16,12 @@
 // 1.1 and 2.0); anything it does not model is an open question, never a
 // guess. Classes are proposed by a name heuristic and, when
 // LLM4TS_JUDGMENT_PROVIDER names a judgment seat, by a typed judgment.
-// LLM4TS_SOAP_SERVICE overrides the service directory name.
+// LLM4TS_SOAP_SERVICE overrides the service directory name. For a URL, the
+// fetch side of <repo>/.llm4ts/soap/<LLM4TS_SOAP_SERVICE>/auth.json (Basic,
+// Bearer, mTLS; references only) authenticates every document request.
 import { isAbsolute, resolve } from "node:path"
 import * as Effect from "effect/Effect"
 import {
-  FlowAborted,
   Info,
   makeNodeWorkspace,
   mock,
@@ -29,8 +30,10 @@ import {
   runNode
 } from "@llm4ts/runner"
 import { judgmentConnectorFromEnvironment } from "@llm4ts/runner/Connectors"
-import { discoverService } from "./lib/soap/Discover.ts"
-import { DocumentLoader, makeFileDocumentLoader } from "./lib/soap/Wsdl.ts"
+import { nodeSecretSource, resolveSide } from "./lib/soap/Auth.ts"
+import { discoverService, loadAuthProfile } from "./lib/soap/Discover.ts"
+import { makeNodeSoapTransport, makeTransportDocumentLoader } from "./lib/soap/Transport.ts"
+import { DocumentLoader } from "./lib/soap/Wsdl.ts"
 
 const isUrl = (location: string): boolean => /^https?:\/\//i.test(location)
 
@@ -54,13 +57,18 @@ const program = Effect.gen(function* () {
     (context) =>
       Effect.gen(function* () {
         const say = (message: string) => context.events.publish(Info.make({ message }))
-        if (isUrl(location)) {
-          return yield* FlowAborted.make({
-            message:
-              "WSDL URLs are read through the SOAP transport and its auth profile, which is not wired yet; download the WSDL and its schemas and pass the local path"
-          })
-        }
         const workspace = yield* makeNodeWorkspace(input.workDir)
+        const profile =
+          service === undefined || service === ""
+            ? undefined
+            : yield* loadAuthProfile(workspace, service)
+        if (isUrl(location) && profile === undefined) {
+          yield* say(
+            "fetching without credentials (set LLM4TS_SOAP_SERVICE and write its auth.json for an authenticated WSDL)"
+          )
+        }
+        const fetchSide = yield* resolveSide(nodeSecretSource(), profile?.fetch)
+        const loader = makeTransportDocumentLoader(makeNodeSoapTransport(), fetchSide)
         const result = yield* discoverService({
           workspace,
           location,
@@ -68,7 +76,7 @@ const program = Effect.gen(function* () {
           ...(judgment === undefined || context.judgment === undefined
             ? {}
             : { judgment: context.judgment })
-        }).pipe(Effect.provideService(DocumentLoader, makeFileDocumentLoader()))
+        }).pipe(Effect.provideService(DocumentLoader, loader))
 
         const { catalog } = result
         yield* say(

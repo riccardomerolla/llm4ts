@@ -45,8 +45,9 @@ reports operations it does not mention and entries no longer in the WSDL.
 Classes are proposed by a name heuristic (Italian and English verbs) and, when
 `LLM4TS_JUDGMENT_PROVIDER` names a judgment seat, by a typed judgment
 (ADR 0017); without one, discovery makes no model call at all.
-`LLM4TS_SOAP_SERVICE` overrides the service directory name. WSDL URLs arrive
-with the auth-aware transport; until then pass a local path.
+`LLM4TS_SOAP_SERVICE` overrides the service directory name; for a WSDL URL it
+also selects the auth profile whose `fetch` side authenticates every document
+request.
 
 ## Discovery guarantees
 
@@ -61,6 +62,45 @@ with the auth-aware transport; until then pass a local path.
   document/literal binding keeps it and lists the others as open questions.
 - `<!DOCTYPE` is refused outright: no external entities, no entity expansion.
   Schemas in ISO-8859-1 and windows-1252 are decoded by their declaration.
+
+## Auth profile
+
+`.llm4ts/soap/<service>/auth.json` is gitignored (discovery writes the
+directory's `.gitignore`) and holds **references only**: `env:NAME` or
+`file:path`. A literal where a secret belongs is refused when the profile is
+read, and errors name the reference, never its value.
+
+```json
+{
+  "environment": "uat",
+  "endpoint": "https://esb-uat.bank.internal/soap/DemoBank",
+  "fetch": { "auth": { "scheme": "basic", "user": "svc-wsdl", "password": "env:WSDL_PASSWORD" } },
+  "call": {
+    "auth": { "scheme": "bearer", "token": "env:SOAP_TOKEN" },
+    "tls": {
+      "pfx": "file:/secure/client.p12",
+      "passphrase": "env:P12_PASS",
+      "ca": "file:/secure/ca.pem"
+    }
+  },
+  "wsSecurity": { "user": "env:WS_USER", "password": "env:WS_PASSWORD", "passwordType": "digest" },
+  "mutating": { "uat": "deny" }
+}
+```
+
+- `environment` must be `dev`, `test`, or `uat`; nothing else is accepted.
+- `fetch` and `call` are configured separately: `auth` is `none`, `basic`, or
+  `bearer`; `tls` is `cert`+`key` (PEM) or `pfx`+`passphrase`, plus an
+  optional `ca`.
+- `wsSecurity` adds a WS-Security `UsernameToken` (`text` or `digest`) to
+  calls.
+- Operations confirmed as `mutating` in `operations.md` follow the
+  environment's policy: `confirm` (default in dev) asks, `flag` (default in
+  test and uat) needs `--allow-mutating <operation>`, `deny` refuses.
+  Unclassified operations are never called.
+
+Persisted exchanges drop `wsse:Security` headers and credential-bearing HTTP
+headers (`authorization`, cookies, anything named like a token or secret).
 
 ## Masking
 

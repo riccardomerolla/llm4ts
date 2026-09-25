@@ -13,6 +13,7 @@ import {
   WsdlCatalog
 } from "./Catalog.ts"
 import type { OperationsFileError } from "./Classification.ts"
+import { type AuthProfile, type AuthProfileError, decodeAuthProfile } from "./Auth.ts"
 import {
   type ClassProposal,
   classifyOperations,
@@ -46,7 +47,10 @@ export const servicePaths = (service: string) => {
     directory,
     catalog: `${directory}/catalog.json`,
     summary: `${directory}/catalog.md`,
-    operations: `${directory}/operations.md`
+    operations: `${directory}/operations.md`,
+    auth: `${directory}/auth.json`,
+    masking: `${directory}/masking.json`,
+    gitignore: `${directory}/.gitignore`
   }
 }
 
@@ -63,6 +67,17 @@ export const serviceName = (
   const safe = raw.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "")
   return safe === "" ? "service" : safe
 }
+
+/** What never leaves the machine: credentials references, raw captures, the masking key. */
+export const serviceGitignore = ["auth.json", "raw/", ".masking-key", ""].join("\n")
+
+export const loadAuthProfile = (
+  workspace: WorkspaceShape,
+  service: string
+): Effect.Effect<AuthProfile | undefined, WorkspaceError | AuthProfileError> =>
+  Effect.flatMap(readIfPresent(workspace, servicePaths(service).auth), (text) =>
+    text === undefined ? Effect.succeed(undefined) : decodeAuthProfile(text)
+  )
 
 export const readIfPresent = (
   workspace: WorkspaceShape,
@@ -203,6 +218,7 @@ export const discoverService = (
     const catalog = yield* readCatalog(options.location)
     const service = serviceName(catalog, options.location, options.service)
     const paths = servicePaths(service)
+    yield* options.workspace.write(paths.gitignore, serviceGitignore)
     yield* options.workspace.write(paths.catalog, encodeCatalog(catalog))
     yield* options.workspace.write(paths.summary, renderCatalogSummary(service, catalog))
 
