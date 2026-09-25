@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -42,6 +42,8 @@ import {
   type StoryPlan
 } from "@llm4ts/flow/StoryPlan"
 import {
+  appDirFor,
+  inAppDir,
   awaitServer,
   chooseEpic,
   epicsDir,
@@ -58,6 +60,7 @@ import {
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
+  setupAgentEnabled,
   setupIn,
   storyCoderFromEnvironment,
   storyJudgeQuery,
@@ -319,6 +322,94 @@ describe("epic-stories flags and seats", () => {
       assert.include(error.message, "worktree setup failed (pnpm install --offline)")
       assert.include(error.message, "ERR_PNPM_NO_OFFLINE_META")
     })
+  )
+
+  it("the setup agent is opt-in", () => {
+    assert.isFalse(setupAgentEnabled({}))
+    assert.isFalse(setupAgentEnabled({ LLM4TS_SETUP_AGENT: "0" }))
+    assert.isTrue(setupAgentEnabled({ LLM4TS_SETUP_AGENT: "1" }))
+    assert.isTrue(setupAgentEnabled({ LLM4TS_SETUP_AGENT: " On " }))
+  })
+
+  it.effect("a missing root package.json points at LLM4TS_APP_DIR", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["pnpm", "install", "--offline"]),
+            ProcessResult.make({
+              exitCode: 1,
+              stdout: [],
+              stderr: ["[ERR_PNPM_NO_PKG_MANIFEST] No package.json found in /wt"]
+            })
+          ]
+        ])
+      })
+      const error = yield* Effect.flip(
+        setupIn(fake.executor, events, ["pnpm", "install", "--offline"])("/wt")
+      )
+      assert.include(error.message, "LLM4TS_APP_DIR")
+    })
+  )
+
+  it.effect("setup and gates run in the app subfolder of each checkout", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["pnpm", "install", "--offline"]),
+            ProcessResult.make({ exitCode: 0, stdout: [], stderr: [] })
+          ],
+          [
+            processCommandKey(["pnpm", "test"]),
+            ProcessResult.make({ exitCode: 0, stdout: [], stderr: [] })
+          ]
+        ])
+      })
+      yield* inAppDir(
+        "frontend",
+        setupIn(fake.executor, events, ["pnpm", "install", "--offline"])
+      )("/wt")
+      yield* inAppDir("frontend", gatesIn(fake.executor, events, [["pnpm", "test"]]))("/wt")
+      yield* inAppDir(".", gatesIn(fake.executor, events, [["pnpm", "test"]]))("/epic")
+      const invoked = yield* fake.recorded
+      assert.deepStrictEqual(
+        invoked.map((call) => call.cwd),
+        ["/wt/frontend", "/wt/frontend", "/epic"]
+      )
+    })
+  )
+
+  it.effect(
+    "the app dir is configured, else the root, else the one subfolder with a package.json",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "llm4ts-appdir-")))
+        const write = (path: string) =>
+          Effect.promise(async () => {
+            await mkdir(dirname(join(root, path)), { recursive: true })
+            await writeFile(join(root, path), "{}")
+          })
+        assert.strictEqual(yield* appDirFor(root, {}), ".")
+        yield* write("docs/readme.md")
+        yield* write("node_modules/x/package.json")
+        yield* write(".llm4ts/package.json")
+        yield* write("frontend/package.json")
+        assert.strictEqual(yield* appDirFor(root, {}), "frontend")
+        yield* write("backend/package.json")
+        assert.strictEqual(yield* appDirFor(root, {}), ".")
+        assert.strictEqual(yield* appDirFor(root, { LLM4TS_APP_DIR: "apps/web/" }), "apps/web")
+        assert.strictEqual(yield* appDirFor(root, { LLM4TS_APP_DIR: "./" }), ".")
+        yield* write("package.json")
+        assert.strictEqual(yield* appDirFor(root, {}), ".")
+        const escaped = yield* Effect.flip(appDirFor(root, { LLM4TS_APP_DIR: "../other" }))
+        assert.include(escaped.message, "inside the repository")
+        const absolute = yield* Effect.flip(appDirFor(root, { LLM4TS_APP_DIR: "/opt/app" }))
+        assert.include(absolute.message, "inside the repository")
+        yield* Effect.promise(() => rm(root, { recursive: true, force: true }))
+      })
   )
 
   it.effect("the story judge turns sub-bar dimensions into critical issues", () =>

@@ -24,6 +24,7 @@ import {
   blockedOnIn,
   blockedRebuttal,
   implementStoriesFlow,
+  setupRecoveryPrompt,
   perimeterRules,
   renderEpicReport,
   type StoriesOptions,
@@ -725,6 +726,55 @@ describe("Stories executor", () => {
         assert.strictEqual(report.stories.find((outcome) => outcome.id === "d")?.status, "waiting")
       })
   )
+
+  it.effect(
+    "with the setup agent, a failed setup gets one coder turn and is checked by running again",
+    () =>
+      Effect.gen(function* () {
+        // Story a's setup fails once, then passes; story b's never does.
+        const attempts = yield* Ref.make<ReadonlyMap<string, number>>(new Map())
+        const setup = (workDir: string) =>
+          Effect.gen(function* () {
+            const id = workDir.split("/").at(-1) ?? ""
+            const seen = (yield* Ref.get(attempts)).get(id) ?? 0
+            yield* Ref.update(attempts, (all) => new Map([...all, [id, seen + 1]]))
+            if (id === "b" || (id === "a" && seen === 0)) {
+              return yield* FlowAborted.make({ message: `ERR_PNPM_NO_OFFLINE_META in ${id}` })
+            }
+          })
+        const harness = yield* makeHarness()
+        const context = yield* makeContext(harness)
+        const options = yield* makeOptions(harness, diamond, context, {
+          concurrency: 1,
+          setup,
+          setupAgent: true
+        })
+        const report = yield* implementStoriesFlow(context, options)
+        assert.strictEqual(report.stories.find((outcome) => outcome.id === "a")?.status, "done")
+        const b = report.stories.find((outcome) => outcome.id === "b")
+        assert.strictEqual(b?.status, "failed")
+        assert.include(b?.reason ?? "", "setup still fails after the coder's turn")
+        assert.include(b?.reason ?? "", "ERR_PNPM_NO_OFFLINE_META in b")
+        const seen = yield* Ref.get(attempts)
+        assert.strictEqual(seen.get("a"), 2)
+        assert.strictEqual(seen.get("b"), 2)
+
+        // Off (the default): the first failure fails the story, no second run.
+        yield* Ref.set(attempts, new Map())
+        const plain = yield* makeHarness()
+        const plainContext = yield* makeContext(plain)
+        const off = yield* makeOptions(plain, diamond, plainContext, { concurrency: 1, setup })
+        const halted = yield* implementStoriesFlow(plainContext, off)
+        assert.strictEqual(halted.stories.find((outcome) => outcome.id === "a")?.status, "failed")
+        assert.strictEqual((yield* Ref.get(attempts)).get("a"), 1)
+      })
+  )
+
+  it("the setup recovery prompt carries the failure and forbids tracked changes", () => {
+    const prompt = setupRecoveryPrompt("worktree setup failed (pnpm install --offline): boom")
+    assert.include(prompt, "boom")
+    assert.include(prompt, "not commit")
+  })
 
   it.effect("a story whose branch has no changes fails before the judge is asked", () =>
     Effect.gen(function* () {

@@ -2,7 +2,7 @@
 // story-plan generator prompt and schema, the story judge, the gate runner,
 // and seat selection. The executor itself is `@llm4ts/flow/Stories`.
 import { readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { isAbsolute, join, normalize } from "node:path"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
@@ -74,6 +74,9 @@ export const epicUsage = [
   "       add CLI flags (key=value;key=value). LLM4TS_GATES overrides the gate commands;",
   "       LLM4TS_WORKTREE_SETUP (default: pnpm install --offline) prepares each worktree;",
   "       LLM4TS_WORKTREE_ROOT (default: <repo>.worktrees beside the repository) holds them;",
+  "       LLM4TS_APP_DIR (e.g. frontend) runs setup and gates in that subfolder; unset, a",
+  "       repository without a root package.json uses its one subfolder that has one;",
+  "       LLM4TS_SETUP_AGENT=1 gives the coder one turn to fix a failed setup, then reruns it;",
   "       LLM4TS_CODER_HEALTH_URL is polled after the coder's serving engine goes down."
 ].join("\n")
 
@@ -757,6 +760,63 @@ export const judgeStory = (
       Effect.map((scored) => subBar(scored, story))
     )
 
+// ---- App directory ----------------------------------------------------------------
+
+/** Folders never taken for the application: dependencies, build output, llm4ts state. */
+const ignoredAppDirs = new Set(["node_modules", "dist", "build", "out", "coverage"])
+
+const hasPackageJson = (dir: string): Effect.Effect<boolean> =>
+  Effect.tryPromise(() => readdir(dir)).pipe(
+    Effect.map((names) => names.includes("package.json")),
+    Effect.catch(() => Effect.succeed(false))
+  )
+
+/**
+ * Where setup and gates run, relative to a checkout: `LLM4TS_APP_DIR` when set
+ * (`.` for the root); otherwise the root when it has a `package.json`, else
+ * its ONE first-level subfolder that has one (a Next.js app in `frontend/`).
+ * Several candidates, or none, keep the root — the setup error then names it.
+ * The value is relative so it applies to every worktree and the epic checkout.
+ */
+export const appDirFor = (
+  workDir: string,
+  environment: Readonly<Record<string, string | undefined>>
+): Effect.Effect<string, ScriptUsage> =>
+  Effect.gen(function* () {
+    const configured = environment.LLM4TS_APP_DIR?.trim()
+    if (configured !== undefined && configured.length > 0) {
+      const normalized = normalize(configured)
+      const relative = normalized.replace(/[\\/]+$/, "")
+      if (isAbsolute(normalized) || relative === ".." || /^\.\.[\\/]/.test(relative)) {
+        return yield* ScriptUsage.make({
+          message: `LLM4TS_APP_DIR must be a folder inside the repository, got '${configured}'`
+        })
+      }
+      return relative.length === 0 ? "." : relative
+    }
+    if (yield* hasPackageJson(workDir)) {
+      return "."
+    }
+    const entries = yield* Effect.tryPromise(() => readdir(workDir, { withFileTypes: true })).pipe(
+      Effect.catch(() => Effect.succeed([]))
+    )
+    const candidates: Array<string> = []
+    for (const entry of entries) {
+      if (entry.isDirectory() && !entry.name.startsWith(".") && !ignoredAppDirs.has(entry.name)) {
+        if (yield* hasPackageJson(join(workDir, entry.name))) {
+          candidates.push(entry.name)
+        }
+      }
+    }
+    return candidates.length === 1 ? (candidates[0] ?? ".") : "."
+  })
+
+/** Runs a per-checkout step in the app directory of whichever checkout it is given. */
+export const inAppDir =
+  <A>(appDir: string, step: (workDir: string) => Effect.Effect<A, FlowError>) =>
+  (workDir: string): Effect.Effect<A, FlowError> =>
+    step(appDir === "." ? workDir : join(workDir, appDir))
+
 // ---- Worktree setup --------------------------------------------------------------
 
 export const defaultWorktreeSetup: ReadonlyArray<string> = ["pnpm", "install", "--offline"]
@@ -780,6 +840,17 @@ export const worktreeSetupCommand = (
   return parts.length === 0 ? undefined : parts
 }
 
+/**
+ * `LLM4TS_SETUP_AGENT=1` (or `true`/`on`): a failed setup gets one coder turn
+ * to make the worktree ready, then runs again as the check. Off by default.
+ */
+export const setupAgentEnabled = (
+  environment: Readonly<Record<string, string | undefined>>
+): boolean => /^(1|true|on|yes)$/i.test(environment.LLM4TS_SETUP_AGENT?.trim() ?? "")
+
+const output = (result: ReviewResult): string =>
+  result.issues.map((issue) => issue.description).join("\n")
+
 /** Runs the setup command in a worktree; a non-zero exit fails the story with the output. */
 export const setupIn =
   (process: ProcessExecutorShape, events: FlowEventsShape, command: ReadonlyArray<string>) =>
@@ -788,9 +859,11 @@ export const setupIn =
       result.isClean
         ? Effect.void
         : FlowAborted.make({
-            message: `worktree setup failed (${command.join(" ")}):\n${result.issues
-              .map((issue) => issue.description)
-              .join("\n")}`
+            message: `worktree setup failed (${command.join(" ")}):\n${output(result)}${
+              /ERR_PNPM_NO_PKG_MANIFEST|ENOENT.*package\.json/.test(output(result))
+                ? "\n(the application is not at this folder: set LLM4TS_APP_DIR to its subfolder)"
+                : ""
+            }`
           })
     )
 

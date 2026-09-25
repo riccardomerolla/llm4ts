@@ -460,6 +460,13 @@ export interface StoriesOptions {
    * Runs on every start and resume; a failure fails the story.
    */
   readonly setup?: (workDir: string) => Effect.Effect<void, FlowError>
+  /**
+   * When setup fails, give the story's coder ONE turn to make the worktree
+   * ready (install, warm a cache, generate a client), then run setup again as
+   * the check. A second failure fails the story with both outputs. Outages
+   * are left to the outage retry. Default false.
+   */
+  readonly setupAgent?: boolean
   /** The target's gates, run in a worktree per task and on the epic checkout after each merge. */
   readonly gates: (workDir: string) => Effect.Effect<ReviewResult, FlowError>
   /** Story-level judge over the branch's diff against the epic branch; omit to skip. */
@@ -526,6 +533,20 @@ const combined = (first: ReviewResult, second: ReviewResult): ReviewResult =>
 
 const issueLines = (result: ReviewResult): string =>
   result.issues.map((issue) => `- ${issue.title}: ${issue.description}`).join("\n")
+
+/** The one-shot turn that makes a worktree ready after its setup command failed. */
+export const setupRecoveryPrompt = (command: string): string =>
+  [
+    "The setup of this worktree failed, so the gates cannot run here yet:",
+    "",
+    command,
+    "",
+    "Make this worktree ready so that the same setup succeeds when it runs again: install",
+    "or fetch dependencies, warm a package cache, generate clients, copy an example env file.",
+    "Work only in this worktree. Do not change sources, tests, manifests or lockfiles, and do",
+    "not commit: the setup is checked by running it again, and any tracked change is a",
+    "perimeter violation. If it cannot be made ready from here, say why in one paragraph."
+  ].join("\n")
 
 const failed = (story: Story, reason: string): StoryFailed =>
   StoryFailed.make({ story: story.id, reason })
@@ -768,7 +789,42 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     // Catch up before setup: the epic may have changed the manifest too.
     yield* catchUp(story, git)
     if (options.setup !== undefined) {
-      yield* stage(laneOf(story), `story ${story.id}: setup`, options.setup(state.worktree))
+      const setup = options.setup(state.worktree)
+      yield* stage(
+        laneOf(story),
+        `story ${story.id}: setup`,
+        options.setupAgent !== true
+          ? setup
+          : setup.pipe(
+              Effect.catch((error) =>
+                isOutageMessage(error.message)
+                  ? Effect.fail(error)
+                  : Effect.gen(function* () {
+                      yield* laneOf(story).publish(
+                        Info.make({
+                          message: `story ${story.id}: setup failed; the coder gets one turn to make the worktree ready`
+                        })
+                      )
+                      const chat = yield* makeChat(seats.context.coder, {
+                        system,
+                        events: laneOf(story),
+                        agent: "coder"
+                      })
+                      yield* chat.ask(setupRecoveryPrompt(error.message))
+                      yield* setup.pipe(
+                        Effect.catch((again) =>
+                          Effect.fail(
+                            failed(
+                              story,
+                              `setup still fails after the coder's turn:\n${again.message}\n(first failure:\n${error.message})`
+                            )
+                          )
+                        )
+                      )
+                    })
+              )
+            )
+      )
     }
 
     // The target's gates plus the perimeter: a stray path is a gate failure
