@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
@@ -22,10 +24,16 @@ import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import { makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
-import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import { makeMemoryPlainFileStore, saveVersioned } from "@llm4ts/flow/Persistence"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { ReviewResult } from "@llm4ts/flow/Review"
-import { implementStoriesFlow, type StorySeats } from "@llm4ts/flow/Stories"
+import {
+  StoryState,
+  StoryStateVersion,
+  implementStoriesFlow,
+  type StorySeats
+} from "@llm4ts/flow/Stories"
+import { nodePlainFileStore } from "@llm4ts/runner"
 import {
   parseStoryPlan,
   storyPlanViolations,
@@ -35,6 +43,11 @@ import {
 } from "@llm4ts/flow/StoryPlan"
 import {
   awaitServer,
+  chooseEpic,
+  epicsDir,
+  listEpics,
+  renderEpicList,
+  type EpicSummary,
   defaultGateCommands,
   epicIdFor,
   flagsFromEnvironment,
@@ -183,6 +196,17 @@ describe("epic-stories flags and seats", () => {
       assert.deepStrictEqual(land.rest, ["Add Conto"])
       assert.strictEqual((yield* parseEpicArgs(["--land=develop"])).land, "develop")
       assert.strictEqual((yield* Effect.flip(parseEpicArgs(["--land="])))._tag, "ScriptUsage")
+      const picked = yield* parseEpicArgs([
+        "--epic",
+        "conto-bonifico",
+        "--keep-worktrees",
+        "--list"
+      ])
+      assert.strictEqual(picked.epic, "conto-bonifico")
+      assert.isTrue(picked.keepWorktrees)
+      assert.isTrue(picked.list)
+      assert.strictEqual((yield* parseEpicArgs(["--epic=carte"])).epic, "carte")
+      assert.strictEqual((yield* Effect.flip(parseEpicArgs(["--epic"])))._tag, "ScriptUsage")
     })
   )
 
@@ -414,6 +438,104 @@ describe("epic-stories worktrees, outages and blocked claims", () => {
       )
       assert.include(asked, "- home (depends on: conto-overview")
     })
+  )
+})
+
+describe("choosing the epic", () => {
+  const summary = (epicId: string, landed?: string, merged = 8): EpicSummary => ({
+    dir: `${epicId}-abc123`,
+    stateDir: `/repo/.llm4ts/epics/${epicId}-abc123`,
+    epicId,
+    epic: `Epic ${epicId}`,
+    stories: 8,
+    merged,
+    landed
+  })
+  const choose = (text: string, epic: string | undefined, epics: ReadonlyArray<EpicSummary>) =>
+    chooseEpic({ text, epic, epics, defaultEpic: "the demo epic" })
+
+  it.effect("text wins, --epic picks by id or folder, otherwise the one open epic", () =>
+    Effect.gen(function* () {
+      const bank = summary("conto-bonifico", "main")
+      const cards = summary("carte", undefined, 3)
+      assert.deepStrictEqual(yield* choose("Add cards", undefined, [bank, cards]), {
+        _tag: "Text",
+        prompt: "Add cards"
+      })
+      const byId = yield* choose("", "conto-bonifico", [bank, cards])
+      assert.strictEqual(byId._tag === "Existing" ? byId.epic.epicId : "", "conto-bonifico")
+      const byDir = yield* choose("", "carte-abc123", [bank, cards])
+      assert.strictEqual(byDir._tag === "Existing" ? byDir.epic.epicId : "", "carte")
+      // Only one epic is not landed: no text needed.
+      const open = yield* choose("", undefined, [bank, cards])
+      assert.strictEqual(open._tag === "Existing" ? open.epic.epicId : "", "carte")
+      // A fresh repository keeps the demo default.
+      assert.deepStrictEqual(yield* choose("", undefined, []), {
+        _tag: "Text",
+        prompt: "the demo epic"
+      })
+    })
+  )
+
+  it.effect("never guesses: several open epics, none left, or an unknown id stop the run", () =>
+    Effect.gen(function* () {
+      const several = yield* Effect.flip(
+        choose("", undefined, [summary("carte"), summary("mutui", undefined, 2)])
+      )
+      assert.include(several.message, "several epics are open here")
+      assert.include(several.message, "--epic carte")
+      const allLanded = yield* Effect.flip(choose("", undefined, [summary("carte", "main")]))
+      assert.include(allLanded.message, "every epic here has landed")
+      const unknown = yield* Effect.flip(choose("", "nope", [summary("carte")]))
+      assert.include(unknown.message, "no epic 'nope'")
+      // --land with no text picks the finished epic that has not landed yet.
+      const land = yield* choose("", undefined, [
+        summary("conto-bonifico"),
+        summary("carte", "main")
+      ])
+      assert.strictEqual(land._tag === "Existing" ? land.epic.epicId : "", "conto-bonifico")
+    })
+  )
+
+  it.effect("lists a repository's epics from their state folders", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), "llm4ts-epics-"))),
+          (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true }))
+        )
+        const stateDir = join(epicsDir(root), "add-the-retail-customer-2e41f4")
+        yield* Effect.promise(() => mkdir(join(stateDir, "stories"), { recursive: true }))
+        yield* nodePlainFileStore.writeAtomic(join(stateDir, "plan.md"), fixture)
+        for (const id of ["accounts-contract", "payments-contract"]) {
+          yield* saveVersioned(
+            nodePlainFileStore,
+            join(stateDir, "stories", `${id}.json`),
+            StoryStateVersion,
+            StoryState,
+            StoryState.make({
+              id,
+              hash: "h",
+              branch: `story/x/${id}`,
+              worktree: "/wt",
+              status: "merged"
+            })
+          )
+        }
+        yield* Effect.promise(() => mkdir(join(epicsDir(root), "not-an-epic"), { recursive: true }))
+        const epics = yield* listEpics(nodePlainFileStore, root)
+        assert.deepStrictEqual(
+          epics.map((epic) => [epic.epicId, epic.merged, epic.stories, epic.landed]),
+          [["conto-bonifico", 2, 8, undefined]]
+        )
+        const listed = renderEpicList(epics)
+        assert.include(
+          listed,
+          "- conto-bonifico · 2/8 stories merged · in progress  (--epic conto-bonifico)"
+        )
+        assert.include(renderEpicList([]), "no epics in this repository yet")
+      })
+    )
   )
 })
 

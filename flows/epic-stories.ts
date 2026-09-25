@@ -3,6 +3,8 @@
 //   llm4ts run epic-stories --repo ~/demo/portal "Add the current account and wire transfers"
 //   llm4ts run epic-stories --repo ~/demo/portal -- --plan-only "…"   # write the plan and stop
 //   llm4ts run epic-stories --repo ~/demo/portal -- --land            # land the finished epic on main
+//   llm4ts run epic-stories --repo ~/demo/portal -- --list            # the repository's epics
+//   llm4ts run epic-stories --repo ~/demo/portal -- --epic <id>       # resume one, no text needed
 //
 // The reasoning seat (LLM4TS_REASONER, default claude) splits the epic,
 // reviews every task and judges every story; the coder seat (LLM4TS_CODER,
@@ -37,8 +39,13 @@ import {
 import { landEpic } from "@llm4ts/flow/Landing"
 import { implementStoriesFlow, type StorySeats } from "@llm4ts/flow/Stories"
 import { makeStoryPlanStore, validateStoryPlan } from "@llm4ts/flow/StoryPlan"
+import * as Console from "effect/Console"
 import {
   awaitServer,
+  chooseEpic,
+  epicsDir,
+  listEpics,
+  renderEpicList,
   combineTotals,
   epicIdFor,
   flagsFromEnvironment,
@@ -82,7 +89,25 @@ const defaultEpic =
 
 const program = Effect.gen(function* () {
   const flags = yield* parseEpicArgs(process.argv.slice(2))
-  const input = yield* resolveFlowInput(defaultEpic, flags.rest)
+  // The epic is chosen before any seat is resolved: the text given, `--epic`,
+  // or the one epic not landed yet (`chooseEpic`); `--list` only lists.
+  const given = yield* resolveFlowInput("", flags.rest)
+  const files = nodePlainFileStore
+  const epics = yield* listEpics(files, given.workDir)
+  if (flags.list) {
+    yield* Console.log(renderEpicList(epics))
+    return
+  }
+  const choice = yield* chooseEpic({
+    text: given.prompt,
+    epic: flags.epic,
+    epics,
+    defaultEpic
+  })
+  const input = {
+    ...given,
+    prompt: choice._tag === "Existing" ? choice.epic.epic : choice.prompt
+  }
   const coderFlags = flagsFromEnvironment(process.env.LLM4TS_CODER_FLAGS)
   const reasoning = withExtraFlags(
     withOptionalModel(
@@ -99,9 +124,10 @@ const program = Effect.gen(function* () {
     coderFlags
   )
   const localServer = localCoderServer(process.env.LLM4TS_CODER_MODEL, coderFlags, process.env)
-  const files = nodePlainFileStore
-  const epicId = epicIdFor(input.prompt)
-  const stateDir = join(input.workDir, ".llm4ts", "epics", epicId)
+  // A new epic's id (and state folder) is derived from its text; an existing
+  // one keeps its folder, whatever text is on the command line.
+  const epicId = choice._tag === "Existing" ? choice.epic.dir : epicIdFor(input.prompt)
+  const stateDir = join(epicsDir(input.workDir), epicId)
   const planPath = join(stateDir, "plan.md")
   const estimateOptions = estimatedUsageOptionsFromEnv(process.env)
   const contextBudget = budget(process.env)
@@ -150,6 +176,7 @@ const program = Effect.gen(function* () {
             files,
             stateDir,
             target: flags.land,
+            keepWorktrees: flags.keepWorktrees,
             gates: gatesIn(nodeProcessExecutor, events, gateCommands(process.env)),
             system: ["House rules of the target repository (CONTRIBUTING.md):", guidance].join("\n")
           })

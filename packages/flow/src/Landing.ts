@@ -5,19 +5,30 @@
 // commit on the target. Nothing touches the target until the epic branch is
 // green with the target's history in it.
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { makeChat } from "./Chat.ts"
 import type { FlowContextShape } from "./FlowContext.ts"
 import { EpicCheckoutDirty, EpicIncomplete, LandingFailed, type FlowError } from "./FlowError.ts"
 import { Info } from "./FlowEvents.ts"
 import { statusPaths } from "./GitTool.ts"
-import { loadVersioned, type PlainFileStoreShape } from "./Persistence.ts"
+import { loadVersioned, saveVersioned, type PlainFileStoreShape } from "./Persistence.ts"
 import type { ReviewResult } from "./Review.ts"
 import { StoryState, StoryStateVersion } from "./Stories.ts"
 import type { StoryPlan } from "./StoryPlan.ts"
 
 const join = (root: string, path: string): string =>
   `${root.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`
+
+export const EpicLandedVersion = 1
+
+/** Written to the epic's state directory once it lands: listings show it, reruns see it. */
+export class EpicLanded extends Schema.Class<EpicLanded>("EpicLanded")({
+  target: Schema.String,
+  epicBranch: Schema.String
+}) {}
+
+export const landedPath = (stateDir: string): string => join(stateDir, "landed.json")
 
 export interface LandOptions {
   readonly plan: StoryPlan
@@ -36,6 +47,8 @@ export interface LandOptions {
   readonly system?: string
   /** Fix rounds before giving up. Default 3. */
   readonly maxRounds?: number
+  /** Keep the story worktrees and branches after landing. Default false: they go. */
+  readonly keepWorktrees?: boolean
 }
 
 export interface LandReport {
@@ -45,6 +58,10 @@ export interface LandReport {
   readonly conflicts: ReadonlyArray<string>
   /** Coder rounds it took (0: clean and green on the first try). */
   readonly rounds: number
+  /** Story worktrees removed after landing. */
+  readonly removedWorktrees: number
+  /** Story branches deleted after landing (each fully merged into the target). */
+  readonly deletedBranches: number
 }
 
 const markerPattern = /^(<{7} |={7}$|>{7} )/m
@@ -175,8 +192,59 @@ export const landEpic = Effect.fn("@llm4ts/flow/Landing.land")(function* (
   }
   yield* git.checkout(target)
   yield* git.merge(epicBranch, `${plan.epicId}: land ${epicBranch}`)
+  yield* saveVersioned(
+    files,
+    landedPath(options.stateDir),
+    EpicLandedVersion,
+    EpicLanded,
+    EpicLanded.make({ target, epicBranch })
+  )
   yield* say(
     `landed ${epicBranch} on ${target}${rounds === 0 ? "" : ` after ${rounds} fix round(s)`}`
   )
-  return { epicBranch, target, conflicts, rounds }
+
+  // 5. The stories' worktrees and branches have done their job: their work
+  // is in the target's history. The epic's record (plan, board, report,
+  // story states, traces) stays. A worktree with uncommitted work, or a
+  // branch not fully merged, is kept and named.
+  let removedWorktrees = 0
+  let deletedBranches = 0
+  if (options.keepWorktrees !== true) {
+    const kept: Array<string> = []
+    for (const story of plan.stories) {
+      const state = yield* loadVersioned(
+        files,
+        join(options.stateDir, `stories/${story.id}.json`),
+        StoryStateVersion,
+        StoryState
+      )
+      if (state === undefined) {
+        continue
+      }
+      if ((yield* files.read(join(state.worktree, ".git"))) !== undefined) {
+        const removed = yield* git.removeWorktree(state.worktree).pipe(
+          Effect.as(true),
+          Effect.catch(() => Effect.succeed(false))
+        )
+        if (removed) {
+          removedWorktrees += 1
+        } else {
+          kept.push(`${state.worktree} (uncommitted work)`)
+        }
+      }
+      if (yield* git.branchExists(state.branch)) {
+        if (yield* git.isAncestor(state.branch, target)) {
+          yield* git.deleteBranch(state.branch)
+          deletedBranches += 1
+        } else {
+          kept.push(`${state.branch} (not merged into ${target})`)
+        }
+      }
+    }
+    yield* say(
+      `removed ${removedWorktrees} story worktree(s) and deleted ${deletedBranches} merged story branch(es)` +
+        (kept.length === 0 ? "" : `; kept: ${kept.join(", ")}`)
+    )
+  }
+  return { epicBranch, target, conflicts, rounds, removedWorktrees, deletedBranches }
 })

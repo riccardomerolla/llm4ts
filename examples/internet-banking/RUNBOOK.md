@@ -152,7 +152,13 @@ side. The coder resolves conflicts and red gates, up to three rounds. Only a
 green epic reaches `main`, as one merge commit. If it cannot get there, the
 epic is rolled back and `main` is untouched. `--land=<branch>` lands on
 another branch. Afterwards the repository is on `main`, with the epic in its
-history.
+history. The story worktrees and merged story branches are gone
+(`--keep-worktrees` keeps them). The epic's record under
+`.llm4ts/epics/` stays.
+
+`llm4ts run epic-stories --repo ~/demo/portal -- --list` shows the epics in
+the repository, and `--epic <id>` picks one without its text. The next
+epic's first run takes its text, like Act 1.
 
 ## Crash recovery (demonstrate it if you get the chance)
 

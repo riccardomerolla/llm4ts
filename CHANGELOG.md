@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.11.0
+
+- `epic-stories` chooses its epic explicitly. `--list` shows this
+  repository's epics: id, stories merged out of total, and whether each has
+  landed. `--epic <id>` works on one by id (the plan's id or its folder
+  name) without retyping its text. With neither text nor `--epic`, the run
+  takes the one epic not landed yet. When several are open, or every epic
+  has landed, it stops with the list rather than guessing. The flow's
+  built-in demo text is used only when the repository has no epic yet.
+- Landing cleans up after itself. The story worktrees are removed, but a
+  worktree with uncommitted work is kept. Story branches fully merged into
+  the target are deleted. What was kept is named. The epic's record stays
+  (plan, board, report, story states, traces), and a `landed.json` records
+  the landing. `--keep-worktrees` keeps everything.
+
 ## 2.10.0
 
 - `epic-stories --land[=<branch>]` lands a finished epic on `main` (or

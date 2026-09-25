@@ -139,7 +139,15 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   runs no stories. It refuses while any story is unmerged, merges the target
   into the epic branch first, lets the coder resolve conflicts and red gates
   for up to three rounds, and only then merges the epic into the target
-  (a merge commit). If it gives up, the target is untouched.
+  (a merge commit). If it gives up, the target is untouched. After landing,
+  the story worktrees and fully merged story branches are removed
+  (`--keep-worktrees` keeps them). The epic's record stays: plan, board,
+  report, story states, traces.
+- Each epic lives in its own folder under `.llm4ts/epics/`, named after its
+  text. `--list` shows them (stories merged, landed or not), and
+  `--epic <id>` works on one by id without retyping its text. With neither
+  text nor `--epic`, the run takes the one epic not landed yet. When several
+  are open, or all have landed, it stops with the list instead of guessing.
 - `--concurrency <n>` (default 3) caps the stories implemented at once;
   `--fail-fast` stops at the first failed story instead of putting its
   dependents on hold (`waiting` on the board until it is fixed and rerun).

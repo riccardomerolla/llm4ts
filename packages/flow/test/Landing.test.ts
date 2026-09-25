@@ -203,13 +203,91 @@ describe("landEpic", () => {
         epicBranch: "epic/bank",
         target: "main",
         conflicts: [],
-        rounds: 0
+        rounds: 0,
+        removedWorktrees: 0,
+        deletedBranches: 0
       })
       assert.deepStrictEqual(yield* Ref.get(log), [
         "checkout:epic/bank",
         "checkout:main",
         "merge:epic/bank:bank: land epic/bank"
       ])
+    })
+  )
+
+  it.effect("clears the merged stories' worktrees and branches, keeping what is not safe", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* merged(memory.store, "a")
+      yield* merged(memory.store, "b")
+      yield* memory.store.writeAtomic("/wt/a/.git", "gitdir: x")
+      yield* memory.store.writeAtomic("/wt/b/.git", "gitdir: y")
+      const events = yield* makeCollectingFlowEvents
+      const log = yield* Ref.make<ReadonlyArray<string>>([])
+      const base = gitFor(log, { behind: false, conflicts: [] })
+      const git: GitToolShape = {
+        ...base,
+        branchExists: () => Effect.succeed(true),
+        // b's branch holds a commit main does not have.
+        isAncestor: (commit) => Effect.succeed(commit !== "story/bank/b"),
+        removeWorktree: (path) =>
+          path === "/wt/b"
+            ? Effect.fail(FlowAborted.make({ message: "contains modified files" }))
+            : Ref.update(log, (all) => [...all, `worktree-remove:${path}`]),
+        deleteBranch: (name) => Ref.update(log, (all) => [...all, `branch-delete:${name}`])
+      }
+      const report = yield* landEpic(
+        contextFor(
+          git,
+          coder(() => Effect.void),
+          events
+        ),
+        {
+          plan,
+          files: memory.store,
+          stateDir,
+          gates: () => Effect.succeed(clean)
+        }
+      )
+      assert.strictEqual(report.removedWorktrees, 1)
+      assert.strictEqual(report.deletedBranches, 1)
+      const entries = yield* Ref.get(log)
+      assert.include(entries, "worktree-remove:/wt/a")
+      assert.include(entries, "branch-delete:story/bank/a")
+      assert.notInclude(entries, "branch-delete:story/bank/b")
+      const said = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Info" ? [event.message] : []
+      )
+      assert.isTrue(
+        said.some(
+          (message) =>
+            message.includes("kept: /wt/b (uncommitted work)") &&
+            message.includes("story/bank/b (not merged into main)")
+        ),
+        JSON.stringify(said)
+      )
+      // The landing is recorded for listings and reruns.
+      const files = yield* memory.files
+      assert.include(files[`${stateDir}/landed.json`] ?? "", '"target": "main"')
+
+      // --keep-worktrees leaves everything in place.
+      const kept = yield* Ref.make<ReadonlyArray<string>>([])
+      const untouched = yield* landEpic(
+        contextFor(
+          { ...git, deleteBranch: (name) => Ref.update(kept, (all) => [...all, name]) },
+          coder(() => Effect.void),
+          events
+        ),
+        {
+          plan,
+          files: memory.store,
+          stateDir,
+          gates: () => Effect.succeed(clean),
+          keepWorktrees: true
+        }
+      )
+      assert.strictEqual(untouched.removedWorktrees + untouched.deletedBranches, 0)
+      assert.deepStrictEqual(yield* Ref.get(kept), [])
     })
   )
 

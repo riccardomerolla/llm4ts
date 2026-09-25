@@ -1,6 +1,7 @@
 // Shared core of the epic-stories flow (ADR 0013): the operator flags, the
 // story-plan generator prompt and schema, the story judge, the gate runner,
 // and seat selection. The executor itself is `@llm4ts/flow/Stories`.
+import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -14,11 +15,18 @@ import { cap } from "@llm4ts/flow/Context"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { type FlowError } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
-import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { BlockedVerdict } from "@llm4ts/flow/Stories"
+import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
+import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { BlockedVerdict, StoryState, StoryStateVersion } from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
 import { ReviewIssue } from "@llm4ts/flow/Review"
-import { StoryPlan, dependenciesOf, pathsNamedIn, type Story } from "@llm4ts/flow/StoryPlan"
+import {
+  StoryPlan,
+  dependenciesOf,
+  makeStoryPlanStore,
+  pathsNamedIn,
+  type Story
+} from "@llm4ts/flow/StoryPlan"
 import { claude, coderIds, pi } from "@llm4ts/runner/Connectors"
 import {
   FlowAborted,
@@ -38,6 +46,12 @@ export interface EpicArgs {
   readonly concurrency: number | undefined
   /** `--land[=branch]`: land the finished epic on that branch (default main) and stop. */
   readonly land: string | undefined
+  /** `--keep-worktrees`: after landing, keep the story worktrees and branches. */
+  readonly keepWorktrees: boolean
+  /** `--list`: list the epics in this repository and stop. */
+  readonly list: boolean
+  /** `--epic <id>`: work on this existing epic, by folder name or plan id, without its text. */
+  readonly epic: string | undefined
   /** Everything else, for `resolveFlowInput` (`--repo`, the epic text). */
   readonly rest: ReadonlyArray<string>
 }
@@ -46,7 +60,12 @@ export const epicUsage = [
   "epic-stories flags:",
   "  --plan-only         write (or re-validate) the story plan and stop",
   "  --land[=<branch>]   land the finished epic on <branch> (default main): merge the branch in,",
-  "                      let the coder fix conflicts and red gates (3 rounds), then merge",
+  "                      let the coder fix conflicts and red gates (3 rounds), then merge;",
+  "                      afterwards the story worktrees and merged story branches go",
+  "  --keep-worktrees    with --land: keep the story worktrees and branches",
+  "  --list              list this repository's epics (id, stories merged, landed) and stop",
+  "  --epic <id>         work on an existing epic by id, no text needed. Without text or",
+  "                      --epic, the one epic not landed yet is chosen; several stop the run",
   "  --concurrency <n>   stories implemented at once (default 3)",
   "  --fail-fast         stop the epic at the first failed story",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
@@ -65,6 +84,9 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
     let failFast = false
     let concurrency: number | undefined
     let land: string | undefined
+    let keepWorktrees = false
+    let list = false
+    let epic: string | undefined
     const rest: Array<string> = []
     for (let index = 0; index < argv.length; index += 1) {
       const argument = argv[index] ?? ""
@@ -72,6 +94,19 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
         planOnly = true
       } else if (argument === "--fail-fast") {
         failFast = true
+      } else if (argument === "--keep-worktrees") {
+        keepWorktrees = true
+      } else if (argument === "--list") {
+        list = true
+      } else if (argument === "--epic" || argument.startsWith("--epic=")) {
+        const value = argument.includes("=") ? argument.slice("--epic=".length) : argv[index + 1]
+        if (!argument.includes("=")) {
+          index += 1
+        }
+        if (value === undefined || value.trim().length === 0 || value.startsWith("--")) {
+          return yield* ScriptUsage.make({ message: `--epic needs an epic id\n${epicUsage}` })
+        }
+        epic = value.trim()
       } else if (argument === "--land" || argument.startsWith("--land=")) {
         // `--land=<branch>`, never a separate word: the epic text may follow.
         const branch = argument.includes("=") ? argument.slice("--land=".length).trim() : "main"
@@ -97,8 +132,148 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
         rest.push(argument)
       }
     }
-    return { planOnly, failFast, concurrency, land, rest }
+    return { planOnly, failFast, concurrency, land, keepWorktrees, list, epic, rest }
   })
+
+// ---- Epics in a repository ---------------------------------------------------------
+
+/** One epic under `.llm4ts/epics/`, as `--list` shows it. */
+export interface EpicSummary {
+  /** The state folder's name: the epic's text as a slug plus a hash of it. */
+  readonly dir: string
+  readonly stateDir: string
+  /** The plan's own id (`epic/<epicId>` is its branch). */
+  readonly epicId: string
+  readonly epic: string
+  readonly stories: number
+  readonly merged: number
+  /** The branch it landed on, once it has. */
+  readonly landed: string | undefined
+}
+
+export const epicsDir = (workDir: string): string => join(workDir, ".llm4ts", "epics")
+
+/** Every epic with a plan in this repository, oldest folder name first. */
+export const listEpics = (
+  files: PlainFileStoreShape,
+  workDir: string
+): Effect.Effect<ReadonlyArray<EpicSummary>, FlowError> =>
+  Effect.gen(function* () {
+    const root = epicsDir(workDir)
+    const entries = yield* Effect.tryPromise(() => readdir(root, { withFileTypes: true })).pipe(
+      Effect.catch(() => Effect.succeed([]))
+    )
+    const store = makeStoryPlanStore(files)
+    const summaries: Array<EpicSummary> = []
+    for (const entry of [...entries].sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!entry.isDirectory()) {
+        continue
+      }
+      const stateDir = join(root, entry.name)
+      const plan = yield* store
+        .load(join(stateDir, "plan.md"))
+        .pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (plan === undefined) {
+        continue
+      }
+      let merged = 0
+      for (const story of plan.stories) {
+        const state = yield* loadVersioned(
+          files,
+          join(stateDir, "stories", `${story.id}.json`),
+          StoryStateVersion,
+          StoryState
+        ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        if (state?.status === "merged") {
+          merged += 1
+        }
+      }
+      const landed = yield* loadVersioned(
+        files,
+        landedPath(stateDir),
+        EpicLandedVersion,
+        EpicLanded
+      ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      summaries.push({
+        dir: entry.name,
+        stateDir,
+        epicId: plan.epicId,
+        epic: plan.epic,
+        stories: plan.stories.length,
+        merged,
+        landed: landed?.target
+      })
+    }
+    return summaries
+  })
+
+export const renderEpicList = (epics: ReadonlyArray<EpicSummary>): string =>
+  epics.length === 0
+    ? "no epics in this repository yet: give an epic's text to plan one"
+    : [
+        `epics (${epics.length}):`,
+        ...epics.flatMap((epic) => [
+          `- ${epic.epicId} · ${epic.merged}/${epic.stories} stories merged · ${
+            epic.landed === undefined
+              ? epic.merged === epic.stories
+                ? "finished, not landed"
+                : "in progress"
+              : `landed on ${epic.landed}`
+          }  (--epic ${epic.epicId})`,
+          `  "${epic.epic.length > 110 ? `${epic.epic.slice(0, 109)}…` : epic.epic}"`
+        ])
+      ].join("\n")
+
+/** Which epic a run works on. */
+export type EpicChoice =
+  | { readonly _tag: "Text"; readonly prompt: string }
+  | { readonly _tag: "Existing"; readonly epic: EpicSummary }
+
+/**
+ * The epic text given wins (a new epic, or the existing one with that exact
+ * text); `--epic` picks an existing one; with neither, the one epic not yet
+ * landed is chosen. Several candidates, or none left, stop the run with the
+ * list — never a silent guess. With no epic at all, the flow's default text.
+ */
+export const chooseEpic = (args: {
+  readonly text: string
+  readonly epic: string | undefined
+  readonly epics: ReadonlyArray<EpicSummary>
+  readonly defaultEpic: string
+}): Effect.Effect<EpicChoice, ScriptUsage> => {
+  if (args.epic !== undefined) {
+    const found = args.epics.find((epic) => epic.dir === args.epic || epic.epicId === args.epic)
+    return found === undefined
+      ? Effect.fail(
+          ScriptUsage.make({
+            message: `no epic '${args.epic}' in this repository\n${renderEpicList(args.epics)}`
+          })
+        )
+      : Effect.succeed({ _tag: "Existing", epic: found })
+  }
+  if (args.text.trim().length > 0) {
+    return Effect.succeed({ _tag: "Text", prompt: args.text })
+  }
+  const open = args.epics.filter((epic) => epic.landed === undefined)
+  if (open.length === 1 && open[0] !== undefined) {
+    return Effect.succeed({ _tag: "Existing", epic: open[0] })
+  }
+  if (open.length > 1) {
+    return Effect.fail(
+      ScriptUsage.make({
+        message: `several epics are open here; pick one with --epic <id>, or give an epic's text\n${renderEpicList(open)}`
+      })
+    )
+  }
+  if (args.epics.length > 0) {
+    return Effect.fail(
+      ScriptUsage.make({
+        message: `every epic here has landed; give the new epic's text to plan it\n${renderEpicList(args.epics)}`
+      })
+    )
+  }
+  return Effect.succeed({ _tag: "Text", prompt: args.defaultEpic })
+}
 
 // ---- Seats --------------------------------------------------------------------
 
