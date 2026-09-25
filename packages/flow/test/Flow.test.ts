@@ -183,6 +183,7 @@ const makeFakeGit = (log: Ref.Ref<GitLog>): GitToolShape => ({
   removeWorktree: (_path, _force) => Effect.void,
   moveWorktree: (_from, _to) => Effect.void,
   restorePaths: () => Effect.void,
+  mergeNoCommit: () => Effect.succeed([]),
   branchExists: (_name) => Effect.succeed(false),
   deleteBranch: (_name) => Effect.void,
   isAncestor: (_commit, _of) => Effect.succeed(false),

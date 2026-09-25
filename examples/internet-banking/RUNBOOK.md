@@ -61,9 +61,13 @@ the generated file to make the run deterministic.
 ## Act 2 — the parallel run
 
 ```bash
-llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 3 \
-  "Add the retail customer's current account (Conto) with balance and movements, and wire transfers (Bonifico) with beneficiary, review, SCA confirmation, and history."
+llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 3
 ```
+
+No epic text this time: the flow's default epic is the Conto e Bonifico
+sentence from Act 1, and the epic's state (plan, board, stories) is keyed by
+that text. Retyping it risks a one-character difference, which the flow
+would read as a new epic with a new plan.
 
 What to show while it runs:
 
@@ -135,6 +139,20 @@ Sign in, open Conto, Movimenti, Bonifico (confirm with any six-digit code;
 `000000` is refused), Bonifici, in Italian and in English. Then open
 `.llm4ts/epics/<epic-id>/report.md`: per story the branch, the judge
 verdict, and the estimated tokens and cost, labelled as estimates.
+
+## Act 4 — landing the epic
+
+```bash
+llm4ts run epic-stories --repo ~/demo/portal -- --land
+```
+
+`--land` runs no stories. It refuses an epic with stories not merged, then
+merges `main` into the epic branch, so any conflict is resolved on the epic
+side. The coder resolves conflicts and red gates, up to three rounds. Only a
+green epic reaches `main`, as one merge commit. If it cannot get there, the
+epic is rolled back and `main` is untouched. `--land=<branch>` lands on
+another branch. Afterwards the repository is on `main`, with the epic in its
+history.
 
 ## Crash recovery (demonstrate it if you get the chance)
 

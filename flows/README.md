@@ -135,6 +135,11 @@ pnpm --filter @llm4ts/flows epic-stories -- \
 - `--plan-only` writes (or re-validates) `.llm4ts/epics/<epic-id>/plan.md`
   and stops. An existing plan file always wins over regeneration: editing
   it is the approval and the re-plan path.
+- `--land[=<branch>]` lands the finished epic on `main` (or `<branch>`) and
+  runs no stories. It refuses while any story is unmerged, merges the target
+  into the epic branch first, lets the coder resolve conflicts and red gates
+  for up to three rounds, and only then merges the epic into the target
+  (a merge commit). If it gives up, the target is untouched.
 - `--concurrency <n>` (default 3) caps the stories implemented at once;
   `--fail-fast` stops at the first failed story instead of putting its
   dependents on hold (`waiting` on the board until it is fixed and rerun).

@@ -36,6 +36,8 @@ export interface EpicArgs {
   readonly planOnly: boolean
   readonly failFast: boolean
   readonly concurrency: number | undefined
+  /** `--land[=branch]`: land the finished epic on that branch (default main) and stop. */
+  readonly land: string | undefined
   /** Everything else, for `resolveFlowInput` (`--repo`, the epic text). */
   readonly rest: ReadonlyArray<string>
 }
@@ -43,6 +45,8 @@ export interface EpicArgs {
 export const epicUsage = [
   "epic-stories flags:",
   "  --plan-only         write (or re-validate) the story plan and stop",
+  "  --land[=<branch>]   land the finished epic on <branch> (default main): merge the branch in,",
+  "                      let the coder fix conflicts and red gates (3 rounds), then merge",
   "  --concurrency <n>   stories implemented at once (default 3)",
   "  --fail-fast         stop the epic at the first failed story",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
@@ -60,6 +64,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
     let planOnly = false
     let failFast = false
     let concurrency: number | undefined
+    let land: string | undefined
     const rest: Array<string> = []
     for (let index = 0; index < argv.length; index += 1) {
       const argument = argv[index] ?? ""
@@ -67,6 +72,13 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
         planOnly = true
       } else if (argument === "--fail-fast") {
         failFast = true
+      } else if (argument === "--land" || argument.startsWith("--land=")) {
+        // `--land=<branch>`, never a separate word: the epic text may follow.
+        const branch = argument.includes("=") ? argument.slice("--land=".length).trim() : "main"
+        if (branch.length === 0) {
+          return yield* ScriptUsage.make({ message: `--land= needs a branch name\n${epicUsage}` })
+        }
+        land = branch
       } else if (argument === "--concurrency" || argument.startsWith("--concurrency=")) {
         const raw = argument.includes("=")
           ? argument.slice("--concurrency=".length)
@@ -85,7 +97,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
         rest.push(argument)
       }
     }
-    return { planOnly, failFast, concurrency, rest }
+    return { planOnly, failFast, concurrency, land, rest }
   })
 
 // ---- Seats --------------------------------------------------------------------

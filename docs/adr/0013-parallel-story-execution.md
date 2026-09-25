@@ -114,3 +114,24 @@ causes, and what changed:
 - **An outage is not a story failure.** A serving engine that is down gets a
   slower retry budget. A story it still fails waits for the engine and runs
   again once, instead of each next story failing on the same outage.
+
+## Addendum (2026-09-25): landing a finished epic
+
+The epic branch used to be the end of the flow: merging it into `main` was
+left to the operator, conflicts included. `epic-stories --land[=<branch>]`
+now lands it, with the same discipline as a story's merge:
+
+- **Only a finished epic lands.** Every story must be merged into the epic
+  branch (`EpicIncomplete` otherwise).
+- **Conflicts are resolved on the epic side.** The target is merged into
+  the epic branch first, without committing, and the coder resolves
+  conflicts and red gates in a bounded loop (three rounds). Decision 2's "a
+  conflict is never model-resolved" is about stories, whose disjoint
+  ownership makes a conflict a planning bug. Between a finished epic and a
+  mainline that moved on, a conflict is ordinary integration work.
+- **The target changes last, and only when green.** The epic branch, now
+  holding the target's history, must pass the gates. Then the target gets
+  one merge commit (`--no-ff`), keeping every story merge in its history. A
+  loop that gives up rolls the epic branch back and leaves the target
+  untouched (`LandingFailed`).
+- **Local only.** Pushing and pull requests are out of scope for now.

@@ -505,7 +505,9 @@ reference release.
   context's `contextFor` seat rebind supplied by the runner, and the
   `epic-stories` flow. Every llm4zio flow runs one coder at a time; this
   runs several, each confined to a declared story in its own worktree.
-  Additive; back-porting is out of scope.
+  Landing a finished epic (`--land`, `Landing`, `GitTool.mergeNoCommit`,
+  2.10.0) is part of the same divergence. Additive; back-porting is out of
+  scope.
 - Executor roster beyond the pinned source (ADR 0019, 2026-09-24): the
   flow modules `Roster` and `RosterSeats`, the runner's `ExecutorRoster`
   (roster files, harness mapping, `llm4ts roster`), role-based seats with

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.10.0
+
+- `epic-stories --land[=<branch>]` lands a finished epic on `main` (or
+  `<branch>`) and runs no stories:
+  - it refuses while any story is unmerged (`EpicIncomplete`);
+  - it merges the target into the epic branch first, without committing, so
+    conflicts are resolved on the epic side;
+  - the coder resolves conflicts and red gates for up to three rounds;
+  - only a green epic reaches the target, as one merge commit;
+  - a loop that gives up rolls the epic branch back and leaves the target
+    untouched (`LandingFailed`).
+
+  New library pieces: `@llm4ts/flow/Landing` (`landEpic`) and
+  `GitTool.mergeNoCommit`, which starts a merge, stops before committing
+  and reports the conflicted paths. ADR 0013 addendum.
+
+- RUNBOOK: Act 2 no longer retypes the epic text (the flow's default is the
+  demo epic, and a retyped text that differs would start a new epic). New
+  Act 4 shows landing.
+
 ## 2.9.7
 
 - Roster: a resumed story keeps its previous coder only while that coder

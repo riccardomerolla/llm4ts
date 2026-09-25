@@ -148,6 +148,7 @@ const gitOver = (log: Ref.Ref<ReadonlyArray<string>>, prefix: string): GitToolSh
     removeWorktree: () => Effect.void,
     moveWorktree: () => Effect.void,
     restorePaths: () => Effect.void,
+    mergeNoCommit: () => Effect.succeed([]),
     branchExists: () => Effect.succeed(false),
     deleteBranch: () => Effect.void,
     isAncestor: () => Effect.succeed(false),
@@ -175,6 +176,13 @@ describe("epic-stories flags and seats", () => {
       assert.deepStrictEqual(flags.rest, ["--repo", "/repo", "Add Conto"])
       const bad = yield* Effect.flip(parseEpicArgs(["--concurrency", "zero"]))
       assert.strictEqual(bad._tag, "ScriptUsage")
+      assert.isUndefined(flags.land)
+      // `--land` lands on main; the epic text after it is not a branch name.
+      const land = yield* parseEpicArgs(["--land", "Add Conto"])
+      assert.strictEqual(land.land, "main")
+      assert.deepStrictEqual(land.rest, ["Add Conto"])
+      assert.strictEqual((yield* parseEpicArgs(["--land=develop"])).land, "develop")
+      assert.strictEqual((yield* Effect.flip(parseEpicArgs(["--land="])))._tag, "ScriptUsage")
     })
   )
 

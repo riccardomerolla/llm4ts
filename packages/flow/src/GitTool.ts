@@ -99,6 +99,14 @@ export interface GitToolShape {
     message: string,
     options?: MergeOptions
   ) => Effect.Effect<void, FlowError>
+  /**
+   * Starts a merge of `branch` and stops before committing, conflicts left
+   * in place for someone to resolve: returns the conflicted paths (empty for
+   * a clean merge, still uncommitted). `commitAll` completes the merge and
+   * `rollback` to an earlier checkpoint abandons it. A merge git refuses to
+   * start fails typed, as `merge` does.
+   */
+  readonly mergeNoCommit: (branch: string) => Effect.Effect<ReadonlyArray<string>, FlowError>
 }
 
 export interface MergeOptions {
@@ -437,6 +445,27 @@ export const makeGitTool = (
                   })
                 )
         )
+      ),
+    mergeNoCommit: (branch) =>
+      write(
+        "git merge --no-commit",
+        Effect.gen(function* () {
+          const result = yield* run(["merge", "--no-ff", "--no-commit", branch])
+          if (result.exitCode === 0) {
+            return []
+          }
+          const unmerged = yield* run(["diff", "--name-only", "--diff-filter=U"])
+          const paths = text(unmerged.stdout)
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0)
+          if (paths.length > 0) {
+            return paths
+          }
+          const into = yield* runOrFail(["rev-parse", "--abbrev-ref", "HEAD"])
+          yield* run(["merge", "--abort"])
+          return yield* MergeConflict.make({ branch, into, paths: [], detail: problem(result) })
+        })
       ),
     merge: (branch, message, options = {}) =>
       write(

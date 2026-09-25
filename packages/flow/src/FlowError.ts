@@ -216,6 +216,27 @@ export class RosterInvalid extends Schema.TaggedError<RosterInvalid>()("RosterIn
   }
 }
 
+/** An epic asked to land while some of its stories are not merged into the epic branch yet. */
+export class EpicIncomplete extends Schema.TaggedError<EpicIncomplete>()("EpicIncomplete", {
+  epicId: Schema.String,
+  stories: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    return `epic '${this.epicId}' is not finished; not merged yet: ${this.stories.join(", ")} — run the epic until every story merges, then land it`
+  }
+}
+
+/** Landing an epic failed; the target branch was left untouched. */
+export class LandingFailed extends Schema.TaggedError<LandingFailed>()("LandingFailed", {
+  epicBranch: Schema.String,
+  target: Schema.String,
+  reason: Schema.String
+}) {
+  get message(): string {
+    return `landing '${this.epicBranch}' on '${this.target}' failed, '${this.target}' is untouched: ${this.reason}`
+  }
+}
+
 /** The start of every `RosterExhausted` message, so it is recognisable once wrapped. */
 export const rosterExhaustedPrefix = "roster exhausted: no executor can ever take the role"
 
@@ -302,6 +323,8 @@ export const FlowError = Schema.Union([
   EpicCheckoutDirty,
   RosterExhausted,
   RosterInvalid,
+  EpicIncomplete,
+  LandingFailed,
   StoryFailed,
   DecisionsInvalid,
   OpenPointsPending,

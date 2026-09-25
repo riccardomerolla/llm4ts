@@ -2,6 +2,7 @@
 //
 //   llm4ts run epic-stories --repo ~/demo/portal "Add the current account and wire transfers"
 //   llm4ts run epic-stories --repo ~/demo/portal -- --plan-only "…"   # write the plan and stop
+//   llm4ts run epic-stories --repo ~/demo/portal -- --land            # land the finished epic on main
 //
 // The reasoning seat (LLM4TS_REASONER, default claude) splits the epic,
 // reviews every task and judges every story; the coder seat (LLM4TS_CODER,
@@ -33,6 +34,7 @@ import {
   stage,
   withModel
 } from "@llm4ts/runner"
+import { landEpic } from "@llm4ts/flow/Landing"
 import { implementStoriesFlow, type StorySeats } from "@llm4ts/flow/Stories"
 import { makeStoryPlanStore, validateStoryPlan } from "@llm4ts/flow/StoryPlan"
 import {
@@ -140,6 +142,22 @@ const program = Effect.gen(function* () {
           })
         )
         if (flags.planOnly) {
+          return
+        }
+        if (flags.land !== undefined) {
+          const landed = yield* landEpic(context, {
+            plan,
+            files,
+            stateDir,
+            target: flags.land,
+            gates: gatesIn(nodeProcessExecutor, events, gateCommands(process.env)),
+            system: ["House rules of the target repository (CONTRIBUTING.md):", guidance].join("\n")
+          })
+          yield* events.publish(
+            Info.make({
+              message: `epic ${plan.epicId}: landed on ${landed.target}${landed.conflicts.length === 0 ? "" : ` (${landed.conflicts.length} conflicted file(s) resolved in ${landed.rounds} round(s))`}`
+            })
+          )
           return
         }
         // With a roster, the default is every coder slot it has; the flag caps it.

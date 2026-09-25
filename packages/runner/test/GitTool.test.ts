@@ -339,4 +339,57 @@ describe("GitTool", () => {
         })
       )
   )
+
+  it.effect("starts a merge without committing, leaving conflicts to resolve or abandon", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        yield* git.config("user.name", "llm4ts test")
+        yield* git.config("user.email", "llm4ts@example.invalid")
+        const write = (path: string, text: string) =>
+          Effect.promise(() => writeFile(join(root, path), text))
+        yield* write("app.ts", "a\nb\nc\n")
+        yield* git.commitAll("seed")
+        yield* git.checkoutOrCreate("epic")
+        yield* write("app.ts", "a\nEPIC\nc\n")
+        yield* write("epic.ts", "epic\n")
+        yield* git.commitAll("epic work")
+        yield* git.checkout("main")
+        yield* write("app.ts", "a\nMAIN\nc\n")
+        yield* git.commitAll("main moved on")
+        yield* git.checkout("epic")
+
+        const before = yield* git.checkpoint
+        const conflicted = yield* git.mergeNoCommit("main")
+        assert.deepStrictEqual(conflicted, ["app.ts"])
+        assert.include(
+          yield* Effect.promise(() => readFile(join(root, "app.ts"), "utf8")),
+          "<<<<<<< "
+        )
+        // Abandoned: back to the epic as it was.
+        yield* git.rollback(before)
+        assert.strictEqual(
+          yield* Effect.promise(() => readFile(join(root, "app.ts"), "utf8")),
+          "a\nEPIC\nc\n"
+        )
+        // Resolved: the next commit completes the merge.
+        yield* git.mergeNoCommit("main")
+        yield* write("app.ts", "a\nEPIC+MAIN\nc\n")
+        assert.strictEqual((yield* git.commitAll("merge main into epic"))._tag, "Committed")
+        assert.isTrue(yield* git.isAncestor("main", "epic"))
+
+        // A clean merge reports no conflicts and waits for its commit too.
+        yield* git.checkout("main")
+        yield* write("main-only.ts", "m\n")
+        yield* git.commitAll("more main")
+        yield* git.checkout("epic")
+        assert.deepStrictEqual(yield* git.mergeNoCommit("main"), [])
+        assert.strictEqual((yield* git.commitAll("merge again"))._tag, "Committed")
+        assert.isTrue(yield* git.isAncestor("main", "epic"))
+      })
+    )
+  )
 })

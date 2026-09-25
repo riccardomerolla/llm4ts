@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/flow",
-  "version": "2.9.7",
+  "version": "2.10.0",
   "description": "Effect-native LLM workflow, persistence, review, and repository automation",
   "license": "MIT",
   "type": "module",
@@ -41,6 +41,7 @@
     "./FlowRecorder": "./dist/FlowRecorder.js",
     "./GitHubTool": "./dist/GitHubTool.js",
     "./GitTool": "./dist/GitTool.js",
+    "./Landing": "./dist/Landing.js",
     "./Interaction": "./dist/Interaction.js",
     "./McpServer": "./dist/McpServer.js",
     "./Mermaid": "./dist/Mermaid.js",
