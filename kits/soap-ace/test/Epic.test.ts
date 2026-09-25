@@ -64,8 +64,8 @@ describe("ACE epic", () => {
         ])
         const accounts = plan.story("resource-accounts")
         assert.deepStrictEqual(accounts?.owned, [
-          "DemoBankApi/accounts",
-          "DemoBankApi_Test/src/accounts"
+          "DemoBankApi/resources/accounts",
+          "DemoBankApi_Test/src/resources/accounts"
         ])
         assert.include(
           accounts?.description ?? "",
@@ -81,7 +81,7 @@ describe("ACE epic", () => {
         )
         assert.include(
           plan.story("api-skeleton")?.description ?? "",
-          "creditTransfers.revokeCreditTransfer: POST /v1/credit-transfers/{transferId}/revocation"
+          "resources.creditTransfers.revokeCreditTransfer: POST /v1/credit-transfers/{transferId}/revocation"
         )
       })
   )

@@ -257,14 +257,13 @@ class Parser {
     if (!raw.includes("&")) return raw
     return raw.replace(/&([^;&\s]*);?/g, (whole, body: string) => {
       if (!whole.endsWith(";")) this.fail("syntax", `unterminated reference &${body}`, start)
-      if (body.startsWith("#x")) {
-        const code = Number.parseInt(body.slice(2), 16)
-        return this.codePoint(code, whole, start)
+      if (/^#x[0-9A-Fa-f]+$/.test(body)) {
+        return this.codePoint(Number.parseInt(body.slice(2), 16), whole, start)
       }
-      if (body.startsWith("#")) {
-        const code = Number.parseInt(body.slice(1), 10)
-        return this.codePoint(code, whole, start)
+      if (/^#[0-9]+$/.test(body)) {
+        return this.codePoint(Number.parseInt(body.slice(1), 10), whole, start)
       }
+      if (body.startsWith("#")) this.fail("syntax", `invalid character reference ${whole}`, start)
       const value = predefinedEntities[body]
       if (value === undefined) this.fail("syntax", `undeclared entity ${whole}`, start)
       return value
@@ -428,7 +427,13 @@ export const parseXml = (
   options: { readonly source?: string; readonly limits?: XmlLimits } = {}
 ): Effect.Effect<XmlElement, XmlError> =>
   Effect.try({
-    try: () => new Parser(text, options.limits ?? defaultXmlLimits, options.source).parseDocument(),
+    // XML end-of-line handling: CRLF and CR become LF before parsing.
+    try: () =>
+      new Parser(
+        text.replace(/\r\n?/g, "\n"),
+        options.limits ?? defaultXmlLimits,
+        options.source
+      ).parseDocument(),
     catch: (cause) =>
       cause instanceof XmlError
         ? cause

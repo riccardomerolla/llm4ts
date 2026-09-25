@@ -234,18 +234,19 @@ const program = Effect.gen(function* () {
           analyses: analysisMarkdown,
           exchanges: yield* readExchanges(workspace, service)
         })
-        const target = yield* makeNodeWorkspace(targetRoot)
-        const seeded = yield* writeSeed(target, files)
-        yield* say(
-          `seeded ${targetRoot}: ${seeded.written} files written, ${seeded.kept} team-owned files kept`
-        )
-
+        // The plan is derived and checked before anything touches the target.
         const plan = storyPlanFor({ design: file.design, service, api, analyses })
         const violations = planViolations(plan)
         if (violations.length > 0)
           return yield* FlowAborted.make({
             message: `derived story plan is invalid:\n${violations.join("\n")}`
           })
+        const target = yield* makeNodeWorkspace(targetRoot)
+        const seeded = yield* writeSeed(target, files)
+        yield* say(
+          `seeded ${targetRoot}: ${seeded.written} files written, ${seeded.kept} team-owned files kept`
+        )
+
         const planPath = join(targetRoot, ".llm4ts", "epics", plan.epicId, "plan.md")
         const store = makeStoryPlanStore(nodePlainFileStore)
         const existing = yield* store.load(planPath)

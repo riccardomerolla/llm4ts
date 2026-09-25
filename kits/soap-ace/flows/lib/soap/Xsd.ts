@@ -46,6 +46,8 @@ interface RawField {
   readonly maxOccurs: Occurs
   readonly nillable: boolean
   readonly choice: number | undefined
+  /** Within a choice: which alternative the field belongs to (a sequence is one branch). */
+  readonly branch: number | undefined
   readonly documentation: string | undefined
   readonly location: string
 }
@@ -57,6 +59,8 @@ interface RawComplex {
   readonly fields: ReadonlyArray<RawField>
   readonly attributes: ReadonlyArray<AttributeField>
   readonly textType: QName | undefined
+  /** Derived by simpleContent: `base` may be complex (inherit its text and attributes). */
+  readonly simpleContent: boolean
   readonly documentation: string | undefined
   readonly location: string
 }
@@ -115,9 +119,21 @@ const parseMinOccurs = (value: string | undefined): number => {
   return parsed === "unbounded" ? 1 : parsed
 }
 
+interface ParticleContext {
+  readonly choice: number | undefined
+  readonly branch: number | undefined
+  readonly optional: boolean
+  readonly repeats: Occurs
+}
+
+const multiply = (left: Occurs, right: Occurs): Occurs =>
+  left === "unbounded" || right === "unbounded" ? "unbounded" : left * right
+
 class SchemaReader {
   readonly targetNamespace: string
   private readonly qualifiedElements: boolean
+  /** A schema without targetNamespace included into one: its no-namespace refs mean the includer's. */
+  private readonly chameleon: boolean
   private readonly schema: XmlElement
   private readonly document: string
   private readonly into: SchemaCollector
@@ -133,6 +149,8 @@ class SchemaReader {
     this.document = document
     this.into = into
     this.targetNamespace = attribute(schema, "targetNamespace") ?? namespaceOverride ?? ""
+    this.chameleon =
+      attribute(schema, "targetNamespace") === undefined && namespaceOverride !== undefined
     this.qualifiedElements = attribute(schema, "elementFormDefault") === "qualified"
   }
 
@@ -161,7 +179,10 @@ class SchemaReader {
   private typeRef(element: XmlElement, value: string | undefined): QName | undefined {
     if (value === undefined) return undefined
     const resolved = resolveQName(element, value)
-    return resolved === undefined ? `{?}${value}` : qname(resolved.namespace, resolved.local)
+    if (resolved === undefined) return `{?}${value}`
+    const namespace =
+      this.chameleon && resolved.namespace === "" ? this.targetNamespace : resolved.namespace
+    return qname(namespace, resolved.local)
   }
 
   read(): ReadonlyArray<SchemaReference> {
@@ -268,18 +289,28 @@ class SchemaReader {
         firstChild(simpleContent, XsdNamespace, "extension") ??
         firstChild(simpleContent, XsdNamespace, "restriction")
       if (derivation !== undefined) {
-        textType = this.typeRef(derivation, attribute(derivation, "base")) ?? stringType
+        // The base may be a simple type (the text's type) or a complex type
+        // with simple content (inherit its text type and attributes); which
+        // one is only known once every schema is read.
+        base = this.typeRef(derivation, attribute(derivation, "base")) ?? stringType
+        textType = base
         content = derivation
       }
     }
 
     const fields: Array<RawField> = []
     const attributes: Array<AttributeField> = []
-    let choices = 0
-    const nextChoice = (): number => choices++
+    let counter = 0
+    const next = (): number => counter++
     for (const child of xsChildren(content)) {
       if (xs(child, "sequence") || xs(child, "all") || xs(child, "choice")) {
-        this.particle(child, local, fields, undefined, false, nextChoice)
+        this.particle(
+          child,
+          local,
+          fields,
+          { choice: undefined, branch: undefined, optional: false, repeats: 1 },
+          next
+        )
       } else if (xs(child, "group")) {
         this.question(
           "group-ref",
@@ -298,6 +329,7 @@ class SchemaReader {
       fields,
       attributes,
       textType,
+      simpleContent: simpleContent !== undefined,
       documentation: documentationOf(element),
       location: this.where(element)
     })
@@ -307,18 +339,22 @@ class SchemaReader {
     group: XmlElement,
     owner: string,
     into: Array<RawField>,
-    choice: number | undefined,
-    optional: boolean,
-    nextChoice: () => number
+    context: ParticleContext,
+    next: () => number
   ): void {
-    const groupOptional = optional || attribute(group, "minOccurs") === "0"
-    const groupChoice = xs(group, "choice") ? (choice ?? nextChoice()) : choice
-    const groupRepeats = parseOccurs(attribute(group, "maxOccurs"), 1)
+    const optional = context.optional || attribute(group, "minOccurs") === "0"
+    const repeats = multiply(context.repeats, parseOccurs(attribute(group, "maxOccurs"), 1))
+    const isChoice = xs(group, "choice")
+    const choice = isChoice ? next() : context.choice
     for (const child of xsChildren(group)) {
+      // Every alternative of a choice is its own branch; inside a branch,
+      // a nested sequence keeps the branch it belongs to.
+      const branch = isChoice ? next() : context.branch
+      const inner: ParticleContext = { choice, branch, optional, repeats }
       if (xs(child, "element")) {
-        into.push(this.localElement(child, owner, groupChoice, groupOptional, groupRepeats))
+        into.push(this.localElement(child, owner, inner))
       } else if (xs(child, "sequence") || xs(child, "choice") || xs(child, "all")) {
-        this.particle(child, owner, into, groupChoice, groupOptional, nextChoice)
+        this.particle(child, owner, into, inner, next)
       } else if (xs(child, "any")) {
         this.question(
           "xsd-any",
@@ -337,25 +373,16 @@ class SchemaReader {
     }
   }
 
-  private localElement(
-    element: XmlElement,
-    owner: string,
-    choice: number | undefined,
-    optional: boolean,
-    groupRepeats: Occurs
-  ): RawField {
+  private localElement(element: XmlElement, owner: string, context: ParticleContext): RawField {
     const ref = this.typeRef(element, attribute(element, "ref"))
-    const minOccurs = optional ? 0 : parseMinOccurs(attribute(element, "minOccurs"))
-    const ownMax = parseOccurs(attribute(element, "maxOccurs"), 1)
-    const maxOccurs: Occurs =
-      ownMax === "unbounded" || groupRepeats === "unbounded"
-        ? "unbounded"
-        : Math.max(ownMax, ownMax * groupRepeats)
+    const minOccurs = context.optional ? 0 : parseMinOccurs(attribute(element, "minOccurs"))
+    const maxOccurs = multiply(parseOccurs(attribute(element, "maxOccurs"), 1), context.repeats)
     const base = {
       minOccurs,
       maxOccurs,
       nillable: attribute(element, "nillable") === "true",
-      choice,
+      choice: context.choice,
+      branch: context.branch,
       documentation: documentationOf(element),
       location: this.where(element)
     }
@@ -519,8 +546,9 @@ export const finishSchemas = (
     )
   }
 
-  const resolveField = (field: RawField, owner: string): ElementField => {
+  const resolveField = (field: RawField, owner: string, offset: number): ElementField => {
     let type = field.type ?? anyType
+    let nillable = field.nillable
     if (field.ref !== undefined) {
       const target = collector.elements.get(field.ref)
       if (target === undefined) {
@@ -534,6 +562,7 @@ export const finishSchemas = (
         )
       } else {
         type = target.type
+        nillable = nillable || target.nillable
       }
     } else if (!typeExists(collector, type)) {
       unresolvedType(type, field.location, owner)
@@ -544,8 +573,9 @@ export const finishSchemas = (
       type,
       minOccurs: field.minOccurs,
       maxOccurs: field.maxOccurs,
-      nillable: field.nillable,
-      ...(field.choice === undefined ? {} : { choice: field.choice }),
+      nillable,
+      ...(field.choice === undefined ? {} : { choice: field.choice + offset }),
+      ...(field.branch === undefined ? {} : { branch: field.branch + offset }),
       ...optionalDoc(field.documentation)
     })
   }
@@ -557,6 +587,7 @@ export const finishSchemas = (
     const owner = splitClark(raw.name).local
     let inheritedFields: ReadonlyArray<ElementField> = []
     let inheritedAttributes: ReadonlyArray<AttributeField> = []
+    let textType = raw.textType
     if (raw.base !== undefined && !isBuiltin(raw.base)) {
       const baseRaw = collector.complex.get(raw.base)
       if (baseRaw === undefined) {
@@ -565,10 +596,18 @@ export const finishSchemas = (
         const base = flatten(baseRaw, new Set([...visiting, raw.name]))
         inheritedFields = base.fields
         inheritedAttributes = base.attributes
+        // Simple content over a complex base: the text type is the base's.
+        if (raw.simpleContent) textType = base.textType ?? stringType
       }
     }
-    if (raw.textType !== undefined && !typeExists(collector, raw.textType)) {
-      unresolvedType(raw.textType, raw.location, owner)
+    // Choice and branch ids of the derived part continue after the base's,
+    // so a base choice and a derived choice stay separate groups.
+    const offset = inheritedFields.reduce(
+      (max, field) => Math.max(max, (field.choice ?? -1) + 1, (field.branch ?? -1) + 1),
+      0
+    )
+    if (textType !== undefined && !typeExists(collector, textType)) {
+      unresolvedType(textType, raw.location, owner)
     }
     for (const attributeField of raw.attributes) {
       if (!typeExists(collector, attributeField.type)) {
@@ -579,9 +618,12 @@ export const finishSchemas = (
       name: raw.name,
       anonymous: raw.anonymous,
       ...(raw.base === undefined ? {} : { base: raw.base }),
-      fields: [...inheritedFields, ...raw.fields.map((field) => resolveField(field, owner))],
+      fields: [
+        ...inheritedFields,
+        ...raw.fields.map((field) => resolveField(field, owner, offset))
+      ],
       attributes: [...inheritedAttributes, ...raw.attributes],
-      ...(raw.textType === undefined ? {} : { textType: raw.textType }),
+      ...(textType === undefined ? {} : { textType }),
       ...optionalDoc(raw.documentation)
     })
     flattened.set(raw.name, result)

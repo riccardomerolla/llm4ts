@@ -381,10 +381,16 @@ export const skeletonYaml = (
         `${hash}"#text": ${yamlScalar(exampleValue(catalog, { name: localName(type.name), type: type.textType }, options.seeds))}`
       )
     }
-    const seenChoices = new Set<number>()
+    // The first alternative of each choice is written out; the others (whole
+    // branches, not single fields) are commented as `or`.
+    const firstBranch = new Map<number, number | undefined>()
     for (const field of type.fields) {
-      const alternative = field.choice !== undefined && seenChoices.has(field.choice)
-      if (field.choice !== undefined) seenChoices.add(field.choice)
+      if (field.choice !== undefined && !firstBranch.has(field.choice))
+        firstBranch.set(field.choice, field.branch)
+    }
+    for (const field of type.fields) {
+      const alternative =
+        field.choice !== undefined && firstBranch.get(field.choice) !== field.branch
       const optional = field.minOccurs === 0 && options.includeOptional !== true
       const comment = commented || optional || alternative
       fieldLines(field, depth, level, comment, alternative)
@@ -413,11 +419,27 @@ export const skeletonYaml = (
         emit(depth + 2, `# … nested deeper than ${maxDepth} levels`)
         return
       }
+      const header = lines.length - 1
       if (repeated) {
         emit(depth + 2, `${hash}-`)
         complexBody(type, depth + 4, level + 1, commented)
       } else {
         complexBody(type, depth + 2, level + 1, commented)
+      }
+      // A required element whose children are all optional is written as
+      // an explicit empty map, never as a key with only comments (null).
+      if (
+        !commented &&
+        lines
+          .slice(header + 1)
+          .every((line) => line.trimStart().startsWith("#") || line.trim() === "-")
+      ) {
+        if (repeated) {
+          const dash = lines.findIndex((line, index) => index > header && line.trim() === "-")
+          if (dash >= 0) lines[dash] = `${" ".repeat(depth + 2)}- {}`
+        } else {
+          lines[header] = (lines[header] ?? "").replace(/^(\s*[^:]+):/, "$1: {}")
+        }
       }
       return
     }
@@ -493,37 +515,50 @@ const validateComplex = (
         issues.push({ path: join(path, "#text"), detail: problem })
     }
   }
-  const choices = new Map<number, Array<string>>()
+  // Choices: at most one alternative (branch) present; inside the chosen
+  // one its required fields are required; a required choice needs one.
+  const branches = new Map<number, Map<number | undefined, Array<string>>>()
   for (const field of type.fields) {
-    const item = value[field.name]
-    if (field.choice !== undefined && item !== undefined) {
-      choices.set(field.choice, [...(choices.get(field.choice) ?? []), field.name])
+    if (field.choice === undefined) continue
+    const byBranch = branches.get(field.choice) ?? new Map<number | undefined, Array<string>>()
+    byBranch.set(field.branch, [...(byBranch.get(field.branch) ?? []), field.name])
+    branches.set(field.choice, byBranch)
+  }
+  const taken = new Map<number, Set<number | undefined>>()
+  for (const field of type.fields) {
+    if (field.choice !== undefined && value[field.name] !== undefined) {
+      taken.set(field.choice, new Set([...(taken.get(field.choice) ?? []), field.branch]))
     }
   }
-  for (const present of choices.values()) {
-    if (present.length > 1)
+  const where = path === "" ? "(root)" : path
+  const label = (choice: number, branch: number | undefined) =>
+    (branches.get(choice)?.get(branch) ?? []).join(" + ")
+  for (const [choice, present] of taken) {
+    if (present.size > 1) {
       issues.push({
-        path: path === "" ? "(root)" : path,
-        detail: `choose one of ${present.join(", ")}`
+        path: where,
+        detail: `choose one of ${[...present].map((branch) => label(choice, branch)).join(", ")}`
       })
+    }
+  }
+  for (const [choice, byBranch] of branches) {
+    if ((taken.get(choice)?.size ?? 0) > 0) continue
+    const required = type.fields.some((field) => field.choice === choice && field.minOccurs > 0)
+    if (required) {
+      issues.push({
+        path: where,
+        detail: `one of ${[...byBranch.keys()].map((branch) => label(choice, branch)).join(", ")} is required`
+      })
+    }
   }
   for (const field of type.fields) {
     const item = value[field.name]
     const fieldPath = join(path, field.name)
-    const inChoice = field.choice !== undefined
     if (item === undefined) {
-      const otherBranchTaken = inChoice && (choices.get(field.choice ?? -1)?.length ?? 0) > 0
-      const choiceHasRequiredBranch = inChoice && !otherBranchTaken
-      if (field.minOccurs > 0 && !inChoice)
+      const inTakenBranch =
+        field.choice !== undefined && (taken.get(field.choice)?.has(field.branch) ?? false)
+      if (field.minOccurs > 0 && (field.choice === undefined || inTakenBranch)) {
         issues.push({ path: fieldPath, detail: "required field is missing" })
-      else if (choiceHasRequiredBranch && field.minOccurs > 0 && isFirstInChoice(type, field)) {
-        const names = type.fields
-          .filter((other) => other.choice === field.choice)
-          .map((other) => other.name)
-        issues.push({
-          path: path === "" ? "(root)" : path,
-          detail: `one of ${names.join(", ")} is required`
-        })
       }
       continue
     }
@@ -549,9 +584,6 @@ const validateComplex = (
     })
   }
 }
-
-const isFirstInChoice = (type: ComplexTypeDef, field: ElementField): boolean =>
-  type.fields.find((other) => other.choice === field.choice) === field
 
 const validateValue = (
   catalog: WsdlCatalog,
@@ -692,7 +724,7 @@ export const instanceFromXml = (
       (attribute) =>
         attribute.name.namespace === XsiNamespace &&
         attribute.name.local === "nil" &&
-        attribute.value === "true"
+        (attribute.value === "true" || attribute.value === "1")
     )
 
   const read = (node: XmlElement, typeName: QName, path: string): YamlValue => {

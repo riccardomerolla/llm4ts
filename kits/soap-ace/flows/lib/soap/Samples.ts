@@ -121,9 +121,19 @@ export const renderRequestFile = (options: {
           ...options.issues.map((issue) => `#   ${issue.path}: ${issue.detail}`)
         ])
   ]
+  // A body that is not a non-empty map or list is written inline (`body: {}`),
+  // never as an indented block the reader would not accept.
+  const inline =
+    options.body !== undefined &&
+    !(
+      (isYamlMap(options.body) && Object.keys(options.body).length > 0) ||
+      (Array.isArray(options.body) && options.body.length > 0)
+    )
   const body =
     options.body !== undefined
-      ? renderYaml(options.body, 2).trimEnd().split("\n")
+      ? inline
+        ? []
+        : renderYaml(options.body, 2).trimEnd().split("\n")
       : input === undefined
         ? []
         : skeletonYaml(
@@ -132,11 +142,13 @@ export const renderRequestFile = (options: {
             2,
             options.seeds === undefined ? {} : { seeds: options.seeds }
           )
+  const bodyKey =
+    options.body !== undefined && inline ? `body: ${renderYaml(options.body).trim()}` : "body:"
   return [
     ...header,
     `operation: ${options.operation}`,
     `purpose: ${JSON.stringify(options.purpose)}`,
-    "body:",
+    bodyKey,
     ...body,
     ""
   ].join("\n")

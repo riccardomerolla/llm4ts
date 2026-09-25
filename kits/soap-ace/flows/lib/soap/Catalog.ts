@@ -55,6 +55,8 @@ export class ElementField extends Schema.Class<ElementField>("ElementField")({
   nillable: Schema.Boolean,
   /** Set when the field sits inside an `xs:choice`: the choice's index within the type. */
   choice: Schema.optionalKey(Schema.Int),
+  /** Within a choice: the alternative this field belongs to (a sequence is one alternative). */
+  branch: Schema.optionalKey(Schema.Int),
   documentation: Schema.optionalKey(Schema.String)
 }) {}
 

@@ -7,7 +7,7 @@ by story by `epic-stories`.
 | Path                   | What it holds                                                          | Edited by                  |
 | ---------------------- | ---------------------------------------------------------------------- | -------------------------- |
 | `contracts/`           | the approved design, the OpenAPI contract, the 1:1 mapping, the WSDL   | nobody (regenerated)       |
-| `__API__/`             | the REST API project: descriptors, main flow, one broker schema per resource | stories                    |
+| `__API__/`             | the REST API project: descriptors, main flow, one broker schema per resource under `resources/` | stories                    |
 | `__API__Lib/`          | shared library: the imported WSDL, SOAP call and error-mapping subflows | the `shared-lib` story     |
 | `__API__Policies/`     | policy project: backend endpoints and security per environment          | the `policies` story       |
 | `__API___Test/`        | ACE unit tests (JUnit) with the recorded backend stubs                  | stories                    |

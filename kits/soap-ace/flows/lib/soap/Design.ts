@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { type OperationAnalysis, schemaPaths } from "./Analysis.ts"
+import { isSuccessCode, type OperationAnalysis, schemaPaths } from "./Analysis.ts"
 import {
   ElementDecl,
   elementByName,
@@ -322,8 +322,25 @@ export const checkDesign = (
 
   // Models: names, property style, sources within the bound XSD type.
   const modelUse = new Map<string, Set<string>>() // model → SOAP operations whose responses it renders
+  // Names the OpenAPI projection generates itself.
+  const generated = new Set([
+    "Problem",
+    "PageInfo",
+    ...design.endpoints.flatMap((endpoint) =>
+      endpoint.responses.flatMap((response) =>
+        response.list === true && response.model !== undefined
+          ? [`${response.model}${response.paged === true ? "Page" : "List"}`]
+          : []
+      )
+    )
+  ])
   for (const model of design.models) {
     const where = `model ${model.name}`
+    if (generated.has(model.name))
+      error(
+        where,
+        "the name is taken by a schema the OpenAPI projection generates (Problem, PageInfo, <Model>List, <Model>Page)"
+      )
     if (!/^[A-Z][A-Za-z0-9]*$/.test(model.name)) error(where, "model names are PascalCase")
     const bound =
       model.sourceType === undefined ? undefined : resolveSourceType(catalog, model.sourceType)
@@ -403,8 +420,13 @@ export const checkDesign = (
       error(where, `duplicate operationId ${endpoint.operationId}`)
     operationIds.add(endpoint.operationId)
     if (!camel.test(endpoint.operationId)) error(where, "operationId is camelCase")
-    if (routes.has(where)) error(where, "duplicate route")
-    routes.add(where)
+    // /a/{id} and /a/{other} are one route to OpenAPI and to ACE.
+    const route = `${endpoint.method} ${endpoint.path.replace(/\{[^}]+\}/g, "{}")}`
+    if (routes.has(route))
+      error(where, "duplicate route (paths differing only in parameter names are one route)")
+    routes.add(route)
+    if (/^\/\{/.test(endpoint.path))
+      error(where, "the first path segment names the resource; it cannot be a parameter")
     const segments = endpoint.path.split("/").slice(1)
     if (!endpoint.path.startsWith("/") || segments.some((part) => !segment.test(part))) {
       error(where, "path segments are kebab-case nouns or {camelCaseParam}")
@@ -544,7 +566,7 @@ export const checkDesign = (
       endpoint.sources.includes(candidate.operation)
     )) {
       for (const outcome of analysis.outcomes) {
-        if (/^(OK|0+$)/i.test(outcome.code)) continue
+        if (isSuccessCode(outcome.code)) continue
         if (!mapped.has(outcome.code))
           warn(
             where,
@@ -578,8 +600,12 @@ export const checkDesign = (
 const responsePathFor = (
   design: ApiDesign,
   modelName: string,
-  operation: string
+  operation: string,
+  visiting: ReadonlySet<string> = new Set()
 ): string | undefined => {
+  // Models may refer to each other in a cycle (tree-shaped XSD types).
+  if (visiting.has(modelName)) return undefined
+  const seen = new Set([...visiting, modelName])
   for (const endpoint of design.endpoints) {
     if (!endpoint.sources.includes(operation)) continue
     for (const response of endpoint.responses) {
@@ -590,7 +616,7 @@ const responsePathFor = (
   for (const parent of design.models) {
     for (const property of parent.properties) {
       if (property.ref !== modelName || property.source === undefined) continue
-      const parentPath = responsePathFor(design, parent.name, operation)
+      const parentPath = responsePathFor(design, parent.name, operation, seen)
       if (parentPath !== undefined)
         return parentPath === "" ? property.source : `${parentPath}.${property.source}`
     }

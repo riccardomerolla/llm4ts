@@ -81,12 +81,12 @@ export const storyPlanFor = (options: {
       title: `${api} REST API project skeleton`,
       description: [
         `Create the ACE 12 REST API project ${api}/ from contracts/openapi-ace.yaml: .project, restapi.descriptor, application.descriptor, the imported OpenAPI document as ${api}/openapi.yaml, and the generated main flow under ${api}/gen/ routing each operation to its subflow.`,
-        `Each operation's subflow is ${api}/<schema>/<operationId>.subflow in the resource's broker schema folder; create the routing only — the resource stories implement the subflows (create each as an empty pass-through the resource story will replace).`,
+        `Each operation's subflow is ${api}/resources/<schema>/<operationId>.subflow, in the resource's broker schema (resources.<schema>); create the routing only — the resource stories implement the subflows (create each as an empty pass-through the resource story will replace).`,
         "Operations and their subflows:",
         ...resources.flatMap(([resource, endpoints]) =>
           endpoints.map(
             (endpoint) =>
-              `- ${schemaFolder(resource)}.${endpoint.operationId}: ${endpoint.method} ${design.basePath}${endpoint.path}`
+              `- resources.${schemaFolder(resource)}.${endpoint.operationId}: ${endpoint.method} ${design.basePath}${endpoint.path}`
           )
         )
       ].join("\n"),
@@ -101,7 +101,7 @@ export const storyPlanFor = (options: {
       provides: resources.flatMap(([resource, endpoints]) =>
         endpoints.map(
           (endpoint) =>
-            `${api}/${schemaFolder(resource)}/${endpoint.operationId}.subflow is routed from the main flow`
+            `${api}/resources/${schemaFolder(resource)}/${endpoint.operationId}.subflow is routed from the main flow`
         )
       )
     }),
@@ -157,7 +157,7 @@ export const storyPlanFor = (options: {
         id: `resource-${resource}`,
         title: `${resource}: ${endpoints.map((endpoint) => endpoint.operationId).join(", ")}`,
         description: [
-          `Implement the ${resource} resource in the broker schema folder ${api}/${folder}/: one subflow per operation (replacing the skeleton's pass-through) with its ESQL mapping modules, calling the backend through ${lib}, and its tests in ${tests}/src/${folder}/ against the recorded stubs.`,
+          `Implement the ${resource} resource in the broker schema folder ${api}/resources/${folder}/: one subflow per operation (replacing the skeleton's pass-through) with its ESQL mapping modules, calling the backend through ${lib}, and its tests in ${tests}/src/resources/${folder}/ against the recorded stubs.`,
           "Endpoints:",
           ...endpoints.map((endpoint) => `- ${endpointLine(endpoint)}`),
           ...(findings.length === 0
@@ -166,7 +166,7 @@ export const storyPlanFor = (options: {
           "Follow CONTRIBUTING.md and docs/patterns/."
         ].join("\n"),
         dependsOn: foundation,
-        owned: [`${api}/${folder}`, `${tests}/src/${folder}`],
+        owned: [`${api}/resources/${folder}`, `${tests}/src/resources/${folder}`],
         sharedReadOnly: [
           ...contracts,
           `${api}/gen`,

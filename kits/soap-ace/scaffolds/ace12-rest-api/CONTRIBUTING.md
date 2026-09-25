@@ -19,8 +19,10 @@ code implements `contracts/`, never the other way round.
 ## Project layout
 
 - `__API__/` is the REST API project. Each resource has its own broker
-  schema folder (`accounts/`, `creditTransfers/`) holding one subflow per
-  operation (named after its `operationId`) and its ESQL modules.
+  schema folder under `resources/` (`resources/accounts/`,
+  `resources/creditTransfers/`, broker schema `resources.accounts`) holding
+  one subflow per operation (named after its `operationId`) and its ESQL
+  modules.
 - `__API__Lib/` holds the imported WSDL and XSDs, the subflow that calls the
   backend (`SOAPRequest` node, WS-Security and endpoints from policies), and
   the error-mapping subflow every operation uses.
@@ -45,7 +47,7 @@ code implements `contracts/`, never the other way round.
 
 ## Tests and gates
 
-- Every operation has ACE unit tests in `__API___Test/src/<resource>/` that
+- Every operation has ACE unit tests in `__API___Test/src/resources/<resource>/` that
   run the flow against the recorded backend stubs in `__API___Test/stubs/`
   (built from `test-data/`): the happy path, every mapped business error,
   and every enum value the contract lists.

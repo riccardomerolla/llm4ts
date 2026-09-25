@@ -226,6 +226,9 @@ const cursorField =
 const lastPageField = /^(.*\.)?(ultimaPagina|lastPage|hasMore|altriDati|moreData|isLast)$/i
 const totalField = /^(.*\.)?(totaleRecord|totalRecords|total|totalCount|totaleElementi)$/i
 
+/** OK-prefixed codes (OK00) and all-zero codes (0, 000) are success; 017 is not. */
+export const isSuccessCode = (code: string): boolean => /^(OK|0+$)/i.test(code)
+
 const median = (values: ReadonlyArray<number>): number => {
   const sorted = [...values].sort((left, right) => left - right)
   return sorted[Math.floor((sorted.length - 1) / 2)] ?? 0
@@ -486,7 +489,7 @@ export const analyseOperation = (
           `${field.path}: sent as xsi:nil ${field.nil} times; decide between null and omission.`
         )
     }
-    const koCodes = [...outcomes.keys()].filter((code) => !/^(OK|0+|00)/i.test(code))
+    const koCodes = [...outcomes.keys()].filter((code) => !isSuccessCode(code))
     if (koCodes.length > 0) {
       observations.push(
         `Business errors arrive inside successful responses (${koCodes.join(", ")}): each needs an HTTP status and a problem type.`

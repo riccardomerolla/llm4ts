@@ -272,8 +272,23 @@ export const projectOpenApi = (
 
 // A string that a YAML 1.1 or 1.2 reader would turn into something else
 // (a number, boolean, null, date) or that is not plain-safe is quoted.
-const ambiguous =
-  /^(true|false|yes|no|on|off|y|n|null|~|)$|^[-+]?(\.\d+|\d+(\.\d*)?)([eE][-+]?\d+)?$|^0[xob]|^\d{4}-\d{2}-\d{2}|^[-?:,[\]{}#&*!|>'"%@`\s]|\s$|: |\s#|[\n\r\t]/i
+const ambiguous = new RegExp(
+  [
+    "^(true|false|yes|no|on|off|y|n|null|~|)$", // booleans and nulls, YAML 1.1 included
+    "^[-+]?(\\.\\d+|\\d[\\d_]*(\\.[\\d_]*)?)([eE][-+]?\\d+)?$", // numbers, 1_000 included
+    "^[-+]?\\.(inf|nan)$", // .inf, .nan
+    "^[-+]?\\d[\\d_]*(:[0-5]?\\d)+(\\.\\d*)?$", // YAML 1.1 sexagesimal (12:30)
+    "^0[xob]",
+    "^\\d{4}-\\d{2}-\\d{2}", // dates and timestamps
+    "^[-?:,[\\]{}#&*!|>'\"%@`\\s]",
+    "\\s$",
+    ":$",
+    ": ",
+    "\\s#",
+    "[\\n\\r\\t]"
+  ].join("|"),
+  "i"
+)
 
 const scalar = (value: Json): string =>
   typeof value === "string"

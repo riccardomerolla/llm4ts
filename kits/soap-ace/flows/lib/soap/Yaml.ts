@@ -44,7 +44,10 @@ const stripComment = (text: string): string => {
       if (char === "\\" && quote === '"') index++
       else if (char === quote) quote = undefined
     } else if (char === '"' || char === "'") {
-      if (index === 0 || /[\s:\-[{,]/.test(text[index - 1] ?? "")) quote = char
+      // A quote opens a quoted scalar only where a value starts (after a key,
+      // a list dash, or a flow bracket), never inside a plain value (5 'ft).
+      const before = text.slice(0, index).trimEnd()
+      if (before === "" || /(^|\s)-$|[:[{,]$/.test(before)) quote = char
     } else if (char === "#" && (index === 0 || /\s/.test(text[index - 1] ?? ""))) {
       return text.slice(0, index).trimEnd()
     }
@@ -54,7 +57,7 @@ const stripComment = (text: string): string => {
 
 class Reader {
   private index = 0
-  private readonly lines: ReadonlyArray<Line>
+  private readonly lines: Array<Line>
   private readonly raw: ReadonlyArray<string>
 
   constructor(source: string) {
@@ -105,6 +108,13 @@ class Reader {
       if (line.indent > indent) this.fail(line.number, "unexpected indentation")
       if (!(line.text === "-" || line.text.startsWith("- "))) return items
       const rest = line.text === "-" ? "" : line.text.slice(2).trim()
+      if (rest === "-" || rest.startsWith("- ")) {
+        // `- - a`: a list item that is itself a list, starting on this line.
+        const nestedIndent = indent + (line.text.length - rest.length)
+        this.lines[this.index] = { number: line.number, indent: nestedIndent, text: rest }
+        items.push(this.sequence(nestedIndent))
+        continue
+      }
       this.index++
       if (rest === "") {
         const next = this.lines[this.index]
@@ -181,7 +191,7 @@ class Reader {
     if (text === "{}") return {}
     if (text.startsWith('"') || text.startsWith("'")) return this.quoted(text, number)
     if (text === "|" || text === ">" || /^[|>][-+]?$/.test(text))
-      return this.blockScalar(text, indent)
+      return this.blockScalar(text, indent, number)
     if (/^[[{&*!%@`]/.test(text)) {
       this.fail(number, `unsupported YAML construct at ${JSON.stringify(text.slice(0, 12))}`)
     }
@@ -201,6 +211,8 @@ class Reader {
         n: "\n",
         t: "\t",
         r: "\r",
+        b: "\b",
+        f: "\f",
         '"': '"',
         "\\": "\\",
         "/": "/",
@@ -212,17 +224,21 @@ class Reader {
     })
   }
 
-  private blockScalar(header: string, indent: number): string {
+  private blockScalar(header: string, indent: number, headerLine: number): string {
     const folded = header.startsWith(">")
     const keep = header.endsWith("+")
     const strip = header.endsWith("-")
     // Block scalar content keeps its comments and blank lines, so it is read
     // from the raw source rather than the comment-stripped lines.
-    const startLine = this.lines[this.index]
-    if (startLine === undefined || startLine.indent <= indent) return ""
-    const contentIndent = startLine.indent
+    // Content starts on the raw line after the header, even when that line
+    // looks like a comment (# heading); its indentation is the first
+    // non-blank line's.
+    let rawIndex = headerLine
+    const firstContent = this.raw.slice(rawIndex).find((raw) => raw.trim() !== "")
+    const contentIndent =
+      firstContent === undefined ? 0 : firstContent.length - firstContent.trimStart().length
+    if (firstContent === undefined || contentIndent <= indent) return ""
     const collected: Array<string> = []
-    let rawIndex = startLine.number - 1
     while (rawIndex < this.raw.length) {
       const raw = this.raw[rawIndex] ?? ""
       const rawIndent = raw.length - raw.trimStart().length
@@ -254,7 +270,7 @@ export const parseYaml = (source: string): Effect.Effect<YamlValue, YamlError> =
 // ---------------------------------------------------------------------------
 // Writing
 
-const plainUnsafe = /^[-?:,[\]{}#&*!|>'"%@`\s]|[\s]$|: |\s#|^(~|null|Null|NULL)$|[\n\r\t]/
+const plainUnsafe = /^[-?:,[\]{}#&*!|>'"%@`\s]|[\s]$|:$|: |\s#|^(~|null|Null|NULL)$|[\n\r\t]/
 
 /** A scalar as YAML: plain when it reads back unchanged, otherwise double-quoted. */
 export const yamlScalar = (value: string | null): string => {
@@ -269,7 +285,7 @@ export const yamlScalar = (value: string | null): string => {
 }
 
 export const yamlKey = (key: string): string =>
-  /^[A-Za-z_@#][A-Za-z0-9_.\-@#]*$/.test(key) ? key : JSON.stringify(key)
+  /^[A-Za-z_@][A-Za-z0-9_.\-@#]*$/.test(key) ? key : JSON.stringify(key)
 
 /** Serialize a value (no comments); mappings keep insertion order. */
 export const renderYaml = (value: YamlValue, indent = 0): string => {
