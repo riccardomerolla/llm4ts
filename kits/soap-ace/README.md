@@ -119,6 +119,33 @@ masked before it is written. `LLM4TS_SOAP_STUB=<dir>` answers calls from
 `<dir>/<operation>.xml` instead of the network, for rehearsals; the fixture's
 `responses/` directory is one.
 
+## soap-design: analyse
+
+```bash
+llm4ts run soap-design --repo . "analyse"                  # every operation
+llm4ts run soap-design --repo . "analyse cercaMovimenti"
+```
+
+Reads the recorded exchanges (calls and SoapUI mocks) and writes
+`analysis/<operation>.md` with a typed `analysis/<operation>.json` beside it.
+No model is involved; the report is the evidence the REST design must cite:
+
+- **observations**: values outside a declared enumeration, undeclared code
+  lists, required fields that are always empty, optional ones always present,
+  `xsi:nil` usage, business errors carried inside successful responses,
+  faults, and how many declared fields were never observed;
+- **business outcome codes** (`esito.codice` and similar) with their
+  descriptions and the samples that produced them;
+- **SOAP faults** by code, detail element, and reason;
+- **pagination**: page-number, offset, or cursor style, from the request and
+  response field names, plus what the samples showed (last-page flags, most
+  items per response);
+- **response fields**: presence, emptiness and nil counts, and the masked
+  values seen (most frequent first);
+- **schema findings**: every place a response broke its WSDL;
+- fields **never observed**, optional **request fields no sample used**,
+  and **latency** across real calls.
+
 ## Auth profile
 
 `.llm4ts/soap/<service>/auth.json` is gitignored (discovery writes the
@@ -190,6 +217,7 @@ soap-ace/
   api-style.md                  default REST style guide (a project-tier copy overrides it)
   flows/soap-discover.ts        catalog + open questions + proposed operation classes
   flows/soap-sample.ts          request files, calls, SoapUI import, scenario proposals
+  flows/soap-design.ts          response analysis (the REST design lands here next)
   flows/lib/soap/               the SOAP library (XML, WSDL/XSD, auth, transport, masking, samples)
   fixtures/demo-bank-soap/      synthetic service: WSDL/XSD, canned responses, a SoapUI project
   test/
