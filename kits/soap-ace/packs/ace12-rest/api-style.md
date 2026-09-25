@@ -2,7 +2,8 @@
 
 The design step treats every rule here as a hard constraint and the design
 judge scores against it. A bank-specific guide replaces this file by
-shipping a project-tier copy of the kit (`.llm4ts/kits/soap-ace/api-style.md`).
+shipping a project-tier copy of the kit
+(`.llm4ts/kits/soap-ace/packs/ace12-rest/api-style.md`).
 
 ## Resources and paths
 

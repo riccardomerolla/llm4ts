@@ -25,27 +25,44 @@ const withDefined = (entries: ReadonlyArray<readonly [string, Json | undefined]>
     entries.filter((entry): entry is readonly [string, Json] => entry[1] !== undefined)
   )
 
-const propertySchema = (property: Property): JsonObject => {
+export type Dialect = "3.1" | "3.0"
+
+/**
+ * One property. OpenAPI 3.1 is JSON Schema: `type: [t, "null"]`, and keys
+ * beside `$ref` are honoured. OpenAPI 3.0 (what IBM ACE 12 imports) needs
+ * `nullable: true`, and a `$ref` with siblings wrapped in `allOf`.
+ */
+const propertySchema = (property: Property, dialect: Dialect): JsonObject => {
   const common = withDefined([
     ["description", property.description],
     ["x-soap-source", property.source],
     ["x-derivation", property.derivation],
     ["x-soap-enum-map", property.enumMap === undefined ? undefined : { ...property.enumMap }]
   ])
+  const nullable = property.nullable === true
   if (property.type === "object" && property.ref !== undefined) {
-    return property.nullable === true
+    if (dialect === "3.0") {
+      return Object.keys(common).length === 0 && !nullable
+        ? ref(property.ref)
+        : { allOf: [ref(property.ref)], ...(nullable ? { nullable: true } : {}), ...common }
+    }
+    return nullable
       ? { oneOf: [ref(property.ref), { type: "null" }], ...common }
       : { ...ref(property.ref), ...common }
   }
+  const typeOf = (type: string): JsonObject =>
+    dialect === "3.0"
+      ? { type, ...(nullable ? { nullable: true } : {}) }
+      : { type: nullable ? [type, "null"] : type }
   if (property.type === "array") {
     return {
-      type: property.nullable === true ? ["array", "null"] : "array",
+      ...typeOf("array"),
       items: property.ref !== undefined ? ref(property.ref) : { type: property.items ?? "string" },
       ...common
     }
   }
   return {
-    type: property.nullable === true ? [property.type, "null"] : property.type,
+    ...typeOf(property.type),
     ...withDefined([
       ["format", property.format],
       ["enum", property.enum === undefined ? undefined : [...property.enum]]
@@ -54,7 +71,7 @@ const propertySchema = (property: Property): JsonObject => {
   }
 }
 
-const modelSchema = (model: Model): JsonObject => ({
+const modelSchema = (model: Model, dialect: Dialect): JsonObject => ({
   type: "object",
   ...withDefined([["description", model.description]]),
   ...(model.properties.some((property) => property.required)
@@ -65,7 +82,7 @@ const modelSchema = (model: Model): JsonObject => ({
       }
     : {}),
   properties: Object.fromEntries(
-    model.properties.map((property) => [property.name, propertySchema(property)])
+    model.properties.map((property) => [property.name, propertySchema(property, dialect)])
   ),
   additionalProperties: false,
   ...withDefined([["x-soap-source-type", model.sourceType]])
@@ -207,7 +224,11 @@ const operationObject = (endpoint: Endpoint): JsonObject => {
   }
 }
 
-export const projectOpenApi = (design: ApiDesign, version = "1.0.0"): JsonObject => {
+export const projectOpenApi = (
+  design: ApiDesign,
+  options: { readonly version?: string; readonly dialect?: Dialect } = {}
+): JsonObject => {
+  const dialect = options.dialect ?? "3.1"
   const paths: Record<string, JsonObject> = {}
   for (const endpoint of design.endpoints) {
     paths[endpoint.path] = {
@@ -216,7 +237,7 @@ export const projectOpenApi = (design: ApiDesign, version = "1.0.0"): JsonObject
     }
   }
   const schemas: Record<string, Json> = {}
-  for (const model of design.models) schemas[model.name] = modelSchema(model)
+  for (const model of design.models) schemas[model.name] = modelSchema(model, dialect)
   for (const endpoint of design.endpoints) {
     for (const response of endpoint.responses) {
       if (response.list !== true || response.model === undefined) continue
@@ -233,10 +254,10 @@ export const projectOpenApi = (design: ApiDesign, version = "1.0.0"): JsonObject
   }
   schemas["Problem"] = problemSchema
   return {
-    openapi: "3.1.0",
+    openapi: dialect === "3.0" ? "3.0.3" : "3.1.0",
     info: {
       title: design.title,
-      version,
+      version: options.version ?? "1.0.0",
       description:
         "Projected by soap-design from the approved REST design; do not edit. x-soap-* extensions trace every element to the SOAP service."
     },

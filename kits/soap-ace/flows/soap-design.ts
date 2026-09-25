@@ -14,7 +14,7 @@
 // operations, models bind to XSD types, properties cite XSD paths, errors
 // cite outcome codes and faults (see the kit README). `check` verifies
 // coverage of every operation, verbs against the confirmed classes in
-// operations.md, the style guide (api-style.md), every source path, enum maps
+// operations.md, the style guide (packs/ace12-rest/api-style.md), every source path, enum maps
 // against declared and observed values, and that every business error the
 // samples showed is mapped. api-design.md is the approval file: editing its
 // JSON block is the review, `Status: approved` the sign-off; an existing
@@ -59,8 +59,10 @@ const usage =
 
 const styleGuide = () =>
   Effect.tryPromise({
-    try: () => readFile(fileURLToPath(new URL("../api-style.md", import.meta.url)), "utf8"),
-    catch: () => FlowAborted.make({ message: "cannot read the kit's api-style.md" })
+    try: () =>
+      readFile(fileURLToPath(new URL("../packs/ace12-rest/api-style.md", import.meta.url)), "utf8"),
+    catch: () =>
+      FlowAborted.make({ message: "cannot read the kit's packs/ace12-rest/api-style.md" })
   })
 
 const program = Effect.gen(function* () {

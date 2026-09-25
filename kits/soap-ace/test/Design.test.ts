@@ -254,6 +254,37 @@ describe("OpenAPI projection", () => {
     })
   )
 
+  it.effect("projects an OpenAPI 3.0.3 variant for IBM ACE 12", () =>
+    Effect.gen(function* () {
+      const { design } = yield* referenceDesign
+      const api = projectOpenApi(design, { dialect: "3.0" })
+      assert.strictEqual(at(api, "openapi"), "3.0.3")
+      assert.deepStrictEqual(
+        at(api, "components", "schemas", "AccountDetail", "properties", "overdraftLimit", "allOf"),
+        [{ $ref: "#/components/schemas/Amount" }]
+      )
+      assert.strictEqual(
+        at(
+          api,
+          "components",
+          "schemas",
+          "AccountDetail",
+          "properties",
+          "overdraftLimit",
+          "nullable"
+        ),
+        true
+      )
+      assert.strictEqual(
+        at(api, "components", "schemas", "Account", "properties", "branch", "type"),
+        "string"
+      )
+      assert.isUndefined(
+        at(api, "components", "schemas", "Account", "properties", "balance", "$ref")
+      )
+    })
+  )
+
   it("quotes strings a YAML reader would retype", () => {
     assert.strictEqual(
       renderTypedYaml({

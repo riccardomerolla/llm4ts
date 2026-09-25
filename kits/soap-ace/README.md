@@ -195,6 +195,43 @@ SOAP service. Nobody edits it; the ACE pack implements it. The fixture's
 [`design/api-design.md`](fixtures/demo-bank-soap/design/api-design.md) is a
 reviewed example.
 
+## soap-epic
+
+```bash
+llm4ts run soap-epic --repo . doctor                                # ACE 12 usable here?
+llm4ts run soap-epic --repo . -- --target ~/work/demo-bank-ace plan # seed + story plan
+```
+
+`plan` takes an approved design with no check errors and prepares the ACE
+repository (`--target`, a git repository):
+
+- **regenerated every run**: `contracts/` (the design, `openapi.yaml` 3.1,
+  `openapi-ace.yaml` 3.0.3 because ACE 12 imports OpenAPI 3.0, the 1:1
+  mapping, the WSDL and XSDs re-encoded as UTF-8), `test-data/` (the masked
+  exchanges the backend stubs are built from), `docs/analysis/`, and
+  `docs/patterns/` (the ESQL pattern cards);
+- **created once, then the team's**: the
+  [`ace12-rest-api`](scaffolds/ace12-rest-api) scaffold: README,
+  `CONTRIBUTING.md` (house rules every coder reads), and
+  `scripts/ace-gates.sh build | test` (`ibmint package`; `ibmint deploy` to a
+  scratch work directory and `IntegrationServer --test-project`, after
+  sourcing `mqsiprofile`), plus a container variant.
+
+It then derives the story plan, not generates it: `api-skeleton` (REST API
+project descriptors and main flow), `policies` (dev/test/uat endpoints and
+security), `shared-lib` (WSDL, backend call, error mapping), `backend-stub`
+(test project and stubs), one `resource-<name>` story per resource owning its
+broker schema folder and tests, and `contract-check`. The plan is saved where
+the engine's `epic-stories` flow looks for it
+(`.llm4ts/epics/<epic-id>/plan.md`, same epic id), so that flow executes it
+unchanged: parallel stories in worktrees (concurrency 2), the ACE gates,
+the judge, the board, branches only. An existing plan is kept; editing it is
+the re-plan. `plan` prints the exact `epic-stories` command.
+
+The [`ace12-rest`](packs/ace12-rest/pack.md) pack names the same gates and
+the judge's rubric (contract, mapping, errors); its prompt and reviewer
+sidecars carry the same rules as `CONTRIBUTING.md`.
+
 ## Auth profile
 
 `.llm4ts/soap/<service>/auth.json` is gitignored (discovery writes the
@@ -263,11 +300,14 @@ replacement is reported by path, kind, and reason.
 ```text
 soap-ace/
   README.md
-  api-style.md                  default REST style guide (a project-tier copy overrides it)
   flows/soap-discover.ts        catalog + open questions + proposed operation classes
   flows/soap-sample.ts          request files, calls, SoapUI import, scenario proposals
   flows/soap-design.ts          analysis, 1:1 mapping, design draft and check, OpenAPI projection
+  flows/soap-epic.ts            ACE repository seed and the story plan epic-stories runs
+  packs/ace12-rest/             gates, judge rubric, prompts, and api-style.md (the REST style guide)
+  scaffolds/ace12-rest-api/     README, CONTRIBUTING.md, gate scripts for the ACE repository
+  patterns/                     ESQL pattern cards (esito, faults, amounts and enums, paging, nil)
   flows/lib/soap/               the SOAP library (XML, WSDL/XSD, auth, transport, masking, samples)
-  fixtures/demo-bank-soap/      synthetic service: WSDL/XSD, canned responses, a SoapUI project
+  fixtures/demo-bank-soap/      synthetic service (WSDL/XSD, responses, SoapUI project, reference design) and the RUNBOOK
   test/
 ```
