@@ -60,6 +60,7 @@ import {
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
+  setupAgentEnabled,
   setupIn,
   storyCoderFromEnvironment,
   storyJudgeQuery,
@@ -322,6 +323,13 @@ describe("epic-stories flags and seats", () => {
       assert.include(error.message, "ERR_PNPM_NO_OFFLINE_META")
     })
   )
+
+  it("the setup agent is opt-in", () => {
+    assert.isFalse(setupAgentEnabled({}))
+    assert.isFalse(setupAgentEnabled({ LLM4TS_SETUP_AGENT: "0" }))
+    assert.isTrue(setupAgentEnabled({ LLM4TS_SETUP_AGENT: "1" }))
+    assert.isTrue(setupAgentEnabled({ LLM4TS_SETUP_AGENT: " On " }))
+  })
 
   it.effect("a missing root package.json points at LLM4TS_APP_DIR", () =>
     Effect.gen(function* () {

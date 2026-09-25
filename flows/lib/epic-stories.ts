@@ -76,6 +76,7 @@ export const epicUsage = [
   "       LLM4TS_WORKTREE_ROOT (default: <repo>.worktrees beside the repository) holds them;",
   "       LLM4TS_APP_DIR (e.g. frontend) runs setup and gates in that subfolder; unset, a",
   "       repository without a root package.json uses its one subfolder that has one;",
+  "       LLM4TS_SETUP_AGENT=1 gives the coder one turn to fix a failed setup, then reruns it;",
   "       LLM4TS_CODER_HEALTH_URL is polled after the coder's serving engine goes down."
 ].join("\n")
 
@@ -838,6 +839,14 @@ export const worktreeSetupCommand = (
     .filter((part) => part.length > 0)
   return parts.length === 0 ? undefined : parts
 }
+
+/**
+ * `LLM4TS_SETUP_AGENT=1` (or `true`/`on`): a failed setup gets one coder turn
+ * to make the worktree ready, then runs again as the check. Off by default.
+ */
+export const setupAgentEnabled = (
+  environment: Readonly<Record<string, string | undefined>>
+): boolean => /^(1|true|on|yes)$/i.test(environment.LLM4TS_SETUP_AGENT?.trim() ?? "")
 
 const output = (result: ReviewResult): string =>
   result.issues.map((issue) => issue.description).join("\n")

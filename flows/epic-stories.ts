@@ -60,6 +60,7 @@ import {
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
+  setupAgentEnabled,
   setupIn,
   storyCoderFromEnvironment,
   verifyBlockedOn,
@@ -259,7 +260,10 @@ const program = Effect.gen(function* () {
               }),
             ...(setupCommand === undefined
               ? {}
-              : { setup: inAppDir(appDir, setupIn(nodeProcessExecutor, events, setupCommand)) }),
+              : {
+                  setup: inAppDir(appDir, setupIn(nodeProcessExecutor, events, setupCommand)),
+                  setupAgent: setupAgentEnabled(process.env)
+                }),
             gates,
             // With a roster, the judge and the verifier are leased per story,
             // away from the executor coding it (ADR 0019).

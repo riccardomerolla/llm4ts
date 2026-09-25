@@ -8,6 +8,9 @@
   `package.json` uses its one first-level subfolder that has one. Before,
   such a repository failed every story at setup with
   `ERR_PNPM_NO_PKG_MANIFEST`; that error now names `LLM4TS_APP_DIR`.
+- `LLM4TS_SETUP_AGENT=1` adds an agentic fallback to worktree setup: a
+  failed setup gets one coder turn to make the worktree ready, then setup
+  runs again as the check (`StoriesOptions.setupAgent`, off by default).
 
 ## 2.11.0
 
