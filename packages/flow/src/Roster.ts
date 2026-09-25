@@ -511,15 +511,19 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
   const pick = (role: Role, leaseOptions: LeaseOptions): ExecutorSpec | undefined => {
     const avoid = leaseOptions.avoid ?? []
     const candidates = eligible(role, avoid).filter((spec) => freeFor(spec, role))
-    const preferred = candidates.find((spec) => spec.id === leaseOptions.prefer)
-    if (preferred !== undefined) {
-      return preferred
-    }
-    return [...candidates].sort(
+    const best = [...candidates].sort(
       (left, right) =>
         priorityOf(left, role) - priorityOf(right, role) ||
         (lastLeased.get(left.id) ?? -1) - (lastLeased.get(right.id) ?? -1)
     )[0]
+    // The executor a resumed context held before keeps it only while it
+    // still ranks with the best free one: continuity breaks ties, it never
+    // overrides a priority the operator changed.
+    const preferred = candidates.find((spec) => spec.id === leaseOptions.prefer)
+    return preferred !== undefined &&
+      (best === undefined || priorityOf(preferred, role) <= priorityOf(best, role))
+      ? preferred
+      : best
   }
 
   const release = (spec: ExecutorSpec, role: Role): Effect.Effect<void> =>

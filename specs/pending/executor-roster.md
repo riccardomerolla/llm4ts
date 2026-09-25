@@ -13,17 +13,17 @@ on-prem server, a paid seat with capacity) are never used.
 
 ## Decisions (agreed 2026-09-24)
 
-| Decision  | Choice                                                                                                                                                                                                      |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Seam      | A `Roster` service in `flow`; the runner builds it from a file or from the environment (one executor per seat). Flows stay agnostic.                                                                        |
-| Unit      | A context's coder is one held lease (a story's for its lifetime, a root context's from its first call to the end of the run); reasoning roles lease per call.                                               |
-| Roles     | `planner`, `coder`, `reviewer`, `judge`, `verifier`, declared per executor. Reasoning calls avoid the executor holding the context's coder; if none else can serve, they borrow it, marked not independent. |
-| Capacity  | `slots` per executor; `coderSlots` defaults to `slots - 1` when the executor also has a reasoning role and `slots > 1`, else `slots`. A flow's `--concurrency` stays a global cap.                          |
-| Priority  | Per role (`priority: n` or `{ coder: n, default: n }`), lower first; equal priorities take turns (least recently leased first). A preferred executor (the one held before) wins while free.                 |
-| Exclusion | Automatic on infrastructure signals only; manual pause/resume; persisted when it has an end time.                                                                                                           |
-| Waiting   | Unbounded while any eligible executor can return; typed `RosterExhausted` when none can.                                                                                                                    |
-| Handover  | On an exclusion during a held coder's call: release, lease the next coder, repeat the call with a takeover note; at most 2 per context.                                                                     |
-| Executors | CLI harnesses may take any role; API connectors reasoning roles only (checked by the runner, which knows the harnesses). One server, one executor.                                                          |
+| Decision  | Choice                                                                                                                                                                                                               |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Seam      | A `Roster` service in `flow`; the runner builds it from a file or from the environment (one executor per seat). Flows stay agnostic.                                                                                 |
+| Unit      | A context's coder is one held lease (a story's for its lifetime, a root context's from its first call to the end of the run); reasoning roles lease per call.                                                        |
+| Roles     | `planner`, `coder`, `reviewer`, `judge`, `verifier`, declared per executor. Reasoning calls avoid the executor holding the context's coder; if none else can serve, they borrow it, marked not independent.          |
+| Capacity  | `slots` per executor; `coderSlots` defaults to `slots - 1` when the executor also has a reasoning role and `slots > 1`, else `slots`. A flow's `--concurrency` stays a global cap.                                   |
+| Priority  | Per role (`priority: n` or `{ coder: n, default: n }`), lower first; equal priorities take turns (least recently leased first). A preferred executor (the one held before) wins while free and ranked with the best. |
+| Exclusion | Automatic on infrastructure signals only; manual pause/resume; persisted when it has an end time.                                                                                                                    |
+| Waiting   | Unbounded while any eligible executor can return; typed `RosterExhausted` when none can.                                                                                                                             |
+| Handover  | On an exclusion during a held coder's call: release, lease the next coder, repeat the call with a takeover note; at most 2 per context.                                                                              |
+| Executors | CLI harnesses may take any role; API connectors reasoning roles only (checked by the runner, which knows the harnesses). One server, one executor.                                                                   |
 
 ## Modules
 
@@ -60,8 +60,8 @@ on-prem server, a paid seat with capacity) are never used.
   `RosterShape`:
   - `lease(role, { avoid?, prefer?, label? })`: scoped; picks the eligible
     executor (has the role, not excluded, not in `avoid`, a free slot for
-    the role) by preferred-first, then priority, then least recently
-    leased. Waits while none is free, waking on every release, every
+    the role) by priority, then least recently leased; the preferred one
+    wins only while it ranks with the best free one. Waits while none is free, waking on every release, every
     exclusion change, the earliest `until`, and every 15 s for `health`
     probes. Fails `RosterExhausted { role, reasons }` when no executor with
     the role exists or every one is excluded for the run. Returns

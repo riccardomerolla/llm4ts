@@ -304,18 +304,19 @@ describe("a run served from a roster", () => {
         const storyA = yield* contextFor("/wt/a", { label: "story a" })
         const storyB = yield* contextFor("/wt/b", { label: "story b", prefer: "claude" })
         assert.strictEqual(yield* storyA.roster?.executor ?? Effect.succeed(undefined), "pi-local")
-        assert.strictEqual(yield* storyB.roster?.executor ?? Effect.succeed(undefined), "claude")
+        // Story b preferred claude, but codex ranks higher for coding and is free.
+        assert.strictEqual(yield* storyB.roster?.executor ?? Effect.succeed(undefined), "codex")
         const coded = yield* collect(storyA.coder.executeStream("task 1"))
         assert.strictEqual(coded.content, "pi")
 
-        // Story b's judge must not be claude, which codes it.
+        // Story b's judge must not be codex, which codes it.
         const judge = storyB.roster?.forRole("judge")
         if (judge === undefined) {
           throw new Error("no judge")
         }
         const judged = yield* collect(judge.executeStream("judge b"))
-        assert.strictEqual(judged.content, "codex")
-        // pi and one of claude's two coder slots are held; codex and claude have one each left.
+        assert.strictEqual(judged.content, "claude")
+        // pi and codex's one coder slot are held; claude has its two left.
         assert.strictEqual(yield* context.roster?.available("coder") ?? Effect.succeed(-1), 2)
       })
     )

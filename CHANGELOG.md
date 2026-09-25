@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.9.7
+
+- Roster: a resumed story keeps its previous coder only while that coder
+  still ranks with the best free one. Continuity breaks ties; it no longer
+  overrides a priority the operator changed (the demo's home story went
+  back to a slow coder after codex had been moved first).
+
 ## 2.9.6
 
 - A review round says what it found, not only how much. The review loop

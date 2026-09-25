@@ -47,8 +47,10 @@ knowing how many executors there are.
    so no configuration deadlocks.
 3. **Priority, then turns.** Lower priority numbers are picked first;
    executors with equal priority take turns (the least recently leased
-   first). A context that held an executor before (a resumed story) prefers
-   it while it is free. No difficulty matching in this version.
+   first). A context that held an executor before (a resumed story) keeps
+   it while it is free and still ranks with the best free executor
+   (amended in 2.9.7: continuity breaks ties, it never overrides a changed
+   priority). No difficulty matching in this version.
 4. **Exclusion is automatic, persisted, and manual too.** Only
    infrastructure signals exclude an executor, never the quality of its
    work:

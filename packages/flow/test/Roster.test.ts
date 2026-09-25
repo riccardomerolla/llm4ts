@@ -197,15 +197,22 @@ describe("Roster leasing", () => {
     )
   )
 
-  it.effect("a preferred executor wins while free, and a released slot is leased again", () =>
+  it.effect("a preferred executor wins while it ranks with the best free one", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const events = yield* makeCollectingFlowEvents
-        const roster = yield* makeRoster({ executors: [local, codex], events })
-        const first = yield* roster.lease("coder", { prefer: "codex" })
-        assert.strictEqual(first.executor.id, "codex")
+        const roster = yield* makeRoster({ executors: [local, onPrem, codex], events })
+        // Equal priority: continuity wins over taking turns.
+        const first = yield* roster.lease("coder", { prefer: "lemonade" })
+        assert.strictEqual(first.executor.id, "lemonade")
         yield* first.release
         yield* first.release
+        // A lower-ranked preference loses to the operator's priorities (the
+        // demo's home story kept a slow coder after codex was moved first).
+        const ranked = yield* roster.lease("coder", { prefer: "codex" })
+        assert.strictEqual(ranked.executor.id, "pi-local")
+        // …but still takes the slot when nothing better is free.
+        yield* roster.lease("coder")
         assert.strictEqual((yield* roster.lease("coder", { prefer: "codex" })).executor.id, "codex")
       })
     )
