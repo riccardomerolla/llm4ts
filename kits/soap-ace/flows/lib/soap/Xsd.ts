@@ -118,14 +118,20 @@ const parseMinOccurs = (value: string | undefined): number => {
 class SchemaReader {
   readonly targetNamespace: string
   private readonly qualifiedElements: boolean
+  private readonly schema: XmlElement
+  private readonly document: string
+  private readonly into: SchemaCollector
 
   constructor(
-    private readonly schema: XmlElement,
-    private readonly document: string,
-    private readonly into: SchemaCollector,
+    schema: XmlElement,
+    document: string,
+    into: SchemaCollector,
     /** For chameleon includes: the including schema's namespace. */
     namespaceOverride: string | undefined
   ) {
+    this.schema = schema
+    this.document = document
+    this.into = into
     this.targetNamespace = attribute(schema, "targetNamespace") ?? namespaceOverride ?? ""
     this.qualifiedElements = attribute(schema, "elementFormDefault") === "qualified"
   }
@@ -140,8 +146,15 @@ class SchemaReader {
     subject: string,
     detail: string
   ): void {
+    // Anonymous types carry a `~` marker in their synthesized names; the
+    // question speaks of the element path the reader sees in the schema.
     this.into.questions.push(
-      new OpenQuestion({ code, location: this.where(element), subject, detail })
+      new OpenQuestion({
+        code,
+        location: this.where(element),
+        subject: subject.replace(/^~/, ""),
+        detail: detail.replace(/(^|\s)~/g, "$1")
+      })
     )
   }
 

@@ -220,7 +220,11 @@ class Discovery {
   readonly wsdl20: Wsdl20 = { interfaces: new Map(), bindings: new Map(), endpoints: [] }
   private readonly visited = new Set<string>()
 
-  constructor(private readonly loader: DocumentLoaderShape) {}
+  private readonly loader: DocumentLoaderShape
+
+  constructor(loader: DocumentLoaderShape) {
+    this.loader = loader
+  }
 
   question(code: OpenQuestionCode, location: string, subject: string, detail: string): void {
     this.questions.push(new OpenQuestion({ code, location, subject, detail }))

@@ -24,6 +24,30 @@ source) and shares nothing with this kit.
 | Analysis, REST design, OpenAPI projection          | pending  |
 | `ace12-rest` pack, scaffold, `soap-epic`           | pending  |
 
+## soap-discover
+
+```bash
+llm4ts run soap-discover --repo ~/work/conti-api ./wsdl/DemoBank.wsdl
+```
+
+Writes under `<repo>/.llm4ts/soap/<service>/`:
+
+| File            | What it is                                                               |
+| --------------- | ------------------------------------------------------------------------ |
+| `catalog.json`  | the typed catalog every later step reads                                 |
+| `catalog.md`    | human summary: endpoints, operations and their fields, open questions    |
+| `operations.md` | proposed `read`/`mutating` classes; review, then set `Status: confirmed` |
+
+`operations.md` is the approval file: until its status is `confirmed` every
+operation counts as unclassified, so nothing can be called and the design
+cannot pick REST verbs. An existing file is never overwritten; rerunning
+reports operations it does not mention and entries no longer in the WSDL.
+Classes are proposed by a name heuristic (Italian and English verbs) and, when
+`LLM4TS_JUDGMENT_PROVIDER` names a judgment seat, by a typed judgment
+(ADR 0017); without one, discovery makes no model call at all.
+`LLM4TS_SOAP_SERVICE` overrides the service directory name. WSDL URLs arrive
+with the auth-aware transport; until then pass a local path.
+
 ## Discovery guarantees
 
 - The catalog is produced by code, never by a model. Every operation, type,
@@ -44,7 +68,8 @@ source) and shares nothing with this kit.
 soap-ace/
   README.md
   api-style.md                  default REST style guide (a project-tier copy overrides it)
-  flows/lib/soap/               the SOAP library: Xml, Catalog, Xsd, Wsdl, ...
+  flows/soap-discover.ts        catalog + open questions + proposed operation classes
+  flows/lib/soap/               the SOAP library: Xml, Catalog, Xsd, Wsdl, Classification, Discover
   fixtures/demo-bank-soap/      synthetic service: conti, movimenti, bonifici
   test/
 ```

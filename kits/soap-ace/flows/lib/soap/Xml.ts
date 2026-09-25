@@ -155,12 +155,15 @@ const splitQName = (qname: string): { readonly prefix: string; readonly local: s
 
 class Parser {
   private position = 0
+  private readonly text: string
+  private readonly limits: XmlLimits
+  private readonly source: string | undefined
 
-  constructor(
-    private readonly text: string,
-    private readonly limits: XmlLimits,
-    private readonly source: string | undefined
-  ) {}
+  constructor(text: string, limits: XmlLimits, source: string | undefined) {
+    this.text = text
+    this.limits = limits
+    this.source = source
+  }
 
   fail(reason: XmlError["reason"], detail: string, at: number = this.position): never {
     throw new XmlError({
