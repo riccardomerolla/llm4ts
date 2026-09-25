@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.12.0
 
 - `epic-stories` supports an application in a subfolder (a Next.js app under
   `frontend/`). Worktree setup, the gates (per task, per story and on
