@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic demo-bank response for confermaBonifico. No real data. -->
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ban="http://demobank.example/soap/banking" xmlns:cmn="http://demobank.example/soap/common"><soapenv:Header/><soapenv:Body><ban:confermaBonificoResponse><cmn:esito><cmn:codice>KO17</cmn:codice><cmn:descrizione>Codice OTP non valido</cmn:descrizione></cmn:esito></ban:confermaBonificoResponse></soapenv:Body></soapenv:Envelope>

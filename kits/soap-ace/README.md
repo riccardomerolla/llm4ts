@@ -63,6 +63,62 @@ request.
 - `<!DOCTYPE` is refused outright: no external entities, no entity expansion.
   Schemas in ISO-8859-1 and windows-1252 are decoded by their declaration.
 
+## soap-sample
+
+Runs after `soap-discover` in the same repository; the task text is a
+command.
+
+```bash
+llm4ts run soap-sample --repo . "import ./DemoBank-soapui-project.xml"   # requests + mock responses, masked
+llm4ts run soap-sample --repo . "init cercaMovimenti fine-mese"          # commented skeleton to edit
+llm4ts run soap-sample --repo . "propose cercaMovimenti"                 # scenario set from the reasoning seat
+llm4ts run soap-sample --repo . "call cercaMovimenti"                    # every request of the operation
+llm4ts run soap-sample --repo . -- --allow-mutating revocaBonifico "call revocaBonifico/gia-eseguito"
+llm4ts run soap-sample --repo . list
+```
+
+A request is a YAML projection of the XSD, one file per scenario under
+`samples/<operation>/<name>.request.yaml`:
+
+```yaml
+# cercaMovimenti: fine mese
+operation: cercaMovimenti
+purpose: "fine mese"
+body:
+  iban: IT12L0542811101309953525271 # IbanType, string, pattern …, length 27 [1]
+  dataDa: 2026-01-15 # date [1]
+  dataA: 2026-01-15 # date [1]
+  paginazione: # PaginazioneRichiesta [1]
+    numeroPagina: 1 # int [1]
+    dimensionePagina: 1 # int, 1..100 [1]
+```
+
+Required fields come filled with values that satisfy the schema: identifiers
+already seen in earlier (masked) samples first, then checksummed example
+IBANs and codici fiscali, enumeration values, and strings built from the XSD
+patterns. Optional fields and choice alternatives are commented out. Every
+value is a string, sent exactly as written; `~` sends `xsi:nil`. A raw
+`<name>.request.xml` (the body element or a whole envelope, with an optional
+`<!-- purpose: … -->`) is accepted as a second form and validated the same way.
+
+`call` never sends a request that does not validate; it lists what to fix.
+It records `<name>.exchange.json` beside the request: the masked request
+and response envelopes without security headers, safe HTTP headers, status,
+latency, any SOAP fault, and every place the response breaks its schema
+(values outside an enumeration, undeclared elements), which are findings for
+the design rather than errors. `--keep-raw` also writes the unmasked response
+to the gitignored `raw/`, never shown to a model.
+
+`propose` asks the reasoning seat (`LLM4TS_REASONER`, default `claude`) for
+three to six scenarios (happy path, empty result, pagination boundary, a
+business error, a schema edge) and writes each as a request file, listing
+at its top whatever does not validate. `import` reads the requests saved in a
+SoapUI or ReadyAPI project (interface calls and test steps) and its mock
+responses; stored credentials are counted and ignored, and everything is
+masked before it is written. `LLM4TS_SOAP_STUB=<dir>` answers calls from
+`<dir>/<operation>.xml` instead of the network, for rehearsals; the fixture's
+`responses/` directory is one.
+
 ## Auth profile
 
 `.llm4ts/soap/<service>/auth.json` is gitignored (discovery writes the
@@ -133,7 +189,8 @@ soap-ace/
   README.md
   api-style.md                  default REST style guide (a project-tier copy overrides it)
   flows/soap-discover.ts        catalog + open questions + proposed operation classes
-  flows/lib/soap/               the SOAP library: Xml, Catalog, Xsd, Wsdl, Classification, Discover
-  fixtures/demo-bank-soap/      synthetic service: conti, movimenti, bonifici
+  flows/soap-sample.ts          request files, calls, SoapUI import, scenario proposals
+  flows/lib/soap/               the SOAP library (XML, WSDL/XSD, auth, transport, masking, samples)
+  fixtures/demo-bank-soap/      synthetic service: WSDL/XSD, canned responses, a SoapUI project
   test/
 ```

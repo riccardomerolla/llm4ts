@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic demo-bank response for inserisciBonifico. No real data. -->
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ban="http://demobank.example/soap/banking" xmlns:cmn="http://demobank.example/soap/common"><soapenv:Header/><soapenv:Body><ban:inserisciBonificoResponse><cmn:esito><cmn:codice>OK00</cmn:codice></cmn:esito><ban:idBonifico>BN20260325001</ban:idBonifico><ban:stato>INSERITO</ban:stato><ban:commissioni><cmn:valore>0.50</cmn:valore><cmn:divisa>EUR</cmn:divisa></ban:commissioni></ban:inserisciBonificoResponse></soapenv:Body></soapenv:Envelope>
