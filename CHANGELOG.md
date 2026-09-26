@@ -1,7 +1,28 @@
 # Changelog
 
-## 2.12.1
+## 2.13.0
 
+- New built-in kit `soap-ace`: SOAP services to REST APIs on IBM ACE 12.
+  Four flows take a WSDL (file or URL, with auth from `env:`/`file:`
+  references) to an ACE implementation plan that `epic-stories` runs
+  unchanged:
+  - `soap-discover <wsdl>` catalogs the WSDL/XSD and classifies the
+    operations as read or mutating. Only document/literal bindings are
+    kept; the rest are recorded as open questions.
+  - `soap-sample` authors requests, imports SoapUI projects and calls the
+    service over mTLS. Mutating operations are called only after an opt-in,
+    and a request that fails the XSD is never sent. Every sample is masked
+    before it is written, with pseudonyms that stay valid (IBAN, codice
+    fiscale, partita IVA, PAN).
+  - `soap-design` analyses responses, then drafts, revises and checks a 1:1
+    REST design, and projects OpenAPI 3.1 (plus 3.0.3 for ACE).
+  - `soap-epic` seeds the ACE repository (contracts, stubs, house rules,
+    gate scripts) and writes the story plan. `soap-epic doctor` checks the
+    local ACE install.
+  - It ships with the `ace12-rest` pack, the `ace12-rest-api` scaffold,
+    ESQL pattern cards and a `demo-bank-soap` rehearsal fixture. The ACE
+    gate commands follow the ACE 12.0.7+ documentation but have not been
+    run against a real ACE install yet; `LLM4TS_GATES` overrides them.
 - `epic-stories` default gates follow the application's `package.json`:
   `pnpm typecheck`, `lint`, `test` and `build` run only when the app defines
   that script, and the run prints the gates in force. A Next.js app without
