@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic demo-bank response for revocaBonifico. No real data. -->
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ban="http://demobank.example/soap/banking" xmlns:cmn="http://demobank.example/soap/common"><soapenv:Header/><soapenv:Body><soapenv:Fault><faultcode>soapenv:Server</faultcode><faultstring>Bonifico gia eseguito</faultstring><detail><cmn:ServizioFault><cmn:codice>KO31</cmn:codice><cmn:messaggio>Bonifico BN20260301009 gia eseguito</cmn:messaggio></cmn:ServizioFault></detail></soapenv:Fault></soapenv:Body></soapenv:Envelope>

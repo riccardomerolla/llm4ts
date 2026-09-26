@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic demo-bank SOAP service (document/literal wrapped). No real data. -->
+<wsdl:definitions xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+                  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+                  xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/"
+                  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                  xmlns:cmn="http://demobank.example/soap/common"
+                  xmlns:bnk="http://demobank.example/soap/banking"
+                  xmlns:tns="http://demobank.example/soap/banking/wsdl"
+                  targetNamespace="http://demobank.example/soap/banking/wsdl"
+                  name="DemoBank">
+  <wsdl:types>
+    <xs:schema targetNamespace="http://demobank.example/soap/banking/wsdl">
+      <xs:import namespace="http://demobank.example/soap/banking" schemaLocation="xsd/banking.xsd"/>
+      <xs:import namespace="http://demobank.example/soap/common" schemaLocation="xsd/common.xsd"/>
+    </xs:schema>
+  </wsdl:types>
+
+  <wsdl:message name="cercaContiRequest">
+    <wsdl:part name="parameters" element="bnk:cercaConti"/>
+  </wsdl:message>
+  <wsdl:message name="cercaContiResponse">
+    <wsdl:part name="parameters" element="bnk:cercaContiResponse"/>
+  </wsdl:message>
+  <wsdl:message name="dettaglioContoRequest">
+    <wsdl:part name="parameters" element="bnk:dettaglioConto"/>
+  </wsdl:message>
+  <wsdl:message name="dettaglioContoResponse">
+    <wsdl:part name="parameters" element="bnk:dettaglioContoResponse"/>
+  </wsdl:message>
+  <wsdl:message name="cercaMovimentiRequest">
+    <wsdl:part name="parameters" element="bnk:cercaMovimenti"/>
+  </wsdl:message>
+  <wsdl:message name="cercaMovimentiResponse">
+    <wsdl:part name="parameters" element="bnk:cercaMovimentiResponse"/>
+  </wsdl:message>
+  <wsdl:message name="inserisciBonificoRequest">
+    <wsdl:part name="parameters" element="bnk:inserisciBonifico"/>
+  </wsdl:message>
+  <wsdl:message name="inserisciBonificoResponse">
+    <wsdl:part name="parameters" element="bnk:inserisciBonificoResponse"/>
+  </wsdl:message>
+  <wsdl:message name="confermaBonificoRequest">
+    <wsdl:part name="parameters" element="bnk:confermaBonifico"/>
+  </wsdl:message>
+  <wsdl:message name="confermaBonificoResponse">
+    <wsdl:part name="parameters" element="bnk:confermaBonificoResponse"/>
+  </wsdl:message>
+  <wsdl:message name="revocaBonificoRequest">
+    <wsdl:part name="parameters" element="bnk:revocaBonifico"/>
+  </wsdl:message>
+  <wsdl:message name="revocaBonificoResponse">
+    <wsdl:part name="parameters" element="bnk:revocaBonificoResponse"/>
+  </wsdl:message>
+  <wsdl:message name="ServizioFault">
+    <wsdl:part name="fault" element="cmn:ServizioFault"/>
+  </wsdl:message>
+
+  <wsdl:portType name="DemoBankPortType">
+    <wsdl:operation name="cercaConti">
+      <wsdl:documentation>Lists the customer's current accounts by codice fiscale.</wsdl:documentation>
+      <wsdl:input message="tns:cercaContiRequest"/>
+      <wsdl:output message="tns:cercaContiResponse"/>
+      <wsdl:fault name="ServizioFault" message="tns:ServizioFault"/>
+    </wsdl:operation>
+    <wsdl:operation name="dettaglioConto">
+      <wsdl:documentation>Details of one account, including the overdraft (fido).</wsdl:documentation>
+      <wsdl:input message="tns:dettaglioContoRequest"/>
+      <wsdl:output message="tns:dettaglioContoResponse"/>
+      <wsdl:fault name="ServizioFault" message="tns:ServizioFault"/>
+    </wsdl:operation>
+    <wsdl:operation name="cercaMovimenti">
+      <wsdl:documentation>Paged account movements in a date window.</wsdl:documentation>
+      <wsdl:input message="tns:cercaMovimentiRequest"/>
+      <wsdl:output message="tns:cercaMovimentiResponse"/>
+      <wsdl:fault name="ServizioFault" message="tns:ServizioFault"/>
+    </wsdl:operation>
+    <wsdl:operation name="inserisciBonifico">
+      <wsdl:documentation>Registers a SEPA credit transfer awaiting SCA confirmation.</wsdl:documentation>
+      <wsdl:input message="tns:inserisciBonificoRequest"/>
+      <wsdl:output message="tns:inserisciBonificoResponse"/>
+      <wsdl:fault name="ServizioFault" message="tns:ServizioFault"/>
+    </wsdl:operation>
+    <wsdl:operation name="confermaBonifico">
+      <wsdl:documentation>Confirms an inserted transfer with the OTP.</wsdl:documentation>
+      <wsdl:input message="tns:confermaBonificoRequest"/>
+      <wsdl:output message="tns:confermaBonificoResponse"/>
+      <wsdl:fault name="ServizioFault" message="tns:ServizioFault"/>
+    </wsdl:operation>
+    <wsdl:operation name="revocaBonifico">
+      <wsdl:documentation>Revokes a transfer not yet executed.</wsdl:documentation>
+      <wsdl:input message="tns:revocaBonificoRequest"/>
+      <wsdl:output message="tns:revocaBonificoResponse"/>
+      <wsdl:fault name="ServizioFault" message="tns:ServizioFault"/>
+    </wsdl:operation>
+  </wsdl:portType>
+
+  <wsdl:binding name="DemoBankSoap11" type="tns:DemoBankPortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="cercaConti">
+      <soap:operation soapAction="http://demobank.example/soap/banking/cercaConti"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="dettaglioConto">
+      <soap:operation soapAction="http://demobank.example/soap/banking/dettaglioConto"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="cercaMovimenti">
+      <soap:operation soapAction="http://demobank.example/soap/banking/cercaMovimenti"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="inserisciBonifico">
+      <soap:operation soapAction="http://demobank.example/soap/banking/inserisciBonifico"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="confermaBonifico">
+      <soap:operation soapAction="http://demobank.example/soap/banking/confermaBonifico"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="revocaBonifico">
+      <soap:operation soapAction="http://demobank.example/soap/banking/revocaBonifico"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+  </wsdl:binding>
+
+  <wsdl:binding name="DemoBankSoap12" type="tns:DemoBankPortType">
+    <soap12:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="cercaConti">
+      <soap12:operation soapAction="http://demobank.example/soap/banking/cercaConti"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap12:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="dettaglioConto">
+      <soap12:operation soapAction="http://demobank.example/soap/banking/dettaglioConto"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap12:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="cercaMovimenti">
+      <soap12:operation soapAction="http://demobank.example/soap/banking/cercaMovimenti"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap12:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="inserisciBonifico">
+      <soap12:operation soapAction="http://demobank.example/soap/banking/inserisciBonifico"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap12:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="confermaBonifico">
+      <soap12:operation soapAction="http://demobank.example/soap/banking/confermaBonifico"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap12:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="revocaBonifico">
+      <soap12:operation soapAction="http://demobank.example/soap/banking/revocaBonifico"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+      <wsdl:fault name="ServizioFault"><soap12:fault name="ServizioFault" use="literal"/></wsdl:fault>
+    </wsdl:operation>
+  </wsdl:binding>
+
+  <wsdl:service name="DemoBankService">
+    <wsdl:port name="DemoBankPort" binding="tns:DemoBankSoap11">
+      <soap:address location="https://demobank-dev.example.internal/soap/DemoBank"/>
+    </wsdl:port>
+    <wsdl:port name="DemoBankPort12" binding="tns:DemoBankSoap12">
+      <soap12:address location="https://demobank-dev.example.internal/soap12/DemoBank"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

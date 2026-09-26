@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:cmn="http://demobank.example/soap/common"
+           xmlns:tns="http://demobank.example/soap/banking"
+           targetNamespace="http://demobank.example/soap/banking"
+           elementFormDefault="qualified">
+  <xs:import namespace="http://demobank.example/soap/common" schemaLocation="common.xsd"/>
+
+  <xs:simpleType name="StatoConto">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ATTIVO"/>
+      <xs:enumeration value="BLOCCATO"/>
+      <xs:enumeration value="ESTINTO"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="ContoType">
+    <xs:sequence>
+      <xs:element name="iban" type="cmn:IbanType"/>
+      <xs:element name="intestatario" type="xs:string"/>
+      <xs:element name="codiceFiscale" type="cmn:CodiceFiscaleType"/>
+      <xs:element name="saldo" type="cmn:ImportoType"/>
+      <xs:element name="stato" type="tns:StatoConto"/>
+      <xs:element name="dataApertura" type="xs:date"/>
+      <xs:element name="filiale" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:element name="cercaConti">
+    <xs:annotation><xs:documentation>Lists the customer's current accounts.</xs:documentation></xs:annotation>
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="codiceFiscale" type="cmn:CodiceFiscaleType"/>
+        <xs:element name="stato" type="tns:StatoConto" minOccurs="0"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="cercaContiResponse">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="cmn:RispostaBase">
+          <xs:sequence>
+            <xs:element name="conto" type="tns:ContoType" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="dettaglioConto">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="iban" type="cmn:IbanType"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:element name="dettaglioContoResponse">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="cmn:RispostaBase">
+          <xs:sequence>
+            <xs:element name="conto" type="tns:ContoType" minOccurs="0"/>
+            <xs:element name="fido" type="cmn:ImportoType" minOccurs="0" nillable="true"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

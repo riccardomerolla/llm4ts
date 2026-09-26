@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic RPC/encoded service: out of v1 scope, discovery must refuse it by name. -->
+<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+             xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+             xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+             xmlns:tns="urn:demobank:legacy"
+             targetNamespace="urn:demobank:legacy">
+  <message name="saldoRequest"><part name="conto" type="xsd:string"/></message>
+  <message name="saldoResponse"><part name="saldo" type="xsd:decimal"/></message>
+  <portType name="LegacyPort">
+    <operation name="saldo">
+      <input message="tns:saldoRequest"/>
+      <output message="tns:saldoResponse"/>
+    </operation>
+  </portType>
+  <binding name="LegacyRpcBinding" type="tns:LegacyPort">
+    <soap:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="saldo">
+      <soap:operation soapAction="urn:saldo"/>
+      <input><soap:body use="encoded" namespace="urn:demobank:legacy" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"/></input>
+      <output><soap:body use="encoded" namespace="urn:demobank:legacy" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"/></output>
+    </operation>
+  </binding>
+  <service name="LegacyService">
+    <port name="LegacyPort" binding="tns:LegacyRpcBinding">
+      <soap:address location="http://legacy-dev.example.internal/rpc"/>
+    </port>
+  </service>
+</definitions>

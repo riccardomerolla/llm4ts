@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic demo-bank banking schema: imports common, includes the per-domain parts. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://demobank.example/soap/banking"
+           elementFormDefault="qualified">
+  <xs:import namespace="http://demobank.example/soap/common" schemaLocation="common.xsd"/>
+  <xs:include schemaLocation="conti.xsd"/>
+  <xs:include schemaLocation="movimenti.xsd"/>
+  <xs:include schemaLocation="bonifici.xsd"/>
+</xs:schema>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic SoapUI project for the demo bank. No real data; the stored password is a dummy the importer must ignore. -->
+<con:soapui-project id="demo" name="DemoBank" soapui-version="5.7.2" xmlns:con="http://eviware.com/soapui/config">
+  <con:settings/>
+  <con:interface xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="con:WsdlInterface" name="DemoBankSoap11" bindingName="{http://demobank.example/soap/banking/wsdl}DemoBankSoap11" soapVersion="1_1" definition="https://demobank-dev.example.internal/soap/DemoBank?wsdl">
+    <con:endpoints><con:endpoint>https://demobank-dev.example.internal/soap/DemoBank</con:endpoint></con:endpoints>
+    <con:operation name="cercaConti" action="http://demobank.example/soap/banking/cercaConti">
+      <con:call name="Conti attivi">
+        <con:settings/>
+        <con:encoding>UTF-8</con:encoding>
+        <con:endpoint>https://demobank-dev.example.internal/soap/DemoBank</con:endpoint>
+        <con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ban="http://demobank.example/soap/banking" xmlns:cmn="http://demobank.example/soap/common"><soapenv:Header/><soapenv:Body><ban:cercaConti><ban:codiceFiscale>RSSMRA85T10A562S</ban:codiceFiscale><ban:stato>ATTIVO</ban:stato></ban:cercaConti></soapenv:Body></soapenv:Envelope>]]></con:request>
+        <con:credentials><con:username>svc-demo</con:username><con:password>dummy-password-never-import</con:password><con:authType>Global HTTP Settings</con:authType></con:credentials>
+      </con:call>
+    </con:operation>
+    <con:operation name="dettaglioConto" action="http://demobank.example/soap/banking/dettaglioConto">
+      <con:call name="Request 1"><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ban="http://demobank.example/soap/banking" xmlns:cmn="http://demobank.example/soap/common"><soapenv:Header/><soapenv:Body><ban:dettaglioConto><ban:iban>?</ban:iban></ban:dettaglioConto></soapenv:Body></soapenv:Envelope>]]></con:request></con:call>
+    </con:operation>
+  </con:interface>
+  <con:testSuite name="Regressione">
+    <con:testCase name="Movimenti marzo">
+      <con:testStep type="request" name="Prima pagina">
+        <con:config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="con:RequestStep">
+          <con:interface>DemoBankSoap11</con:interface>
+          <con:operation>cercaMovimenti</con:operation>
+          <con:request name="Prima pagina"><con:request><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ban="http://demobank.example/soap/banking" xmlns:cmn="http://demobank.example/soap/common"><soapenv:Header/><soapenv:Body><ban:cercaMovimenti><ban:iban>IT60X0542811101000000123456</ban:iban><ban:dataDa>2026-03-01</ban:dataDa><ban:dataA>2026-03-31</ban:dataA><ban:paginazione><cmn:numeroPagina>1</cmn:numeroPagina><cmn:dimensionePagina>50</cmn:dimensionePagina></ban:paginazione></ban:cercaMovimenti></soapenv:Body></soapenv:Envelope>]]></con:request></con:request>
+        </con:config>
+      </con:testStep>
+    </con:testCase>
+  </con:testSuite>
+  <con:mockService name="DemoBank mock" port="8088" path="/mock">
+    <con:mockOperation name="cercaConti" interface="DemoBankSoap11" operation="cercaConti">
+      <con:response name="Conto sospeso"><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ban="http://demobank.example/soap/banking" xmlns:cmn="http://demobank.example/soap/common"><soapenv:Header/><soapenv:Body><ban:cercaContiResponse><cmn:esito><cmn:codice>OK00</cmn:codice></cmn:esito><ban:conto><ban:iban>IT60X0542811101000000123456</ban:iban><ban:intestatario>Mario Rossi</ban:intestatario><ban:codiceFiscale>RSSMRA85T10A562S</ban:codiceFiscale><ban:saldo><cmn:valore>98.10</cmn:valore><cmn:divisa>EUR</cmn:divisa></ban:saldo><ban:stato>SOSPESO</ban:stato><ban:dataApertura>2019-04-01</ban:dataApertura><ban:canale>WEB</ban:canale></ban:conto></ban:cercaContiResponse></soapenv:Body></soapenv:Envelope>]]></con:responseContent></con:response>
+    </con:mockOperation>
+    <con:mockOperation name="confermaBonifico" interface="DemoBankSoap11" operation="confermaBonifico">
+      <con:response name="OTP errato"><con:responseContent><![CDATA[<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ban="http://demobank.example/soap/banking" xmlns:cmn="http://demobank.example/soap/common"><soapenv:Header/><soapenv:Body><ban:confermaBonificoResponse><cmn:esito><cmn:codice>KO17</cmn:codice><cmn:descrizione>Codice OTP non valido</cmn:descrizione></cmn:esito></ban:confermaBonificoResponse></soapenv:Body></soapenv:Envelope>]]></con:responseContent></con:response>
+    </con:mockOperation>
+  </con:mockService>
+</con:soapui-project>
