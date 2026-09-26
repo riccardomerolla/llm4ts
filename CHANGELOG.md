@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.13.1
+
+- `soap-ace`: the kit's XSD reading and request validation, fixed after
+  an in-depth review. Each of the 38 bugs has a regression test
+  (`DeepReviewXsd.test.ts`, `DeepReviewInstance.test.ts`).
+  - Invalid requests that were accepted, and would have been sent, are now
+    rejected:
+    - integers outside their type's range, with exact comparisons beyond
+      2^53 and for exponent-form floats and doubles;
+    - impossible dates and times;
+    - malformed durations, `g*` values and base64;
+    - `fixed` values;
+    - facets lost from `simpleContent` restrictions and from inline
+      anonymous bases;
+    - half of an optional sequence;
+    - two branches of a nested choice.
+  - Patterns follow XSD regex syntax (`\-`, `\p{IsBlock}`, class
+    subtraction). A pattern that cannot be translated is reported instead
+    of accepting every value. `\$` is not an XSD escape, so a pattern
+    using it is now reported.
+  - Serialization:
+    - a repeating sequence is written as interleaved groups;
+    - a namespaced attribute, or one under
+      `attributeFormDefault="qualified"`, gets a declared prefix;
+    - `\r` survives as `&#13;`.
+  - Valid requests that were rejected now pass: repeating and emptiable
+    choices, `nillable="1"`, `totalDigits` with a leading zero, `length` on
+    binary types (counted in octets), values with whitespace around them,
+    and a simple-typed root element.
+  - Reading a response reports children out of order and elements inside a
+    simple value.
+  - The catalog:
+    - resolves global attribute refs;
+    - keeps a `complexContent` restriction's base attributes;
+    - models list types;
+    - follows `xs:redefine` and reports each redefinition;
+    - keeps same-named inline types apart.
+  - New catalog keys are optional; a `catalog.json` written by 2.13.0
+    still loads.
+
 ## 2.13.0
 
 - New built-in kit `soap-ace`: SOAP services to REST APIs on IBM ACE 12.

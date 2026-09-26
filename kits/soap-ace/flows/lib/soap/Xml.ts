@@ -501,8 +501,10 @@ export const resolveQName = (element: XmlElement, value: string): XmlName | unde
 // ---------------------------------------------------------------------------
 // Writing
 
+// A carriage return is written as a reference: a literal one would be
+// turned into a line feed by the reader's end-of-line handling.
 export const escapeText = (value: string): string =>
-  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\r/g, "&#13;")
 
 export const escapeAttribute = (value: string): string => escapeText(value).replace(/"/g, "&quot;")
 

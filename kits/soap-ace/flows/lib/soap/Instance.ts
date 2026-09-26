@@ -1,15 +1,21 @@
 import type { Facets } from "./Catalog.ts"
 import {
   ComplexTypeDef,
+  contentModel,
   type ElementDecl,
   type ElementField,
+  emptiable,
   isBuiltin,
   localName,
+  type Particle,
+  particleFields,
+  qname,
   type QName,
   SimpleTypeDef,
   splitClark,
   typeByName,
-  type WsdlCatalog
+  type WsdlCatalog,
+  XsdNamespace
 } from "./Catalog.ts"
 import { kindForName } from "./Masking.ts"
 import { escapeAttribute, escapeText, elements, textOf, type XmlElement } from "./Xml.ts"
@@ -35,110 +41,500 @@ export interface Issue {
 
 interface SimpleView {
   readonly builtin: string
+  /** Facets of every restriction step, most derived first (above a list: of the list). */
   readonly facets: ReadonlyArray<Facets>
   readonly chain: ReadonlyArray<string>
+  /** Set when the type is a list: its item type. */
+  readonly itemType: QName | undefined
+  /** A union: values are strings of unknown shape. */
+  readonly union: boolean
+}
+
+/** Built-in list types and their item types. */
+const builtinLists: Readonly<Record<string, string>> = {
+  NMTOKENS: "NMTOKEN",
+  IDREFS: "IDREF",
+  ENTITIES: "ENTITY"
 }
 
 export const simpleView = (catalog: WsdlCatalog, name: QName): SimpleView => {
   const facets: Array<Facets> = []
   const chain: Array<string> = []
   let current = name
+  let itemType: QName | undefined
+  let union = false
   for (let depth = 0; depth < 16 && !isBuiltin(current); depth++) {
     const type = typeByName(catalog, current)
     if (!(type instanceof SimpleTypeDef)) break
-    facets.push(type.facets)
     chain.push(localName(type.name))
+    if (type.variety === "list") {
+      itemType = type.itemType ?? qname(XsdNamespace, "string")
+      break
+    }
+    if (type.variety === "union") union = true
+    facets.push(type.facets)
     current = type.base
   }
-  return { builtin: isBuiltin(current) ? localName(current) : "string", facets, chain }
+  const builtin = isBuiltin(current) ? localName(current) : "string"
+  const listItem = builtinLists[builtin]
+  if (itemType === undefined && listItem !== undefined) itemType = qname(XsdNamespace, listItem)
+  return { builtin, facets, chain, itemType, union }
 }
 
-const integerTypes = new Set([
-  "int",
-  "integer",
-  "long",
-  "short",
-  "byte",
-  "nonNegativeInteger",
-  "positiveInteger",
-  "nonPositiveInteger",
-  "negativeInteger",
-  "unsignedInt",
-  "unsignedLong",
-  "unsignedShort",
-  "unsignedByte"
-])
-
-const lexical: Readonly<Record<string, RegExp>> = {
-  boolean: /^(true|false|1|0)$/,
-  decimal: /^[+-]?(\d+(\.\d*)?|\.\d+)$/,
-  float: /^([+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?|INF|-INF|NaN)$/,
-  double: /^([+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?|INF|-INF|NaN)$/,
-  date: /^-?\d{4,}-\d{2}-\d{2}(Z|[+-]\d{2}:\d{2})?$/,
-  dateTime: /^-?\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/,
-  time: /^\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/,
-  gYear: /^-?\d{4,}(Z|[+-]\d{2}:\d{2})?$/,
-  base64Binary: /^[A-Za-z0-9+/\s]*=?=?\s*$/,
-  hexBinary: /^([0-9A-Fa-f]{2})*$/
+/** Inclusive bounds of the integer built-ins; `undefined` is unbounded. */
+const integerRanges: Readonly<Record<string, readonly [bigint | undefined, bigint | undefined]>> = {
+  integer: [undefined, undefined],
+  nonNegativeInteger: [0n, undefined],
+  positiveInteger: [1n, undefined],
+  nonPositiveInteger: [undefined, 0n],
+  negativeInteger: [undefined, -1n],
+  long: [-(2n ** 63n), 2n ** 63n - 1n],
+  int: [-(2n ** 31n), 2n ** 31n - 1n],
+  short: [-32768n, 32767n],
+  byte: [-128n, 127n],
+  unsignedLong: [0n, 2n ** 64n - 1n],
+  unsignedInt: [0n, 2n ** 32n - 1n],
+  unsignedShort: [0n, 65535n],
+  unsignedByte: [0n, 255n]
 }
 
-/** XSD patterns are implicitly anchored and mostly JS-compatible. */
-const xsdRegex = (pattern: string): RegExp | undefined => {
-  try {
-    return new RegExp(
-      `^(?:${pattern.replace(/\\i/g, "[A-Za-z_:]").replace(/\\c/g, "[A-Za-z0-9._:-]")})$`,
-      "u"
+const integerTypes = new Set(Object.keys(integerRanges))
+
+const isDecimal = (builtin: string) => builtin === "decimal" || integerTypes.has(builtin)
+const isFloating = (builtin: string) => builtin === "float" || builtin === "double"
+
+/** Built-ins derived from xs:string by whitespace: token and its descendants collapse. */
+const replacing = new Set(["normalizedString"])
+const preserving = new Set(["string", "anySimpleType", "anyType"])
+
+/** The effective whiteSpace facet: the most derived one, else the built-in's. */
+const whiteSpaceOf = (view: SimpleView): "preserve" | "replace" | "collapse" => {
+  for (const facets of view.facets) if (facets.whiteSpace !== undefined) return facets.whiteSpace
+  if (view.itemType !== undefined) return "collapse"
+  if (view.union || preserving.has(view.builtin)) return "preserve"
+  return replacing.has(view.builtin) ? "replace" : "collapse"
+}
+
+const normalizeSpace = (value: string, mode: "preserve" | "replace" | "collapse"): string =>
+  mode === "preserve"
+    ? value
+    : mode === "replace"
+      ? value.replace(/[\t\n\r]/g, " ")
+      : value.replace(/[\t\n\r ]+/g, " ").trim()
+
+const zone = "(Z|[+-]\\d{2}:\\d{2})?"
+
+const validZone = (text: string | undefined): boolean => {
+  if (text === undefined || text === "Z") return true
+  const hours = Number(text.slice(1, 3))
+  const minutes = Number(text.slice(4, 6))
+  return minutes < 60 && (hours < 14 || (hours === 14 && minutes === 0))
+}
+
+const leapYear = (year: string): boolean => {
+  // The leap rule only needs the year modulo 400, which its last four digits give.
+  const last = Number(year.replace(/^-/, "").slice(-4))
+  return last % 4 === 0 && (last % 100 !== 0 || last % 400 === 0)
+}
+
+const daysIn = (year: string, month: number): number =>
+  month === 2 ? (leapYear(year) ? 29 : 28) : [4, 6, 9, 11].includes(month) ? 30 : 31
+
+const validMonth = (month: string) => Number(month) >= 1 && Number(month) <= 12
+
+const validDate = (year: string, month: string, day: string): boolean =>
+  validMonth(month) && Number(day) >= 1 && Number(day) <= daysIn(year, Number(month))
+
+const validTime = (hours: string, minutes: string, seconds: string, fraction: string) =>
+  (Number(hours) < 24 && Number(minutes) < 60 && Number(seconds) < 60) ||
+  (hours === "24" && minutes === "00" && seconds === "00" && /^(\.0+)?$/.test(fraction))
+
+const shapes: Readonly<Record<string, RegExp>> = {
+  date: new RegExp(`^(-?\\d{4,})-(\\d{2})-(\\d{2})${zone}$`),
+  dateTime: new RegExp(
+    `^(-?\\d{4,})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2}):(\\d{2})(\\.\\d+)?${zone}$`
+  ),
+  time: new RegExp(`^(\\d{2}):(\\d{2}):(\\d{2})(\\.\\d+)?${zone}$`),
+  gYearMonth: new RegExp(`^(-?\\d{4,})-(\\d{2})${zone}$`),
+  gYear: new RegExp(`^(-?\\d{4,})${zone}$`),
+  gMonth: new RegExp(`^--(\\d{2})(?:--)?${zone}$`),
+  gDay: new RegExp(`^---(\\d{2})${zone}$`),
+  gMonthDay: new RegExp(`^--(\\d{2})-(\\d{2})${zone}$`)
+}
+
+const lexical: Readonly<Record<string, (value: string) => boolean>> = {
+  boolean: (value) => /^(true|false|1|0)$/.test(value),
+  decimal: (value) => /^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(value),
+  float: (value) => /^([+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?|INF|-INF|NaN)$/.test(value),
+  double: (value) => /^([+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?|INF|-INF|NaN)$/.test(value),
+  duration: (value) =>
+    /^-?P(?=\d|T\d)(\d+Y)?(\d+M)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$/.test(value),
+  date: (value) => {
+    const match = shapes.date?.exec(value)
+    return (
+      match != null &&
+      validDate(match[1] ?? "", match[2] ?? "", match[3] ?? "") &&
+      validZone(match[4])
     )
+  },
+  dateTime: (value) => {
+    const match = shapes.dateTime?.exec(value)
+    return (
+      match != null &&
+      validDate(match[1] ?? "", match[2] ?? "", match[3] ?? "") &&
+      validTime(match[4] ?? "", match[5] ?? "", match[6] ?? "", match[7] ?? "") &&
+      validZone(match[8])
+    )
+  },
+  time: (value) => {
+    const match = shapes.time?.exec(value)
+    return (
+      match != null &&
+      validTime(match[1] ?? "", match[2] ?? "", match[3] ?? "", match[4] ?? "") &&
+      validZone(match[5])
+    )
+  },
+  gYearMonth: (value) => {
+    const match = shapes.gYearMonth?.exec(value)
+    return match != null && validMonth(match[2] ?? "") && validZone(match[3])
+  },
+  gYear: (value) => {
+    const match = shapes.gYear?.exec(value)
+    return match != null && validZone(match[2])
+  },
+  gMonth: (value) => {
+    const match = shapes.gMonth?.exec(value)
+    return match != null && validMonth(match[1] ?? "") && validZone(match[2])
+  },
+  gDay: (value) => {
+    const match = shapes.gDay?.exec(value)
+    return match != null && Number(match[1]) >= 1 && Number(match[1]) <= 31 && validZone(match[2])
+  },
+  gMonthDay: (value) => {
+    const match = shapes.gMonthDay?.exec(value)
+    return (
+      match != null &&
+      validMonth(match[1] ?? "") &&
+      Number(match[2]) >= 1 &&
+      // A leap year: --02-29 is a valid month-day.
+      Number(match[2]) <= daysIn("2000", Number(match[1])) &&
+      validZone(match[3])
+    )
+  },
+  // Whole quanta of four characters, padding only at the end.
+  base64Binary: (value) =>
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
+      value.replace(/[\t\n\r ]/g, "")
+    ),
+  hexBinary: (value) => /^([0-9A-Fa-f]{2})*$/.test(value)
+}
+
+// XSD regular expressions: implicitly anchored, no anchors of their own,
+// `.` excludes only line ends, \d \w \s \i \c and \p{Is<Block>} mean more
+// (or less) than in JavaScript, and classes can be subtracted. Translated
+// token by token; anything without a faithful translation is refused.
+
+const unicodeBlocks: Readonly<Record<string, string>> = {
+  BasicLatin: "\\u{0}-\\u{7F}",
+  "Latin-1Supplement": "\\u{80}-\\u{FF}",
+  "LatinExtended-A": "\\u{100}-\\u{17F}",
+  "LatinExtended-B": "\\u{180}-\\u{24F}",
+  IPAExtensions: "\\u{250}-\\u{2AF}",
+  SpacingModifierLetters: "\\u{2B0}-\\u{2FF}",
+  CombiningDiacriticalMarks: "\\u{300}-\\u{36F}",
+  Greek: "\\u{370}-\\u{3FF}",
+  GreekandCoptic: "\\u{370}-\\u{3FF}",
+  Cyrillic: "\\u{400}-\\u{4FF}",
+  Armenian: "\\u{530}-\\u{58F}",
+  Hebrew: "\\u{590}-\\u{5FF}",
+  Arabic: "\\u{600}-\\u{6FF}",
+  Devanagari: "\\u{900}-\\u{97F}",
+  Thai: "\\u{E00}-\\u{E7F}",
+  LatinExtendedAdditional: "\\u{1E00}-\\u{1EFF}",
+  GreekExtended: "\\u{1F00}-\\u{1FFF}",
+  GeneralPunctuation: "\\u{2000}-\\u{206F}",
+  SuperscriptsandSubscripts: "\\u{2070}-\\u{209F}",
+  CurrencySymbols: "\\u{20A0}-\\u{20CF}",
+  LetterlikeSymbols: "\\u{2100}-\\u{214F}",
+  NumberForms: "\\u{2150}-\\u{218F}",
+  Arrows: "\\u{2190}-\\u{21FF}",
+  MathematicalOperators: "\\u{2200}-\\u{22FF}",
+  BoxDrawing: "\\u{2500}-\\u{257F}",
+  CJKSymbolsandPunctuation: "\\u{3000}-\\u{303F}",
+  Hiragana: "\\u{3040}-\\u{309F}",
+  Katakana: "\\u{30A0}-\\u{30FF}",
+  CJKUnifiedIdeographs: "\\u{4E00}-\\u{9FFF}",
+  HangulSyllables: "\\u{AC00}-\\u{D7AF}",
+  PrivateUse: "\\u{E000}-\\u{F8FF}",
+  AlphabeticPresentationForms: "\\u{FB00}-\\u{FB4F}",
+  HalfwidthandFullwidthForms: "\\u{FF00}-\\u{FFEF}",
+  Specials: "\\u{FFF0}-\\u{FFFF}"
+}
+
+/** An escape as JavaScript source: inside a class (when expressible) and as an atom. */
+interface Escape {
+  readonly inside: string | undefined
+  readonly atom: string
+}
+
+const set = (members: string): Escape => ({ inside: members, atom: `[${members}]` })
+const complement = (members: string): Escape => ({ inside: undefined, atom: `[^${members}]` })
+
+const classEscapes: Readonly<Record<string, Escape>> = {
+  d: { inside: "\\p{Nd}", atom: "\\p{Nd}" },
+  D: { inside: "\\P{Nd}", atom: "\\P{Nd}" },
+  s: set(" \\t\\n\\r"),
+  S: complement(" \\t\\n\\r"),
+  w: set("\\p{L}\\p{M}\\p{N}\\p{S}"),
+  W: set("\\p{P}\\p{Z}\\p{C}"),
+  i: set("\\p{L}_:"),
+  I: complement("\\p{L}_:"),
+  c: set("\\p{L}\\p{M}\\p{N}._:\\-"),
+  C: complement("\\p{L}\\p{M}\\p{N}._:\\-")
+}
+
+const categories = /^(L[ultmo]?|M[nce]?|N[dlo]?|P[cdseifo]?|Z[slp]?|S[mcko]?|C[cfons]?)$/
+
+/** Translate an XSD pattern to an anchored JavaScript source; undefined when impossible. */
+export const translatePattern = (pattern: string): string | undefined => {
+  let index = 0
+  const escape = (): Escape | undefined => {
+    const char = pattern[index + 1]
+    index += 2
+    if (char === undefined) return undefined
+    if (char === "n") return { inside: "\\n", atom: "\\n" }
+    if (char === "r") return { inside: "\\r", atom: "\\r" }
+    if (char === "t") return { inside: "\\t", atom: "\\t" }
+    if (char === "-") return { inside: "\\-", atom: "-" }
+    if ("\\|.?*+(){}[]^".includes(char)) return { inside: `\\${char}`, atom: `\\${char}` }
+    const known = classEscapes[char]
+    if (known !== undefined) return known
+    if (char !== "p" && char !== "P") return undefined
+    const close = pattern.indexOf("}", index)
+    if (pattern[index] !== "{" || close < 0) return undefined
+    const property = pattern.slice(index + 1, close)
+    index = close + 1
+    if (property.startsWith("Is")) {
+      const block = unicodeBlocks[property.slice(2)]
+      if (block === undefined) return undefined
+      return char === "p" ? set(block) : complement(block)
+    }
+    if (!categories.test(property)) return undefined
+    const atom = `\\${char}{${property}}`
+    return { inside: atom, atom }
+  }
+  // A class body after its `[`, through its `]`; subtraction as a lookahead.
+  const characterClass = (): string | undefined => {
+    const negated = pattern[index] === "^"
+    if (negated) index++
+    let members = ""
+    let subtracted: string | undefined
+    for (;;) {
+      const char = pattern[index]
+      if (char === undefined) return undefined
+      if (char === "]") {
+        index++
+        break
+      }
+      if (char === "-" && pattern[index + 1] === "[") {
+        index += 2
+        subtracted = characterClass()
+        if (subtracted === undefined || pattern[index] !== "]") return undefined
+        index++
+        break
+      }
+      if (char === "\\") {
+        const escaped = escape()
+        if (escaped?.inside === undefined) return undefined
+        members += escaped.inside
+      } else if (char === "[") {
+        return undefined
+      } else {
+        members += char
+        index++
+      }
+    }
+    if (members === "") return undefined
+    const base = `[${negated ? "^" : ""}${members}]`
+    return subtracted === undefined ? base : `(?:(?!${subtracted})${base})`
+  }
+  let source = ""
+  while (index < pattern.length) {
+    const char = pattern[index] ?? ""
+    if (char === "\\") {
+      const escaped = escape()
+      if (escaped === undefined) return undefined
+      source += escaped.atom
+    } else if (char === "[") {
+      index++
+      const translated = characterClass()
+      if (translated === undefined) return undefined
+      source += translated
+    } else if (char === ".") {
+      source += "[^\\n\\r]"
+      index++
+    } else if (char === "^" || char === "$") {
+      source += `\\${char}`
+      index++
+    } else {
+      source += char
+      index++
+    }
+  }
+  return `^(?:${source})$`
+}
+
+const xsdRegex = (pattern: string): RegExp | undefined => {
+  const source = translatePattern(pattern)
+  if (source === undefined) return undefined
+  try {
+    return new RegExp(source, "u")
   } catch {
     return undefined
   }
 }
 
-const digitsOf = (value: string) => {
-  const unsigned = value.replace(/^[+-]/, "")
-  const [whole = "", fraction = ""] = unsigned.split(".")
-  const trimmedFraction = fraction.replace(/0+$/, "")
+interface DecimalParts {
+  readonly negative: boolean
+  readonly whole: string
+  readonly fraction: string
+}
+
+const decimalParts = (value: string): DecimalParts | undefined => {
+  const match = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(value)
+  if (match === null || (match[2] === "" && (match[3] ?? "") === "")) return undefined
   return {
-    total: whole.replace(/^0+(?=\d)/, "").length + trimmedFraction.length,
-    fraction: trimmedFraction.length
+    negative: match[1] === "-",
+    whole: (match[2] ?? "").replace(/^0+/, ""),
+    fraction: (match[3] ?? "").replace(/0+$/, "")
   }
+}
+
+/** Exact comparison of two decimal literals: -1, 0, 1, or undefined when either is not one. */
+const compareDecimal = (left: string, right: string): number | undefined => {
+  const a = decimalParts(left)
+  const b = decimalParts(right)
+  if (a === undefined || b === undefined) return undefined
+  const scale = Math.max(a.fraction.length, b.fraction.length)
+  const scaled = (parts: DecimalParts) => {
+    const magnitude = BigInt(`${parts.whole}${parts.fraction.padEnd(scale, "0")}` || "0")
+    return parts.negative ? -magnitude : magnitude
+  }
+  const x = scaled(a)
+  const y = scaled(b)
+  return x < y ? -1 : x > y ? 1 : 0
+}
+
+const floating = (value: string): number =>
+  value === "INF" ? Infinity : value === "-INF" ? -Infinity : Number(value)
+
+/** Order two values of a numeric built-in; undefined when not comparable. */
+const compareValues = (builtin: string, left: string, right: string): number | undefined => {
+  if (isDecimal(builtin)) return compareDecimal(left, right)
+  if (isFloating(builtin)) {
+    const x = floating(left)
+    const y = floating(right)
+    if (Number.isNaN(x) || Number.isNaN(y)) return undefined
+    return x < y ? -1 : x > y ? 1 : 0
+  }
+  return undefined
+}
+
+/** Equality in the value space of the built-in (`1.0` is `1.00` as a decimal). */
+const sameValue = (builtin: string, left: string, right: string): boolean => {
+  if (isDecimal(builtin) || isFloating(builtin)) {
+    const order = compareValues(builtin, left, right)
+    if (order !== undefined) return order === 0
+    return isFloating(builtin) && left === "NaN" && right === "NaN"
+  }
+  if (builtin === "boolean") {
+    const truth = (value: string) => (value === "1" ? "true" : value === "0" ? "false" : value)
+    return truth(left) === truth(right)
+  }
+  return left === right
+}
+
+/** Length in the facet's unit: octets for binaries, code points otherwise. */
+const lengthOf = (builtin: string, value: string): number => {
+  if (builtin === "hexBinary") return Math.floor(value.length / 2)
+  if (builtin === "base64Binary") {
+    const compact = value.replace(/[\t\n\r ]/g, "")
+    return Math.floor(compact.length / 4) * 3 - (compact.match(/=+$/)?.[0].length ?? 0)
+  }
+  return [...value].length
+}
+
+const digitsOf = (value: string) => {
+  const parts = decimalParts(value)
+  const whole = parts?.whole ?? ""
+  const fraction = parts?.fraction ?? ""
+  return { total: whole.length + fraction.length, fraction: fraction.length }
 }
 
 export const checkSimple = (
   catalog: WsdlCatalog,
   type: QName,
-  value: string
+  raw: string
 ): ReadonlyArray<string> => {
   const view = simpleView(catalog, type)
+  // Every check sees the value after its whiteSpace facet normalizes it.
+  const value = normalizeSpace(raw, whiteSpaceOf(view))
   const problems: Array<string> = []
   const builtin = view.builtin
-  if (integerTypes.has(builtin)) {
+  const items = view.itemType === undefined ? undefined : value === "" ? [] : value.split(" ")
+  if (items !== undefined) {
+    for (const item of items) {
+      for (const problem of checkSimple(catalog, view.itemType ?? type, item)) {
+        problems.push(`item ${problem}`)
+      }
+    }
+  } else if (view.union) {
+    // Member types are not modelled; any string is accepted.
+  } else if (integerTypes.has(builtin)) {
+    const [low, high] = integerRanges[builtin] ?? [undefined, undefined]
     if (!/^[+-]?\d+$/.test(value)) problems.push(`"${value}" is not an ${builtin}`)
+    else {
+      const number = BigInt(value.replace(/^\+/, ""))
+      if ((low !== undefined && number < low) || (high !== undefined && number > high)) {
+        problems.push(`${value} is out of the ${builtin} range`)
+      }
+    }
   } else {
     const shape = lexical[builtin]
-    if (shape !== undefined && !shape.test(value)) problems.push(`"${value}" is not a ${builtin}`)
+    if (shape !== undefined && !shape(value)) problems.push(`"${value}" is not a ${builtin}`)
   }
-  const numeric = integerTypes.has(builtin) || ["decimal", "float", "double"].includes(builtin)
+  const lexicallyValid = problems.length === 0
   for (const facets of view.facets) {
-    if (facets.enumeration !== undefined && !facets.enumeration.includes(value)) {
+    if (
+      facets.enumeration !== undefined &&
+      !facets.enumeration.some((option) =>
+        sameValue(builtin, normalizeSpace(option, whiteSpaceOf(view)), value)
+      )
+    ) {
       problems.push(`"${value}" is not one of ${facets.enumeration.join(", ")}`)
     }
     if (facets.pattern !== undefined && facets.pattern.length > 0) {
-      const matches = facets.pattern.some((pattern) => xsdRegex(pattern)?.test(value) ?? true)
-      if (!matches) problems.push(`"${value}" does not match ${facets.pattern.join(" | ")}`)
+      const regexes = facets.pattern.map(xsdRegex)
+      const untranslatable = facets.pattern.filter((_, position) => regexes[position] === undefined)
+      if (untranslatable.length > 0) {
+        problems.push(`pattern ${untranslatable.join(" | ")} cannot be checked`)
+      } else if (!regexes.some((regex) => regex?.test(value) ?? false)) {
+        problems.push(`"${value}" does not match ${facets.pattern.join(" | ")}`)
+      }
     }
-    const length = [...value].length
+    const length = items === undefined ? lengthOf(builtin, value) : items.length
+    const unit = items === undefined ? "length" : "items"
     if (facets.length !== undefined && length !== facets.length) {
-      problems.push(`length ${length}, expected ${facets.length}`)
+      problems.push(`${unit} ${length}, expected ${facets.length}`)
     }
     if (facets.minLength !== undefined && length < facets.minLength) {
-      problems.push(`length ${length} below ${facets.minLength}`)
+      problems.push(`${unit} ${length} below ${facets.minLength}`)
     }
     if (facets.maxLength !== undefined && length > facets.maxLength) {
-      problems.push(`length ${length} above ${facets.maxLength}`)
+      problems.push(`${unit} ${length} above ${facets.maxLength}`)
     }
-    if (numeric && /^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(value)) {
-      const number = Number(value)
+    if (items !== undefined || !lexicallyValid) continue
+    if (isDecimal(builtin)) {
       const digits = digitsOf(value)
       if (facets.totalDigits !== undefined && digits.total > facets.totalDigits) {
         problems.push(`${digits.total} digits, at most ${facets.totalDigits}`)
@@ -146,21 +542,44 @@ export const checkSimple = (
       if (facets.fractionDigits !== undefined && digits.fraction > facets.fractionDigits) {
         problems.push(`${digits.fraction} fraction digits, at most ${facets.fractionDigits}`)
       }
-      if (facets.minInclusive !== undefined && number < Number(facets.minInclusive)) {
-        problems.push(`${value} below ${facets.minInclusive}`)
-      }
-      if (facets.maxInclusive !== undefined && number > Number(facets.maxInclusive)) {
-        problems.push(`${value} above ${facets.maxInclusive}`)
-      }
-      if (facets.minExclusive !== undefined && number <= Number(facets.minExclusive)) {
-        problems.push(`${value} not above ${facets.minExclusive}`)
-      }
-      if (facets.maxExclusive !== undefined && number >= Number(facets.maxExclusive)) {
-        problems.push(`${value} not below ${facets.maxExclusive}`)
-      }
+    }
+    const compare = (bound: string | undefined) =>
+      bound === undefined ? undefined : compareValues(builtin, value, bound.trim())
+    const minInclusive = compare(facets.minInclusive)
+    const maxInclusive = compare(facets.maxInclusive)
+    const minExclusive = compare(facets.minExclusive)
+    const maxExclusive = compare(facets.maxExclusive)
+    if (minInclusive !== undefined && minInclusive < 0) {
+      problems.push(`${value} below ${facets.minInclusive}`)
+    }
+    if (maxInclusive !== undefined && maxInclusive > 0) {
+      problems.push(`${value} above ${facets.maxInclusive}`)
+    }
+    if (minExclusive !== undefined && minExclusive <= 0) {
+      problems.push(`${value} not above ${facets.minExclusive}`)
+    }
+    if (maxExclusive !== undefined && maxExclusive >= 0) {
+      problems.push(`${value} not below ${facets.maxExclusive}`)
     }
   }
   return problems
+}
+
+/** A `fixed=` value: the only one allowed (an empty element takes it). */
+const checkFixed = (
+  catalog: WsdlCatalog,
+  type: QName,
+  raw: string,
+  fixed: string,
+  emptyTakesFixed: boolean
+): ReadonlyArray<string> => {
+  const view = simpleView(catalog, type)
+  const mode = whiteSpaceOf(view)
+  const value = normalizeSpace(raw, mode)
+  if (emptyTakesFixed && raw === "") return []
+  return sameValue(view.builtin, value, normalizeSpace(fixed, mode))
+    ? []
+    : [`"${value}" is fixed to "${fixed}"`]
 }
 
 // ---------------------------------------------------------------------------
@@ -261,16 +680,22 @@ const builtinExamples: Readonly<Record<string, string>> = {
   dateTime: "2026-01-15T10:00:00Z",
   time: "10:00:00",
   gYear: "2026",
+  gYearMonth: "2026-01",
+  gMonth: "--01",
+  gDay: "---15",
+  gMonthDay: "--01-15",
+  duration: "P1D",
   base64Binary: "",
   hexBinary: ""
 }
 
-/** An example value for a field: a seed, then field meaning, then facets, then the builtin. */
+/** An example value for a field: its fixed value, a seed, field meaning, facets, the builtin. */
 export const exampleValue = (
   catalog: WsdlCatalog,
-  field: { readonly name: string; readonly type: QName },
+  field: { readonly name: string; readonly type: QName; readonly fixed?: string },
   seeds: ReadonlyMap<string, string> = new Map()
 ): string => {
+  if (field.fixed !== undefined) return field.fixed
   const seeded = seeds.get(field.name)
   if (seeded !== undefined) return seeded
   const view = simpleView(catalog, field.type)
@@ -383,14 +808,19 @@ export const skeletonYaml = (
     }
     // The first alternative of each choice is written out; the others (whole
     // branches, not single fields) are commented as `or`.
-    const firstBranch = new Map<number, number | undefined>()
-    for (const field of type.fields) {
-      if (field.choice !== undefined && !firstBranch.has(field.choice))
-        firstBranch.set(field.choice, field.branch)
+    const alternatives = new Set<ElementField>()
+    const markAlternatives = (particle: Particle): void => {
+      if (particle.kind === "element") return
+      particle.children.forEach((child, position) => {
+        if (particle.kind === "choice" && position > 0) {
+          for (const field of particleFields(child)) alternatives.add(field)
+        }
+        markAlternatives(child)
+      })
     }
+    markAlternatives(contentModel(type))
     for (const field of type.fields) {
-      const alternative =
-        field.choice !== undefined && firstBranch.get(field.choice) !== field.branch
+      const alternative = alternatives.has(field)
       const optional = field.minOccurs === 0 && options.includeOptional !== true
       const comment = commented || optional || alternative
       fieldLines(field, depth, level, comment, alternative)
@@ -465,17 +895,173 @@ export const skeletonYaml = (
 }
 
 // ---------------------------------------------------------------------------
-// Validation of values
+// Content models over value maps
 
 const join = (path: string, segment: string): string =>
   path === "" ? segment : `${path}.${segment}`
+
+const unbounded = (occurs: number | "unbounded"): number =>
+  occurs === "unbounded" ? Infinity : occurs
+
+/** How many elements a value map holds for a field. */
+const countIn = (value: YamlMap, name: string): number => {
+  const item = value[name]
+  return item === undefined ? 0 : isYamlList(item) ? item.length : 1
+}
+
+const labelOf = (particle: Particle, nested = false): string => {
+  if (particle.kind === "element") return particle.field.name
+  const parts = particle.children.map((child) => labelOf(child, true))
+  if (particle.kind !== "choice") return parts.join(" + ")
+  return nested ? `(${parts.join(" | ")})` : parts.join(" | ")
+}
+
+/**
+ * Whether the element counts of a value map can come from `particle`
+ * occurring `times` times. A value map keeps no order, so this is the
+ * question XSD asks of it: a repeating sequence needs balanced counts, a
+ * repeating choice any mix of its alternatives. A term is tried up to as
+ * many repetitions as there are elements (a minimal repetition is never
+ * empty; beyond it an emptiable term stays satisfiable).
+ */
+const fitsCounts = (value: YamlMap, particle: Particle, times: number): boolean => {
+  const memo = new Map<Particle, Map<number, boolean>>()
+  const sizes = new Map<Particle, number>()
+  const sizeOf = (node: Particle): number => {
+    const known = sizes.get(node)
+    if (known !== undefined) return known
+    const size = particleFields(node).reduce((sum, field) => sum + countIn(value, field.name), 0)
+    sizes.set(node, size)
+    return size
+  }
+  const term = (node: Particle, repetitions: number): boolean => {
+    if (node.kind === "element") return countIn(value, node.field.name) === repetitions
+    if (node.kind !== "choice") return node.children.every((child) => occurs(child, repetitions))
+    // Split the repetitions among the alternatives.
+    let reachable = new Set([0])
+    for (const child of node.children) {
+      const next = new Set<number>()
+      for (const done of reachable) {
+        for (let share = 0; done + share <= repetitions; share++) {
+          if (occurs(child, share)) next.add(done + share)
+        }
+      }
+      reachable = next
+    }
+    return reachable.has(repetitions)
+  }
+  const occurs = (node: Particle, count: number): boolean => {
+    const cached = memo.get(node)?.get(count)
+    if (cached !== undefined) return cached
+    const from = count * node.min
+    const to = count === 0 ? 0 : Math.min(count * unbounded(node.max), Math.max(from, sizeOf(node)))
+    let result = false
+    for (let repetitions = from; repetitions <= to && !result; repetitions++) {
+      result = term(node, repetitions)
+    }
+    memo.set(node, (memo.get(node) ?? new Map<number, boolean>()).set(count, result))
+    return result
+  }
+  return occurs(particle, times)
+}
+
+/**
+ * Check a value map against a complex type's content model: required
+ * fields and choices, all-or-nothing optional groups, balanced repeating
+ * groups, and each field's number of occurrences. Values are not descended.
+ */
+const checkContent = (type: ComplexTypeDef, value: YamlMap, path: string): Array<Issue> => {
+  const issues: Array<Issue> = []
+  const where = path === "" ? "(root)" : path
+  const present = (particle: Particle) =>
+    particleFields(particle).some((field) => countIn(value, field.name) > 0)
+  const counts = (particle: Particle) =>
+    [...new Set(particleFields(particle).map((field) => field.name))]
+      .map((name) => `${name} ${countIn(value, name)}`)
+      .join(", ")
+  // `repeating`: inside a group that repeats, where different occurrences
+  // may take different alternatives of a choice.
+  const walk = (particle: Particle, repeating: boolean): void => {
+    if (particle.kind === "element") {
+      const field = particle.field
+      const count = countIn(value, field.name)
+      if (count === 0 && particle.min > 0) {
+        issues.push({ path: join(path, field.name), detail: "required field is missing" })
+      } else if (
+        !repeating &&
+        count > 0 &&
+        count < particle.min &&
+        field.minOccurs < particle.min
+      ) {
+        issues.push({
+          path: join(path, field.name),
+          detail: `at least ${particle.min} occurrences`
+        })
+      }
+      return
+    }
+    const here = present(particle)
+    if (!here && (particle.min === 0 || emptiable(particle))) return
+    if (!here && particle.kind === "choice") {
+      issues.push({
+        path: where,
+        detail: `one of ${particle.children.map((child) => labelOf(child, true)).join(", ")} is required`
+      })
+      return
+    }
+    const repeats = unbounded(particle.max) > 1
+    const before = issues.length
+    if (particle.kind === "choice" && !(repeating || repeats)) {
+      const taken = particle.children.filter(present)
+      if (taken.length > 1) {
+        issues.push({
+          path: where,
+          detail: `choose one of ${taken.map((child) => labelOf(child, true)).join(", ")}`
+        })
+        return
+      }
+      for (const child of taken) walk(child, false)
+    } else if (particle.kind === "choice") {
+      for (const child of particle.children.filter(present)) walk(child, true)
+    } else {
+      for (const child of particle.children) walk(child, repeating || repeats)
+    }
+    if (repeats && here && issues.length === before && !fitsCounts(value, particle, 1)) {
+      issues.push({
+        path: where,
+        detail: `${labelOf(particle)} repeat${particle.kind === "choice" ? "s" : " together"} as a group; counts ${counts(particle)} do not fit`
+      })
+    }
+  }
+  walk(contentModel(type), false)
+  for (const field of type.fields) {
+    const item = value[field.name]
+    if (item === undefined) continue
+    const fieldPath = join(path, field.name)
+    const count = isYamlList(item) ? item.length : 1
+    const repeated = field.maxOccurs === "unbounded" || field.maxOccurs > 1
+    if (isYamlList(item) && !repeated) {
+      issues.push({ path: fieldPath, detail: "occurs at most once; write a single value" })
+    }
+    if (count < field.minOccurs)
+      issues.push({ path: fieldPath, detail: `at least ${field.minOccurs} occurrences` })
+    if (field.maxOccurs !== "unbounded" && count > field.maxOccurs) {
+      issues.push({ path: fieldPath, detail: `at most ${field.maxOccurs} occurrences` })
+    }
+  }
+  return issues
+}
+
+// ---------------------------------------------------------------------------
+// Validation of values
 
 const validateComplex = (
   catalog: WsdlCatalog,
   type: ComplexTypeDef,
   value: YamlMap,
   path: string,
-  issues: Array<Issue>
+  issues: Array<Issue>,
+  fixed: string | undefined
 ): void => {
   const known = new Set([
     ...type.fields.map((field) => field.name),
@@ -491,87 +1077,38 @@ const validateComplex = (
   }
   for (const attribute of type.attributes) {
     const item = value[`@${attribute.name}`]
+    const attributePath = join(path, `@${attribute.name}`)
     if (item === undefined || item === null) {
       if (attribute.required)
-        issues.push({
-          path: join(path, `@${attribute.name}`),
-          detail: "required attribute is missing"
-        })
+        issues.push({ path: attributePath, detail: "required attribute is missing" })
     } else if (typeof item !== "string") {
-      issues.push({
-        path: join(path, `@${attribute.name}`),
-        detail: "an attribute holds a single value"
-      })
+      issues.push({ path: attributePath, detail: "an attribute holds a single value" })
     } else {
-      for (const problem of checkSimple(catalog, attribute.type, item)) {
-        issues.push({ path: join(path, `@${attribute.name}`), detail: problem })
-      }
+      const problems = [
+        ...checkSimple(catalog, attribute.type, item),
+        ...(attribute.fixed === undefined
+          ? []
+          : checkFixed(catalog, attribute.type, item, attribute.fixed, false))
+      ]
+      for (const problem of problems) issues.push({ path: attributePath, detail: problem })
     }
   }
   if (type.textType !== undefined) {
     const text = value["#text"]
     if (typeof text === "string") {
-      for (const problem of checkSimple(catalog, type.textType, text))
-        issues.push({ path: join(path, "#text"), detail: problem })
+      const problems = [
+        ...checkSimple(catalog, type.textType, text),
+        ...(fixed === undefined ? [] : checkFixed(catalog, type.textType, text, fixed, true))
+      ]
+      for (const problem of problems) issues.push({ path: join(path, "#text"), detail: problem })
     }
   }
-  // Choices: at most one alternative (branch) present; inside the chosen
-  // one its required fields are required; a required choice needs one.
-  const branches = new Map<number, Map<number | undefined, Array<string>>>()
-  for (const field of type.fields) {
-    if (field.choice === undefined) continue
-    const byBranch = branches.get(field.choice) ?? new Map<number | undefined, Array<string>>()
-    byBranch.set(field.branch, [...(byBranch.get(field.branch) ?? []), field.name])
-    branches.set(field.choice, byBranch)
-  }
-  const taken = new Map<number, Set<number | undefined>>()
-  for (const field of type.fields) {
-    if (field.choice !== undefined && value[field.name] !== undefined) {
-      taken.set(field.choice, new Set([...(taken.get(field.choice) ?? []), field.branch]))
-    }
-  }
-  const where = path === "" ? "(root)" : path
-  const label = (choice: number, branch: number | undefined) =>
-    (branches.get(choice)?.get(branch) ?? []).join(" + ")
-  for (const [choice, present] of taken) {
-    if (present.size > 1) {
-      issues.push({
-        path: where,
-        detail: `choose one of ${[...present].map((branch) => label(choice, branch)).join(", ")}`
-      })
-    }
-  }
-  for (const [choice, byBranch] of branches) {
-    if ((taken.get(choice)?.size ?? 0) > 0) continue
-    const required = type.fields.some((field) => field.choice === choice && field.minOccurs > 0)
-    if (required) {
-      issues.push({
-        path: where,
-        detail: `one of ${[...byBranch.keys()].map((branch) => label(choice, branch)).join(", ")} is required`
-      })
-    }
-  }
+  issues.push(...checkContent(type, value, path))
   for (const field of type.fields) {
     const item = value[field.name]
+    if (item === undefined) continue
     const fieldPath = join(path, field.name)
-    if (item === undefined) {
-      const inTakenBranch =
-        field.choice !== undefined && (taken.get(field.choice)?.has(field.branch) ?? false)
-      if (field.minOccurs > 0 && (field.choice === undefined || inTakenBranch)) {
-        issues.push({ path: fieldPath, detail: "required field is missing" })
-      }
-      continue
-    }
     const items = isYamlList(item) ? item : [item]
-    const repeated = field.maxOccurs === "unbounded" || field.maxOccurs > 1
-    if (isYamlList(item) && !repeated) {
-      issues.push({ path: fieldPath, detail: "occurs at most once; write a single value" })
-    }
-    if (items.length < field.minOccurs)
-      issues.push({ path: fieldPath, detail: `at least ${field.minOccurs} occurrences` })
-    if (field.maxOccurs !== "unbounded" && items.length > field.maxOccurs) {
-      issues.push({ path: fieldPath, detail: `at most ${field.maxOccurs} occurrences` })
-    }
     items.forEach((entry, position) => {
       validateValue(
         catalog,
@@ -579,7 +1116,8 @@ const validateComplex = (
         field.nillable,
         entry,
         isYamlList(item) ? `${fieldPath}[${position}]` : fieldPath,
-        issues
+        issues,
+        field.fixed
       )
     })
   }
@@ -591,7 +1129,8 @@ const validateValue = (
   nillable: boolean,
   value: YamlValue,
   path: string,
-  issues: Array<Issue>
+  issues: Array<Issue>,
+  fixed: string | undefined
 ): void => {
   if (value === null) {
     if (!nillable)
@@ -601,20 +1140,32 @@ const validateValue = (
   const type = typeByName(catalog, typeName)
   if (type instanceof ComplexTypeDef) {
     if (typeof value === "string" && type.textType !== undefined) {
-      validateComplex(catalog, type, { "#text": value }, path, issues)
+      validateComplex(catalog, type, { "#text": value }, path, issues, fixed)
     } else if (!isYamlMap(value)) {
       issues.push({ path, detail: `expects fields of ${localName(type.name).replace(/^~/, "")}` })
     } else {
-      validateComplex(catalog, type, value, path, issues)
+      validateComplex(catalog, type, value, path, issues, fixed)
     }
     return
   }
-  if (typeof value !== "string") {
+  // A simple value may also be written as `"#text": value` (a simple-typed root).
+  let text: YamlValue = value
+  if (isYamlMap(value) && typeof value["#text"] === "string") {
+    for (const key of Object.keys(value)) {
+      if (key !== "#text")
+        issues.push({ path: join(path, key), detail: "not a field of a simple value" })
+    }
+    text = value["#text"]
+  }
+  if (typeof text !== "string") {
     issues.push({ path, detail: "expects a single value" })
     return
   }
-  for (const problem of checkSimple(catalog, typeName, value))
-    issues.push({ path, detail: problem })
+  const problems = [
+    ...checkSimple(catalog, typeName, text),
+    ...(fixed === undefined ? [] : checkFixed(catalog, typeName, text, fixed, true))
+  ]
+  for (const problem of problems) issues.push({ path, detail: problem })
 }
 
 /** Validate a value tree against a global element's type. */
@@ -624,12 +1175,54 @@ export const validateInstance = (
   value: YamlValue
 ): ReadonlyArray<Issue> => {
   const issues: Array<Issue> = []
-  validateValue(catalog, element.type, element.nillable, value, "", issues)
+  validateValue(catalog, element.type, element.nillable, value, "", issues, element.fixed)
   return issues.map((issue) => (issue.path === "" ? { ...issue, path: "(root)" } : issue))
 }
 
 // ---------------------------------------------------------------------------
 // Value → XML
+
+/**
+ * The children of a value map in wire order: the content model is walked
+ * and each occurrence takes the next entries, so a repeating sequence is
+ * written as interleaved groups and a repeating choice as its alternatives.
+ * Entries the model leaves over (an invalid value) follow in field order.
+ */
+const wireOrder = (
+  type: ComplexTypeDef,
+  value: YamlMap
+): ReadonlyArray<{ readonly field: ElementField; readonly entry: YamlValue }> => {
+  const queues = new Map<string, Array<YamlValue>>()
+  for (const field of type.fields) {
+    const item = value[field.name]
+    if (item !== undefined && !queues.has(field.name)) {
+      queues.set(field.name, isYamlList(item) ? [...item] : [item])
+    }
+  }
+  const out: Array<{ readonly field: ElementField; readonly entry: YamlValue }> = []
+  const remaining = (particle: Particle) =>
+    particleFields(particle).some((field) => (queues.get(field.name)?.length ?? 0) > 0)
+  const take = (field: ElementField): void => {
+    const queue = queues.get(field.name)
+    if (queue !== undefined && queue.length > 0) out.push({ field, entry: queue.shift() ?? null })
+  }
+  const occurrence = (particle: Particle): void => {
+    const limit = unbounded(particle.max)
+    for (let count = 0; count < limit && remaining(particle); count++) {
+      if (particle.kind === "element") take(particle.field)
+      else if (particle.kind === "choice") {
+        const branch = particle.children.find(remaining)
+        if (branch !== undefined) occurrence(branch)
+      } else particle.children.forEach(occurrence)
+    }
+  }
+  occurrence(contentModel(type))
+  for (const field of type.fields) {
+    const queue = queues.get(field.name) ?? []
+    while (queue.length > 0) take(field)
+  }
+  return out
+}
 
 /** Serialize an instance of `element` with prefixes `ns1`, `ns2`… declared on the root. */
 export const instanceToXml = (
@@ -660,27 +1253,28 @@ export const instanceToXml = (
     }
     const type = typeByName(catalog, typeName)
     if (!(type instanceof ComplexTypeDef)) {
-      return `<${name}>${escapeText(typeof item === "string" ? item : "")}</${name}>`
+      const text =
+        typeof item === "string"
+          ? item
+          : isYamlMap(item) && typeof item["#text"] === "string"
+            ? item["#text"]
+            : ""
+      return `<${name}>${escapeText(text)}</${name}>`
     }
     const map: YamlMap = typeof item === "string" ? { "#text": item } : isYamlMap(item) ? item : {}
     const attributes = type.attributes
       .flatMap((attribute) => {
         const attributeValue = map[`@${attribute.name}`]
         return typeof attributeValue === "string"
-          ? [` ${attribute.name}="${escapeAttribute(attributeValue)}"`]
+          ? [
+              ` ${qualified(attribute.namespace ?? "", attribute.name)}="${escapeAttribute(attributeValue)}"`
+            ]
           : []
       })
       .join("")
     const text = typeof map["#text"] === "string" ? escapeText(map["#text"]) : ""
-    const children = type.fields
-      .flatMap((field) => {
-        const child = map[field.name]
-        if (child === undefined) return []
-        const entries = isYamlList(child) ? child : [child]
-        return entries.map((entry) =>
-          write(qualified(field.namespace, field.name), field.type, entry)
-        )
-      })
+    const children = wireOrder(type, map)
+      .map(({ field, entry }) => write(qualified(field.namespace, field.name), field.type, entry))
       .join("")
     const content = `${text}${children}`
     return content === "" ? `<${name}${attributes}/>` : `<${name}${attributes}>${content}</${name}>`
@@ -701,10 +1295,71 @@ export const instanceToXml = (
 // ---------------------------------------------------------------------------
 // XML → value
 
+/** Whether a sequence of child names can be read in order by the content model. */
+const followsModel = (model: Particle, names: ReadonlyArray<string>): boolean => {
+  // Every position reachable after one occurrence of a particle from `from`.
+  const ends = (particle: Particle, from: number): ReadonlySet<number> => {
+    const result = new Set<number>()
+    if (particle.min === 0) result.add(from)
+    const seen = new Set<number>()
+    let frontier: ReadonlySet<number> = new Set([from])
+    const limit = unbounded(particle.max)
+    for (let count = 1; count <= limit && frontier.size > 0; count++) {
+      const next = new Set<number>()
+      for (const position of frontier) for (const end of termEnds(particle, position)) next.add(end)
+      if (count < particle.min) {
+        frontier = next
+        continue
+      }
+      for (const end of next) result.add(end)
+      frontier = new Set([...next].filter((end) => !seen.has(end)))
+      for (const end of next) seen.add(end)
+    }
+    return result
+  }
+  const termEnds = (particle: Particle, from: number): ReadonlySet<number> => {
+    if (particle.kind === "element") {
+      return names[from] === particle.field.name ? new Set([from + 1]) : new Set()
+    }
+    if (particle.kind === "choice") {
+      return new Set(particle.children.flatMap((child) => [...ends(child, from)]))
+    }
+    if (particle.kind === "sequence") {
+      let positions: ReadonlySet<number> = new Set([from])
+      for (const child of particle.children) {
+        positions = new Set([...positions].flatMap((position) => [...ends(child, position)]))
+      }
+      return positions
+    }
+    // xs:all: every child at most once, in any order.
+    const result = new Set<number>()
+    const visited = new Set<string>()
+    const explore = (position: number, used: ReadonlySet<number>): void => {
+      const key = `${position}:${[...used].join(",")}`
+      if (visited.has(key)) return
+      visited.add(key)
+      const complete = particle.children.every(
+        (child, index) => used.has(index) || emptiable(child)
+      )
+      if (complete) result.add(position)
+      particle.children.forEach((child, index) => {
+        if (used.has(index)) return
+        for (const end of ends(child, position)) {
+          if (end !== position) explore(end, new Set([...used, index]))
+        }
+      })
+    }
+    explore(from, new Set())
+    return result
+  }
+  return ends(model, 0).has(names.length)
+}
+
 /**
  * Read an XML element as an instance of `element`'s type. Unknown children,
- * wrong namespaces, and repeated singletons become issues; values are kept
- * as found so a response can be analysed even when it breaks its schema.
+ * wrong namespaces, repeated singletons, and children out of the schema's
+ * order become issues; values are kept as found so a response can be
+ * analysed even when it breaks its schema.
  */
 export const instanceFromXml = (
   catalog: WsdlCatalog,
@@ -726,26 +1381,45 @@ export const instanceFromXml = (
         attribute.name.local === "nil" &&
         (attribute.value === "true" || attribute.value === "1")
     )
+  const noChildren = (node: XmlElement, path: string): void => {
+    const children = elements(node)
+    if (children.length > 0) {
+      issues.push({
+        path: path === "" ? "(root)" : path,
+        detail: `unexpected child element ${children.map((child) => child.name.local).join(", ")} in a simple value`
+      })
+    }
+  }
 
   const read = (node: XmlElement, typeName: QName, path: string): YamlValue => {
     if (nil(node)) return null
     const type = typeByName(catalog, typeName)
-    if (!(type instanceof ComplexTypeDef)) return textOf(node)
+    if (!(type instanceof ComplexTypeDef)) {
+      noChildren(node, path)
+      return textOf(node)
+    }
     const result: Record<string, YamlValue> = {}
     for (const attribute of node.attributes) {
       if (attribute.name.namespace === XsiNamespace) continue
-      if (!type.attributes.some((declared) => declared.name === attribute.name.local)) {
+      const attributePath = join(path, `@${attribute.name.local}`)
+      const declared = type.attributes.find((candidate) => candidate.name === attribute.name.local)
+      if (declared === undefined) {
+        issues.push({ path: attributePath, detail: "attribute not declared" })
+      } else if ((declared.namespace ?? "") !== attribute.name.namespace) {
         issues.push({
-          path: join(path, `@${attribute.name.local}`),
-          detail: "attribute not declared"
+          path: attributePath,
+          detail: `namespace ${attribute.name.namespace === "" ? "(none)" : attribute.name.namespace}, expected ${declared.namespace ?? "(none)"}`
         })
       }
       result[`@${attribute.name.local}`] = attribute.value
     }
-    if (type.textType !== undefined) result["#text"] = textOf(node)
-    else if (textOf(node).trim() !== "")
+    if (type.textType !== undefined) {
+      noChildren(node, path)
+      result["#text"] = textOf(node)
+    } else if (textOf(node).trim() !== "")
       issues.push({ path: path === "" ? "(root)" : path, detail: "unexpected text content" })
-    for (const child of elements(node)) {
+    const order: Array<string> = []
+    for (const child of type.textType === undefined ? elements(node) : []) {
       const field = type.fields.find((candidate) => candidate.name === child.name.local)
       const childPath = join(path, child.name.local)
       if (field === undefined) {
@@ -753,6 +1427,7 @@ export const instanceFromXml = (
         result[child.name.local] = textOf(child)
         continue
       }
+      order.push(field.name)
       if (child.name.namespace !== field.namespace) {
         issues.push({
           path: childPath,
@@ -770,6 +1445,14 @@ export const instanceFromXml = (
       } else {
         result[field.name] = childValue
       }
+    }
+    // Order only matters once the counts fit: otherwise validation says why.
+    const model = contentModel(type)
+    if (!followsModel(model, order) && checkContent(type, result, path).length === 0) {
+      issues.push({
+        path: path === "" ? "(root)" : path,
+        detail: `children ${order.join(", ")} are out of the schema's order ${[...new Set(particleFields(model).map((field) => field.name))].join(", ")}`
+      })
     }
     return result
   }

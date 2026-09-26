@@ -5,6 +5,7 @@ import {
   ElementField,
   Facets,
   isBuiltin,
+  ModelGroup,
   type Occurs,
   OpenQuestion,
   type OpenQuestionCode,
@@ -44,20 +45,49 @@ interface RawField {
   readonly ref: QName | undefined
   readonly minOccurs: number
   readonly maxOccurs: Occurs
+  /** The element particle's own bounds, before its groups' bounds fold in. */
+  readonly own: { readonly min: number; readonly max: Occurs }
   readonly nillable: boolean
+  readonly fixed: string | undefined
   readonly choice: number | undefined
   /** Within a choice: which alternative the field belongs to (a sequence is one branch). */
   readonly branch: number | undefined
+  /** The innermost model group the element sits in. */
+  readonly group: number
   readonly documentation: string | undefined
   readonly location: string
+}
+
+interface RawAttribute {
+  readonly name: string
+  readonly namespace: string | undefined
+  readonly type: QName
+  /** Global attribute this one refers to (`ref=`); resolved in the finish pass. */
+  readonly ref: QName | undefined
+  readonly use: string | undefined
+  readonly fixed: string | undefined
+  readonly documentation: string | undefined
+  readonly location: string
+}
+
+interface GlobalAttribute {
+  readonly type: QName
+  readonly fixed: string | undefined
+  readonly documentation: string | undefined
 }
 
 interface RawComplex {
   readonly name: QName
   readonly anonymous: boolean
   readonly base: QName | undefined
+  /**
+   * How the type derives from `base`: an extension appends to the base's
+   * content, a restriction restates it (only the base's attributes carry over).
+   */
+  readonly derivation: "extension" | "restriction" | undefined
   readonly fields: ReadonlyArray<RawField>
-  readonly attributes: ReadonlyArray<AttributeField>
+  readonly groups: ReadonlyArray<ModelGroup>
+  readonly attributes: ReadonlyArray<RawAttribute>
   readonly textType: QName | undefined
   /** Derived by simpleContent: `base` may be complex (inherit its text and attributes). */
   readonly simpleContent: boolean
@@ -66,6 +96,7 @@ interface RawComplex {
 }
 
 export interface SchemaReference {
+  /** A redefine is followed as an include; its redefinitions are reported. */
   readonly kind: "import" | "include"
   readonly namespace: string | undefined
   readonly location: string
@@ -75,17 +106,25 @@ export interface SchemaCollector {
   readonly complex: Map<QName, RawComplex>
   readonly simple: Map<QName, SimpleTypeDef>
   readonly elements: Map<QName, ElementDecl>
+  readonly attributes: Map<QName, GlobalAttribute>
   readonly questions: Array<OpenQuestion>
   /** Namespaces declared by at least one schema, for unresolved-reference reporting. */
   readonly namespaces: Set<string>
+  /** Synthesized names of anonymous types, kept unique across every schema read. */
+  readonly anonymous: Set<QName>
+  /** `<document>:<line>` of simple types and global elements, for open questions. */
+  readonly locations: Map<QName, string>
 }
 
 export const makeSchemaCollector = (): SchemaCollector => ({
   complex: new Map(),
   simple: new Map(),
   elements: new Map(),
+  attributes: new Map(),
   questions: [],
-  namespaces: new Set()
+  namespaces: new Set(),
+  anonymous: new Set(),
+  locations: new Map()
 })
 
 const xs = (element: XmlElement, local: string): boolean => is(element, XsdNamespace, local)
@@ -119,9 +158,31 @@ const parseMinOccurs = (value: string | undefined): number => {
   return parsed === "unbounded" ? 1 : parsed
 }
 
+/** An XSD boolean attribute: `true` or `1`. */
+const flag = (element: XmlElement, name: string): boolean => {
+  const value = attribute(element, name)?.trim()
+  return value === "true" || value === "1"
+}
+
+const facetNames = new Set([
+  "enumeration",
+  "pattern",
+  "length",
+  "minLength",
+  "maxLength",
+  "totalDigits",
+  "fractionDigits",
+  "minInclusive",
+  "maxInclusive",
+  "minExclusive",
+  "maxExclusive",
+  "whiteSpace"
+])
+
 interface ParticleContext {
   readonly choice: number | undefined
   readonly branch: number | undefined
+  readonly group: number | undefined
   readonly optional: boolean
   readonly repeats: Occurs
 }
@@ -132,6 +193,7 @@ const multiply = (left: Occurs, right: Occurs): Occurs =>
 class SchemaReader {
   readonly targetNamespace: string
   private readonly qualifiedElements: boolean
+  private readonly qualifiedAttributes: boolean
   /** A schema without targetNamespace included into one: its no-namespace refs mean the includer's. */
   private readonly chameleon: boolean
   private readonly schema: XmlElement
@@ -152,6 +214,21 @@ class SchemaReader {
     this.chameleon =
       attribute(schema, "targetNamespace") === undefined && namespaceOverride !== undefined
     this.qualifiedElements = attribute(schema, "elementFormDefault") === "qualified"
+    this.qualifiedAttributes = attribute(schema, "attributeFormDefault") === "qualified"
+  }
+
+  /**
+   * A name for an anonymous type at `path` (`~op/x`). A global element and
+   * a named type may share a local name, so a taken path gets a `#n` suffix.
+   */
+  private anonymousName(path: string): QName {
+    const base = `~${path.replace(/^~/, "")}`
+    let name = qname(this.targetNamespace, base)
+    for (let n = 2; this.into.anonymous.has(name); n++) {
+      name = qname(this.targetNamespace, `${base}#${n}`)
+    }
+    this.into.anonymous.add(name)
+    return name
   }
 
   private where(element: XmlElement): string {
@@ -190,7 +267,7 @@ class SchemaReader {
     const references: Array<SchemaReference> = []
     for (const child of xsChildren(this.schema)) {
       const name = attribute(child, "name")
-      if (xs(child, "import") || xs(child, "include")) {
+      if (xs(child, "import") || xs(child, "include") || xs(child, "redefine")) {
         const location = attribute(child, "schemaLocation")
         if (location !== undefined) {
           references.push({
@@ -199,6 +276,19 @@ class SchemaReader {
             location
           })
         }
+        const redefined = xsChildren(child)
+          .filter((definition) => !xs(definition, "annotation"))
+          .map((definition) => attribute(definition, "name") ?? "?")
+        if (xs(child, "redefine") && redefined.length > 0) {
+          this.question(
+            "redefine",
+            child,
+            location ?? "?",
+            `schema ${location ?? "?"} is included, but its redefinitions of ${redefined.join(", ")} are not applied`
+          )
+        }
+      } else if (xs(child, "attribute") && name !== undefined) {
+        this.globalAttribute(child, name)
       } else if (xs(child, "element") && name !== undefined) {
         this.globalElement(child, name)
       } else if (xs(child, "complexType") && name !== undefined) {
@@ -222,34 +312,51 @@ class SchemaReader {
         `element ${name} joins substitution group ${attribute(element, "substitutionGroup") ?? ""}; substitutes are not modelled`
       )
     }
-    if (attribute(element, "abstract") === "true") {
+    if (flag(element, "abstract")) {
       this.question("abstract", element, name, `element ${name} is abstract`)
     }
-    const type = this.elementType(element, `~${name}`)
+    const type = this.elementType(element, name)
+    const fixed = attribute(element, "fixed")
+    this.into.locations.set(elementName, this.where(element))
     this.into.elements.set(
       elementName,
       new ElementDecl({
         name: elementName,
         type,
-        nillable: attribute(element, "nillable") === "true",
+        nillable: flag(element, "nillable"),
+        ...(fixed === undefined ? {} : { fixed }),
         ...optionalDoc(documentationOf(element))
       })
     )
   }
 
+  private globalAttribute(element: XmlElement, name: string): void {
+    const inline = firstChild(element, XsdNamespace, "simpleType")
+    let type = this.typeRef(element, attribute(element, "type"))
+    if (type === undefined && inline !== undefined) {
+      type = this.anonymousName(`@${name}`)
+      this.simpleType(inline, type, true)
+    }
+    this.into.attributes.set(qname(this.targetNamespace, name), {
+      type: type ?? stringType,
+      fixed: attribute(element, "fixed"),
+      documentation: documentationOf(element)
+    })
+  }
+
   /** The type of an element: its `type=` or its inline (anonymous) type. */
-  private elementType(element: XmlElement, anonymousLocal: string): QName {
+  private elementType(element: XmlElement, anonymousPath: string): QName {
     const declared = this.typeRef(element, attribute(element, "type"))
     if (declared !== undefined) return declared
     const inlineComplex = firstChild(element, XsdNamespace, "complexType")
     if (inlineComplex !== undefined) {
-      const name = qname(this.targetNamespace, anonymousLocal)
+      const name = this.anonymousName(anonymousPath)
       this.complexType(inlineComplex, name, true)
       return name
     }
     const inlineSimple = firstChild(element, XsdNamespace, "simpleType")
     if (inlineSimple !== undefined) {
-      const name = qname(this.targetNamespace, anonymousLocal)
+      const name = this.anonymousName(anonymousPath)
       this.simpleType(inlineSimple, name, true)
       return name
     }
@@ -258,22 +365,24 @@ class SchemaReader {
 
   private complexType(element: XmlElement, name: QName, anonymous: boolean): void {
     const local = splitClark(name).local
-    if (attribute(element, "mixed") === "true") {
+    const complexContent = firstChild(element, XsdNamespace, "complexContent")
+    const simpleContent = firstChild(element, XsdNamespace, "simpleContent")
+    if (flag(element, "mixed") || (complexContent !== undefined && flag(complexContent, "mixed"))) {
       this.question("mixed-content", element, local, `type ${local} allows mixed text content`)
     }
-    if (attribute(element, "abstract") === "true") {
+    if (flag(element, "abstract")) {
       this.question("abstract", element, local, `type ${local} is abstract`)
     }
     let base: QName | undefined
+    let derivation: RawComplex["derivation"]
     let textType: QName | undefined
     let content = element
-    const complexContent = firstChild(element, XsdNamespace, "complexContent")
-    const simpleContent = firstChild(element, XsdNamespace, "simpleContent")
     if (complexContent !== undefined) {
       const extension = firstChild(complexContent, XsdNamespace, "extension")
       const restriction = firstChild(complexContent, XsdNamespace, "restriction")
       if (extension !== undefined) {
         base = this.typeRef(extension, attribute(extension, "base"))
+        derivation = "extension"
         content = extension
       } else if (restriction !== undefined) {
         this.question(
@@ -282,24 +391,36 @@ class SchemaReader {
           local,
           `type ${local} restricts ${attribute(restriction, "base") ?? "?"}; only the restated content is modelled`
         )
+        base = this.typeRef(restriction, attribute(restriction, "base"))
+        derivation = "restriction"
         content = restriction
       }
     } else if (simpleContent !== undefined) {
-      const derivation =
-        firstChild(simpleContent, XsdNamespace, "extension") ??
-        firstChild(simpleContent, XsdNamespace, "restriction")
-      if (derivation !== undefined) {
+      const extension = firstChild(simpleContent, XsdNamespace, "extension")
+      const restriction = firstChild(simpleContent, XsdNamespace, "restriction")
+      const step = extension ?? restriction
+      if (step !== undefined) {
         // The base may be a simple type (the text's type) or a complex type
         // with simple content (inherit its text type and attributes); which
         // one is only known once every schema is read.
-        base = this.typeRef(derivation, attribute(derivation, "base")) ?? stringType
+        base = this.typeRef(step, attribute(step, "base")) ?? stringType
+        derivation = extension === undefined ? "restriction" : "extension"
         textType = base
-        content = derivation
+        content = step
+        const inline = firstChild(step, XsdNamespace, "simpleType")
+        const facets = xsChildren(step).some((child) => facetNames.has(child.name.local))
+        if (extension === undefined && (facets || inline !== undefined)) {
+          // A restriction narrows the text: an anonymous simple type over
+          // the base's text type (resolved in the finish pass) keeps its facets.
+          textType = this.anonymousName(`${local}/#text`)
+          this.simpleType(step, textType, true, base)
+        }
       }
     }
 
     const fields: Array<RawField> = []
-    const attributes: Array<AttributeField> = []
+    const groups: Array<ModelGroup> = []
+    const attributes: Array<RawAttribute> = []
     let counter = 0
     const next = (): number => counter++
     for (const child of xsChildren(content)) {
@@ -308,7 +429,14 @@ class SchemaReader {
           child,
           local,
           fields,
-          { choice: undefined, branch: undefined, optional: false, repeats: 1 },
+          groups,
+          {
+            choice: undefined,
+            branch: undefined,
+            group: undefined,
+            optional: false,
+            repeats: 1
+          },
           next
         )
       } else if (xs(child, "group")) {
@@ -326,7 +454,9 @@ class SchemaReader {
       name,
       anonymous,
       base,
+      derivation,
       fields,
+      groups,
       attributes,
       textType,
       simpleContent: simpleContent !== undefined,
@@ -339,22 +469,37 @@ class SchemaReader {
     group: XmlElement,
     owner: string,
     into: Array<RawField>,
+    groups: Array<ModelGroup>,
     context: ParticleContext,
     next: () => number
   ): void {
-    const optional = context.optional || attribute(group, "minOccurs") === "0"
-    const repeats = multiply(context.repeats, parseOccurs(attribute(group, "maxOccurs"), 1))
+    const minOccurs = parseMinOccurs(attribute(group, "minOccurs"))
+    const maxOccurs = parseOccurs(attribute(group, "maxOccurs"), 1)
+    const optional = context.optional || minOccurs === 0
+    const repeats = multiply(context.repeats, maxOccurs)
     const isChoice = xs(group, "choice")
     const choice = isChoice ? next() : context.choice
+    // The exact content model: every group, with its own bounds and parent.
+    const id = groups.length
+    groups.push(
+      new ModelGroup({
+        id,
+        kind: isChoice ? "choice" : xs(group, "all") ? "all" : "sequence",
+        minOccurs,
+        maxOccurs,
+        ...(context.group === undefined ? {} : { parent: context.group }),
+        start: into.length
+      })
+    )
     for (const child of xsChildren(group)) {
       // Every alternative of a choice is its own branch; inside a branch,
       // a nested sequence keeps the branch it belongs to.
       const branch = isChoice ? next() : context.branch
-      const inner: ParticleContext = { choice, branch, optional, repeats }
+      const inner: ParticleContext = { choice, branch, group: id, optional, repeats }
       if (xs(child, "element")) {
         into.push(this.localElement(child, owner, inner))
       } else if (xs(child, "sequence") || xs(child, "choice") || xs(child, "all")) {
-        this.particle(child, owner, into, inner, next)
+        this.particle(child, owner, into, groups, inner, next)
       } else if (xs(child, "any")) {
         this.question(
           "xsd-any",
@@ -375,14 +520,19 @@ class SchemaReader {
 
   private localElement(element: XmlElement, owner: string, context: ParticleContext): RawField {
     const ref = this.typeRef(element, attribute(element, "ref"))
-    const minOccurs = context.optional ? 0 : parseMinOccurs(attribute(element, "minOccurs"))
-    const maxOccurs = multiply(parseOccurs(attribute(element, "maxOccurs"), 1), context.repeats)
+    const own = {
+      min: parseMinOccurs(attribute(element, "minOccurs")),
+      max: parseOccurs(attribute(element, "maxOccurs"), 1)
+    }
     const base = {
-      minOccurs,
-      maxOccurs,
-      nillable: attribute(element, "nillable") === "true",
+      minOccurs: context.optional ? 0 : own.min,
+      maxOccurs: multiply(own.max, context.repeats),
+      own,
+      nillable: flag(element, "nillable"),
+      fixed: attribute(element, "fixed"),
       choice: context.choice,
       branch: context.branch,
+      group: context.group ?? 0,
       documentation: documentationOf(element),
       location: this.where(element)
     }
@@ -397,29 +547,50 @@ class SchemaReader {
       ...base,
       name,
       namespace: qualified ? this.targetNamespace : "",
-      type: this.elementType(element, `~${owner.replace(/^~/, "")}/${name}`),
+      type: this.elementType(element, `${owner}/${name}`),
       ref: undefined
     }
   }
 
-  private attributes(content: XmlElement, owner: string, into: Array<AttributeField>): void {
+  private attributes(content: XmlElement, owner: string, into: Array<RawAttribute>): void {
     for (const child of xsChildren(content)) {
       if (xs(child, "attribute")) {
-        const name = attribute(child, "name") ?? attribute(child, "ref") ?? "?"
+        const common = {
+          use: attribute(child, "use"),
+          fixed: attribute(child, "fixed"),
+          documentation: documentationOf(child),
+          location: this.where(child)
+        }
+        const ref = this.typeRef(child, attribute(child, "ref"))
+        if (ref !== undefined) {
+          // A global attribute: its name, type and namespace are the
+          // declaration's, looked up once every schema is read.
+          const target = splitClark(ref)
+          into.push({
+            ...common,
+            name: target.local,
+            namespace: target.namespace === "" ? undefined : target.namespace,
+            type: stringType,
+            ref
+          })
+          continue
+        }
+        const name = attribute(child, "name") ?? "?"
         const inline = firstChild(child, XsdNamespace, "simpleType")
         let type = this.typeRef(child, attribute(child, "type"))
         if (type === undefined && inline !== undefined) {
-          type = qname(this.targetNamespace, `~${owner.replace(/^~/, "")}/@${name}`)
+          type = this.anonymousName(`${owner}/@${name}`)
           this.simpleType(inline, type, true)
         }
-        into.push(
-          new AttributeField({
-            name,
-            type: type ?? stringType,
-            required: attribute(child, "use") === "required",
-            ...optionalDoc(documentationOf(child))
-          })
-        )
+        const form = attribute(child, "form")
+        const qualified = form === undefined ? this.qualifiedAttributes : form === "qualified"
+        into.push({
+          ...common,
+          name,
+          namespace: qualified && this.targetNamespace !== "" ? this.targetNamespace : undefined,
+          type: type ?? stringType,
+          ref: undefined
+        })
       } else if (xs(child, "attributeGroup")) {
         this.question(
           "attribute-group",
@@ -433,15 +604,50 @@ class SchemaReader {
     }
   }
 
-  private simpleType(element: XmlElement, name: QName, anonymous: boolean): void {
+  /**
+   * A simple type from its `xs:simpleType` element, or (with `restrictionBase`)
+   * from a simpleContent restriction whose base is only known later.
+   */
+  private simpleType(
+    element: XmlElement,
+    name: QName,
+    anonymous: boolean,
+    restrictionBase?: QName
+  ): void {
     const local = splitClark(name).local
-    const restriction = firstChild(element, XsdNamespace, "restriction")
+    this.into.locations.set(name, this.where(element))
+    const restriction =
+      restrictionBase === undefined ? firstChild(element, XsdNamespace, "restriction") : element
+    const list = firstChild(element, XsdNamespace, "list")
+    if (restriction === undefined && list !== undefined) {
+      // A list: whitespace-separated items of the item type; length facets
+      // of a restriction over it count items.
+      const inline = firstChild(list, XsdNamespace, "simpleType")
+      let itemType = this.typeRef(list, attribute(list, "itemType"))
+      if (itemType === undefined && inline !== undefined) {
+        itemType = this.anonymousName(`${local}/#item`)
+        this.simpleType(inline, itemType, true)
+      }
+      this.into.simple.set(
+        name,
+        new SimpleTypeDef({
+          name,
+          anonymous,
+          base: stringType,
+          facets: new Facets({}),
+          variety: "list",
+          itemType: itemType ?? stringType,
+          ...optionalDoc(documentationOf(element))
+        })
+      )
+      return
+    }
     if (restriction === undefined) {
       this.question(
         "list-or-union",
         element,
         local,
-        `simple type ${local} is a list or union; values are treated as strings`
+        `simple type ${local} is a union; values are treated as strings`
       )
       this.into.simple.set(
         name,
@@ -450,17 +656,26 @@ class SchemaReader {
           anonymous,
           base: stringType,
           facets: new Facets({}),
+          variety: "union",
           ...optionalDoc(documentationOf(element))
         })
       )
       return
+    }
+    // The base is `base=`, or an anonymous simple type written inside.
+    let base = this.typeRef(restriction, attribute(restriction, "base")) ?? restrictionBase
+    const inline = firstChild(restriction, XsdNamespace, "simpleType")
+    if (inline !== undefined && (base === undefined || restrictionBase !== undefined)) {
+      const inlineName = this.anonymousName(`${local}/#base`)
+      this.simpleType(inline, inlineName, true)
+      base = inlineName
     }
     this.into.simple.set(
       name,
       new SimpleTypeDef({
         name,
         anonymous,
-        base: this.typeRef(restriction, attribute(restriction, "base")) ?? stringType,
+        base: base ?? stringType,
         facets: readFacets(restriction),
         ...optionalDoc(documentationOf(element))
       })
@@ -497,6 +712,7 @@ const readFacets = (restriction: XmlElement): Facets => {
   const maxLength = intFacet(restriction, "maxLength")
   const totalDigits = intFacet(restriction, "totalDigits")
   const fractionDigits = intFacet(restriction, "fractionDigits")
+  const whiteSpace = stringFacet(restriction, "whiteSpace")?.trim()
   return new Facets({
     ...(enumeration.length > 0 ? { enumeration } : {}),
     ...(pattern.length > 0 ? { pattern } : {}),
@@ -508,7 +724,10 @@ const readFacets = (restriction: XmlElement): Facets => {
     ...(minInclusive === undefined ? {} : { minInclusive }),
     ...(maxInclusive === undefined ? {} : { maxInclusive }),
     ...(minExclusive === undefined ? {} : { minExclusive }),
-    ...(maxExclusive === undefined ? {} : { maxExclusive })
+    ...(maxExclusive === undefined ? {} : { maxExclusive }),
+    ...(whiteSpace === "preserve" || whiteSpace === "replace" || whiteSpace === "collapse"
+      ? { whiteSpace }
+      : {})
   })
 }
 
@@ -546,9 +765,15 @@ export const finishSchemas = (
     )
   }
 
-  const resolveField = (field: RawField, owner: string, offset: number): ElementField => {
+  const resolveField = (
+    field: RawField,
+    owner: string,
+    offset: number,
+    groupOffset: number
+  ): ElementField => {
     let type = field.type ?? anyType
     let nillable = field.nillable
+    let fixed = field.fixed
     if (field.ref !== undefined) {
       const target = collector.elements.get(field.ref)
       if (target === undefined) {
@@ -563,6 +788,7 @@ export const finishSchemas = (
       } else {
         type = target.type
         nillable = nillable || target.nillable
+        fixed = fixed ?? target.fixed
       }
     } else if (!typeExists(collector, type)) {
       unresolvedType(type, field.location, owner)
@@ -576,9 +802,48 @@ export const finishSchemas = (
       nillable,
       ...(field.choice === undefined ? {} : { choice: field.choice + offset }),
       ...(field.branch === undefined ? {} : { branch: field.branch + offset }),
+      group: field.group + groupOffset,
+      occurs: field.own,
+      ...(fixed === undefined ? {} : { fixed }),
       ...optionalDoc(field.documentation)
     })
   }
+
+  const resolveAttribute = (raw: RawAttribute, owner: string): AttributeField | undefined => {
+    if (raw.use === "prohibited") return undefined
+    let type = raw.type
+    let fixed = raw.fixed
+    let documentation = raw.documentation
+    if (raw.ref !== undefined) {
+      const target = collector.attributes.get(raw.ref)
+      if (target === undefined) {
+        questions.push(
+          new OpenQuestion({
+            code: "unresolved-attribute",
+            location: raw.location,
+            subject: owner,
+            detail: `attribute ref ${raw.ref} is not declared in any schema that was read`
+          })
+        )
+      } else {
+        type = target.type
+        fixed = fixed ?? target.fixed
+        documentation = documentation ?? target.documentation
+      }
+    }
+    if (!typeExists(collector, type)) unresolvedType(type, raw.location, owner)
+    return new AttributeField({
+      name: raw.name,
+      ...(raw.namespace === undefined ? {} : { namespace: raw.namespace }),
+      type,
+      required: raw.use === "required",
+      ...(fixed === undefined ? {} : { fixed }),
+      ...optionalDoc(documentation)
+    })
+  }
+
+  const sameAttribute = (left: AttributeField | RawAttribute, right: RawAttribute): boolean =>
+    left.name === right.name && (left.namespace ?? "") === (right.namespace ?? "")
 
   const flattened = new Map<QName, ComplexTypeDef>()
   const flatten = (raw: RawComplex, visiting: ReadonlySet<QName>): ComplexTypeDef => {
@@ -586,6 +851,7 @@ export const finishSchemas = (
     if (done !== undefined) return done
     const owner = splitClark(raw.name).local
     let inheritedFields: ReadonlyArray<ElementField> = []
+    let inheritedGroups: ReadonlyArray<ModelGroup> = []
     let inheritedAttributes: ReadonlyArray<AttributeField> = []
     let textType = raw.textType
     if (raw.base !== undefined && !isBuiltin(raw.base)) {
@@ -594,10 +860,14 @@ export const finishSchemas = (
         if (!collector.simple.has(raw.base)) unresolvedType(raw.base, raw.location, owner)
       } else if (!visiting.has(raw.base)) {
         const base = flatten(baseRaw, new Set([...visiting, raw.name]))
-        inheritedFields = base.fields
+        // A restriction restates the content; only attributes carry over.
+        if (raw.derivation !== "restriction" || raw.simpleContent) {
+          inheritedFields = base.fields
+          inheritedGroups = base.groups ?? []
+        }
         inheritedAttributes = base.attributes
         // Simple content over a complex base: the text type is the base's.
-        if (raw.simpleContent) textType = base.textType ?? stringType
+        if (raw.simpleContent && raw.textType === raw.base) textType = base.textType ?? stringType
       }
     }
     // Choice and branch ids of the derived part continue after the base's,
@@ -606,23 +876,50 @@ export const finishSchemas = (
       (max, field) => Math.max(max, (field.choice ?? -1) + 1, (field.branch ?? -1) + 1),
       0
     )
+    const groupOffset = inheritedGroups.length
+    const fieldOffset = inheritedFields.length
     if (textType !== undefined && !typeExists(collector, textType)) {
       unresolvedType(textType, raw.location, owner)
     }
-    for (const attributeField of raw.attributes) {
-      if (!typeExists(collector, attributeField.type)) {
-        unresolvedType(attributeField.type, raw.location, owner)
+    // Derived attributes restate (or prohibit) inherited ones of the same name.
+    const attributes: Array<AttributeField> = []
+    for (const inherited of inheritedAttributes) {
+      const restated = raw.attributes.find((candidate) => sameAttribute(inherited, candidate))
+      if (restated === undefined) attributes.push(inherited)
+      else {
+        const resolved = resolveAttribute(restated, owner)
+        if (resolved !== undefined) attributes.push(resolved)
       }
     }
+    for (const declared of raw.attributes) {
+      if (inheritedAttributes.some((inherited) => sameAttribute(inherited, declared))) continue
+      const resolved = resolveAttribute(declared, owner)
+      if (resolved !== undefined) attributes.push(resolved)
+    }
+    const groups = [
+      ...inheritedGroups,
+      ...raw.groups.map(
+        (group) =>
+          new ModelGroup({
+            ...group,
+            id: group.id + groupOffset,
+            ...(group.parent === undefined ? {} : { parent: group.parent + groupOffset }),
+            start: group.start + fieldOffset
+          })
+      )
+    ]
     const result = new ComplexTypeDef({
       name: raw.name,
       anonymous: raw.anonymous,
-      ...(raw.base === undefined ? {} : { base: raw.base }),
+      ...(raw.base === undefined || (raw.derivation === "restriction" && !raw.simpleContent)
+        ? {}
+        : { base: raw.base }),
       fields: [
         ...inheritedFields,
-        ...raw.fields.map((field) => resolveField(field, owner, offset))
+        ...raw.fields.map((field) => resolveField(field, owner, offset, groupOffset))
       ],
-      attributes: [...inheritedAttributes, ...raw.attributes],
+      ...(groups.length === 0 ? {} : { groups }),
+      attributes,
       ...(textType === undefined ? {} : { textType }),
       ...optionalDoc(raw.documentation)
     })
@@ -631,15 +928,35 @@ export const finishSchemas = (
   }
 
   const complex = [...collector.complex.values()].map((raw) => flatten(raw, new Set()))
-  const simple = [...collector.simple.values()]
+  // A simpleContent restriction's text type restricts its complex base's
+  // text type, known only now.
+  const simple = [...collector.simple.values()].map((type) => {
+    const complexBase = collector.complex.get(type.base)
+    if (complexBase === undefined) return type
+    return new SimpleTypeDef({
+      ...type,
+      base: flatten(complexBase, new Set()).textType ?? stringType
+    })
+  })
   for (const type of simple) {
-    if (!typeExists(collector, type.base)) {
-      unresolvedType(type.base, "(simple type)", splitClark(type.name).local)
+    const types = [type.base, ...(type.itemType === undefined ? [] : [type.itemType])]
+    for (const name of types) {
+      if (!typeExists(collector, name)) {
+        unresolvedType(
+          name,
+          collector.locations.get(type.name) ?? "(simple type)",
+          splitClark(type.name).local
+        )
+      }
     }
   }
   for (const element of collector.elements.values()) {
     if (!typeExists(collector, element.type)) {
-      unresolvedType(element.type, "(global element)", splitClark(element.name).local)
+      unresolvedType(
+        element.type,
+        collector.locations.get(element.name) ?? "(global element)",
+        splitClark(element.name).local
+      )
     }
   }
   return {

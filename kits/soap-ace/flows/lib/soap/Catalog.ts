@@ -41,8 +41,26 @@ export class Facets extends Schema.Class<Facets>("Facets")({
   minInclusive: Schema.optionalKey(Schema.String),
   maxInclusive: Schema.optionalKey(Schema.String),
   minExclusive: Schema.optionalKey(Schema.String),
-  maxExclusive: Schema.optionalKey(Schema.String)
+  maxExclusive: Schema.optionalKey(Schema.String),
+  whiteSpace: Schema.optionalKey(Schema.Literals(["preserve", "replace", "collapse"]))
 }) {}
+
+/** A model group (`xs:sequence`, `xs:choice`, `xs:all`) of a complex type's content. */
+export class ModelGroup extends Schema.Class<ModelGroup>("ModelGroup")({
+  /** Index of the group within its type's `groups`. */
+  id: Schema.Int,
+  kind: Schema.Literals(["sequence", "choice", "all"]),
+  minOccurs: Schema.Int,
+  maxOccurs: Occurs,
+  /** The enclosing group; absent for a group at the top of the content. */
+  parent: Schema.optionalKey(Schema.Int),
+  /** Index into the type's `fields` of the first field at or after the group's start. */
+  start: Schema.Int
+}) {}
+
+/** An element particle's own occurrence bounds, before its groups' bounds fold in. */
+export const ParticleOccurs = Schema.Struct({ min: Schema.Int, max: Occurs })
+export type ParticleOccurs = typeof ParticleOccurs.Type
 
 /** A child element of a complex type's content model. */
 export class ElementField extends Schema.Class<ElementField>("ElementField")({
@@ -50,20 +68,34 @@ export class ElementField extends Schema.Class<ElementField>("ElementField")({
   /** Namespace of the element as it appears on the wire (`""` when unqualified). */
   namespace: Schema.String,
   type: QName,
+  /**
+   * Effective bounds within one instance of the type: an optional group
+   * makes its elements optional, a repeating group makes them repeat.
+   */
   minOccurs: Schema.Int,
   maxOccurs: Occurs,
   nillable: Schema.Boolean,
-  /** Set when the field sits inside an `xs:choice`: the choice's index within the type. */
+  /** Set when the field sits inside an `xs:choice`: the innermost choice's index within the type. */
   choice: Schema.optionalKey(Schema.Int),
   /** Within a choice: the alternative this field belongs to (a sequence is one alternative). */
   branch: Schema.optionalKey(Schema.Int),
+  /** The innermost model group (index into the type's `groups`); the exact content model. */
+  group: Schema.optionalKey(Schema.Int),
+  /** The element particle's own bounds within `group`. */
+  occurs: Schema.optionalKey(ParticleOccurs),
+  /** `fixed=`: the only value the element may hold. */
+  fixed: Schema.optionalKey(Schema.String),
   documentation: Schema.optionalKey(Schema.String)
 }) {}
 
 export class AttributeField extends Schema.Class<AttributeField>("AttributeField")({
   name: Schema.String,
+  /** Namespace of the attribute on the wire; absent when unqualified. */
+  namespace: Schema.optionalKey(Schema.String),
   type: QName,
   required: Schema.Boolean,
+  /** `fixed=`: the only value the attribute may hold. */
+  fixed: Schema.optionalKey(Schema.String),
   documentation: Schema.optionalKey(Schema.String)
 }) {}
 
@@ -75,6 +107,8 @@ export class ComplexTypeDef extends Schema.Class<ComplexTypeDef>("ComplexTypeDef
   /** `xs:extension` base, already flattened into `fields`/`attributes`. */
   base: Schema.optionalKey(QName),
   fields: Schema.Array(ElementField),
+  /** The model groups the fields sit in (see `ElementField.group`). */
+  groups: Schema.optionalKey(Schema.Array(ModelGroup)),
   attributes: Schema.Array(AttributeField),
   /** Simple content (`xs:simpleContent`): the text value's type. */
   textType: Schema.optionalKey(QName),
@@ -88,6 +122,10 @@ export class SimpleTypeDef extends Schema.Class<SimpleTypeDef>("SimpleTypeDef")(
   /** The restriction base (an `xs:` builtin or another simple type). */
   base: QName,
   facets: Facets,
+  /** `xs:list` and `xs:union` types; absent for a restriction. */
+  variety: Schema.optionalKey(Schema.Literals(["list", "union"])),
+  /** A list's item type. */
+  itemType: Schema.optionalKey(QName),
   documentation: Schema.optionalKey(Schema.String)
 }) {}
 
@@ -98,6 +136,7 @@ export class ElementDecl extends Schema.Class<ElementDecl>("ElementDecl")({
   name: QName,
   type: QName,
   nillable: Schema.Boolean,
+  fixed: Schema.optionalKey(Schema.String),
   documentation: Schema.optionalKey(Schema.String)
 }) {}
 
@@ -142,6 +181,8 @@ export const OpenQuestionCode = Schema.Literals([
   "list-or-union",
   "unresolved-type",
   "unresolved-element",
+  "unresolved-attribute",
+  "redefine",
   "non-literal-part",
   "unsupported-binding",
   "multi-part-message",
@@ -178,3 +219,120 @@ export const elementByName = (catalog: WsdlCatalog, name: QName): ElementDecl | 
 
 export const operationByName = (catalog: WsdlCatalog, name: string): Operation | undefined =>
   catalog.operations.find((operation) => operation.name === name)
+
+// ---------------------------------------------------------------------------
+// Content models
+
+/** A particle of a complex type's content model: an element or a model group. */
+export type Particle =
+  | {
+      readonly kind: "element"
+      readonly field: ElementField
+      readonly min: number
+      readonly max: Occurs
+    }
+  | {
+      readonly kind: "sequence" | "choice" | "all"
+      readonly min: number
+      readonly max: Occurs
+      readonly children: ReadonlyArray<Particle>
+    }
+
+/**
+ * The content model of a complex type as a particle tree, rooted in a
+ * sequence that occurs once (an extension's base content, then its own).
+ * A catalog written before model groups were recorded is rebuilt from the
+ * fields' choice and branch ids.
+ */
+export const contentModel = (type: ComplexTypeDef): Particle => {
+  const groups = type.groups ?? []
+  const exact = type.fields.every((field) => field.group !== undefined)
+  const legacyElement = (field: ElementField): Particle => ({
+    kind: "element",
+    field,
+    min: field.minOccurs,
+    max: field.maxOccurs
+  })
+  if (!exact || groups.length === 0) {
+    // Top-level entries: a field, or the id of a choice at its first field.
+    const top: Array<ElementField | number> = []
+    const choices = new Map<number, Map<number | undefined, Array<ElementField>>>()
+    for (const field of type.fields) {
+      if (field.choice === undefined) {
+        top.push(field)
+        continue
+      }
+      const branches =
+        choices.get(field.choice) ?? new Map<number | undefined, Array<ElementField>>()
+      if (!choices.has(field.choice)) top.push(field.choice)
+      choices.set(field.choice, branches)
+      branches.set(field.branch, [...(branches.get(field.branch) ?? []), field])
+    }
+    const children = top.map((entry): Particle => {
+      if (typeof entry !== "number") return legacyElement(entry)
+      const alternatives = [...(choices.get(entry)?.values() ?? [])].map(
+        (members): Particle =>
+          members.length === 1 && members[0] !== undefined
+            ? legacyElement(members[0])
+            : { kind: "sequence", min: 1, max: 1, children: members.map(legacyElement) }
+      )
+      return { kind: "choice", min: 1, max: 1, children: alternatives }
+    })
+    return { kind: "sequence", min: 1, max: 1, children }
+  }
+  // Children of each group in document order: a group sits before the
+  // field it starts at; groups starting together keep their id order.
+  const entries: Array<{
+    readonly parent: number | undefined
+    readonly order: readonly [number, number, number]
+    readonly build: () => Particle
+  }> = []
+  const childrenOf = (parent: number | undefined): ReadonlyArray<Particle> =>
+    entries
+      .filter((entry) => entry.parent === parent)
+      .sort(
+        (left, right) =>
+          left.order[0] - right.order[0] ||
+          left.order[1] - right.order[1] ||
+          left.order[2] - right.order[2]
+      )
+      .map((entry) => entry.build())
+  groups.forEach((group) => {
+    entries.push({
+      parent: group.parent,
+      order: [group.start, 0, group.id],
+      build: () => ({
+        kind: group.kind,
+        min: group.minOccurs,
+        max: group.maxOccurs,
+        children: childrenOf(group.id)
+      })
+    })
+  })
+  type.fields.forEach((field, index) => {
+    entries.push({
+      parent: field.group,
+      order: [index, 1, 0],
+      build: () => ({
+        kind: "element",
+        field,
+        min: field.occurs?.min ?? field.minOccurs,
+        max: field.occurs?.max ?? field.maxOccurs
+      })
+    })
+  })
+  return { kind: "sequence", min: 1, max: 1, children: childrenOf(undefined) }
+}
+
+/** Every element field under a particle, in order. */
+export const particleFields = (particle: Particle): ReadonlyArray<ElementField> =>
+  particle.kind === "element" ? [particle.field] : particle.children.flatMap(particleFields)
+
+/** Whether a particle can be satisfied by no elements at all. */
+export const emptiable = (particle: Particle): boolean => {
+  if (particle.min === 0) return true
+  if (particle.kind === "element") return false
+  return particle.kind === "choice"
+    ? particle.children.some(emptiable)
+    : particle.children.every(emptiable)
+}
