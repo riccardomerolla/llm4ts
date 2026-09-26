@@ -156,8 +156,9 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi
   takes `provider/model`, e.g. `openai-codex/gpt-5.5`).
   `LLM4TS_CODER_FLAGS` / `LLM4TS_REASONING_FLAGS` add CLI flags to a seat
-  (`key=value;key`). `LLM4TS_GATES="cmd; cmd"` overrides the four default
-  `pnpm` gates; `LLM4TS_WORKTREE_SETUP` (default `pnpm install --offline`)
+  (`key=value;key`). `LLM4TS_GATES="cmd; cmd"` overrides the default
+  `pnpm` gates (`typecheck`, `lint`, `test`, `build` — each only when the
+  app's `package.json` defines that script, and the run lists them); `LLM4TS_WORKTREE_SETUP` (default `pnpm install --offline`)
   prepares each story worktree, which starts as a fresh checkout without
   dependencies.
 - Setup and gates run in the application folder: `LLM4TS_APP_DIR`

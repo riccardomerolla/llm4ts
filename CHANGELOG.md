@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.12.1
+
+- `epic-stories` default gates follow the application's `package.json`:
+  `pnpm typecheck`, `lint`, `test` and `build` run only when the app defines
+  that script, and the run prints the gates in force. A Next.js app without
+  a `typecheck` script failed every merge with
+  `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command "typecheck" not found`.
+  `LLM4TS_GATES` still overrides.
+
 ## 2.12.0
 
 - `epic-stories` supports an application in a subfolder (a Next.js app under

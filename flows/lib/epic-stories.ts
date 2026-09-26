@@ -5,6 +5,7 @@ import { readdir } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import type { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
@@ -71,7 +72,8 @@ export const epicUsage = [
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
   "       LLM4TS_CODER (default pi) implements; LLM4TS_REASONING_MODEL / LLM4TS_CODER_MODEL",
   "       pick their models (pi: provider/model); LLM4TS_CODER_FLAGS / LLM4TS_REASONING_FLAGS",
-  "       add CLI flags (key=value;key=value). LLM4TS_GATES overrides the gate commands;",
+  "       add CLI flags (key=value;key=value). LLM4TS_GATES overrides the gate commands",
+  "       (default: those of pnpm typecheck|lint|test|build the app's package.json defines);",
   "       LLM4TS_WORKTREE_SETUP (default: pnpm install --offline) prepares each worktree;",
   "       LLM4TS_WORKTREE_ROOT (default: <repo>.worktrees beside the repository) holds them;",
   "       LLM4TS_APP_DIR (e.g. frontend) runs setup and gates in that subfolder; unset, a",
@@ -876,13 +878,48 @@ export const defaultGateCommands: ReadonlyArray<ReadonlyArray<string>> = [
   ["pnpm", "build"]
 ]
 
-/** `LLM4TS_GATES="pnpm typecheck;pnpm test"` overrides the four defaults. */
+/** The part of an application's package.json the gates care about. */
+const PackageScripts = Schema.fromJsonString(
+  Schema.Struct({
+    scripts: Schema.optional(Schema.Record(Schema.String, Schema.String))
+  })
+)
+
+/**
+ * The script names in `<appRoot>/package.json`; undefined when it is missing
+ * or unreadable, which keeps every default gate (the failure then says why).
+ */
+export const appScripts = (
+  files: PlainFileStoreShape,
+  appRoot: string
+): Effect.Effect<ReadonlySet<string> | undefined> =>
+  files.read(join(appRoot, "package.json")).pipe(
+    Effect.flatMap((text) =>
+      text === undefined
+        ? Effect.succeed(undefined)
+        : Effect.map(
+            Schema.decodeUnknownEffect(PackageScripts)(text),
+            (manifest) => new Set(Object.keys(manifest.scripts ?? {}))
+          )
+    ),
+    Effect.catch(() => Effect.succeed(undefined))
+  )
+
+/**
+ * `LLM4TS_GATES="pnpm typecheck;pnpm test"` overrides the four defaults.
+ * Without it, a default gate runs only when the application defines that
+ * script: a Next.js app has `lint` and `build` but seldom `typecheck`, and
+ * `pnpm typecheck` there fails with "Command not found", not a red gate.
+ */
 export const gateCommands = (
-  environment: Readonly<Record<string, string | undefined>>
+  environment: Readonly<Record<string, string | undefined>>,
+  scripts?: ReadonlySet<string>
 ): ReadonlyArray<ReadonlyArray<string>> => {
   const raw = environment.LLM4TS_GATES?.trim()
   if (raw === undefined || raw.length === 0) {
-    return defaultGateCommands
+    return scripts === undefined
+      ? defaultGateCommands
+      : defaultGateCommands.filter((command) => scripts.has(command[1] ?? ""))
   }
   return raw
     .split(";")

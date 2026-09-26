@@ -43,6 +43,7 @@ import {
 } from "@llm4ts/flow/StoryPlan"
 import {
   appDirFor,
+  appScripts,
   inAppDir,
   awaitServer,
   chooseEpic,
@@ -264,6 +265,33 @@ describe("epic-stories flags and seats", () => {
     assert.include(storyPlanInstructions("conto-bonifico", "rules"), 'epicId: "conto-bonifico"')
     assert.include(storyPlanInstructions("conto-bonifico", "rules"), "pairwise DISJOINT")
   })
+
+  it.effect("default gates are the ones the app's package.json defines", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic(
+        "/repo/frontend/package.json",
+        JSON.stringify({
+          name: "web",
+          scripts: { dev: "next dev", build: "next build", lint: "next lint" }
+        })
+      )
+      yield* memory.store.writeAtomic("/repo/broken/package.json", "{ not json")
+      const next = yield* appScripts(memory.store, "/repo/frontend")
+      assert.deepStrictEqual(gateCommands({}, next), [
+        ["pnpm", "lint"],
+        ["pnpm", "build"]
+      ])
+      // The override still wins; a missing or unreadable manifest keeps every default.
+      assert.deepStrictEqual(gateCommands({ LLM4TS_GATES: "pnpm vitest run" }, next), [
+        ["pnpm", "vitest", "run"]
+      ])
+      assert.isUndefined(yield* appScripts(memory.store, "/repo/missing"))
+      assert.isUndefined(yield* appScripts(memory.store, "/repo/broken"))
+      assert.deepStrictEqual(gateCommands({}, undefined), defaultGateCommands)
+      assert.deepStrictEqual(gateCommands({}, new Set(["dev"])), [])
+    })
+  )
 
   it.effect("gates stop at the first red command", () =>
     Effect.gen(function* () {

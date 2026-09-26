@@ -50,6 +50,7 @@ import {
   epicIdFor,
   flagsFromEnvironment,
   appDirFor,
+  appScripts,
   gateCommands,
   gatesIn,
   inAppDir,
@@ -180,6 +181,18 @@ const program = Effect.gen(function* () {
             Info.make({ message: `app dir: ${appDir} (setup and gates run there; LLM4TS_APP_DIR)` })
           )
         }
+        const commands = gateCommands(
+          process.env,
+          yield* appScripts(files, join(input.workDir, appDir))
+        )
+        yield* events.publish(
+          Info.make({
+            message:
+              commands.length === 0
+                ? "gates: none (the app defines none of typecheck, lint, test, build; set LLM4TS_GATES)"
+                : `gates: ${commands.map((command) => command.join(" ")).join(" · ")}`
+          })
+        )
         if (flags.land !== undefined) {
           const landed = yield* landEpic(context, {
             plan,
@@ -187,10 +200,7 @@ const program = Effect.gen(function* () {
             stateDir,
             target: flags.land,
             keepWorktrees: flags.keepWorktrees,
-            gates: inAppDir(
-              appDir,
-              gatesIn(nodeProcessExecutor, events, gateCommands(process.env))
-            ),
+            gates: inAppDir(appDir, gatesIn(nodeProcessExecutor, events, commands)),
             system: ["House rules of the target repository (CONTRIBUTING.md):", guidance].join("\n")
           })
           yield* events.publish(
@@ -226,10 +236,7 @@ const program = Effect.gen(function* () {
             : [
                 `The application lives in ${appDir}/ — its package.json, sources and tests; the gates run there.`
               ]
-        const gates = inAppDir(
-          appDir,
-          gatesIn(nodeProcessExecutor, events, gateCommands(process.env))
-        )
+        const gates = inAppDir(appDir, gatesIn(nodeProcessExecutor, events, commands))
         const setupCommand = worktreeSetupCommand(process.env)
         const healthUrl = serverHealthUrl(localServer, process.env)
         const report = yield* implementStoriesFlow(
