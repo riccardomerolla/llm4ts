@@ -176,11 +176,10 @@ an error message, only key names).
   `act | caution | hold` fact with `decide`, and a `FlowRecorder` hook that
   writes `RunResult` into the trace directory. Both are consumers, not
   part of the primitive.
-- ADR 0020 (proposed by Codex, uncommitted) frames the blackboard as
-  modernization coordination. That is one possible consumer. The ADR should
-  be rewritten to record the decisions in this spec (core primitive, TS
-  rules, forward chaining, core never decides) and list coordination as
-  future work; that rewrite is part of the implementation plan.
+- ADR 0020 (`docs/adr/0020-typed-blackboard.md`) records the decisions in
+  this spec. Coordinating modernization work through a board, the framing
+  of an earlier uncommitted draft, is one possible consumer and stays
+  future work.
 
 ## Testing
 

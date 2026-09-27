@@ -70,6 +70,31 @@ options before renormalization. An answer rebuilt from a sliver of mass is
 held regardless of its Confidence.
 _Avoid_: coverage, mass
 
+### Blackboard
+
+**Blackboard**:
+A run-time on which typed Facts are posted and Rules fire when the facts
+they match are present, until nothing more fires. The engine decides; a
+model only contributes facts through a judge Rule.
+_Avoid_: rule engine, workflow, agent memory, chat history
+
+**Fact**:
+One named, schema-typed value on a Blackboard, written once per run. Held
+in its encoded JSON form; read through its key's schema.
+_Avoid_: variable, slot, message
+
+**Rule**:
+A condition over Facts and a consequence that posts Facts. Kinds: `derive`
+(pure), `judge` (asks the Judgment service and posts the Answer), `rule`
+(any effect). It declares what it produces.
+_Avoid_: step, task, node, handler
+
+**Ruleset**:
+Named imports, exports and Rules, validated when built: every read
+produced, one producer per key, every export produced; unreachable Rules
+pruned. A value that runs many times.
+_Avoid_: pipeline, flow, module
+
 ### Existing evaluation terms (kept distinct from Judgment)
 
 **Judge**:

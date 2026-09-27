@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- New primitive `@llm4ts/core/blackboard/*` (ADR 0020): a typed blackboard
+  where company-written rules and `Judgment`-backed rules post facts until
+  a decision is produced. `makeKey`, `on`/`all`/`when`, `derive`/`rule`/
+  `judge`, `makeRuleset` (validated when built, unreachable rules pruned),
+  `runRuleset` (forward chaining to quiescence, a firing trace, typed
+  errors that name the waiting rules). No flow uses it yet.
+
 ## 2.13.1
 
 - `soap-ace`: the kit's XSD reading and request validation, fixed after
