@@ -14,6 +14,10 @@
   ],
   "exports": {
     "./AgentSession": "./dist/AgentSession.js",
+    "./blackboard/Fact": "./dist/blackboard/Fact.js",
+    "./blackboard/Rule": "./dist/blackboard/Rule.js",
+    "./blackboard/Ruleset": "./dist/blackboard/Ruleset.js",
+    "./blackboard/Run": "./dist/blackboard/Run.js",
     "./Capability": "./dist/Capability.js",
     "./Connector": "./dist/Connector.js",
     "./ConnectorConfig": "./dist/ConnectorConfig.js",
