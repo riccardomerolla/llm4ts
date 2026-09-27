@@ -26,13 +26,33 @@ export class Firing extends Schema.Class<Firing>("Firing")({
   startedAt: Schema.Number,
   /** Milliseconds. */
   duration: Schema.Number,
+  /** `failed`: the consequence failed and `postedKeys` are the rule's defaults. */
+  outcome: Schema.Literals(["posted", "failed"]),
   judgment: Schema.optionalKey(JudgmentNote)
 }) {}
 
+/**
+ * A rule's typed failure. `error` is the value itself while the result is in
+ * memory; `tag` and `message` are what survive encoding, since `Defect`
+ * encodes any error as a plain one.
+ */
 export class RuleFailure extends Schema.Class<RuleFailure>("RuleFailure")({
   rule: Schema.String,
+  tag: Schema.String,
+  message: Schema.String,
   error: Schema.Defect()
 }) {}
+
+const isTagged = (error: unknown): error is { readonly _tag: string } =>
+  typeof error === "object" && error !== null && "_tag" in error && typeof error._tag === "string"
+
+const ruleFailure = (rule: string, error: unknown): RuleFailure =>
+  RuleFailure.make({
+    rule,
+    tag: isTagged(error) ? error._tag : error instanceof Error ? error.name : typeof error,
+    message: error instanceof Error ? error.message : String(error),
+    error
+  })
 
 export class RunResult extends Schema.Class<RunResult>("RunResult")({
   board: Board,
@@ -62,20 +82,33 @@ export class WaitingRule extends Schema.Class<WaitingRule>("WaitingRule")({
   missingKeys: Schema.Array(Schema.String)
 }) {}
 
+/** Why an export is missing: who still waits, and who ran and did not post it. */
+export class MissingExport extends Schema.Class<MissingExport>("MissingExport")({
+  key: Schema.String,
+  waitingRules: Schema.Array(WaitingRule),
+  /** Producers that fired, failed or were vetoed by `when` without posting the key. */
+  silentRules: Schema.Array(Schema.String)
+}) {}
+
 export class ExportsMissing extends Schema.TaggedError<ExportsMissing>()("ExportsMissing", {
-  missing: Schema.Array(
-    Schema.Struct({ key: Schema.String, waitingRules: Schema.Array(WaitingRule) })
-  )
+  missing: Schema.Array(MissingExport),
+  /** What did run, so a stall can be explained. */
+  trace: Schema.Array(Firing),
+  failures: Schema.Array(RuleFailure)
 }) {
   get message(): string {
-    return `the run ended without: ${this.missing
-      .map(
-        (entry) =>
-          `"${entry.key}" (${entry.waitingRules
-            .map((waiting) => `${waiting.rule} waits for ${waiting.missingKeys.join(", ")}`)
-            .join("; ")})`
+    const reasons = this.missing.map((entry) => {
+      const waiting = entry.waitingRules.map(
+        (rule) => `${rule.rule} waits for ${rule.missingKeys.join(", ")}`
       )
-      .join(", ")}`
+      const silent = entry.silentRules.map((rule) => `${rule} fired without posting it`)
+      return `"${entry.key}" (${[...waiting, ...silent].join("; ")})`
+    })
+    const failed =
+      this.failures.length === 0
+        ? ""
+        : `; failed: ${this.failures.map((f) => `${f.rule} (${f.tag})`).join(", ")}`
+    return `the run ended without: ${reasons.join(", ")}${failed}`
   }
 }
 
@@ -157,20 +190,13 @@ export const runRuleset = <E, R>(
       if (ready.length === 0) break
       const outcomes = yield* fireAll(ready)
       for (const outcome of outcomes) {
+        const failed = Result.isFailure(outcome.result)
         if (Result.isFailure(outcome.result)) {
-          failures.push(
-            RuleFailure.make({ rule: outcome.rule.name, error: outcome.result.failure })
-          )
-          const [withDefaults] = yield* post(
-            facts,
-            outcome.rule.name,
-            outcome.rule.produces,
-            outcome.rule.defaults
-          )
-          facts = withDefaults
-          continue
+          failures.push(ruleFailure(outcome.rule.name, outcome.result.failure))
         }
-        const posted = outcome.result.success
+        const posted: Posted = Result.isSuccess(outcome.result)
+          ? outcome.result.success
+          : { facts: outcome.rule.defaults }
         const [next, postedKeys] = yield* post(
           facts,
           outcome.rule.name,
@@ -186,6 +212,7 @@ export const runRuleset = <E, R>(
             postedKeys,
             startedAt: outcome.startedAt,
             duration: outcome.duration,
+            outcome: failed ? "failed" : "posted",
             ...(posted.judgment === undefined ? {} : { judgment: posted.judgment })
           })
         )
@@ -195,17 +222,24 @@ export const runRuleset = <E, R>(
     if (missing.length > 0) {
       return yield* Effect.fail(
         ExportsMissing.make({
-          missing: missing.map((key) => ({
-            key,
-            waitingRules: [...pending.values()]
-              .filter((rule) => rule.produces.includes(key))
-              .map((rule) =>
-                WaitingRule.make({
-                  rule: rule.name,
-                  missingKeys: rule.reads.filter((read) => !facts.has(read))
-                })
-              )
-          }))
+          missing: missing.map((key) =>
+            MissingExport.make({
+              key,
+              waitingRules: [...pending.values()]
+                .filter((rule) => rule.produces.includes(key))
+                .map((rule) =>
+                  WaitingRule.make({
+                    rule: rule.name,
+                    missingKeys: rule.reads.filter((read) => !facts.has(read))
+                  })
+                ),
+              silentRules: ruleset.rules
+                .filter((rule) => rule.produces.includes(key) && !pending.has(rule.name))
+                .map((rule) => rule.name)
+            })
+          ),
+          trace,
+          failures
         })
       )
     }

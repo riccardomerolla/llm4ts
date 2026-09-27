@@ -154,8 +154,12 @@ describe("running a ruleset", () => {
         assert.strictEqual(result.failures[0]?.rule, "small")
         assert.instanceOf(result.failures[0]?.error, Refused)
         assert.deepStrictEqual(
-          result.trace.map((f) => f.rule),
-          ["size", "landing"]
+          result.trace.map((f) => [f.rule, f.outcome]),
+          [
+            ["size", "posted"],
+            ["small", "failed"],
+            ["landing", "posted"]
+          ]
         )
       })
   )
@@ -291,6 +295,128 @@ describe("running a ruleset", () => {
       )
       assert.strictEqual(yield* result.board.get(sum), 3)
       assert.deepStrictEqual(result.trace.map((f) => f.rule).sort(), ["left", "right", "sum"])
+    })
+  )
+})
+
+describe("review findings", () => {
+  class GateFailed extends Schema.TaggedError<GateFailed>()("GateFailed", {}) {}
+
+  it.effect("a ruleset mixes rules with different error and service types", () =>
+    Effect.gen(function* () {
+      const gate = rule({
+        name: "small",
+        condition: on(size),
+        produces: [small],
+        consequence: () => Effect.fail(new GateFailed())
+      })
+      const other = rule({
+        name: "landing",
+        condition: all(small, rules),
+        produces: [landable],
+        consequence: () => Effect.fail(new Refused())
+      })
+      const ruleset = yield* makeRuleset({
+        name: "mixed",
+        imports: [diff, rules],
+        exports: [landable],
+        rules: [sizeOf, gate, other]
+      })
+      assert.strictEqual(ruleset.rules.length, 3)
+    })
+  )
+
+  it.effect(
+    "a stall carries the trace, the failures and the producers that fired without posting",
+    () =>
+      Effect.gen(function* () {
+        const failing = rule({
+          name: "small",
+          condition: on(size),
+          produces: [small],
+          consequence: () => Effect.fail(new Refused())
+        })
+        const ruleset = yield* makeRuleset({
+          name: "landing",
+          imports: [diff, rules],
+          exports: [landable],
+          rules: [sizeOf, failing, landing]
+        })
+        const error = yield* Effect.flip(runRuleset(ruleset, [diff.of("x"), rules.of("r")]))
+        assert.instanceOf(error, ExportsMissing)
+        assert.strictEqual(error.failures[0]?.rule, "small")
+        assert.include(
+          error.trace.map((f) => f.rule),
+          "size"
+        )
+        assert.deepStrictEqual(error.missing[0]?.silentRules, [])
+        assert.deepStrictEqual(
+          error.missing[0]?.waitingRules.map((w) => w.rule),
+          ["landing"]
+        )
+        const silent = derive({
+          name: "small",
+          condition: on(size),
+          produces: [small],
+          derive: () => []
+        })
+        const ruleset2 = yield* makeRuleset({
+          name: "s",
+          imports: [diff],
+          exports: [small],
+          rules: [sizeOf, silent]
+        })
+        const error2 = yield* Effect.flip(runRuleset(ruleset2, [diff.of("x")]))
+        assert.instanceOf(error2, ExportsMissing)
+        assert.deepStrictEqual(error2.missing[0]?.silentRules, ["small"])
+        assert.include(error2.message, "small fired without posting it")
+      })
+  )
+
+  it.effect("a failed firing is in the trace with its outcome and the default keys it posted", () =>
+    Effect.gen(function* () {
+      const gate = rule({
+        name: "small",
+        condition: on(size),
+        produces: [small],
+        defaults: [small.of(false)],
+        consequence: () => Effect.fail(new Refused())
+      })
+      const ruleset = yield* makeRuleset({
+        name: "landing",
+        imports: [diff, rules],
+        exports: [landable],
+        rules: [sizeOf, gate, landing]
+      })
+      const result = yield* runRuleset(ruleset, [diff.of("x"), rules.of("r")])
+      const failed = result.trace.find((f) => f.rule === "small")
+      assert.strictEqual(failed?.outcome, "failed")
+      assert.deepStrictEqual(failed?.postedKeys, ["small"])
+      assert.strictEqual(result.trace.find((f) => f.rule === "size")?.outcome, "posted")
+    })
+  )
+
+  it.effect("a failure keeps its tag and message through the schema", () =>
+    Effect.gen(function* () {
+      const gate = rule({
+        name: "small",
+        condition: on(size),
+        produces: [small],
+        defaults: [small.of(false)],
+        consequence: () => Effect.fail(new Refused())
+      })
+      const ruleset = yield* makeRuleset({
+        name: "s",
+        imports: [diff],
+        exports: [small],
+        rules: [sizeOf, gate]
+      })
+      const result = yield* runRuleset(ruleset, [diff.of("x")])
+      const json = yield* Schema.encodeEffect(RunResult)(result)
+      const back = yield* Schema.decodeUnknownEffect(RunResult)(json)
+      assert.strictEqual(back.failures[0]?.tag, "Refused")
+      assert.strictEqual(typeof back.failures[0]?.message, "string")
+      assert.instanceOf(result.failures[0]?.error, Refused)
     })
   )
 })

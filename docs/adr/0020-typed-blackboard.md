@@ -59,6 +59,12 @@ every export produced). Design spec:
   a mapped tuple type needs one). An import only pruned rules read counts
   as `UnusedImport`. `run` is the function `runRuleset(ruleset, facts)`,
   not a method, to keep `Ruleset.ts` and `Run.ts` free of an import cycle.
+  A failed firing stays in the trace with `outcome: "failed"` and the
+  default keys it posted, so paid judgment calls are counted whether or not
+  they succeeded; `RuleFailure` carries `tag` and `message` because `Defect`
+  encodes every error as a plain one; and `ExportsMissing` carries the
+  trace, the failures and, per key, the producers that ran without posting
+  it (`silentRules`), so a stall explains itself.
 - Not in this ADR: retraction and superseding, a declarative rule
   language, persisting rulesets, a UI, a first consumer flow, and the
   coordination of modernization work through a board (a possible consumer

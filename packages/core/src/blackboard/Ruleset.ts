@@ -66,12 +66,20 @@ export class RulesetInvalid extends Schema.TaggedError<RulesetInvalid>()("Rulese
   }
 }
 
-export interface RulesetOptions<E, R> {
+export interface RulesetOptions<Rs extends ReadonlyArray<Rule<unknown, unknown>>> {
   readonly name: string
   readonly imports: ReadonlyArray<FactKey<unknown>>
   readonly exports: ReadonlyArray<FactKey<unknown>>
-  readonly rules: ReadonlyArray<Rule<E, R>>
+  readonly rules: Rs
 }
+
+/** The union of the rules' error types, so a `judge` and a custom-error `rule` mix freely. */
+export type ErrorOf<Rs extends ReadonlyArray<Rule<unknown, unknown>>> =
+  Rs[number] extends Rule<infer E, unknown> ? E : never
+
+/** The union of the services the rules need. */
+export type RequirementsOf<Rs extends ReadonlyArray<Rule<unknown, unknown>>> =
+  Rs[number] extends Rule<unknown, infer R> ? R : never
 
 export interface Ruleset<E = never, R = never> {
   readonly name: string
@@ -137,14 +145,23 @@ const renderMermaid = <E, R>(name: string, rules: ReadonlyArray<Rule<E, R>>): st
   return ["flowchart LR", `  %% ${escapeLabel(name)}`, ...nodes, ...edges].join("\n")
 }
 
-export const makeRuleset = <E, R>(
-  options: RulesetOptions<E, R>
-): Effect.Effect<Ruleset<E, R>, RulesetInvalid> => {
+/**
+ * Typed by overload: the ruleset's error and service types are the unions
+ * over its rules, so a `judge` and a custom-error `rule` mix in one array.
+ * The implementation only needs names, so it works over loose rules.
+ */
+export function makeRuleset<const Rs extends ReadonlyArray<Rule<unknown, unknown>>>(
+  options: RulesetOptions<Rs>
+): Effect.Effect<Ruleset<ErrorOf<Rs>, RequirementsOf<Rs>>, RulesetInvalid>
+export function makeRuleset(
+  options: RulesetOptions<ReadonlyArray<Rule<unknown, unknown>>>
+): Effect.Effect<Ruleset<unknown, unknown>, RulesetInvalid> {
+  const given = options.rules
   const imports = options.imports.map((key) => key.name)
   const exports = options.exports.map((key) => key.name)
   const problems: Array<Problem> = []
   const seen = new Set<string>()
-  for (const rule of options.rules) {
+  for (const rule of given) {
     if (seen.has(rule.name)) problems.push({ kind: "DuplicateRuleName", rule: rule.name })
     seen.add(rule.name)
     if (rule.reads.length === 0) problems.push({ kind: "EmptyCondition", rule: rule.name })
@@ -152,11 +169,11 @@ export const makeRuleset = <E, R>(
       if (rule.produces.includes(key)) problems.push({ kind: "SelfMatch", rule: rule.name, key })
     }
   }
-  const producers = producersByKey(imports, options.rules)
+  const producers = producersByKey(imports, given)
   for (const [key, names] of producers) {
     if (names.length > 1) problems.push({ kind: "ManyProducers", key, rules: names })
   }
-  for (const rule of options.rules) {
+  for (const rule of given) {
     for (const key of rule.reads) {
       if (!producers.has(key)) problems.push({ kind: "UnproducedMatch", rule: rule.name, key })
     }
@@ -168,11 +185,11 @@ export const makeRuleset = <E, R>(
     return Effect.fail(RulesetInvalid.make({ name: options.name, problems }))
   }
   const warnings: Array<Problem> = []
-  const kept = reachable(exports, options.rules)
-  for (const rule of options.rules) {
+  const kept = reachable(exports, given)
+  for (const rule of given) {
     if (!kept.has(rule.name)) warnings.push({ kind: "Unreachable", rule: rule.name })
   }
-  const rules = options.rules.filter((rule) => kept.has(rule.name))
+  const rules = given.filter((rule) => kept.has(rule.name))
   // An import only pruned rules read is unused too: nothing that runs needs it.
   const read = new Set(rules.flatMap((rule) => rule.reads))
   for (const key of imports) {
