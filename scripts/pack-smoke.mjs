@@ -67,6 +67,12 @@ import { runFlowMain, resolveFlowInput, completeAndPublish } from "@llm4ts/runne
 import { requireApproval } from "@llm4ts/flow/Approval"
 import { choice, truth } from "@llm4ts/core/judgment/Schemas"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
+import { makeKey } from "@llm4ts/core/blackboard/Fact"
+import { derive, on } from "@llm4ts/core/blackboard/Rule"
+import { makeRuleset } from "@llm4ts/core/blackboard/Ruleset"
+import { runRuleset } from "@llm4ts/core/blackboard/Run"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import { verbalizedScoreLabels } from "@llm4ts/core/LabelScoring"
 import { makeMlxLmProvider } from "@llm4ts/core/providers/MlxLmProvider"
 import { decide, defaultJudgmentPolicy } from "@llm4ts/flow/Judgment"
@@ -92,6 +98,14 @@ assert.equal(typeof decide, "function")
 assert.ok(defaultJudgmentPolicy.verbalized.act > defaultJudgmentPolicy.logprobs.act)
 assert.equal(choice("q", { a: "x" }).type, "choice")
 assert.equal(truth("s").type, "truth")
+
+const size = makeKey("size", Schema.Number)
+const big = makeKey("big", Schema.Boolean)
+const bigRule = derive({ name: "big", condition: on(size), produces: [big], derive: (n) => [big.of(n > 1)] })
+const ruleset = await Effect.runPromise(makeRuleset({ name: "smoke", imports: [size], exports: [big], rules: [bigRule] }))
+const run = await Effect.runPromise(runRuleset(ruleset, [size.of(2)]))
+assert.equal(run.board.facts.big, true)
+assert.equal(run.trace.length, 1)
 
 const client = createClient({ provider: "mock", model: "mock" })
 const response = await client.complete("Say hello")
