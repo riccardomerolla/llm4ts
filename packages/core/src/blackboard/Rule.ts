@@ -1,6 +1,8 @@
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
+import { Judgment, type JudgmentBackendError, type JudgmentInput } from "../judgment/Judgment.ts"
+import type { JudgmentResult } from "../judgment/Schemas.ts"
 import type { Fact, FactKey } from "./Fact.ts"
 
 /**
@@ -167,4 +169,33 @@ export interface DeriveOptions<A> {
 export const derive = <A>(options: DeriveOptions<A>): Rule =>
   makeRule({ ...options, kind: "derive" }, (value) =>
     Effect.succeed({ facts: options.derive(value) })
+  )
+
+export interface JudgeOptions<A> {
+  readonly name: string
+  readonly condition: Condition<A>
+  readonly produces: ReadonlyArray<FactKey<unknown>>
+  /** The State and Questions for this firing; `state` is data, never instructions. */
+  readonly ask: (value: A) => JudgmentInput
+  /**
+   * Facts from the typed result. Post the `Answer` itself (probability,
+   * support, origin), not a boolean read off it: deciding is another rule's
+   * job. Unanswered questions arrive in `result.failures`.
+   */
+  readonly post: (result: JudgmentResult, value: A) => ReadonlyArray<Fact>
+  /** Posted when the backend itself is unreachable or rejects the request. */
+  readonly defaults?: ReadonlyArray<Fact>
+}
+
+/** A rule that asks the Judgment service; its firing notes the backend and checkpoint for the trace. */
+export const judge = <A>(options: JudgeOptions<A>): Rule<JudgmentBackendError, Judgment> =>
+  makeRule({ ...options, kind: "judge" }, (value) =>
+    Effect.gen(function* () {
+      const judgment = yield* Judgment
+      const result = yield* judgment.judge(options.ask(value))
+      return {
+        facts: options.post(result, value),
+        judgment: { backend: judgment.backend, identity: judgment.identity }
+      }
+    })
   )
