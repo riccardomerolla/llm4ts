@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
+import { RunResult } from "@llm4ts/core/blackboard/Run"
 import { Answer, AnswerOrigin, Question, State } from "@llm4ts/core/judgment/Schemas"
 import { Decision, JudgmentMode } from "./JudgmentTypes.ts"
 
@@ -18,12 +19,22 @@ export const JudgmentOutcome = Schema.Union([
     issues: Schema.Struct({ Critical: Schema.Int, Warning: Schema.Int, Info: Schema.Int })
   }),
   Schema.TaggedStruct("SatisfiedProbe", { literalMatch: Schema.Boolean }),
-  Schema.TaggedStruct("ProgramJudge", { score: Schema.Number })
+  Schema.TaggedStruct("ProgramJudge", { score: Schema.Number }),
+  Schema.TaggedStruct("StoryBoard", {
+    dimension: Schema.String,
+    score: Schema.Number,
+    mergeable: Schema.Boolean
+  })
 ])
 export type JudgmentOutcome = typeof JudgmentOutcome.Type
 
 export class JudgmentObserved extends Schema.TaggedClass<JudgmentObserved>()("JudgmentObserved", {
-  consumer: Schema.Literals(["review-prescreen", "satisfied-probe", "program-judge"]),
+  consumer: Schema.Literals([
+    "review-prescreen",
+    "satisfied-probe",
+    "program-judge",
+    "story-board"
+  ]),
   key: Schema.String,
   state: State,
   question: Question,
@@ -164,8 +175,15 @@ export class Declassified extends Schema.TaggedClass<Declassified>()("Declassifi
   label: Schema.String
 }) {}
 
+/** A blackboard ruleset ran (ADR 0020): its board, trace and failures, for the trace file. */
+export class BlackboardRun extends Schema.TaggedClass<BlackboardRun>()("BlackboardRun", {
+  ruleset: Schema.String,
+  result: RunResult
+}) {}
+
 export const FlowEvent = Schema.Union([
   JudgmentObserved,
+  BlackboardRun,
   StageStarted,
   StageCompleted,
   StageFailed,

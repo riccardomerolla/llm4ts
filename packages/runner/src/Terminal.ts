@@ -33,8 +33,10 @@ export const parseVerbosity = (value: string | undefined): Verbosity => {
 export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean => {
   switch (event._tag) {
     // Advise mode publishes a separate Info event for the operator; progress
-    // feeds the status rows. Neither is a line of its own.
+    // feeds the status rows; a blackboard run is for the trace file. None is
+    // a line of its own.
     case "JudgmentObserved":
+    case "BlackboardRun":
     case "UsageProgress":
       return false
     case "StageStarted":
@@ -233,6 +235,7 @@ export const terminalLine = (
         verbosity === "Verbose" || verbosity === "Debug" ? event.issues.length : reviewFindingsShown
       )
     case "JudgmentObserved":
+    case "BlackboardRun":
     case "UsageProgress":
       return ""
     case "StageStarted":

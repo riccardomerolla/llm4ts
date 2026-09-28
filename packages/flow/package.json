@@ -21,6 +21,7 @@
     "./BasecampTool": "./dist/BasecampTool.js",
     "./Bench": "./dist/Bench.js",
     "./BenchReport": "./dist/BenchReport.js",
+    "./Blackboard": "./dist/Blackboard.js",
     "./BoardSync": "./dist/BoardSync.js",
     "./CapabilityGuard": "./dist/CapabilityGuard.js",
     "./Chat": "./dist/Chat.js",
