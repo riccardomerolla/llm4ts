@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.16.0
+
+- `soap-ace`: new flow `soap-explore`, one command from a WSDL to a
+  design draft. It discovers the service, writes a `happy-path` request for
+  every operation, probes the read operations once in producer-first
+  order (a value one response returns seeds the next request), writes the
+  analyses and the 1:1 mapping, drafts the REST design (check plus one
+  revise round), and writes `explore.md` with the next command for every
+  gap. A rerun continues where the last one stopped; `--refresh`
+  re-probes, `--no-design` skips drafting.
+  - Only reads are called. Without `auth.json` nothing is. Before
+    `operations.md` is confirmed, an operation is probed only in dev or
+    test, and only when the file, the name heuristic and the judgment seat
+    all say read. Mutating operations are never called.
+  - Chained values stay in memory; request files on disk keep the masked
+    form. `callOperation` gains an in-memory request and returns the
+    response payload, live and masked.
+  - Spec: `specs/pending/soap-explore.md`.
+
 ## 2.15.0
 
 - `epic-stories-board`: a fork of `epic-stories` whose story judge is a
