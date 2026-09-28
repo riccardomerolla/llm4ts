@@ -8,7 +8,7 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { makeKey, type FactKey } from "@llm4ts/core/blackboard/Fact"
 import { all, derive, judge } from "@llm4ts/core/blackboard/Rule"
-import { runRuleset, type RunResult } from "@llm4ts/core/blackboard/Run"
+import { runRuleset, type ExportsMissing, type RunResult } from "@llm4ts/core/blackboard/Run"
 import { makeRuleset, type Ruleset, type RulesetInvalid } from "@llm4ts/core/blackboard/Ruleset"
 import { ProviderError } from "@llm4ts/core/Errors"
 import { dimensionQuestion } from "@llm4ts/core/eval/Judge"
@@ -213,14 +213,29 @@ export interface BoardStoryJudgeContext extends StoryJudgeContext {
   readonly policy?: JudgmentPolicy
 }
 
-const unscored = (story: string, keys: ReadonlyArray<string>): FlowError =>
-  FlowLlmError.from(
+/**
+ * The round's error when the bar never fired: which dimensions went unscored
+ * and, when the backend itself failed, its message — the story loop reads an
+ * outage off that message and waits for recovery instead of failing the story.
+ */
+const unscored = (story: string, error: ExportsMissing): FlowError => {
+  const names = [
+    ...new Set(
+      error.missing
+        .flatMap((m) => m.waitingRules.flatMap((w) => w.missingKeys))
+        .filter((key) => key.startsWith("judge."))
+        .map((key) => key.slice("judge.".length))
+    )
+  ]
+  const because = error.failures.map((failure) => `${failure.tag}: ${failure.message}`)
+  return FlowLlmError.from(
     ProviderError.make({
-      message: `story-board: the judge could not score ${keys
-        .map((key) => key.replace(/^judge\./, ""))
-        .join(", ")} for ${story}`
+      message: `story-board: the judge could not score ${names.join(", ")} for ${story}${
+        because.length === 0 ? "" : ` (${because.join("; ")})`
+      }`
     })
   )
+}
 
 /** The seam implementation: the ruleset built once, run per judge round. */
 export const boardStoryJudge = (
@@ -242,10 +257,7 @@ export const boardStoryJudge = (
             Effect.provide(Layer.succeed(Judgment, judgment)),
             Effect.mapError((error) =>
               error._tag === "ExportsMissing"
-                ? unscored(
-                    story.id,
-                    error.missing.flatMap((m) => m.waitingRules.flatMap((w) => w.missingKeys))
-                  )
+                ? unscored(story.id, error)
                 : runErrorToFlowError(error)
             )
           )

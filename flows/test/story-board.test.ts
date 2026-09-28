@@ -5,6 +5,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { dimensionQuestion } from "@llm4ts/core/eval/Judge"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
+import { JudgmentBackendError, type JudgmentShape } from "@llm4ts/core/judgment/Judgment"
 import { origins, scoreAnswer, type Answer } from "@llm4ts/core/judgment/Schemas"
 import {
   makeCollectingFlowEvents,
@@ -14,8 +15,14 @@ import {
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import type { StorySeats } from "@llm4ts/flow/Stories"
 import { Story, StoryPlan } from "@llm4ts/flow/StoryPlan"
-import { storyDimensions } from "../lib/epic-stories.ts"
-import { boardStoryJudge, makeStoryBoard, storyBriefOf } from "../lib/story-board.ts"
+import { isOutageMessage } from "@llm4ts/flow/TransientRetry"
+import { epicRunnerOptions, storyDimensions } from "../lib/epic-stories.ts"
+import {
+  boardJudgeFactory,
+  boardStoryJudge,
+  makeStoryBoard,
+  storyBriefOf
+} from "../lib/story-board.ts"
 import { idleContext, replying } from "./support.ts"
 
 const story = Story.make({
@@ -174,7 +181,72 @@ describe("the fork entry", () => {
     const original = readFileSync(join(here, "..", "epic-stories.ts"), "utf8")
     const fork = readFileSync(join(here, "..", "epic-stories-board.ts"), "utf8")
     assert.include(original, "runEpicStories({ storyJudge: rubricStoryJudge })")
-    assert.include(fork, "runEpicStories({ storyJudge: boardJudgeFactory })")
+    assert.match(fork, /runEpicStories\(\{\s*storyJudge: boardJudgeFactory/)
     assert.match(fork.split("\n")[0] ?? "", /^\/\/ .*fork of epic-stories/)
   })
+})
+
+describe("review findings", () => {
+  it.effect(
+    "the fork's runner options carry the judgment seat from the environment and the log",
+    () =>
+      Effect.gen(function* () {
+        const off = yield* epicRunnerOptions({ storyJudge: boardJudgeFactory }, {})
+        assert.deepStrictEqual(off, {})
+        const on = yield* epicRunnerOptions(
+          { storyJudge: boardJudgeFactory, judgmentFromEnvironment: true, judgmentLog: true },
+          { LLM4TS_JUDGMENT_PROVIDER: "mock" }
+        )
+        assert.strictEqual(on.judgmentLog, true)
+        assert.strictEqual(on.judgment?.connectorId.value, "mock")
+        const unset = yield* epicRunnerOptions(
+          { storyJudge: boardJudgeFactory, judgmentFromEnvironment: true, judgmentLog: true },
+          {}
+        )
+        assert.deepStrictEqual(unset, { judgmentLog: true })
+      })
+  )
+
+  it("the fork entry opts into the judgment seat and the judgment log", () => {
+    const here = dirname(fileURLToPath(import.meta.url))
+    const fork = readFileSync(join(here, "..", "epic-stories-board.ts"), "utf8")
+    assert.include(fork, "judgmentFromEnvironment: true")
+    assert.include(fork, "judgmentLog: true")
+  })
+
+  it.effect(
+    "a backend outage during the judge keeps the backend's message, so the story loop can wait for recovery",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const memory = yield* makeMemoryPlainFileStore()
+        const down: JudgmentShape = {
+          backend: "llm",
+          identity: "llm:down",
+          judge: () =>
+            Effect.fail(
+              JudgmentBackendError.make({
+                backend: "llm",
+                message: "the backend is unhealthy"
+              })
+            )
+        }
+        const judge = yield* boardStoryJudge({
+          plan,
+          budget: 10_000,
+          reasoning: replying(""),
+          events,
+          files: memory.store,
+          houseRules: "rules",
+          judgment: down
+        })
+        const error = yield* Effect.flip(judge(story, "+ code", { context: idleContext(events) }))
+        assert.include(error.message, "backend is unhealthy")
+        assert.isTrue(isOutageMessage(error.message))
+        // Each dimension named once, without the key prefix.
+        assert.strictEqual(error.message.split("tests").length, 2)
+        assert.notInclude(error.message, "judge.")
+        assert.notInclude(error.message, "decision.")
+      })
+  )
 })

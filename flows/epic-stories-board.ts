@@ -12,4 +12,10 @@ import { runFlowMain } from "@llm4ts/runner"
 import { runEpicStories } from "./lib/epic-stories.ts"
 import { boardJudgeFactory } from "./lib/story-board.ts"
 
-runFlowMain(runEpicStories({ storyJudge: boardJudgeFactory }))
+runFlowMain(
+  runEpicStories({
+    storyJudge: boardJudgeFactory,
+    judgmentFromEnvironment: true,
+    judgmentLog: true
+  })
+)

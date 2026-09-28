@@ -28,7 +28,7 @@ import {
   type Story
 } from "@llm4ts/flow/StoryPlan"
 import * as Console from "effect/Console"
-import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import { CliConnectorConfig, type ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { budget } from "@llm4ts/flow/Context"
 import { makeLocalBoardSync } from "@llm4ts/flow/BoardSync"
 import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
@@ -44,7 +44,7 @@ import {
   stage,
   withModel
 } from "@llm4ts/runner"
-import { claude, coderIds, pi } from "@llm4ts/runner/Connectors"
+import { claude, coderIds, judgmentConnectorFromEnvironment, pi } from "@llm4ts/runner/Connectors"
 import {
   FlowAborted,
   FlowLlmError,
@@ -998,7 +998,33 @@ export const rubricStoryJudge =
 
 export interface EpicStoriesOptions {
   readonly storyJudge: (context: StoryJudgeContext) => StoryJudge
+  /**
+   * Resolve the judgment seat from LLM4TS_JUDGMENT_PROVIDER / _MODEL (ADR
+   * 0017) and pass it to the runner. Off, the runner derives one from the
+   * reasoning seat — what epic-stories has always done.
+   */
+  readonly judgmentFromEnvironment?: boolean
+  /** Write every JudgmentObserved to .llm4ts/judgments/<consumer>.jsonl. */
+  readonly judgmentLog?: boolean
 }
+
+/** The runner options the two flags above add; empty when neither is set. */
+export const epicRunnerOptions = Effect.fn("epic-stories.runnerOptions")(function* (
+  options: EpicStoriesOptions,
+  environment: Readonly<Record<string, string | undefined>>
+): Effect.fn.Return<
+  { readonly judgment?: ApiConnectorConfig; readonly judgmentLog?: boolean },
+  ScriptUsage
+> {
+  const judgment =
+    options.judgmentFromEnvironment === true
+      ? yield* judgmentConnectorFromEnvironment(environment)
+      : undefined
+  return {
+    ...(judgment === undefined ? {} : { judgment }),
+    ...(options.judgmentLog === true ? { judgmentLog: true } : {})
+  }
+})
 
 /** `LLM4TS_CODER_MODEL` / `LLM4TS_REASONING_MODEL`: pi takes `provider/model` (e.g. `openai-codex/gpt-5.5`). */
 const withOptionalModel = (
@@ -1068,6 +1094,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
     const estimateOptions = estimatedUsageOptionsFromEnv(process.env)
     const contextBudget = budget(process.env)
 
+    const runnerOptions = yield* epicRunnerOptions(options, process.env)
     yield* runNode(
       {
         workDir: input.workDir,
@@ -1076,7 +1103,8 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
         coder,
         reasoning,
         reviewers: [asReadOnly(reasoning)],
-        environment: process.env
+        environment: process.env,
+        ...runnerOptions
       },
       (context) =>
         Effect.gen(function* () {
