@@ -31,6 +31,7 @@ import {
   loadMaskingOverrides,
   readRequestFile,
   RecordedMessage,
+  type RequestFile,
   RecordedResponse,
   type SampleError,
   samplePaths,
@@ -92,6 +93,11 @@ export interface CallOptions {
   readonly allowMutating: string | undefined
   readonly confirm: (question: string) => Effect.Effect<boolean>
   readonly keepRaw?: boolean
+  /**
+   * The request to send instead of the file on disk (soap-explore's chained
+   * body, whose live values are never written). It is validated the same way.
+   */
+  readonly request?: RequestFile
   readonly now?: () => Date
   readonly random?: (size: number) => Uint8Array
 }
@@ -100,6 +106,13 @@ export interface CallResult {
   readonly exchange: Exchange
   readonly path: string
   readonly permission: CallPermission
+  /**
+   * The response payload (first Body child) as received and as masked, when
+   * the response was a SOAP envelope without a fault. The live one is
+   * in-memory only: callers may chain values from it into later calls, never
+   * persist or print it.
+   */
+  readonly payload?: { readonly live: XmlElement; readonly masked: XmlElement }
 }
 
 /** The endpoint for an operation: the profile's override, else the WSDL port of its binding. */
@@ -146,7 +159,8 @@ export const callOperation = (options: CallOptions): Effect.Effect<CallResult, C
       })
     }
 
-    const request = yield* readRequestFile(workspace, catalog, service, operation.name, name)
+    const request =
+      options.request ?? (yield* readRequestFile(workspace, catalog, service, operation.name, name))
     const issues: ReadonlyArray<Issue> = [
       ...request.readIssues,
       ...validateInstance(catalog, input, request.body)
@@ -215,6 +229,7 @@ export const callOperation = (options: CallOptions): Effect.Effect<CallResult, C
     // which quote values) is read from the masked, security-stripped tree:
     // nothing unmasked reaches the exchange.
     let fault: Exchange["fault"]
+    let payload: CallResult["payload"]
     if (parsedResponse._tag === "None") {
       responseIssues.push({
         path: "(response)",
@@ -230,10 +245,13 @@ export const callOperation = (options: CallOptions): Effect.Effect<CallResult, C
         fault = read.value.fault
       } else if (operation.output !== undefined) {
         const output = elementByName(catalog, operation.output)
-        const payload = read.value.payload
-        if (output !== undefined && payload !== undefined) {
-          responseIssues.push(...instanceFromXml(catalog, output, payload).issues)
-        } else if (payload === undefined) {
+        const masked = read.value.payload
+        if (output !== undefined && masked !== undefined) {
+          responseIssues.push(...instanceFromXml(catalog, output, masked).issues)
+          const live = yield* readEnvelope(stripSecurity(parsedResponse.value)).pipe(Effect.option)
+          if (live._tag === "Some" && live.value.payload !== undefined)
+            payload = { live: live.value.payload, masked }
+        } else if (masked === undefined) {
           responseIssues.push({ path: "(response)", detail: "empty Body" })
         }
       }
@@ -267,5 +285,5 @@ export const callOperation = (options: CallOptions): Effect.Effect<CallResult, C
       masking: mergeReports([maskedRequest.report, maskedResponse.report])
     })
     const path = yield* writeExchange(workspace, service, exchange)
-    return { exchange, path, permission }
+    return { exchange, path, permission, ...(payload === undefined ? {} : { payload }) }
   })
