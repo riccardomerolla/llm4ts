@@ -201,6 +201,20 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   `story/<epic-id>/<story-id>`, the board and `report.md` under
   `.llm4ts/epics/<epic-id>/`. Every usage figure is an estimate.
 
+### The story judge as a ruleset (fork)
+
+`epic-stories-board` is `epic-stories` with one difference: each story is
+judged by a blackboard ruleset (ADR 0020, `flows/lib/story-board.ts`)
+instead of the rubric judge. A `judge` rule scores the four dimensions
+(provides, scope, house-style, tests) with the Judgment service; `decide`
+turns each answer into act, caution or hold; and the `bar` rule merges the
+story only when every dimension scores at least 1.5 of 2 **and** is an
+`act`. Anything else comes back to the coder as issues, one per dimension.
+Every round's run is in the trace (`BlackboardRun`) and every answer in
+`.llm4ts/judgments/story-board.jsonl`. Same flags and environment as
+`epic-stories`; the judgment seat is `LLM4TS_JUDGMENT_PROVIDER` /
+`LLM4TS_JUDGMENT_MODEL`, or the reasoning seat.
+
 ### A pool of executors
 
 With a roster file (`~/.config/llm4ts/roster.json`, overridden by id by

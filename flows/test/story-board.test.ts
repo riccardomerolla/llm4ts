@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { dimensionQuestion } from "@llm4ts/core/eval/Judge"
@@ -163,4 +166,15 @@ describe("the story board ruleset", () => {
       assert.notInclude(error.message, "+ code")
     })
   )
+})
+
+describe("the fork entry", () => {
+  it("both flow entries run the shared program; the fork's first line names it a fork", () => {
+    const here = dirname(fileURLToPath(import.meta.url))
+    const original = readFileSync(join(here, "..", "epic-stories.ts"), "utf8")
+    const fork = readFileSync(join(here, "..", "epic-stories-board.ts"), "utf8")
+    assert.include(original, "runEpicStories({ storyJudge: rubricStoryJudge })")
+    assert.include(fork, "runEpicStories({ storyJudge: boardJudgeFactory })")
+    assert.match(fork.split("\n")[0] ?? "", /^\/\/ .*fork of epic-stories/)
+  })
 })

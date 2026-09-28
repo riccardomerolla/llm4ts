@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `epic-stories-board`: a fork of `epic-stories` whose story judge is a
+  blackboard ruleset (`flows/lib/story-board.ts`): four Score judgments,
+  `decide`, and a company-editable bar (score ≥ 1.5 and `act` on every
+  dimension). The run is a `BlackboardRun` trace event; answers are logged
+  under the `story-board` judgment consumer. `epic-stories` is unchanged;
+  its program is now `runEpicStories({ storyJudge })`.
+- `@llm4ts/flow/Blackboard`: `decideRule`, `answerKey`/`decisionKey`,
+  `publishBlackboardRun`, `runErrorToFlowError`.
+
 ## 2.14.0
 
 - New primitive `@llm4ts/core/blackboard/*` (ADR 0020): a typed blackboard
