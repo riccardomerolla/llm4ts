@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.15.0
 
 - `epic-stories-board`: a fork of `epic-stories` whose story judge is a
   blackboard ruleset (`flows/lib/story-board.ts`): four Score judgments,
