@@ -8,7 +8,6 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
-import type { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { TokenUsage, type JsonSchema } from "@llm4ts/core/Models"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
@@ -28,6 +27,23 @@ import {
   pathsNamedIn,
   type Story
 } from "@llm4ts/flow/StoryPlan"
+import * as Console from "effect/Console"
+import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import { budget } from "@llm4ts/flow/Context"
+import { makeLocalBoardSync } from "@llm4ts/flow/BoardSync"
+import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
+import { landEpic } from "@llm4ts/flow/Landing"
+import { implementStoriesFlow, type StoriesOptions, type StorySeats } from "@llm4ts/flow/Stories"
+import { validateStoryPlan } from "@llm4ts/flow/StoryPlan"
+import {
+  asReadOnly,
+  nodePlainFileStore,
+  nodeProcessExecutor,
+  resolveFlowInput,
+  runNode,
+  stage,
+  withModel
+} from "@llm4ts/runner"
 import { claude, coderIds, pi } from "@llm4ts/runner/Connectors"
 import {
   FlowAborted,
@@ -421,7 +437,8 @@ export const serverHealthUrl = (
 }
 
 /** Whether `url` answers 2xx within five seconds (the roster's health check). */
-export { httpProbe } from "@llm4ts/runner/ExecutorRoster"
+import { httpProbe } from "@llm4ts/runner/ExecutorRoster"
+export { httpProbe }
 
 export interface RecoveryTiming {
   readonly interval: Duration.Input
@@ -951,3 +968,288 @@ export const gatesIn =
       }
       return mergeReviewResults(results)
     })
+
+// ---- The flow program, shared by epic-stories and its forks -------------------
+
+export type StoryJudge = NonNullable<StoriesOptions["judge"]>
+
+/** What a story judge is built from, once per run. */
+export interface StoryJudgeContext {
+  readonly plan: StoryPlan
+  readonly budget: number
+  /** The metered reasoning seat; a roster's judge seat wins per story when present. */
+  readonly reasoning: LlmServiceShape
+  readonly events: FlowEventsShape
+  readonly files: PlainFileStoreShape
+  readonly houseRules: string
+}
+
+/** Today's story judge: the rubric judge over the four dimensions. */
+export const rubricStoryJudge =
+  (context: StoryJudgeContext): StoryJudge =>
+  (story, diff, seats) =>
+    judgeStory(
+      seats.context.roster?.forRole("judge") ?? context.reasoning,
+      story,
+      diff,
+      context.budget,
+      context.plan
+    )
+
+export interface EpicStoriesOptions {
+  readonly storyJudge: (context: StoryJudgeContext) => StoryJudge
+}
+
+/** `LLM4TS_CODER_MODEL` / `LLM4TS_REASONING_MODEL`: pi takes `provider/model` (e.g. `openai-codex/gpt-5.5`). */
+const withOptionalModel = (
+  config: CliConnectorConfig,
+  model: string | undefined
+): CliConnectorConfig => {
+  const trimmed = model?.trim()
+  return trimmed === undefined || trimmed.length === 0 ? config : withModel(config, trimmed)
+}
+
+/** Extra CLI flags on top of a preset's own (`LLM4TS_CODER_FLAGS`). */
+const withExtraFlags = (
+  config: CliConnectorConfig,
+  flags: Readonly<Record<string, string>>
+): CliConnectorConfig =>
+  Object.keys(flags).length === 0
+    ? config
+    : CliConnectorConfig.make({ ...config, flags: { ...config.flags, ...flags } })
+
+const defaultEpic =
+  "Add the retail customer's current account (Conto) with balance and movements, and wire " +
+  "transfers (Bonifico) with beneficiary, review, SCA confirmation, and history."
+
+export const runEpicStories = (options: EpicStoriesOptions) =>
+  Effect.gen(function* () {
+    const flags = yield* parseEpicArgs(process.argv.slice(2))
+    // The epic is chosen before any seat is resolved: the text given, `--epic`,
+    // or the one epic not landed yet (`chooseEpic`); `--list` only lists.
+    const given = yield* resolveFlowInput("", flags.rest)
+    const files = nodePlainFileStore
+    const epics = yield* listEpics(files, given.workDir)
+    if (flags.list) {
+      yield* Console.log(renderEpicList(epics))
+      return
+    }
+    const choice = yield* chooseEpic({
+      text: given.prompt,
+      epic: flags.epic,
+      epics,
+      defaultEpic
+    })
+    const input = {
+      ...given,
+      prompt: choice._tag === "Existing" ? choice.epic.epic : choice.prompt
+    }
+    const coderFlags = flagsFromEnvironment(process.env.LLM4TS_CODER_FLAGS)
+    const reasoning = withExtraFlags(
+      withOptionalModel(
+        yield* reasonerFromEnvironment(process.env),
+        process.env.LLM4TS_REASONING_MODEL
+      ),
+      flagsFromEnvironment(process.env.LLM4TS_REASONING_FLAGS)
+    )
+    const coder = withExtraFlags(
+      withOptionalModel(
+        yield* storyCoderFromEnvironment(process.env),
+        process.env.LLM4TS_CODER_MODEL
+      ),
+      coderFlags
+    )
+    const localServer = localCoderServer(process.env.LLM4TS_CODER_MODEL, coderFlags, process.env)
+    // A new epic's id (and state folder) is derived from its text; an existing
+    // one keeps its folder, whatever text is on the command line.
+    const epicId = choice._tag === "Existing" ? choice.epic.dir : epicIdFor(input.prompt)
+    const stateDir = join(epicsDir(input.workDir), epicId)
+    const planPath = join(stateDir, "plan.md")
+    const estimateOptions = estimatedUsageOptionsFromEnv(process.env)
+    const contextBudget = budget(process.env)
+
+    yield* runNode(
+      {
+        workDir: input.workDir,
+        workspace: input.workspace,
+        userPrompt: input.prompt,
+        coder,
+        reasoning,
+        reviewers: [asReadOnly(reasoning)],
+        environment: process.env
+      },
+      (context) =>
+        Effect.gen(function* () {
+          const events = context.events
+          const reasoningMeter = yield* makeEstimatedUsageMeter(context.reasoning, estimateOptions)
+          const guidance = yield* Effect.map(
+            files.read(join(input.workDir, "CONTRIBUTING.md")),
+            (text) => cap(text ?? "(no CONTRIBUTING.md in the target repository)", 24_000).text
+          )
+
+          const store = makeStoryPlanStore(files)
+          const plan = yield* stage(
+            events,
+            "story plan",
+            store
+              .recoverOrCreate(
+                planPath,
+                generateStoryPlan(reasoningMeter.service, events, input.prompt, epicId, guidance)
+              )
+              .pipe(Effect.flatMap(validateStoryPlan))
+          )
+          yield* events.publish(
+            Info.make({
+              message: `story plan: ${plan.stories.length} stories at ${planPath} (edit and rerun to re-plan)`
+            })
+          )
+          if (flags.planOnly) {
+            return
+          }
+          // Setup and gates run where the application is, in every checkout.
+          const appDir = yield* appDirFor(input.workDir, process.env)
+          if (appDir !== ".") {
+            yield* events.publish(
+              Info.make({
+                message: `app dir: ${appDir} (setup and gates run there; LLM4TS_APP_DIR)`
+              })
+            )
+          }
+          const commands = gateCommands(
+            process.env,
+            yield* appScripts(files, join(input.workDir, appDir))
+          )
+          yield* events.publish(
+            Info.make({
+              message:
+                commands.length === 0
+                  ? "gates: none (the app defines none of typecheck, lint, test, build; set LLM4TS_GATES)"
+                  : `gates: ${commands.map((command) => command.join(" ")).join(" · ")}`
+            })
+          )
+          if (flags.land !== undefined) {
+            const landed = yield* landEpic(context, {
+              plan,
+              files,
+              stateDir,
+              target: flags.land,
+              keepWorktrees: flags.keepWorktrees,
+              gates: inAppDir(appDir, gatesIn(nodeProcessExecutor, events, commands)),
+              system: ["House rules of the target repository (CONTRIBUTING.md):", guidance].join(
+                "\n"
+              )
+            })
+            yield* events.publish(
+              Info.make({
+                message: `epic ${plan.epicId}: landed on ${landed.target}${landed.conflicts.length === 0 ? "" : ` (${landed.conflicts.length} conflicted file(s) resolved in ${landed.rounds} round(s))`}`
+              })
+            )
+            return
+          }
+          // With a roster, the default is every coder slot it has; the flag caps it.
+          const concurrency = flags.concurrency ?? context.roster?.slots("coder") ?? 3
+          if (context.roster === undefined && localServer !== undefined && concurrency > 1) {
+            yield* events.publish(
+              Info.make({
+                message:
+                  `⚠ the coder is served by a local single-model server (${localServer}): it generates one ` +
+                  `reply at a time, so ${concurrency} parallel coders queue behind each other and a queued ` +
+                  'request is cut off after a few minutes ("terminated"). Prefer --concurrency 1, or give ' +
+                  "the server parallel slots."
+              })
+            )
+          }
+
+          const contextFor = context.contextFor
+          if (contextFor === undefined) {
+            return yield* FlowAborted.make({
+              message: "this runner cannot rebind seats to a worktree (no contextFor)"
+            })
+          }
+          const appDirNote =
+            appDir === "."
+              ? []
+              : [
+                  `The application lives in ${appDir}/ — its package.json, sources and tests; the gates run there.`
+                ]
+          const gates = inAppDir(appDir, gatesIn(nodeProcessExecutor, events, commands))
+          const setupCommand = worktreeSetupCommand(process.env)
+          const healthUrl = serverHealthUrl(localServer, process.env)
+          const report = yield* implementStoriesFlow(
+            { ...context, reasoning: reasoningMeter.service },
+            {
+              plan,
+              files,
+              stateDir,
+              worktreeRoot: worktreeRootFor(input.workDir, plan.epicId, process.env),
+              board: makeLocalBoardSync(files, stateDir, `Epic: ${plan.epicId}`),
+              contextFor: (workDir, contextOptions) =>
+                Effect.gen(function* () {
+                  const rebound = yield* contextFor(workDir, contextOptions)
+                  const coderMeter = yield* makeEstimatedUsageMeter(rebound.coder, estimateOptions)
+                  const reviewMeter = yield* makeEstimatedUsageMeter(
+                    rebound.reasoning,
+                    estimateOptions
+                  )
+                  const seats: StorySeats = {
+                    context: {
+                      ...rebound,
+                      coder: coderMeter.service,
+                      reasoning: reviewMeter.service
+                    },
+                    totals: combineTotals(coderMeter.totals, reviewMeter.totals)
+                  }
+                  return seats
+                }),
+              ...(setupCommand === undefined
+                ? {}
+                : {
+                    setup: inAppDir(appDir, setupIn(nodeProcessExecutor, events, setupCommand)),
+                    setupAgent: setupAgentEnabled(process.env)
+                  }),
+              gates,
+              // With a roster, the judge and the verifier are leased per story,
+              // away from the executor coding it (ADR 0019).
+              judge: options.storyJudge({
+                plan,
+                budget: contextBudget,
+                reasoning: reasoningMeter.service,
+                events,
+                files,
+                houseRules: guidance
+              }),
+              verifyBlocked: (story, need, workDir, seats) =>
+                verifyBlockedOn(
+                  seats.context.roster?.forRole("verifier") ?? reasoningMeter.service,
+                  events,
+                  files,
+                  plan
+                )(story, need, workDir),
+              // A roster waits for its own executors (the story's next lease
+              // does); without one, poll the single coder's engine.
+              awaitRecovery:
+                context.roster === undefined
+                  ? awaitServer(healthUrl === undefined ? undefined : httpProbe(healthUrl), events)
+                  : () => Effect.void,
+              system: (story) =>
+                Effect.succeed(
+                  [
+                    "House rules of the target repository (CONTRIBUTING.md):",
+                    guidance,
+                    "",
+                    `Imitate the exemplar feature before inventing anything. Story id: ${story.id}.`,
+                    ...appDirNote
+                  ].join("\n")
+                ),
+              concurrency,
+              failFast: flags.failFast
+            }
+          )
+          yield* events.publish(
+            Info.make({
+              message: `epic ${report.epicId}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("waiting")} waiting — report at ${join(stateDir, "report.md")} (usage figures estimated)`
+            })
+          )
+        })
+    )
+  })

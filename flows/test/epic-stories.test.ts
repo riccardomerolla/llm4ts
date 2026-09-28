@@ -58,6 +58,7 @@ import {
   gatesIn,
   judgeStory,
   localCoderServer,
+  rubricStoryJudge,
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
@@ -820,5 +821,48 @@ describe("epic-stories demo plan", () => {
         assert.include(files[`${stateDir}/report.md`] ?? "", "| home | done |")
         assert.include(files[`${stateDir}/board.md`] ?? "", "done: 8")
       })
+  )
+})
+
+describe("story judge factories", () => {
+  it.effect("rubricStoryJudge judges with today's rubric judge and clears a clean review", () =>
+    Effect.gen(function* () {
+      const story = parsedFixture.stories[0]
+      if (story === undefined) {
+        return yield* FlowAborted.make({ message: "fixture has no stories" })
+      }
+      const events = yield* makeFlowEventHub()
+      const memory = yield* makeMemoryPlainFileStore()
+      const scored = structured({
+        scores: [
+          { name: "provides", score: 2, reasoning: "" },
+          { name: "scope", score: 2, reasoning: "" },
+          { name: "house-style", score: 2, reasoning: "" },
+          { name: "tests", score: 2, reasoning: "" }
+        ]
+      })
+      const judge = rubricStoryJudge({
+        plan: parsedFixture,
+        budget: 1000,
+        reasoning: scored,
+        events,
+        files: memory.store,
+        houseRules: "rules"
+      })
+      const context: FlowContextShape = {
+        reasoning: scored,
+        coder: replying("done"),
+        git: gitOver(yield* Ref.make<ReadonlyArray<string>>([]), ""),
+        hosting,
+        events,
+        reviewers: [scored],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: parsedFixture.epic,
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+      const verdict = yield* judge(story, "diff", { context })
+      assert.isTrue(verdict.isClean)
+    })
   )
 })
