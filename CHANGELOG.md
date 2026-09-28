@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.14.0
 
 - New primitive `@llm4ts/core/blackboard/*` (ADR 0020): a typed blackboard
   where company-written rules and `Judgment`-backed rules post facts until
