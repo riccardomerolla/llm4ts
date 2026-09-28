@@ -16,6 +16,22 @@ cd ~/work/conti-analysis
 The analysis repository holds `.llm4ts/soap/<service>/`: catalog, samples,
 analysis, design. The ACE repository receives the contracts and the code.
 
+## Fast path: soap-explore
+
+Steps 1 to 4 in one command, rerun after each decision:
+
+```bash
+llm4ts run soap-explore --repo . ./wsdl/ContiService.wsdl   # discover, requests, report
+# write auth.json (step 2), review and confirm operations.md
+llm4ts run soap-explore --repo .                            # probe reads, analyse, draft the design
+```
+
+Read `.llm4ts/soap/<service>/explore.md` after each run: it lists what was
+called, what was not and why, and the next command. On the fixture:
+`LLM4TS_SOAP_STUB=<kit>/fixtures/demo-bank-soap/responses`. The steps below
+are the same work one command at a time, and what to use past the first
+pass.
+
 ## 1. Discover
 
 ```bash

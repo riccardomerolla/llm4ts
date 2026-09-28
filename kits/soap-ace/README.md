@@ -14,15 +14,56 @@ source) and shares nothing with this kit.
 
 ## Status
 
-| Piece                                              | State    |
-| -------------------------------------------------- | -------- |
-| Strict XML reader (`flows/lib/soap/Xml.ts`)        | done     |
-| WSDL 1.1/2.0 + XSD catalog (`Wsdl.ts`, `Xsd.ts`)   | done     |
-| `demo-bank-soap` fixture                           | WSDL/XSD |
-| `soap-discover` flow and operation classification  | pending  |
-| Masking, auth profile, transport, sample authoring | pending  |
-| Analysis, REST design, OpenAPI projection          | pending  |
-| `ace12-rest` pack, scaffold, `soap-epic`           | pending  |
+| Piece                                                                    | State |
+| ------------------------------------------------------------------------ | ----- |
+| Strict XML reader, WSDL 1.1/2.0 + XSD catalog                            | done  |
+| `soap-discover` flow and operation classification                        | done  |
+| Masking, auth profile, transport, sample authoring                       | done  |
+| Analysis, REST design, OpenAPI projection                                | done  |
+| `ace12-rest` pack, scaffold, `soap-epic`                                 | done  |
+| `soap-explore`: the discovery half in one command                        | done  |
+| `demo-bank-soap` fixture ([runbook](fixtures/demo-bank-soap/RUNBOOK.md)) | done  |
+
+## Quick start: soap-explore
+
+One command from a WSDL to a design draft, the way SoapUI turns a WSDL into
+a project. It stops only where a person decides, and a rerun continues where
+it stopped:
+
+```bash
+llm4ts run soap-explore --repo ~/work/conti-analysis ./wsdl/ContiService.wsdl   # or an https URL
+# write .llm4ts/soap/<service>/auth.json: at least {"environment": "test"}
+# review operations.md, set Status: confirmed
+llm4ts run soap-explore --repo ~/work/conti-analysis                             # continue
+```
+
+| Step     | What happens                                                                                                                                                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| discover | `catalog.json`/`.md`, `operations.md` with proposed classes (as `soap-discover`)                                                                                                                                                |
+| requests | `samples/<op>/happy-path.request.yaml` for **every** operation, example values from the XSD                                                                                                                                     |
+| probe    | calls the **read** operations once, producers first: the IBAN `cercaConti` returns is what `dettaglioConto` is called with. Live values stay in memory; the request file on disk carries the masked one. Mutating: never called |
+| evidence | `analysis/<op>.md`, `design/mapping.json`/`.md`                                                                                                                                                                                 |
+| design   | the reasoning seat drafts `design/api-design.md`, `check`, one `revise` round when errors remain; an existing design is only checked; `--no-design` skips                                                                       |
+| report   | `explore.md`: per operation the probe decision and result, the chained values, the design state, and the next command for every gap                                                                                             |
+
+**Who may be called.** Without `auth.json` nothing is called (explore never
+writes it: the environment label is yours to declare). With `operations.md`
+confirmed, its `read` operations are called. Before confirmation, an
+operation is called only in dev or test, and only when the file still lists
+it as `read`, the name heuristic says `read`, and the judgment seat
+(`LLM4TS_JUDGMENT_PROVIDER`) answers `read` with an `act` decision; without
+a judgment seat, confirm first. uat always needs confirmation.
+
+**Files it owns.** A request explore writes starts with a `# soap-explore:
+generated` line and is regenerated when probed again. Delete that line to
+own the file: explore then sends it as written and never touches it.
+`--refresh` calls the probed operations again; everything else is kept.
+
+Approvals stay human: `Status: confirmed` in `operations.md`,
+`Status: approved` in `api-design.md`. Then `soap-design "openapi"` and
+`soap-epic` as below. The individual flows remain for everything past the
+first pass: more scenarios per operation (`soap-sample "propose <op>"`),
+mutating calls, SoapUI import, design revisions.
 
 ## soap-discover
 
