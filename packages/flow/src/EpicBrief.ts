@@ -651,18 +651,36 @@ export interface AssembleOptions {
 
 export const checkMark = "[check]"
 
-/** The next draft: never approved, feedback consumed, open points renumbered. */
+/**
+ * The next draft: never approved, feedback consumed, open points renumbered.
+ * Answered points are folded in by the revision and go, except answered
+ * `[check]` points: those are the human overriding a check (a scenario
+ * refine dropped, kept on purpose) and stay as the record of it.
+ */
 export const assembleBrief = (options: AssembleOptions): EpicBrief => {
-  const questions = [
-    ...options.proposal.openPoints,
-    ...(options.previous === undefined
+  const previous = options.previous
+  const isAnswered = (point: OpenPoint): boolean => (point.answer ?? "").trim().length > 0
+  const carried: ReadonlyArray<{ readonly question: string; readonly answer?: string }> =
+    previous === undefined
       ? []
-      : unanswered(options.previous)
-          .map((point) => point.question)
-          .filter((question) => !question.startsWith(checkMark))),
-    ...(options.problems ?? []).map((problem) => `${checkMark} ${renderBriefProblem(problem)}`)
+      : [
+          ...unanswered(previous)
+            .filter((point) => !point.question.startsWith(checkMark))
+            .map((point) => ({ question: point.question })),
+          ...previous.openPoints
+            .filter((point) => point.question.startsWith(checkMark) && isAnswered(point))
+            .map((point) => ({ question: point.question, answer: (point.answer ?? "").trim() }))
+        ]
+  const all: ReadonlyArray<{ readonly question: string; readonly answer?: string }> = [
+    ...options.proposal.openPoints.map((question) => ({ question })),
+    ...carried,
+    ...(options.problems ?? []).map((problem) => ({
+      question: `${checkMark} ${renderBriefProblem(problem)}`
+    }))
   ]
-  const unique = questions.filter((question, index) => questions.indexOf(question) === index)
+  const unique = all.filter(
+    (entry, index) => all.findIndex((other) => other.question === entry.question) === index
+  )
   return EpicBrief.make({
     epicId: options.epicId,
     status: "draft",
@@ -675,7 +693,13 @@ export const assembleBrief = (options: AssembleOptions): EpicBrief => {
     provided: options.proposal.provided,
     deferred: options.proposal.deferred,
     constraints: options.proposal.constraints,
-    openPoints: unique.map((question, index) => OpenPoint.make({ number: index + 1, question })),
+    openPoints: unique.map((entry, index) =>
+      OpenPoint.make({
+        number: index + 1,
+        question: entry.question,
+        ...(entry.answer === undefined ? {} : { answer: entry.answer })
+      })
+    ),
     feedback: ""
   })
 }

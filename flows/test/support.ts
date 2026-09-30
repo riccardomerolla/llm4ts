@@ -2,6 +2,8 @@
 // epic-stories suite keeps its own copies on purpose (it is the guard that the
 // program move preserved behaviour, so it does not change).
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { InvalidRequestError } from "@llm4ts/core/Errors"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
@@ -95,3 +97,31 @@ export const idleContext = (events: FlowEventsShape): FlowContextShape => ({
   workDir: "/repo",
   workspace: "/repo"
 })
+
+/**
+ * A reasoning seat that answers structured calls from a script, in order, and
+ * records the prompts it was given. Each reply is decoded by the schema the
+ * caller asked for, so a wrong reply in the script is a defect in the test.
+ */
+export const scripted = (replies: ReadonlyArray<unknown>) =>
+  Effect.gen(function* () {
+    const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+    const cursor = yield* Ref.make(0)
+    const next = <A, E, RD, RE>(prompt: string, schema: Schema.ConstraintCodec<A, E, RD, RE>) =>
+      Effect.gen(function* () {
+        const index = yield* Ref.getAndUpdate(cursor, (count) => count + 1)
+        yield* Ref.update(prompts, (all) => [...all, prompt])
+        return yield* Schema.decodeUnknownEffect(schema)(replies[index]).pipe(Effect.orDie)
+      })
+    const service: LlmServiceShape = {
+      executeStream: () => Stream.empty,
+      executeStreamWithHistory: () => Stream.empty,
+      executeWithTools: () => Effect.fail(unused),
+      executeStructured: (prompt, schema) => next(prompt, schema),
+      executeStructuredWithUsage: (prompt, schema) =>
+        Effect.map(next(prompt, schema), (decoded) => [decoded, undefined, undefined] as const),
+      scoreLabels: unsupportedScoreLabels,
+      isAvailable: Effect.succeed(true)
+    }
+    return { service, prompts: Ref.get(prompts), calls: Ref.get(cursor) }
+  })
