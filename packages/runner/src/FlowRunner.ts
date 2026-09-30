@@ -762,6 +762,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
           {
             write: (text) => Effect.sync(() => void process.stdout.write(text)),
             columns: () => process.stdout.columns,
+            rows: () => process.stdout.rows,
             colour: true
           },
           nodeTreeKeys("interrupt")

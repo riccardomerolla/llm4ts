@@ -48,6 +48,7 @@ const setup = (keys: ReadonlyArray<string> = [], interactive = false) =>
       output: {
         write: (text) => Ref.update(written, (all) => all + text),
         columns: () => 90,
+        rows: () => 20,
         interactive,
         colour: false
       },
@@ -105,6 +106,14 @@ describe("llm4ts watch", () => {
       assert.isTrue(text.endsWith("\u001b[?1049l"))
       // `e` switched to the executor columns before `q`.
       assert.include(text, "│ no lease")
+      // Every frame fits the terminal's 20 rows and keeps its status lines.
+      const frames = text.split("\u001b[H\u001b[2J").slice(1)
+      assert.isAbove(frames.length, 1)
+      for (const frame of frames) {
+        const lines = frame.replace("\u001b[?25h\u001b[?1049l", "").split("\n")
+        assert.isAtMost(lines.length, 20)
+        assert.include(lines.at(-1) ?? "", "run [completed]")
+      }
     })
   )
 })

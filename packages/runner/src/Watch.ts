@@ -13,6 +13,7 @@ import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistenc
 import { readTrace } from "@llm4ts/flow/Replay"
 import {
   emptyTree,
+  fitToRows,
   initialView,
   onTreeKey,
   reduceTree,
@@ -47,6 +48,7 @@ export interface WatchOptions {
 export interface WatchOutput {
   readonly write: (text: string) => Effect.Effect<void>
   readonly columns: () => number | undefined
+  readonly rows: () => number | undefined
   /** A terminal a person looks at: full-screen, keys, following. */
   readonly interactive: boolean
   readonly colour: boolean
@@ -181,6 +183,10 @@ const draw = (state: TreeState, view: TreeView, output: WatchOutput): string =>
     view
   }).join("\n")
 
+/** A full-screen frame: no taller than the terminal. */
+const drawScreen = (state: TreeState, view: TreeView, output: WatchOutput): string =>
+  fitToRows(draw(state, view, output).split("\n"), output.rows()).join("\n")
+
 export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function* (
   options: WatchOptions,
   dependencies: WatchDependencies
@@ -236,7 +242,7 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
           const current = yield* Ref.get(inputs)
           const count = yield* Ref.get(shown)
           const state = yield* fold(current.slice(0, count))
-          yield* output.write(`${home}${draw(state, yield* Ref.get(view), output)}`)
+          yield* output.write(`${home}${drawScreen(state, yield* Ref.get(view), output)}`)
           const replaying = options.replay === true && count < current.length
           const gap = replaying
             ? Math.min(replayGapCap, (current[count]?.at ?? 0) - (current[count - 1]?.at ?? 0)) /
@@ -276,6 +282,7 @@ export const nodeWatchDependencies = (
     output: {
       write: (text) => Effect.sync(() => void process.stdout.write(text)),
       columns: () => process.stdout.columns,
+      rows: () => process.stdout.rows,
       interactive,
       colour: process.stdout.isTTY === true && environment.NO_COLOR === undefined
     },

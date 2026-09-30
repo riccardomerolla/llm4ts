@@ -911,3 +911,15 @@ export const renderTree = (state: TreeState, options: TreeRenderOptions): Readon
   ]
   return lines.map((line) => paint(fit(line, width), options.colour))
 }
+
+/**
+ * A frame cut to a terminal's height: the top of the tree and its two status
+ * lines, so a full-screen redraw never scrolls.
+ */
+export const fitToRows = (
+  lines: ReadonlyArray<string>,
+  rows: number | undefined
+): ReadonlyArray<string> =>
+  rows === undefined || rows < 4 || lines.length <= rows
+    ? lines
+    : [...lines.slice(0, rows - 2), ...lines.slice(-2)]

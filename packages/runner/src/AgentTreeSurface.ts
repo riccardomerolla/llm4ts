@@ -8,6 +8,7 @@ import * as Stream from "effect/Stream"
 import { awaitConsumed, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
 import {
   emptyTree,
+  fitToRows,
   initialView,
   onTreeKey,
   reduceTree,
@@ -27,6 +28,7 @@ import type { TerminalSurface } from "./Terminal.ts"
 export interface AgentTreeOutput {
   readonly write: (text: string) => Effect.Effect<void>
   readonly columns: () => number | undefined
+  readonly rows: () => number | undefined
   readonly colour: boolean
 }
 
@@ -64,14 +66,18 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
     Effect.forkScoped
   )
 
-  const frame: Effect.Effect<string> = Effect.gen(function* () {
-    const lines = renderTree(yield* Ref.get(state), {
-      width: Math.max(90, output.columns() ?? 90),
-      colour: output.colour,
-      view: yield* Ref.get(view)
+  const render = (rows: number | undefined): Effect.Effect<string> =>
+    Effect.gen(function* () {
+      const lines = renderTree(yield* Ref.get(state), {
+        width: Math.max(90, output.columns() ?? 90),
+        colour: output.colour,
+        view: yield* Ref.get(view)
+      })
+      return fitToRows(lines, rows).join("\n")
     })
-    return lines.join("\n")
-  })
+  /** The full screen fits the terminal; the last frame left behind is whole. */
+  const frame = render(undefined)
+  const screen = Effect.suspend(() => render(output.rows()))
 
   /** Runs `effect` only while the tree has the screen, under the drawing lock. */
   const whileShown = (effect: Effect.Effect<void>): Effect.Effect<void> =>
@@ -90,7 +96,7 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
   yield* Effect.forever(
     Effect.andThen(
       Effect.sleep(redrawEvery),
-      whileShown(Effect.flatMap(frame, (text) => output.write(`${home}${text}`)))
+      whileShown(Effect.flatMap(screen, (text) => output.write(`${home}${text}`)))
     )
   ).pipe(Effect.forkScoped)
   yield* Stream.runForEach(keys, (key) =>

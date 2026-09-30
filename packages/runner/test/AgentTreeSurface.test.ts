@@ -24,6 +24,7 @@ const setup = (keys: Stream.Stream<string>) =>
       {
         write: (text) => Ref.update(written, (all) => all + text),
         columns: () => 90,
+        rows: () => 40,
         colour: false
       },
       keys
