@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "value": {
+    "title": "Epic: conto-bonifico",
+    "items": [
+      { "id": "accounts", "title": "Accounts domain contract", "wave": "1", "status": "done" },
+      { "id": "payments", "title": "Payments fake routes", "wave": "1", "status": "active" },
+      { "id": "iban", "title": "IBAN input component", "wave": "1", "status": "failed" },
+      { "id": "overview", "title": "Conto: account overview", "wave": "2", "status": "active" },
+      { "id": "movimenti", "title": "Conto: movements list", "wave": "2", "status": "planned" },
+      {
+        "id": "bonifico",
+        "title": "Bonifico form",
+        "wave": "2",
+        "status": "waiting",
+        "detail": "waiting for iban"
+      }
+    ]
+  }
+}

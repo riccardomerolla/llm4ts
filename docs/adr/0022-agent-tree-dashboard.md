@@ -40,7 +40,7 @@ terminal view of the orchestrator, the judgment layer, the story lanes on the
 roster, the judge seat and a session log.
 
 1. **One pure core, two hosts.** `reduce(state, FlowEvent)` and
-   `view(state, width)` live in `packages/runner/src/tree/`. They know
+   `view(state, width)` live in `packages/runner/src/AgentTree.ts`. They know
    nothing about where events come from. Two hosts feed them:
    - **in-process**, a `TreeSurface` behind `llm4ts run <flow> --ui tree`,
      subscribed to the hub. The shell passes the choice to the flow child as

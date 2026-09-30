@@ -15,6 +15,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./Cli": "./dist/Cli.js",
+    "./AgentTree": "./dist/AgentTree.js",
     "./CoderPolicy": "./dist/CoderPolicy.js",
     "./Connectors": "./dist/Connectors.js",
     "./Costs": "./dist/Costs.js",

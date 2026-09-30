@@ -1,0 +1,33 @@
+                        LLM4TS AGENT TREE  ·  epic conto-bonifico                         
+══════════════════════════════════════════════════════════════════════════════════════════
+                                                                                          
+┌────────────────────────┐          ┌─ epic conto-bonifico ──────────────────────┐        
+│       JUDGE SEAT       │          │ stage  implement stories                   │        
+│      — · on call       │          │ stories 6  elapsed 7m10s                   │        
+│                        │          └────────────────────────────────────────────┘        
+│ last verdict:          │                                •                               
+│ » none yet             │  ┌─ JUDGMENT ─────────────────────────────────────────────────┐
+└────────────────────────┘  │ no verdicts yet                                            │
+                            └────────────────────────────────────────────────────────────┘
+                                            delegate to roster · 2 running                
+                                                          ▼                               
+                            ┌────────────────────────────┐  ┌────────────────────────────┐
+                            │ payments                   │  │ overview                   │
+                            │ pi-lmstudio                │  │ codex                      │
+                            │ Payments fake routes       │  │ story overview: setup      │
+                            │ bash pnpm typecheck && pn… │  │ read src/features/conto/p… │
+                            │ 7m06s · 92.5k tok          │  │ 29s · 0 tok                │
+                            │ ◐ running                  │  │ ◐ running                  │
+                            └────────────────────────────┘  └────────────────────────────┘
+                                                                                          
+                            ✓ accounts  ◐ payments  ✗ iban  ◐ overview  · movimenti       
+                            ◌ bonifico                                                    
+                                                                                          
+┌─ session log ──────────────────────────────────────────────────────────────────────────┐
+│ 00:00:01  flow             story plan: 6 stories                                       │
+│ 00:03:20  iban             failed · pi error: Connection error.                        │
+│ 00:06:39  accounts         merged into epic/conto-bonifico                             │
+│ 00:06:40  accounts         done                                                        │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+stories [1/6 done · 2 running · 1 failed · 1 waiting]  roster [2/3 busy]                  
+tokens [383.5k]  cost [~$0.38]  run [live]                                                

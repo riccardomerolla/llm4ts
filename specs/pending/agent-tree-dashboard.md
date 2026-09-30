@@ -82,7 +82,7 @@ At 90 columns, top to bottom:
 - [ ] `epic-stories` appends `{runId, tracePath, round, startedAt}` to
       `.llm4ts/epics/<id>/runs.jsonl` when a run starts.
 
-### Core (`packages/runner/src/tree/`)
+### Core (`packages/runner/src/AgentTree.ts`)
 
 - [ ] `TreeState` and `reduce(state, FlowEvent)`: lanes with a stage stack
       each, executors and leases, judge seat, judgment entries, session log,
