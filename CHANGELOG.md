@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.18.0
 
 - The **coverage ledger** for `epic-design`: the epic briefs of a target
   repository are read together, against the whole legacy extract pack.
