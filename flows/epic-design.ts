@@ -27,7 +27,7 @@
 // the other epic. --coverage writes .llm4ts/epics/coverage.md, the ledger of
 // every scenario of the pack against every brief, without calling a model.
 import { access, readdir } from "node:fs/promises"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import { budget, cap } from "@llm4ts/flow/Context"
@@ -69,13 +69,15 @@ const program = Effect.gen(function* () {
     yield* Console.log(renderBriefList(briefs))
     return
   }
-  const legacyRepo = process.env.LLM4TS_LEGACY_REPO?.trim()
-  if (legacyRepo === undefined || legacyRepo.length === 0) {
+  const legacyGiven = process.env.LLM4TS_LEGACY_REPO?.trim()
+  if (legacyGiven === undefined || legacyGiven.length === 0) {
     return yield* ScriptUsage.make({
       message:
         "LLM4TS_LEGACY_REPO is not set: point it at the legacy repository holding docs/modernization/"
     })
   }
+  // One spelling of the path, so every brief of this repository names the same legacy.
+  const legacyRepo = resolve(given.workspace, legacyGiven)
   const specNames = yield* Effect.tryPromise(() => readdir(join(legacyRepo, ModDir, "specs"))).pipe(
     Effect.map((names) =>
       names
@@ -97,7 +99,7 @@ const program = Effect.gen(function* () {
     return
   }
   const target = yield* resolveDesignTarget({ text: given.prompt, epic: flags.epic, briefs })
-  const others = (yield* loadBriefs(files, given.workDir, dirs)).briefs
+  const loaded = yield* loadBriefs(files, given.workDir, dirs)
   const reasoning = asReadOnly(yield* reasonerFromEnvironment(process.env))
 
   yield* runNode(
@@ -154,7 +156,8 @@ const program = Effect.gen(function* () {
             budget: budget(process.env),
             guidance,
             packNote,
-            others,
+            others: loaded.briefs,
+            unreadable: loaded.unreadable,
             pathExists: (absolute) =>
               Effect.tryPromise(() => access(absolute)).pipe(
                 Effect.as(true),

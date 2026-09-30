@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema"
 import {
   BriefStatus,
+  crossProblem,
   dispositionWords,
   hasOverride,
   type BriefDisposition,
@@ -27,7 +28,11 @@ export const Claim = Schema.Struct({
   approved: Schema.Boolean,
   disposition: Disposition,
   /** The in-scope item's title, the reason, the pointer or the deferral note. */
-  note: Schema.String
+  note: Schema.String,
+  /** The epics this claim was kept against on purpose (`keep: <why>` in its brief). */
+  keptAgainst: Schema.Array(Schema.String),
+  /** Whether the claim still binds: false for a draft's, an overruled one, a deferral handed over. */
+  standing: Schema.Boolean
 })
 export type Claim = typeof Claim.Type
 
@@ -131,7 +136,11 @@ export interface LedgerInputs {
   readonly legacy?: string
 }
 
-interface Located extends Claim {
+interface Located {
+  readonly epicId: string
+  readonly approved: boolean
+  readonly disposition: BriefDisposition
+  readonly note: string
   readonly program: string
   readonly scenario: string
 }
@@ -171,6 +180,18 @@ const claimsOf = (epicId: string, brief: EpicBrief): ReadonlyArray<Located> => {
 
 const unique = (values: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(values)]
 
+const trimmed = (path: string): string => path.replace(/[\\/]+$/, "")
+const lastSegment = (path: string): string => trimmed(path).split(/[\\/]/).at(-1) ?? ""
+
+/**
+ * Whether two `Legacy:` paths name the same repository. The same checkout is
+ * written with or without a trailing slash, and lives under another home on a
+ * colleague's machine or in CI: the folder's name is what stays.
+ */
+export const sameLegacy = (left: string, right: string): boolean =>
+  trimmed(left) === trimmed(right) ||
+  (lastSegment(left).length > 0 && lastSegment(left) === lastSegment(right))
+
 const deliveryOf = (progress: EpicProgress | undefined): DeliveryState =>
   progress === undefined
     ? "approved"
@@ -182,9 +203,16 @@ const deliveryOf = (progress: EpicProgress | undefined): DeliveryState =>
           ? "planned"
           : "approved"
 
+interface Settled {
+  readonly status: LedgerStatus
+  readonly owners: ReadonlyArray<string>
+  readonly claims: ReadonlyArray<Claim>
+}
+
 export const buildLedger = (inputs: LedgerInputs): CoverageLedger => {
+  const legacy = inputs.legacy
   const skipped = inputs.briefs
-    .filter((entry) => inputs.legacy !== undefined && entry.brief.legacy !== inputs.legacy)
+    .filter((entry) => legacy !== undefined && !sameLegacy(entry.brief.legacy, legacy))
     .map((entry) => entry.epicId)
   const read = inputs.briefs.filter((entry) => !skipped.includes(entry.epicId))
   const briefById = new Map(read.map((entry) => [entry.epicId, entry.brief]))
@@ -209,77 +237,105 @@ export const buildLedger = (inputs: LedgerInputs): CoverageLedger => {
     }
   }
 
-  /** The status the approved claims give a scenario, and the epics behind it. */
-  const settle = (
-    program: string,
-    scenario: string,
-    claims: ReadonlyArray<Located>
-  ): { readonly status: LedgerStatus; readonly owners: ReadonlyArray<string> } => {
-    const approved = claims.filter((claim) => claim.approved)
-    if (approved.length === 0) {
-      return { status: claims.length === 0 ? "unclaimed" : "proposed", owners: [] }
+  /**
+   * The status the approved claims give a scenario. Deferrals bind nobody.
+   * Every other pair of claims is put to `crossProblem`, the rule the
+   * per-brief check uses: a clash nobody kept on purpose is a conflict;
+   * shared ownership needs one `keep:`; a contradiction is settled for the
+   * one brief that kept its decision, and the other claim becomes history.
+   */
+  const settle = (program: string, scenario: string, located: ReadonlyArray<Located>): Settled => {
+    const binding = located.filter((claim) => claim.approved && claim.disposition !== "deferred")
+    const deferrers = located.filter((claim) => claim.approved && claim.disposition === "deferred")
+    const kept = (mine: Located, theirs: Located): boolean => {
+      const brief = briefById.get(mine.epicId)
+      const problem = crossProblem(program, scenario, mine.disposition, {
+        epic: theirs.epicId,
+        disposition: theirs.disposition
+      })
+      return brief !== undefined && problem !== undefined && hasOverride(brief, problem)
     }
-    const epicsWith = (disposition: BriefDisposition): ReadonlyArray<string> =>
-      unique(approved.filter((c) => c.disposition === disposition).map((c) => c.epicId))
-    const owners = epicsWith("in-scope")
-    const droppers = epicsWith("dropped")
-    const providers = epicsWith("provided")
-    if (owners.length > 0) {
-      const kept = (owner: string, other: string, disposition: BriefDisposition): boolean => {
-        const brief = briefById.get(owner)
-        if (brief === undefined) return false
-        return disposition === "in-scope"
-          ? hasOverride(brief, { kind: "AlreadyOwned", program, scenario, epic: other })
-          : hasOverride(brief, {
-              kind: "ContradictsBrief",
-              program,
-              scenario,
-              epic: other,
-              here: dispositionWords["in-scope"],
-              disposition: dispositionWords[disposition]
-            })
+    const keptAgainst = new Map<Located, Array<string>>()
+    const overruled = new Set<Located>()
+    let disputed = false
+    for (let i = 0; i < binding.length; i += 1) {
+      for (let j = i + 1; j < binding.length; j += 1) {
+        const left = binding[i]
+        const right = binding[j]
+        if (left === undefined || right === undefined) continue
+        if (left.epicId === right.epicId) {
+          // One brief disposing of a scenario twice disagrees with itself.
+          if (left.disposition !== right.disposition) disputed = true
+          continue
+        }
+        const clash = crossProblem(program, scenario, left.disposition, {
+          epic: right.epicId,
+          disposition: right.disposition
+        })
+        if (clash === undefined) continue
+        const leftKeeps = kept(left, right)
+        const rightKeeps = kept(right, left)
+        if (leftKeeps) keptAgainst.set(left, [...(keptAgainst.get(left) ?? []), right.epicId])
+        if (rightKeeps) keptAgainst.set(right, [...(keptAgainst.get(right) ?? []), left.epicId])
+        if (clash.kind === "AlreadyOwned") {
+          if (!leftKeeps && !rightKeeps) disputed = true
+        } else if (leftKeeps === rightKeeps) {
+          // Nobody kept it, or both insist: still a contradiction.
+          disputed = true
+        } else {
+          overruled.add(leftKeeps ? right : left)
+        }
       }
-      // Several owners are fine only when one of them kept it on purpose.
-      const shared =
-        owners.length === 1 ||
-        owners.some((owner) =>
-          owners.some((other) => other !== owner && kept(owner, other, "in-scope"))
-        )
-      const against = [
-        ...droppers.map((epic) => ({ epic, disposition: "dropped" as const })),
-        ...providers.map((epic) => ({ epic, disposition: "provided" as const }))
-      ].filter((other) => !owners.includes(other.epic))
-      const overruled = against.every((other) =>
-        owners.some((owner) => kept(owner, other.epic, other.disposition))
-      )
-      return shared && overruled
-        ? { status: "in-scope", owners }
-        : { status: "conflict", owners: unique([...owners, ...against.map((o) => o.epic)]) }
     }
-    if (droppers.length > 0 && providers.length > 0) {
-      return { status: "conflict", owners: unique([...droppers, ...providers]) }
+    const survivors = binding.filter((claim) => !overruled.has(claim))
+    const conflict = disputed || (binding.length > 0 && survivors.length === 0)
+    const status: LedgerStatus =
+      located.filter((claim) => claim.approved).length === 0
+        ? located.length === 0
+          ? "unclaimed"
+          : "proposed"
+        : conflict
+          ? "conflict"
+          : (survivors[0]?.disposition ?? "deferred")
+    const standing = (claim: Located): boolean =>
+      !claim.approved
+        ? false
+        : conflict
+          ? claim.disposition !== "deferred"
+          : claim.disposition === "deferred"
+            ? status === "deferred"
+            : !overruled.has(claim)
+    const owners =
+      status === "conflict"
+        ? unique(binding.map((claim) => claim.epicId))
+        : status === "deferred"
+          ? unique(deferrers.map((claim) => claim.epicId))
+          : unique(survivors.map((claim) => claim.epicId))
+    return {
+      status,
+      owners: located.filter((claim) => claim.approved).length === 0 ? [] : owners,
+      claims: located.map((claim) => ({
+        epicId: claim.epicId,
+        approved: claim.approved,
+        disposition: claim.disposition,
+        note: claim.note,
+        keptAgainst: keptAgainst.get(claim) ?? [],
+        standing: standing(claim)
+      }))
     }
-    if (droppers.length > 0) return { status: "dropped", owners: droppers }
-    if (providers.length > 0) return { status: "provided", owners: providers }
-    return { status: "deferred", owners: epicsWith("deferred") }
   }
 
   const entries: Array<LedgerEntry> = []
   for (const program of inputs.pack.programs) {
     for (const scenario of program.scenarios) {
       const located = bySlot.get(`${program.name}\u0000${scenario}`) ?? []
-      const { status, owners } = settle(program.name, scenario, located)
+      const { status, owners, claims } = settle(program.name, scenario, located)
       const [owner] = owners
       entries.push({
         program: program.name,
         scenario,
         status,
-        claims: located.map((claim) => ({
-          epicId: claim.epicId,
-          approved: claim.approved,
-          disposition: claim.disposition,
-          note: claim.note
-        })),
+        claims,
         owners,
         ...(status === "in-scope" && owner !== undefined
           ? { delivery: deliveryOf(progressById.get(owner)) }
@@ -332,24 +388,30 @@ export const buildLedger = (inputs: LedgerInputs): CoverageLedger => {
   }
 }
 
-/** What approved briefs decided, scenario by scenario: the view another brief inherits. */
+/**
+ * What approved briefs decided, scenario by scenario: the view another brief
+ * inherits. Only claims that still stand: an overruled decision, or a
+ * deferral another epic took up, binds nobody.
+ */
 export const inheritedFrom = (ledger: CoverageLedger): ReadonlyArray<InheritedDecision> =>
   ledger.entries.flatMap((entry) =>
     entry.claims
-      .filter((claim) => claim.approved)
+      .filter((claim) => claim.approved && claim.standing)
       .map((claim) => ({
         program: entry.program,
         scenario: entry.scenario,
         epic: claim.epicId,
         disposition: claim.disposition,
-        note: claim.note
+        note: claim.note,
+        ...(claim.keptAgainst.length === 0 ? {} : { keptAgainst: claim.keptAgainst })
       }))
   )
 
 // ---- The report -----------------------------------------------------------------
 
 const percent = (part: number, whole: number): string =>
-  `${whole === 0 ? 0 : Math.round((part / whole) * 100)}%`
+  // Floored: 299 of 300 is 99%, never a whole it has not reached.
+  `${whole === 0 ? 0 : Math.floor((part / whole) * 100)}%`
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`
 

@@ -282,6 +282,13 @@ export const proposePrompt = (options: ProposePromptOptions): string => {
   const settled = new Set(
     decided.map((decision) => `${decision.program}\u0000${decision.scenario}`)
   )
+  const open = options.pack.index.programs
+    .filter((program) => selected.has(program.name))
+    .flatMap((program) =>
+      program.scenarios
+        .filter((scenario) => !settled.has(`${program.name}\u0000${scenario}`))
+        .map((scenario) => `- ${program.name} › ${scenario}`)
+    )
   const evidence = options.programs.flatMap((program) => [
     `===== ${program.name} — spec =====`,
     cap(options.pack.specs[program.name] ?? "", perProgram).text,
@@ -360,13 +367,9 @@ export const proposePrompt = (options: ProposePromptOptions): string => {
         ]),
     "Every scenario to give a disposition to (the complete list; the evidence below may be",
     "abridged, these titles are not):",
-    ...options.pack.index.programs
-      .filter((program) => selected.has(program.name))
-      .flatMap((program) =>
-        program.scenarios
-          .filter((scenario) => !settled.has(`${program.name}\u0000${scenario}`))
-          .map((scenario) => `- ${program.name} › ${scenario}`)
-      ),
+    ...(open.length === 0
+      ? ["(none: every scenario of these programs is already decided by other epics)"]
+      : open),
     "",
     "Legacy evidence:",
     ...evidence
@@ -397,6 +400,8 @@ export interface DesignDeps {
    * brief being designed is ignored if it is among them.
    */
   readonly others?: ReadonlyArray<LedgerBrief>
+  /** Brief files of other epics that did not parse; nothing can be inherited from them. */
+  readonly unreadable?: ReadonlyArray<{ readonly dir: string; readonly reason: string }>
 }
 
 export interface DesignOutcome {
@@ -410,6 +415,12 @@ export interface DesignOutcome {
   readonly openPoints: number
   /** Decisions of other epics this brief inherited, per epic. */
   readonly inherited: ReadonlyArray<{ readonly epic: string; readonly scenarios: number }>
+  /**
+   * Briefs of other epics this run could not use: unreadable, or designed
+   * against another legacy repository. What they own or dropped was not
+   * inherited and not checked against.
+   */
+  readonly warnings: ReadonlyArray<string>
 }
 
 const packPointer = "pack:"
@@ -439,19 +450,31 @@ const check = (
   others: ReadonlyArray<InheritedDecision>
 ): Effect.Effect<ReadonlyArray<BriefProblem>, FlowError> =>
   Effect.map(verifiedPointers(deps, brief), (pointers) =>
-    checkEpicBrief(brief, { pack: pack.index, pointers, others })
+    checkEpicBrief(brief, { pack: pack.index, pointers, others, epicId: deps.epicId })
   )
 
-/** What the approved briefs of the other epics decided, against this pack. */
-const inheritedBy = (deps: DesignDeps, pack: PackData): ReadonlyArray<InheritedDecision> =>
-  inheritedFrom(
-    buildLedger({
-      pack: pack.index,
-      briefs: (deps.others ?? []).filter((other) => other.epicId !== deps.epicId),
-      epics: [],
-      legacy: deps.legacyRepo
-    })
+/** The ledger of the other epics' briefs, against this pack. */
+const ledgerOfOthers = (deps: DesignDeps, pack: PackData): CoverageLedger =>
+  buildLedger({
+    pack: pack.index,
+    briefs: (deps.others ?? []).filter((other) => other.epicId !== deps.epicId),
+    epics: [],
+    legacy: deps.legacyRepo
+  })
+
+/** Other briefs that fed nothing into this run, said in words. */
+const unusedBriefs = (deps: DesignDeps, others: CoverageLedger): ReadonlyArray<string> => [
+  ...(deps.unreadable ?? [])
+    .filter((brief) => brief.dir !== deps.epicId)
+    .map(
+      (brief) =>
+        `brief '${brief.dir}' could not be read (${brief.reason}): nothing is inherited from it`
+    ),
+  ...others.skipped.map(
+    (epic) =>
+      `brief '${epic}' was designed against another legacy repository: nothing is inherited from it`
   )
+]
 
 /** Per epic, how many scenarios of the considered programs a brief inherits. */
 const inheritedSummary = (
@@ -477,7 +500,9 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
   const onDisk = yield* deps.files.read(path)
   const current = onDisk === undefined ? undefined : yield* parseEpicBrief(onDisk, path)
   const action = loopAction(current)
-  const inherited = inheritedBy(deps, pack)
+  const others = ledgerOfOthers(deps, pack)
+  const inherited = inheritedFrom(others)
+  const warnings = unusedBriefs(deps, others)
   const outcome = (
     changes: ReadonlyArray<string>,
     problems: ReadonlyArray<BriefProblem>,
@@ -490,7 +515,8 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
     changes,
     problems,
     openPoints,
-    inherited: inheritedSummary(inherited, considered)
+    inherited: inheritedSummary(inherited, considered),
+    warnings
   })
 
   if (current !== undefined && action === "halt") {
@@ -587,7 +613,7 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
 })
 
 /** What the flow prints after a run. */
-export const renderOutcome = (outcome: DesignOutcome, epicId: string): ReadonlyArray<string> => {
+const outcomeLines = (outcome: DesignOutcome, epicId: string): ReadonlyArray<string> => {
   const approve = `set \`Status: approved\` in ${outcome.path} once it is right`
   const plan = `llm4ts run epic-stories --repo ${outcome.targetDir} -- --epic ${epicId}`
   switch (outcome.action) {
@@ -624,6 +650,12 @@ export const renderOutcome = (outcome: DesignOutcome, epicId: string): ReadonlyA
       ]
   }
 }
+
+/** What the flow prints after a run; briefs it could not use are always said. */
+export const renderOutcome = (outcome: DesignOutcome, epicId: string): ReadonlyArray<string> => [
+  ...outcomeLines(outcome, epicId),
+  ...outcome.warnings.map((warning) => `warning: ${warning}`)
+]
 
 // ---- The coverage ledger ---------------------------------------------------------
 

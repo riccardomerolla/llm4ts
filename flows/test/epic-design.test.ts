@@ -962,7 +962,101 @@ describe("epic-design --coverage", () => {
       assert.include(entry, "coverageReport(")
       // The entry loads the other briefs and hands them to designEpic.
       assert.include(entry, "loadBriefs(")
-      assert.match(entry, /\n\s+others,\n/)
+      assert.include(entry, "others: loaded.briefs")
     })
   )
+})
+
+describe("review findings: the ledger during design", () => {
+  it.effect("briefs that could not be used are named in the outcome, not dropped quietly", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      for (const file of packFiles) {
+        yield* memory.store.writeAtomic(`/${file}`, readFileSync(join(fixtures, file), "utf8"))
+      }
+      const events = yield* makeCollectingFlowEvents
+      const seat = yield* scripted([selection, { ...good, openPoints: [] }])
+      const elsewhere: LedgerBrief = {
+        epicId: "carte",
+        brief: EpicBrief.make({
+          epicId: "carte",
+          status: "approved",
+          request: "Cards",
+          legacy: "/another/cards-core",
+          goal: "",
+          programs: [],
+          scope: [],
+          dropped: [],
+          provided: [],
+          deferred: [],
+          constraints: "",
+          openPoints: [],
+          feedback: ""
+        })
+      }
+      const outcome = yield* designEpic({
+        files: memory.store,
+        reasoning: seat.service,
+        events,
+        targetDir: "/target",
+        legacyRepo: "/legacy",
+        specNames,
+        epicId,
+        request: "Current account",
+        budget: 50_000,
+        guidance: "",
+        packNote: undefined,
+        pathExists: (absolute) =>
+          Effect.map(memory.store.read(absolute), (text) => text !== undefined),
+        others: [elsewhere],
+        unreadable: [{ dir: "bonifici", reason: "line 2: Status is `draft` or `approved`" }]
+      })
+      assert.deepStrictEqual(outcome.warnings, [
+        "brief 'bonifici' could not be read (line 2: Status is `draft` or `approved`): nothing is inherited from it",
+        "brief 'carte' was designed against another legacy repository: nothing is inherited from it"
+      ])
+      assert.include(
+        renderOutcome(outcome, epicId).join("\n"),
+        "brief 'bonifici' could not be read"
+      )
+    })
+  )
+
+  it.effect("a prompt with nothing left open says so", () =>
+    Effect.gen(function* () {
+      const { files } = yield* setup([])
+      const pack = yield* readPackIndex({ files, legacyRepo: "/legacy", specNames })
+      const prompt = proposePrompt({
+        request: "r",
+        programs: [{ name: "CONTO_SALDO", reason: "" }],
+        pack,
+        budget: 10_000,
+        guidance: "",
+        packNote: undefined,
+        inherited: [
+          {
+            program: "CONTO_SALDO",
+            scenario: "Show the available balance",
+            epic: "saldo",
+            disposition: "in-scope",
+            note: ""
+          },
+          {
+            program: "CONTO_SALDO",
+            scenario: "Session timeout warning",
+            epic: "saldo",
+            disposition: "provided",
+            note: "src/kit/session/SessionGuard.tsx"
+          }
+        ]
+      })
+      assert.include(prompt, "(none: every scenario of these programs is already decided")
+    })
+  )
+
+  it("the entry resolves the legacy path and passes on the briefs it could not read", () => {
+    const entry = readFileSync(join(fixtures, "..", "..", "epic-design.ts"), "utf8")
+    assert.include(entry, "resolve(")
+    assert.match(entry, /\n\s+unreadable: /)
+  })
 })

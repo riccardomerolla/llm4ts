@@ -344,3 +344,89 @@ describe("the coverage report", () => {
     assert.include(ledgerHeadline(empty), "0 scenarios · 0 accounted for (0%)")
   })
 })
+
+describe("review findings: the ledger and the checks agree", () => {
+  it("three owners with one override between two of them is still a conflict", () => {
+    const ledger = ledgerOf([
+      briefOf("A", "approved", { scope: [inScope("Item", "s1")] }),
+      briefOf("B", "approved", { scope: [inScope("Item", "s1")] }),
+      briefOf("C", "approved", {
+        scope: [inScope("Item", "s1")],
+        openPoints: [kept({ kind: "AlreadyOwned", program: "P", scenario: "s1", epic: "A" })]
+      })
+    ])
+    assert.strictEqual(entry(ledger, "s1").status, "conflict")
+    assert.deepStrictEqual(entry(ledger, "s1").owners, ["A", "B", "C"])
+  })
+
+  it("one epic disposing of a scenario twice is a conflict with itself", () => {
+    const ledger = ledgerOf([
+      briefOf("A", "approved", { scope: [inScope("Item", "s1")], dropped: [out("s1", "dead")] })
+    ])
+    assert.strictEqual(entry(ledger, "s1").status, "conflict")
+    assert.deepStrictEqual(entry(ledger, "s1").owners, ["A"])
+  })
+
+  it("an override settles dropped against provided, whichever brief holds it", () => {
+    const ledger = ledgerOf([
+      briefOf("A", "approved", { dropped: [out("s2", "dead")] }),
+      briefOf("B", "approved", {
+        provided: [out("s2", "src/x.ts")],
+        openPoints: [
+          kept({
+            kind: "ContradictsBrief",
+            program: "P",
+            scenario: "s2",
+            epic: "A",
+            here: "provided",
+            disposition: "dropped"
+          })
+        ]
+      })
+    ])
+    assert.strictEqual(entry(ledger, "s2").status, "provided")
+    assert.deepStrictEqual(entry(ledger, "s2").owners, ["B"])
+    // The overruled claim is kept as history, but no longer binds anyone.
+    assert.strictEqual(entry(ledger, "s2").claims.length, 2)
+    assert.deepStrictEqual(inheritedFrom(ledger), [
+      {
+        program: "P",
+        scenario: "s2",
+        epic: "B",
+        disposition: "provided",
+        note: "src/x.ts",
+        keptAgainst: ["A"]
+      }
+    ])
+  })
+
+  it("the same legacy repository is recognised across trailing slashes and machines", () => {
+    const at = (legacy: string) =>
+      ledgerOf(
+        [briefOf("A", "approved", { legacy, dropped: [out("s2", "dead")] })],
+        [],
+        "/Users/anna/legacy/ib-core"
+      ).skipped
+    assert.deepStrictEqual(at("/Users/anna/legacy/ib-core/"), [])
+    assert.deepStrictEqual(at("/home/ci/work/ib-core"), [])
+    assert.deepStrictEqual(at("/Users/anna/legacy/cards-core"), ["A"])
+  })
+
+  it("a percentage never rounds up to a whole it has not reached", () => {
+    const scenarios = Array.from({ length: 300 }, (_, index) => `t${index}`)
+    const big: PackIndex = { programs: [{ name: "P", summary: "", scenarios }], refine: [] }
+    const ledger = buildLedger({
+      pack: big,
+      briefs: [
+        {
+          epicId: "A",
+          brief: briefOf("A", "approved", {
+            dropped: scenarios.slice(0, 299).map((name) => out(name, "dead"))
+          })
+        }
+      ],
+      epics: []
+    })
+    assert.include(ledgerHeadline(ledger), "299 accounted for (99%)")
+  })
+})

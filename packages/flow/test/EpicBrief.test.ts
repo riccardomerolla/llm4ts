@@ -718,3 +718,64 @@ describe("checking a brief against the approved briefs of other epics", () => {
     )
   })
 })
+
+describe("review findings: hand-overs and overrides work from both sides", () => {
+  const other = (
+    scenario: string,
+    disposition: InheritedDecision["disposition"],
+    keptAgainst?: ReadonlyArray<string>
+  ): InheritedDecision => ({
+    program: "CONTO_MOVIMENTI",
+    scenario,
+    epic: "bonifici",
+    disposition,
+    note: "n",
+    ...(keptAgainst === undefined ? {} : { keptAgainst })
+  })
+
+  it("the brief that deferred a scenario still validates after another epic took it", () => {
+    const deferring = withBrief({
+      dropped: [],
+      deferred: [
+        Disposed.make({
+          program: "CONTO_MOVIMENTI",
+          scenario: "Export movements to fax",
+          note: "next epic"
+        })
+      ]
+    })
+    for (const theirs of ["in-scope", "dropped", "provided"] as const) {
+      assert.deepStrictEqual(
+        checkEpicBrief(deferring, {
+          pack,
+          pointers,
+          others: [other("Export movements to fax", theirs)]
+        }),
+        [],
+        theirs
+      )
+    }
+  })
+
+  it("a brief the other epic deliberately overruled has nothing to answer for", () => {
+    // sampleBrief (epic conto-corrente) dropped the fax export; bonifici kept it in scope on purpose.
+    assert.deepStrictEqual(
+      kinds(
+        checkEpicBrief(sampleBrief, {
+          pack,
+          pointers,
+          others: [other("Export movements to fax", "in-scope")]
+        })
+      ),
+      ["ContradictsBrief"]
+    )
+    assert.deepStrictEqual(
+      checkEpicBrief(sampleBrief, {
+        pack,
+        pointers,
+        others: [other("Export movements to fax", "in-scope", ["conto-corrente"])]
+      }),
+      []
+    )
+  })
+})

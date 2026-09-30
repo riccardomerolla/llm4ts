@@ -542,6 +542,37 @@ export interface InheritedDecision {
   readonly epic: string
   readonly disposition: BriefDisposition
   readonly note: string
+  /** The epics this decision was kept against on purpose (`keep: <why>` in that brief). */
+  readonly keptAgainst?: ReadonlyArray<string>
+}
+
+/**
+ * The one rule for two briefs on one scenario, read from the side of the
+ * brief that has `here`. A deferred scenario is free on either side; two
+ * briefs that agree are fine; both in scope is ownership shared or disputed;
+ * anything else is a contradiction. The ledger and the per-brief check both
+ * use it, so they cannot disagree about what a conflict is.
+ */
+export const crossProblem = (
+  program: string,
+  scenario: string,
+  here: BriefDisposition,
+  other: { readonly epic: string; readonly disposition: BriefDisposition }
+): BriefProblem | undefined => {
+  if (here === "deferred" || other.disposition === "deferred") return undefined
+  if (here === other.disposition) {
+    return here === "in-scope"
+      ? { kind: "AlreadyOwned", program, scenario, epic: other.epic }
+      : undefined
+  }
+  return {
+    kind: "ContradictsBrief",
+    program,
+    scenario,
+    epic: other.epic,
+    here: dispositionWords[here],
+    disposition: dispositionWords[other.disposition]
+  }
 }
 
 /**
@@ -574,6 +605,8 @@ export interface BriefCheckInputs {
    * otherwise here is a problem. Absent: the brief is checked on its own.
    */
   readonly others?: ReadonlyArray<InheritedDecision>
+  /** This brief's epic, as the other briefs name it. Default: the brief's own id. */
+  readonly epicId?: string
 }
 
 /** Every problem of a brief against the pack, all at once; empty means acceptable. */
@@ -701,28 +734,27 @@ export const checkEpicBrief = (
     }
   }
 
-  // Approved briefs of other epics stand. A scenario they deferred is free to
-  // take; agreeing with them is fine; anything else is said, and is overridable
-  // only on purpose.
+  // Approved briefs of other epics stand; `crossProblem` says when two briefs
+  // clash. A clash one side kept on purpose is settled: shared ownership when
+  // either keeps it, a contradiction when exactly one does.
+  const self = inputs.epicId ?? brief.epicId
+  const byWords = new Map<string, BriefDisposition>([
+    ["in scope", "in-scope"],
+    ["dropped", "dropped"],
+    ["provided", "provided"],
+    ["deferred", "deferred"]
+  ])
   for (const [key, where] of lists) {
     const [program = "", scenario = ""] = key.split("\u0000")
-    const here = where[0] ?? ""
+    const here = byWords.get(where[0] ?? "")
+    if (here === undefined) continue
     for (const other of inherited.get(key) ?? []) {
-      if (other.disposition === "deferred") continue
-      const theirs = dispositionWords[other.disposition]
-      if (here === theirs && other.disposition !== "in-scope") continue
-      const problem: BriefProblem =
-        here === theirs
-          ? { kind: "AlreadyOwned", program, scenario, epic: other.epic }
-          : {
-              kind: "ContradictsBrief",
-              program,
-              scenario,
-              epic: other.epic,
-              here,
-              disposition: theirs
-            }
-      if (!hasOverride(brief, problem)) problems.push(problem)
+      const problem = crossProblem(program, scenario, here, other)
+      if (problem === undefined) continue
+      const theyKept = (other.keptAgainst ?? []).includes(self)
+      const iKept = hasOverride(brief, problem)
+      const settled = problem.kind === "AlreadyOwned" ? theyKept || iKept : theyKept !== iKept
+      if (!settled) problems.push(problem)
     }
   }
 
