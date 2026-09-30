@@ -569,7 +569,8 @@ describe("choosing the epic", () => {
     epic: `Epic ${epicId}`,
     stories: 8,
     merged,
-    landed
+    landed,
+    rounds: []
   })
   const choose = (text: string, epic: string | undefined, epics: ReadonlyArray<EpicSummary>) =>
     chooseEpic({ text, epic, epics, defaultEpic: "the demo epic" })

@@ -24,6 +24,18 @@ import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { EpicBriefInvalid, EpicBriefNotApproved, type FlowError } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
+import {
+  RefineProposal,
+  assembleRound,
+  countNotPlanned,
+  earlierStories,
+  refineProposalJsonSchema,
+  renderNotPlanned,
+  roundPrefix,
+  type EarlierStory,
+  type NotPlanned,
+  type RoundProgress
+} from "@llm4ts/flow/RefineRound"
 import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { BlockedVerdict, StoryState, StoryStateVersion } from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
@@ -32,6 +44,7 @@ import {
   StoryPlan,
   dependenciesOf,
   makeStoryPlanStore,
+  parseStoryPlan,
   pathsNamedIn,
   type Story
 } from "@llm4ts/flow/StoryPlan"
@@ -77,6 +90,8 @@ export interface EpicArgs {
   readonly list: boolean
   /** `--epic <id>`: work on this existing epic, by folder name or plan id, without its text. */
   readonly epic: string | undefined
+  /** `--refine`: the text is feedback on the finished epic, planned as a round of follow-up stories. */
+  readonly refine: boolean
   /** Everything else, for `resolveFlowInput` (`--repo`, the epic text). */
   readonly rest: ReadonlyArray<string>
 }
@@ -91,6 +106,9 @@ export const epicUsage = [
   "  --list              list this repository's epics (id, stories merged, landed) and stop",
   "  --epic <id>         work on an existing epic by id, no text needed. Without text or",
   "                      --epic, the one epic not landed yet is chosen; several stop the run",
+  "  --refine            the text is feedback on the finished epic: plan a round of follow-up",
+  "                      stories from it and run them on the epic branch (before landing).",
+  "                      A plain rerun finishes an open round; --plan-only stops after planning",
   "  --concurrency <n>   stories implemented at once (default 3)",
   "  --fail-fast         stop the epic at the first failed story",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
@@ -115,6 +133,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
     let land: string | undefined
     let keepWorktrees = false
     let list = false
+    let refine = false
     let epic: string | undefined
     const rest: Array<string> = []
     for (let index = 0; index < argv.length; index += 1) {
@@ -127,6 +146,8 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
         keepWorktrees = true
       } else if (argument === "--list") {
         list = true
+      } else if (argument === "--refine") {
+        refine = true
       } else if (argument === "--epic" || argument.startsWith("--epic=")) {
         const value = argument.includes("=") ? argument.slice("--epic=".length) : argv[index + 1]
         if (!argument.includes("=")) {
@@ -161,7 +182,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
         rest.push(argument)
       }
     }
-    return { planOnly, failFast, concurrency, land, keepWorktrees, list, epic, rest }
+    return { planOnly, failFast, concurrency, land, keepWorktrees, list, epic, refine, rest }
   })
 
 // ---- Epics in a repository ---------------------------------------------------------
@@ -178,7 +199,102 @@ export interface EpicSummary {
   readonly merged: number
   /** The branch it landed on, once it has. */
   readonly landed: string | undefined
+  /** Its refine rounds (ADR 0021), in order. */
+  readonly rounds: ReadonlyArray<RoundOnDisk>
 }
+
+/** One refine round of an epic as its folder holds it. */
+export interface RoundOnDisk {
+  readonly round: number
+  /** `<epic state>/rounds/<n>`: the round's plan, story states, board and report. */
+  readonly stateDir: string
+  readonly plan: StoryPlan | undefined
+  readonly merged: number
+  /** Feedback items the planner left out. */
+  readonly notPlanned: number
+  /** Why the plan cannot be used, naming the file. */
+  readonly unreadable: string | undefined
+}
+
+export const roundDir = (stateDir: string, round: number): string =>
+  join(stateDir, "rounds", String(round))
+
+const mergedStories = (files: PlainFileStoreShape, stateDir: string, plan: StoryPlan) =>
+  Effect.gen(function* () {
+    let merged = 0
+    for (const story of plan.stories) {
+      const state = yield* loadVersioned(
+        files,
+        join(stateDir, "stories", `${story.id}.json`),
+        StoryStateVersion,
+        StoryState
+      ).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (state?.status === "merged") {
+        merged += 1
+      }
+    }
+    return merged
+  })
+
+/**
+ * The epic's rounds, numbered from 1 without gaps: the first `rounds/<n>`
+ * without a plan ends the list. A plan that does not parse, or breaks the
+ * plan's rules, is a round that cannot be used, never one silently skipped.
+ */
+export const loadRounds = (
+  files: PlainFileStoreShape,
+  stateDir: string
+): Effect.Effect<ReadonlyArray<RoundOnDisk>, FlowError> =>
+  Effect.gen(function* () {
+    const rounds: Array<RoundOnDisk> = []
+    for (let round = 1; ; round += 1) {
+      const dir = roundDir(stateDir, round)
+      const path = join(dir, "plan.md")
+      const text = yield* files.read(path)
+      if (text === undefined) {
+        return rounds
+      }
+      const notPlanned = countNotPlanned((yield* files.read(join(dir, "not-planned.md"))) ?? "")
+      const parsed = yield* Effect.result(
+        parseStoryPlan(text).pipe(Effect.flatMap(validateStoryPlan))
+      )
+      if (Result.isSuccess(parsed)) {
+        rounds.push({
+          round,
+          stateDir: dir,
+          plan: parsed.success,
+          merged: yield* mergedStories(files, dir, parsed.success),
+          notPlanned,
+          unreadable: undefined
+        })
+      } else {
+        rounds.push({
+          round,
+          stateDir: dir,
+          plan: undefined,
+          merged: 0,
+          notPlanned,
+          unreadable: `${path}: ${parsed.failure.message}`
+        })
+      }
+    }
+  })
+
+/** The rounds as the run decision reads them. */
+export const roundProgress = (rounds: ReadonlyArray<RoundOnDisk>): ReadonlyArray<RoundProgress> =>
+  rounds.map((round) => ({
+    round: round.round,
+    stories: round.plan?.stories.length ?? 0,
+    merged: round.merged,
+    ...(round.unreadable === undefined ? {} : { unreadable: round.unreadable })
+  }))
+
+const renderRound = (round: RoundOnDisk): string =>
+  round.plan === undefined
+    ? `round ${round.round}: unreadable plan`
+    : `round ${round.round}: ${round.merged}/${round.plan.stories.length} merged${
+        round.notPlanned === 0 ? "" : `, ${round.notPlanned} not planned`
+      }`
 
 export const epicsDir = (workDir: string): string => join(workDir, ".llm4ts", "epics")
 
@@ -205,18 +321,7 @@ export const listEpics = (
       if (plan === undefined) {
         continue
       }
-      let merged = 0
-      for (const story of plan.stories) {
-        const state = yield* loadVersioned(
-          files,
-          join(stateDir, "stories", `${story.id}.json`),
-          StoryStateVersion,
-          StoryState
-        ).pipe(Effect.catch(() => Effect.succeed(undefined)))
-        if (state?.status === "merged") {
-          merged += 1
-        }
-      }
+      const merged = yield* mergedStories(files, stateDir, plan)
       const landed = yield* loadVersioned(
         files,
         landedPath(stateDir),
@@ -230,7 +335,8 @@ export const listEpics = (
         epic: plan.epic,
         stories: plan.stories.length,
         merged,
-        landed: landed?.target
+        landed: landed?.target,
+        rounds: yield* loadRounds(files, stateDir).pipe(Effect.catch(() => Effect.succeed([])))
       })
     }
     return summaries
@@ -248,7 +354,7 @@ export const renderEpicList = (epics: ReadonlyArray<EpicSummary>): string =>
                 ? "finished, not landed"
                 : "in progress"
               : `landed on ${epic.landed}`
-          }  (--epic ${epic.epicId})`,
+          }${epic.rounds.map((round) => ` · ${renderRound(round)}`).join("")}  (--epic ${epic.epicId})`,
           `  "${epic.epic.length > 110 ? `${epic.epic.slice(0, 109)}…` : epic.epic}"`
         ])
       ].join("\n")
@@ -798,6 +904,161 @@ export const generateStoryPlan = (
     // The id and the epic text are ours, whatever the model echoed back.
     Effect.map((plan) => StoryPlan.make({ ...plan, epicId, epic }))
   )
+
+// ---- Refine rounds (ADR 0021) ---------------------------------------------------
+
+export interface RefinePlanInputs {
+  readonly epicId: string
+  readonly round: number
+  readonly guidance: string
+  /** Every story merged before this round: what was built, and where. */
+  readonly earlier: ReadonlyArray<EarlierStory>
+  /** The epic's brief, when it has one. */
+  readonly brief?: string
+  /** The previous round's not-planned list. */
+  readonly openItems?: string
+}
+
+/** The round planner's constraints: the story planner's, for feedback on finished work. */
+export const refinePlanInstructions = (inputs: RefinePlanInputs): string =>
+  [
+    "You are the orchestrator of a parallel implementation. The epic below is finished: every",
+    "story is merged into the epic branch, which is checked out in front of you. A person tried",
+    "it and gave the feedback at the end of this message. Turn the feedback into follow-up",
+    "stories that independent coding agents will implement AT THE SAME TIME, each in its own git",
+    "worktree, each confined to the paths it owns. Read the code before you answer.",
+    "",
+    "Rules (violations are rejected mechanically):",
+    "- Every story has a kebab-case id, a title, a description precise enough to implement alone,",
+    "  `dependsOn`, `owned` (repo-relative paths it may create or change), `sharedReadOnly`",
+    "  (prefixes it may read but never change), and `provides`.",
+    "- One story per feedback item, or per group of items that change the same files. The",
+    "  description quotes the feedback items it answers, word for word.",
+    "- `owned` lists the files the story will change, existing files included: name them from the",
+    "  code. The earlier stories below are merged, so their paths are free to claim.",
+    "- `owned` sets are pairwise DISJOINT within this round: items that need the same file go",
+    "  into ONE story.",
+    "- `dependsOn` names stories of THIS round only, and only when one needs the other's result.",
+    "- `provides` says what the person who gave the feedback will see changed.",
+    "- Tests that cover the changed behaviour are updated in the same story, and the test files",
+    "  are in its `owned`.",
+    "- Shared surfaces (the kit, the theme, house rules) are owned only by a story the feedback",
+    "  asks to change them.",
+    "- An item that is unclear, contradicts another item, or cannot be tied to a file is NOT",
+    "  guessed: it goes to `notPlanned` with the question whose answer would make it plannable.",
+    `- Ids are short; each is prefixed \`${roundPrefix(inputs.round)}\` for you (round ${inputs.round} of epic "${inputs.epicId}").`,
+    "",
+    "Respond only with JSON:",
+    '{"stories":[{"id":"...","title":"...","description":"...","dependsOn":[],"owned":[],',
+    '"sharedReadOnly":[],"provides":[]}],"notPlanned":[{"item":"...","reason":"..."}]}',
+    "",
+    "Earlier stories (merged: what was built, and where):",
+    ...(inputs.earlier.length === 0
+      ? ["(none)"]
+      : inputs.earlier.map(
+          (story) =>
+            `- ${story.id}: ${story.title} — owns: ${story.owned.join(", ")} — provides: ${story.provides.join("; ")}`
+        )),
+    ...(inputs.brief === undefined ? [] : ["", "The epic's approved brief:", inputs.brief]),
+    ...(inputs.openItems === undefined
+      ? []
+      : [
+          "",
+          "Left unplanned in the previous round (the new feedback may answer these):",
+          inputs.openItems
+        ]),
+    "",
+    "Target repository guidance (house rules and layout — the vocabulary to use):",
+    inputs.guidance
+  ].join("\n")
+
+export const generateRefineProposal = (
+  reasoning: LlmServiceShape,
+  events: FlowEventsShape,
+  inputs: RefinePlanInputs & { readonly feedback: string }
+): Effect.Effect<RefineProposal, FlowLlmError> =>
+  structuredAndPublish(
+    reasoning,
+    events,
+    `${refinePlanInstructions(inputs)}\n\nFeedback:\n${inputs.feedback}`,
+    RefineProposal,
+    refineProposalJsonSchema
+  )
+
+export interface PlanRoundDeps {
+  readonly files: PlainFileStoreShape
+  readonly reasoning: LlmServiceShape
+  readonly events: FlowEventsShape
+  /** The epic's state folder. */
+  readonly stateDir: string
+  readonly epicId: string
+  readonly round: number
+  readonly feedback: string
+  readonly guidance: string
+  /** The epic's plan and every earlier round's. */
+  readonly plans: ReadonlyArray<StoryPlan>
+  readonly brief?: string
+}
+
+const bulletLines = (markdown: string): string =>
+  markdown
+    .split("\n")
+    .filter((line) => line.startsWith("- "))
+    .join("\n")
+
+/**
+ * Plans a round from feedback and writes it: `feedback.md`, `plan.md`, and
+ * `not-planned.md` when something was left out. Nothing is written unless the
+ * plan is valid, and no round is created when no story could be planned.
+ */
+export const planRound = Effect.fn("flows/epic-stories.planRound")(function* (
+  deps: PlanRoundDeps
+): Effect.fn.Return<
+  { readonly plan: StoryPlan | undefined; readonly notPlanned: ReadonlyArray<NotPlanned> },
+  FlowError
+> {
+  const open =
+    deps.round > 1
+      ? bulletLines(
+          (yield* deps.files.read(
+            join(roundDir(deps.stateDir, deps.round - 1), "not-planned.md")
+          )) ?? ""
+        )
+      : ""
+  const earlier = earlierStories(deps.plans)
+  const proposal = yield* generateRefineProposal(deps.reasoning, deps.events, {
+    epicId: deps.epicId,
+    round: deps.round,
+    guidance: deps.guidance,
+    earlier,
+    feedback: deps.feedback,
+    ...(deps.brief === undefined ? {} : { brief: deps.brief }),
+    ...(open.length === 0 ? {} : { openItems: open })
+  })
+  if (proposal.stories.length === 0) {
+    return { plan: undefined, notPlanned: proposal.notPlanned }
+  }
+  const plan = yield* validateStoryPlan(
+    assembleRound({
+      epicId: deps.epicId,
+      round: deps.round,
+      feedback: deps.feedback,
+      proposal,
+      earlier: earlier.map((story) => story.id)
+    })
+  )
+  const dir = roundDir(deps.stateDir, deps.round)
+  yield* deps.files.writeAtomic(join(dir, "feedback.md"), `${deps.feedback}\n`)
+  if (proposal.notPlanned.length > 0) {
+    yield* deps.files.writeAtomic(
+      join(dir, "not-planned.md"),
+      renderNotPlanned(deps.round, proposal.notPlanned)
+    )
+  }
+  // The plan goes last: it is what makes the folder a round.
+  yield* makeStoryPlanStore(deps.files).save(join(dir, "plan.md"), plan)
+  return { plan, notPlanned: proposal.notPlanned }
+})
 
 // ---- Usage ---------------------------------------------------------------------
 

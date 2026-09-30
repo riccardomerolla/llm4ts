@@ -666,8 +666,12 @@ export const epicProgressOf = (epics: ReadonlyArray<EpicSummary>): ReadonlyArray
   epics.map((epic) => ({
     epicId: epic.dir,
     planned: true,
-    stories: epic.stories,
-    merged: epic.merged,
+    // A refine round's stories are the epic's work too (ADR 0021).
+    stories: epic.rounds.reduce(
+      (sum, round) => sum + (round.plan?.stories.length ?? 0),
+      epic.stories
+    ),
+    merged: epic.rounds.reduce((sum, round) => sum + round.merged, epic.merged),
     landed: epic.landed !== undefined
   }))
 

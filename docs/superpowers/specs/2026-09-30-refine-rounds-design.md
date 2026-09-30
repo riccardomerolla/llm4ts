@@ -39,8 +39,8 @@ planner cannot place come back as a list, not as guesses.
 4. **Ownership needs no new rule.** A round's plan holds only that round's
    stories, so paths are exclusive within the round as they are within a
    plan today. Earlier stories are merged and not in it: their paths are
-   free to claim. Two follow-ups that need the same file get a dependency
-   and run in sequence.
+   free to claim. Feedback items that need the same file go into one
+   follow-up story.
 5. **Plan what is clear, list the rest.** The planner returns stories plus
    a "not planned" list, each item with the reason or the question it needs
    answered. The round runs with the clear ones; the list is printed, kept
@@ -128,8 +128,8 @@ Instructions to the planner, beyond the story planner's:
   files; its description quotes the items it answers;
 - `owned` lists the paths the story will change, including existing files;
   `provides` says what the person will see changed;
-- `dependsOn` names stories of this round only; two stories that need one
-  file depend on each other in the order the feedback implies;
+- `dependsOn` names stories of this round only; items that need one file
+  are answered by one story, since two stories never own the same path;
 - tests that cover the changed behaviour are updated in the same story;
 - an item that is unclear, contradicts another item, or cannot be tied to a
   file goes to `notPlanned` with the question to answer. It is not guessed.

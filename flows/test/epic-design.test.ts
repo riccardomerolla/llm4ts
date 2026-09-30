@@ -935,7 +935,8 @@ describe("epic-design --coverage", () => {
           epic: "a",
           stories: 3,
           merged: 3,
-          landed: "main"
+          landed: "main",
+          rounds: []
         }
       ]
       assert.deepStrictEqual(epicProgressOf(epics), [
