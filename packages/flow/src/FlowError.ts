@@ -293,6 +293,41 @@ export class OpenPointsPending extends Schema.TaggedError<OpenPointsPending>()(
   }
 }
 
+/** `epic-design` needs the legacy repository's extract pack (docs/modernization/). */
+export class ExtractPackMissing extends Schema.TaggedError<ExtractPackMissing>()(
+  "ExtractPackMissing",
+  {
+    legacyRepo: Schema.String
+  }
+) {
+  get message(): string {
+    return `no extract pack under ${this.legacyRepo}/docs/modernization/specs — run modernize-extract on the legacy repository first`
+  }
+}
+
+/** An epic brief that does not parse, or an approved one that fails its checks. */
+export class EpicBriefInvalid extends Schema.TaggedError<EpicBriefInvalid>()("EpicBriefInvalid", {
+  path: Schema.optionalKey(Schema.String),
+  violations: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const where = this.path === undefined ? "" : ` in ${this.path}`
+    return `epic brief invalid${where}:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** `epic-stories` found a draft brief in the epic's folder; it plans only from an approved one. */
+export class EpicBriefNotApproved extends Schema.TaggedError<EpicBriefNotApproved>()(
+  "EpicBriefNotApproved",
+  {
+    path: Schema.String
+  }
+) {
+  get message(): string {
+    return `the epic brief at ${this.path} is a draft — set \`Status: approved\` once it is right, or run epic-design to revise it`
+  }
+}
+
 /** Two page specs of one domain feature disagree on an API operation — never merged silently (ADR 0012 addendum). */
 export class ContractConflict extends Schema.TaggedError<ContractConflict>()("ContractConflict", {
   feature: Schema.String,
@@ -328,6 +363,9 @@ export const FlowError = Schema.Union([
   StoryFailed,
   DecisionsInvalid,
   OpenPointsPending,
-  ContractConflict
+  ContractConflict,
+  ExtractPackMissing,
+  EpicBriefInvalid,
+  EpicBriefNotApproved
 ])
 export type FlowError = typeof FlowError.Type

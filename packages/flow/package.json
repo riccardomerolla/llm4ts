@@ -32,6 +32,7 @@
     "./CostTracker": "./dist/CostTracker.js",
     "./Decisions": "./dist/Decisions.js",
     "./Domains": "./dist/Domains.js",
+    "./EpicBrief": "./dist/EpicBrief.js",
     "./Equiv": "./dist/Equiv.js",
     "./EquivReport": "./dist/EquivReport.js",
     "./EstimatedUsage": "./dist/EstimatedUsage.js",
