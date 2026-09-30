@@ -3,28 +3,33 @@
                                                                                           
 ┌────────────────────────┐          ┌─ epic conto-bonifico ──────────────────────┐        
 │       JUDGE SEAT       │          │ stage  implement stories                   │        
-│      — · on call       │          │ stories 6  elapsed 7m10s                   │        
+│    claude · on call    │          │ stories 6  elapsed 7m10s                   │        
 │                        │          └────────────────────────────────────────────┘        
 │ last verdict:          │                                •                               
-│ » none yet             │  ┌─ JUDGMENT ─────────────────────────────────────────────────┐
-│                        │  │ no verdicts yet                                            │
-│ reviews            0   │  └────────────────────────────────────────────────────────────┘
-│ verdicts           0   │                  delegate to roster · 2 running                
-└────────────────────────┘                                ▼                               
-                            ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ 
-                            │ codex           │  │ pi-lmstudio     │  │ lemonade        │ 
-                            │ coder · overvi… │  │ coder · paymen… │  │ no lease        │ 
-                            │ ◐ busy          │  │ ◐ busy          │  │ ○ idle          │ 
-                            └─────────────────┘  └─────────────────┘  └─────────────────┘ 
+│ » accounts r2: cleared │  ┌─ JUDGMENT · accounts r2 ───────────────────────────────────┐
+│                        │  │ provides        ██████████  2/2                            │
+│ reviews            1   │  │ scope           ██████████  2/2                            │
+│ verdicts           2   │  │ house-style     ██████████  2/2                            │
+└────────────────────────┘  │ tests           ██████████  2/2                            │
+                            │ cleared → merge                                            │
+                            └────────────────────────────────────────────────────────────┘
+                                            delegate to roster · 2 running                
+                                                          ▼                               
+                            ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
+                            │ codex      │  │ pi-lmstud… │  │ lemonade   │  │ claude     │
+                            │ coder · o… │  │ coder · p… │  │ no lease   │  │ no lease   │
+                            │ ◐ busy     │  │ ◐ busy     │  │ ✗ out: un… │  │ ○ idle     │
+                            └────────────┘  └────────────┘  └────────────┘  └────────────┘
                                                                                           
                             ✓ accounts  ◐ payments  ✗ iban  ◐ overview  · movimenti       
                             ◌ bonifico                                                    
                                                                                           
 ┌─ session log ──────────────────────────────────────────────────────────────────────────┐
-│ 00:00:01  flow             story plan: 6 stories                                       │
-│ 00:03:20  iban             failed · pi error: Connection error.                        │
+│ 00:05:30  judge            accounts r1 · 1 issue → coder                               │
+│ 00:06:35  judge            accounts r2 · cleared → merge                               │
 │ 00:06:39  accounts         merged into epic/conto-bonifico                             │
 │ 00:06:40  accounts         done                                                        │
+│ 00:06:42  roster           codex → coder · overview                                    │
 └────────────────────────────────────────────────────────────────────────────────────────┘
-stories [1/6 done · 2 running · 1 failed · 1 waiting]  roster [2/3 busy]                  
+stories [1/6 done · 2 running · 1 failed · 1 waiting]  roster [2/4 busy]                  
 tokens [383.5k]  cost [~$0.38]  run [live]                                                
