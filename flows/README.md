@@ -147,8 +147,8 @@ LLM4TS_LEGACY_REPO=~/legacy/ib-core \
   exists in the pack, every "provided" pointer exists in the target, every
   dropped or deferred entry has a reason, and **every scenario of every
   program the brief considers has exactly one disposition**. A scenario
-  `modernize-refine` dropped comes back only through an answered open
-  point. What one fix round cannot clear is written into the brief as a
+  `modernize-refine` dropped comes back only when you answer its `[check]`
+  open point with `keep: <why>`; that answer stays in the brief as the record. What one fix round cannot clear is written into the brief as a
   `[check]` open point; nothing is hidden.
 - Approve by setting `Status: approved`, then:
   `llm4ts run epic-stories --repo ~/work/portal -- --epic <epic-id>`. The

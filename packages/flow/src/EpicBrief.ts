@@ -81,8 +81,17 @@ const sectionTitles = {
 } as const
 type SectionKey = keyof typeof sectionTitles
 
+/** A scenario title holding the note separator is quoted, so the note still splits cleanly. */
+const quoted = (scenario: string): string =>
+  scenario.includes(dash.trim()) ? `\`${scenario}\`` : scenario
+
+const unquoted = (scenario: string): string =>
+  scenario.length > 1 && scenario.startsWith("`") && scenario.endsWith("`")
+    ? scenario.slice(1, -1)
+    : scenario
+
 const renderDisposed = (entry: Disposed): string =>
-  `- ${entry.program}${cite}${entry.scenario}${entry.note.length === 0 ? "" : `${dash}${entry.note}`}`
+  `- ${entry.program}${cite}${quoted(entry.scenario)}${entry.note.length === 0 ? "" : `${dash}${entry.note}`}`
 
 const section = (key: SectionKey, body: ReadonlyArray<string>): ReadonlyArray<string> => [
   `## ${sectionTitles[key]}`,
@@ -158,6 +167,12 @@ const splitFirst = (text: string, separator: string): readonly [string, string |
 const parseDisposed = (text: string): Disposed | undefined => {
   const [program, rest] = splitFirst(text, cite.trim())
   if (rest === undefined || program.length === 0) return undefined
+  const close = rest.startsWith("`") ? rest.indexOf("`", 1) : -1
+  if (close > 0) {
+    const tail = rest.slice(close + 1).trim()
+    const note = tail.startsWith(dash.trim()) ? tail.slice(dash.trim().length).trim() : tail
+    return Disposed.make({ program, scenario: rest.slice(1, close), note })
+  }
   const [scenario, note] = splitFirst(rest, dash)
   return scenario.length === 0 ? undefined : Disposed.make({ program, scenario, note: note ?? "" })
 }
@@ -187,6 +202,7 @@ export const parseEpicBrief = Effect.fn("@llm4ts/flow/EpicBrief.parse")(function
   const points = makeOpenPointsCollector()
   let current: SectionKey | "header" | "unknown" = "header"
   let fenced = false
+  let fenceLine = 0
 
   const lines = markdown.split(/\r?\n/)
   for (let index = 0; index < lines.length; index += 1) {
@@ -196,6 +212,7 @@ export const parseEpicBrief = Effect.fn("@llm4ts/flow/EpicBrief.parse")(function
     const isProse = current === "goal" || current === "constraints" || current === "feedback"
     if (trimmed.startsWith("```")) {
       fenced = !fenced
+      if (fenced) fenceLine = number
       if (current === "goal" || current === "constraints" || current === "feedback") {
         proseLines[current].push(raw)
       }
@@ -272,7 +289,7 @@ export const parseEpicBrief = Effect.fn("@llm4ts/flow/EpicBrief.parse")(function
         violations.push(`line ${number}: a citation is \`PROGRAM › scenario title\`, got: ${text}`)
         continue
       }
-      item.citations.push(Citation.make({ program, scenario }))
+      item.citations.push(Citation.make({ program, scenario: unquoted(scenario) }))
       continue
     }
     const bullet = (top ?? nested)?.[1]?.trim()
@@ -297,6 +314,10 @@ export const parseEpicBrief = Effect.fn("@llm4ts/flow/EpicBrief.parse")(function
 
   if (epicId === undefined) violations.push("missing the `# Epic brief: <id>` title")
   if (status === undefined) violations.push("missing the `Status:` line")
+  if (fenced) {
+    // Everything after it was read as code: nothing below that line can be trusted.
+    violations.push(`line ${fenceLine}: the code fence opened here is never closed`)
+  }
   if (header.request === undefined) violations.push("missing the `Request:` line")
   if (header.legacy === undefined) violations.push("missing the `Legacy:` line")
   if (violations.length > 0 || epicId === undefined || status === undefined) {
@@ -329,6 +350,73 @@ export const parseEpicBrief = Effect.fn("@llm4ts/flow/EpicBrief.parse")(function
     feedback: text("feedback")
   })
 })
+
+// ---- Normalizing --------------------------------------------------------------
+
+const oneLine = (text: string): string => text.replace(/\s*\r?\n\s*/g, " ").trim()
+
+/** Prose the file format can hold: no `## ` line of its own, no fence left open. */
+const safeProse = (text: string): string => {
+  let fenced = false
+  const lines = text.split(/\r?\n/).map((line) => {
+    if (line.trim().startsWith("```")) {
+      fenced = !fenced
+      return line
+    }
+    return !fenced && /^\s*##\s/.test(line) ? line.replace(/^(\s*)##\s/, "$1### ") : line
+  })
+  return (fenced ? [...lines, "```"] : lines).join("\n")
+}
+
+const safeDisposed = (entry: Disposed): Disposed =>
+  Disposed.make({
+    program: oneLine(entry.program),
+    scenario: oneLine(entry.scenario),
+    note: oneLine(entry.note)
+  })
+
+/**
+ * The brief as the file can hold it. A model's proposal may carry a newline
+ * in a title, a `## ` line in the goal, an unclosed fence; written as they
+ * are, those would parse back as something else on the next run. Fields that
+ * live on one line are folded onto one, prose is made safe for the section
+ * grammar, and nothing else changes.
+ */
+export const normalizeBrief = (brief: EpicBrief): EpicBrief =>
+  EpicBrief.make({
+    epicId: oneLine(brief.epicId),
+    status: brief.status,
+    request: oneLine(brief.request),
+    legacy: oneLine(brief.legacy),
+    goal: safeProse(brief.goal),
+    programs: brief.programs.map((program) =>
+      ConsideredProgram.make({ name: oneLine(program.name), reason: oneLine(program.reason) })
+    ),
+    scope: brief.scope.map((item) =>
+      ScopeItem.make({
+        title: oneLine(item.title).replace(/^-+\s*/, ""),
+        citations: item.citations.map((citation) =>
+          Citation.make({
+            program: oneLine(citation.program),
+            scenario: oneLine(citation.scenario)
+          })
+        ),
+        ...(item.newBehaviour === undefined ? {} : { newBehaviour: oneLine(item.newBehaviour) })
+      })
+    ),
+    dropped: brief.dropped.map(safeDisposed),
+    provided: brief.provided.map(safeDisposed),
+    deferred: brief.deferred.map(safeDisposed),
+    constraints: safeProse(brief.constraints),
+    openPoints: brief.openPoints.map((point) =>
+      OpenPoint.make({
+        number: point.number,
+        question: oneLine(point.question),
+        ...(point.answer === undefined ? {} : { answer: oneLine(point.answer) })
+      })
+    ),
+    feedback: safeProse(brief.feedback)
+  })
 
 // ---- Checks -------------------------------------------------------------------
 
@@ -409,7 +497,7 @@ export const renderBriefProblem = (problem: BriefProblem): string => {
     case "Unaccounted":
       return `${problem.program}${cite}${problem.scenario} has no disposition: put it in scope, or drop, mark provided or defer it`
     case "RefineConflict":
-      return `${problem.program}${cite}${problem.scenario} is in scope, but modernize-refine marked it ${problem.disposition}`
+      return `${problem.program}${cite}${problem.scenario} is in scope, but modernize-refine marked it ${problem.disposition}; answer \`keep: <why>\` to keep it in scope, or move it out`
     case "ApprovedWithOpenPoints":
       return `the brief is approved with unanswered open points: ${problem.numbers.join(", ")}`
   }
@@ -505,11 +593,19 @@ export const checkEpicBrief = (
       problems.push({ kind: "DuplicateDisposition", program, scenario, lists: where })
     }
   }
-  for (const considered of brief.programs) {
-    const known = programs.get(considered.name)
+  // Complete means every program the brief touches: the ones it lists as
+  // considered, and any it cites or disposes of without listing.
+  const touched = [
+    ...new Set([
+      ...brief.programs.map((program) => program.name),
+      ...[...lists.keys()].map((key) => key.split("\u0000")[0] ?? "")
+    ])
+  ]
+  for (const name of touched) {
+    const known = programs.get(name)
     if (known === undefined) {
-      if (!problems.some((p) => p.kind === "UnknownProgram" && p.program === considered.name)) {
-        problems.push({ kind: "UnknownProgram", program: considered.name })
+      if (!problems.some((p) => p.kind === "UnknownProgram" && p.program === name)) {
+        problems.push({ kind: "UnknownProgram", program: name })
       }
       continue
     }
@@ -521,12 +617,12 @@ export const checkEpicBrief = (
   }
 
   // A scenario refine took out of the pack's scope can come back only on purpose.
-  const justified = (program: string, scenario: string): boolean =>
+  // The override is explicit: the check's own question, answered `keep: <why>`.
+  const justified = (conflict: BriefProblem): boolean =>
     brief.openPoints.some(
       (point) =>
-        (point.answer ?? "").trim().length > 0 &&
-        point.question.includes(program) &&
-        point.question.includes(scenario)
+        point.question === `${checkMark} ${renderBriefProblem(conflict)}` &&
+        (point.answer ?? "").trim().toLowerCase().startsWith("keep")
     )
   for (const item of brief.scope) {
     for (const citation of item.citations) {
@@ -536,13 +632,14 @@ export const checkEpicBrief = (
           (entry.scenario === undefined || entry.scenario === citation.scenario) &&
           (entry.disposition === "drop" || entry.disposition === "provided")
       )
-      if (refined !== undefined && !justified(citation.program, citation.scenario)) {
-        problems.push({
+      if (refined !== undefined) {
+        const conflict: BriefProblem = {
           kind: "RefineConflict",
           program: citation.program,
           scenario: citation.scenario,
           disposition: refined.disposition
-        })
+        }
+        if (!justified(conflict)) problems.push(conflict)
       }
     }
   }
@@ -712,9 +809,25 @@ export type LoopAction = "propose" | "revise" | "halt" | "await-approval" | "val
 export const loopAction = (brief: EpicBrief | undefined): LoopAction => {
   if (brief === undefined) return "propose"
   if (brief.status === "approved") return "validate"
-  const answered = brief.openPoints.some((point) => (point.answer ?? "").trim().length > 0)
+  // An answered `[check]` point is an override on file, not something to fold in.
+  const answered = brief.openPoints.some(
+    (point) => (point.answer ?? "").trim().length > 0 && !point.question.startsWith(checkMark)
+  )
   if (answered || brief.feedback.trim().length > 0) return "revise"
   return unanswered(brief).length > 0 ? "halt" : "await-approval"
+}
+
+const notes = (brief: EpicBrief): ReadonlyMap<string, readonly [string, string]> => {
+  const found = new Map<string, readonly [string, string]>()
+  const add = (kind: string, entries: ReadonlyArray<Disposed>): void => {
+    for (const entry of entries) {
+      found.set(`${entry.program}${cite}${entry.scenario}`, [kind, entry.note])
+    }
+  }
+  add("reason", brief.dropped)
+  add("pointer", brief.provided)
+  add("note", brief.deferred)
+  return found
 }
 
 const dispositions = (brief: EpicBrief): ReadonlyMap<string, string> => {
@@ -758,12 +871,29 @@ export const diffBriefs = (
   for (const [scenario, list] of was) {
     if (!is.has(scenario)) changes.push(`${scenario}: removed (was ${list})`)
   }
-  const asked = new Set(previous.openPoints.map((point) => point.question))
+  // A rationale is what an audit reads: a changed one is never silent.
+  const noted = notes(previous)
+  for (const [scenario, [kind, note]] of notes(next)) {
+    const old = noted.get(scenario)
+    if (old !== undefined && old[0] === kind && old[1] !== note) {
+      changes.push(`${scenario}: ${kind} changed`)
+    }
+  }
+  const titled = new Set(previous.scope.map((item) => item.title))
+  const titles = new Set(next.scope.map((item) => item.title))
+  for (const title of titles) if (!titled.has(title)) changes.push(`item added: ${title}`)
+  for (const title of titled) if (!titles.has(title)) changes.push(`item removed: ${title}`)
   const asking = new Set(next.openPoints.map((point) => point.question))
+  const asked = new Set(previous.openPoints.map((point) => point.question))
   for (const question of asking)
     if (!asked.has(question)) changes.push(`open point raised: ${question}`)
-  for (const question of asked)
-    if (!asking.has(question)) changes.push(`open point closed: ${question}`)
+  for (const point of previous.openPoints) {
+    if (asking.has(point.question)) continue
+    const answer = (point.answer ?? "").trim()
+    changes.push(
+      `open point closed: ${point.question}${answer.length === 0 ? "" : ` (answer: ${answer})`}`
+    )
+  }
   if (previous.goal !== next.goal) changes.push("goal rewritten")
   if (previous.constraints !== next.constraints) changes.push("constraints rewritten")
   return changes

@@ -360,6 +360,25 @@ export const chooseEpic = (args: {
     return Effect.succeed({ _tag: "Text", prompt: args.text })
   }
   const open = args.epics.filter((epic) => epic.landed === undefined)
+  // A folder `epic-design` wrote a brief into and nobody planned yet is an open
+  // epic too: alone it is the one to run, beside others it is never guessed.
+  const planned = new Set(args.epics.map((epic) => epic.dir))
+  const briefOnly = (args.briefs ?? []).filter((brief) => !planned.has(brief.dir))
+  const [onlyBrief] = briefOnly
+  if (briefOnly.length === 1 && open.length === 0 && onlyBrief !== undefined) {
+    return Effect.succeed({ _tag: "Brief", dir: onlyBrief.dir, request: onlyBrief.request })
+  }
+  if (briefOnly.length > 0) {
+    return Effect.fail(
+      ScriptUsage.make({
+        message: [
+          "several epics are open here; pick one with --epic <id>, or give an epic's text",
+          ...(open.length === 0 ? [] : [renderEpicList(open)]),
+          ...briefOnly.map((brief) => `${brief.dir}  brief ${brief.status}  ${brief.request}`)
+        ].join("\n")
+      })
+    )
+  }
   if (open.length === 1 && open[0] !== undefined) {
     return Effect.succeed({ _tag: "Existing", epic: open[0] })
   }

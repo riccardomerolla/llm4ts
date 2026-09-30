@@ -13,6 +13,7 @@ import {
   EpicBriefProposal,
   epicBriefProposalJsonSchema,
   loopAction,
+  normalizeBrief,
   parseEpicBrief,
   ProgramSelection,
   programSelectionJsonSchema,
@@ -330,16 +331,26 @@ describe("checking an epic brief", () => {
     assert.deepStrictEqual(kinds(checkEpicBrief(sampleBrief, { pack: refined, pointers })), [
       "RefineConflict"
     ])
-    const justified = withBrief({
-      openPoints: [
-        OpenPoint.make({
-          number: 1,
-          question:
-            "Refine dropped CONTO_MOVIMENTI › Filter movements by amount; keep it in this epic?",
-          answer: "yes, the business asked for it again"
-        })
-      ]
-    })
+    const conflict = checkEpicBrief(sampleBrief, { pack: refined, pointers })[0]
+    const question = `[check] ${conflict === undefined ? "" : renderBriefProblem(conflict)}`
+    assert.include(question, "keep:")
+    const answered = (answer: string, asked = question): EpicBrief =>
+      withBrief({ openPoints: [OpenPoint.make({ number: 1, question: asked, answer })] })
+    // Any other answer, or an answer to some other question, overrides nothing.
+    assert.deepStrictEqual(
+      kinds(checkEpicBrief(answered("No, remove it"), { pack: refined, pointers })),
+      ["RefineConflict"]
+    )
+    assert.deepStrictEqual(
+      kinds(
+        checkEpicBrief(
+          answered("keep: yes", "Is CONTO_MOVIMENTI › Filter movements by amount still wanted?"),
+          { pack: refined, pointers }
+        )
+      ),
+      ["RefineConflict"]
+    )
+    const justified = answered("Keep: the business asked for it again")
     assert.deepStrictEqual(checkEpicBrief(justified, { pack: refined, pointers }), [])
   })
 
@@ -473,4 +484,129 @@ describe("the loop over the brief", () => {
       assert.strictEqual(epicBriefProposalJsonSchema.type, "object")
     })
   )
+})
+
+describe("review findings: the brief file", () => {
+  it("an answered check point alone does not ask for another revision", () => {
+    const overridden = withBrief({
+      openPoints: [
+        OpenPoint.make({ number: 1, question: "[check] something", answer: "keep: yes" })
+      ]
+    })
+    assert.strictEqual(loopAction(overridden), "await-approval")
+    assert.strictEqual(
+      loopAction(
+        withBrief({
+          openPoints: [
+            OpenPoint.make({ number: 1, question: "[check] something", answer: "keep: yes" }),
+            OpenPoint.make({ number: 2, question: "still open?" })
+          ]
+        })
+      ),
+      "halt"
+    )
+  })
+
+  it.effect("a code fence that never closes is a violation, not a swallowed brief", () =>
+    Effect.gen(function* () {
+      const text = renderEpicBrief(sampleBrief).replace(
+        "Customers see their balance",
+        "```\nCustomers see their balance"
+      )
+      const error = yield* Effect.flip(parseEpicBrief(text))
+      assert.include(error.violations.join("\n"), "never closed")
+    })
+  )
+
+  it.effect("a scenario title with a dash survives the file in every list", () =>
+    Effect.gen(function* () {
+      const dashed = withBrief({
+        dropped: [
+          Disposed.make({
+            program: "CONTO_MOVIMENTI",
+            scenario: "Export — to fax",
+            note: "dead — since 2019"
+          })
+        ],
+        scope: [
+          ScopeItem.make({
+            title: "Filters — date and amount",
+            citations: [Citation.make({ program: "CONTO_MOVIMENTI", scenario: "Filter — by date" })]
+          })
+        ]
+      })
+      const parsed = yield* parseEpicBrief(renderEpicBrief(dashed))
+      assert.strictEqual(parsed.dropped[0]?.scenario, "Export — to fax")
+      assert.strictEqual(parsed.dropped[0]?.note, "dead — since 2019")
+      assert.strictEqual(parsed.scope[0]?.citations[0]?.scenario, "Filter — by date")
+      assert.strictEqual(renderEpicBrief(parsed), renderEpicBrief(dashed))
+    })
+  )
+
+  it.effect("normalizing makes a model's odd text writable: newlines, headings, open fences", () =>
+    Effect.gen(function* () {
+      const odd = withBrief({
+        request: "Current account\nwith statements",
+        goal: "Intro.\n## Not a section\n```ts\nconst x = 1",
+        dropped: [
+          Disposed.make({
+            program: "CONTO_MOVIMENTI",
+            scenario: "Export movements to fax",
+            note: "dead:\nno caller"
+          })
+        ],
+        scope: [
+          ScopeItem.make({
+            title: "- Balance\ncard",
+            citations: [
+              Citation.make({ program: "CONTO_SALDO", scenario: "Show the available balance" })
+            ]
+          })
+        ]
+      })
+      const safe = normalizeBrief(odd)
+      const parsed = yield* parseEpicBrief(renderEpicBrief(safe))
+      assert.strictEqual(renderEpicBrief(parsed), renderEpicBrief(safe))
+      assert.strictEqual(parsed.request, "Current account with statements")
+      assert.strictEqual(parsed.dropped[0]?.note, "dead: no caller")
+      assert.strictEqual(parsed.scope[0]?.title, "Balance card")
+      assert.include(parsed.goal, "### Not a section")
+      assert.strictEqual(parsed.programs.length, 2)
+    })
+  )
+
+  it("a program that is cited must be complete, even when it is not listed as considered", () => {
+    const problems = checkEpicBrief(
+      withBrief({
+        programs: [ConsideredProgram.make({ name: "CONTO_SALDO", reason: "balance" })],
+        dropped: []
+      }),
+      { pack, pointers }
+    )
+    assert.deepStrictEqual(kinds(problems), ["Unaccounted"])
+    assert.include(problems.map(renderBriefProblem).join("\n"), "Export movements to fax")
+  })
+
+  it("the revision diff shows changed reasons, renamed items and the answers it folded in", () => {
+    const next = withBrief({
+      dropped: [
+        Disposed.make({
+          program: "CONTO_MOVIMENTI",
+          scenario: "Export movements to fax",
+          note: "replaced by the document service"
+        })
+      ],
+      scope: [
+        ScopeItem.make({ ...sampleBrief.scope[0], title: "Movement filters" }),
+        ...sampleBrief.scope.slice(1, 2)
+      ],
+      openPoints: [sampleBrief.openPoints[0] ?? OpenPoint.make({ number: 1, question: "" })]
+    })
+    const changes = diffBriefs(sampleBrief, next).join("\n")
+    assert.include(changes, "CONTO_MOVIMENTI › Export movements to fax: reason changed")
+    assert.include(changes, "item removed: Movements list with date and amount filters")
+    assert.include(changes, "item added: Movement filters")
+    assert.include(changes, "item removed: Empty state for an account with no movements")
+    assert.include(changes, "open point closed: Which date is the default range? (answer: 30 days)")
+  })
 })

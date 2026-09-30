@@ -14,6 +14,7 @@ import {
   EpicBriefProposal,
   epicBriefProposalJsonSchema,
   loopAction,
+  normalizeBrief,
   parseEpicBrief,
   ProgramSelection,
   programSelectionJsonSchema,
@@ -77,6 +78,12 @@ export const parseEpicDesignArgs = (
           })
         }
         epic = value.trim()
+        // The id names a folder under .llm4ts/epics: it must not be a path.
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(epic) || epic.includes("..")) {
+          return yield* ScriptUsage.make({
+            message: `'${epic}' is not an epic id (letters, digits, '.', '_' and '-' only)\n${epicDesignUsage}`
+          })
+        }
       } else {
         rest.push(argument)
       }
@@ -294,6 +301,12 @@ export const proposePrompt = (options: ProposePromptOptions): string => {
     options.guidance,
     ...(options.packNote === undefined ? [] : ["", "The target stack's pack:", options.packNote]),
     "",
+    "Every scenario to give a disposition to (the complete list; the evidence below may be",
+    "abridged, these titles are not):",
+    ...options.pack.index.programs
+      .filter((program) => options.programs.some((selected) => selected.name === program.name))
+      .flatMap((program) => program.scenarios.map((scenario) => `- ${program.name} › ${scenario}`)),
+    "",
     "Legacy evidence:",
     ...evidence
   ].join("\n")
@@ -421,25 +434,47 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
       epicBriefProposalJsonSchema
     )
   const assemble = (proposal: EpicBriefProposal, problems?: ReadonlyArray<BriefProblem>) =>
-    assembleBrief({
-      epicId: deps.epicId,
-      request,
-      legacy: deps.legacyRepo,
-      programs,
-      proposal,
-      ...(current === undefined ? {} : { previous: current }),
-      ...(problems === undefined ? {} : { problems })
-    })
+    normalizeBrief(
+      assembleBrief({
+        epicId: deps.epicId,
+        request,
+        legacy: deps.legacyRepo,
+        programs,
+        proposal,
+        ...(current === undefined ? {} : { previous: current }),
+        ...(problems === undefined ? {} : { problems })
+      })
+    )
+  // A selection that matched nothing would give an empty brief that passes
+  // every check; say so where the user will read it.
+  const noPrograms =
+    "No legacy program of the extract pack was selected for this request: add the programs " +
+    "to consider under `## Legacy programs considered` (`- NAME — why`), answer here, and rerun."
+  const withNotice = (proposed: EpicBriefProposal): EpicBriefProposal =>
+    programs.length > 0
+      ? proposed
+      : EpicBriefProposal.make({ ...proposed, openPoints: [noPrograms, ...proposed.openPoints] })
 
-  let proposal = yield* propose()
+  let proposal = withNotice(yield* propose())
   let problems = yield* check(deps, pack, assemble(proposal))
   if (problems.length > 0) {
     // One bounded fix round; what still fails is shown to the human, never hidden.
-    proposal = yield* propose(problems)
+    proposal = withNotice(yield* propose(problems))
     problems = yield* check(deps, pack, assemble(proposal))
   }
   const next = assemble(proposal, problems)
-  yield* deps.files.writeAtomic(path, renderEpicBrief(next))
+  // What is written must read back as the same brief: a file that parses to
+  // something else would pass today's checks and fail, or mean another thing,
+  // on the next run.
+  const written = renderEpicBrief(next)
+  const readBack = yield* parseEpicBrief(written, path)
+  if (renderEpicBrief(readBack) !== written) {
+    return yield* EpicBriefInvalid.make({
+      path,
+      violations: ["the proposal cannot be written as a brief without changing its meaning"]
+    })
+  }
+  yield* deps.files.writeAtomic(path, written)
   return outcome(diffBriefs(current, next), problems, next.openPoints.length)
 })
 

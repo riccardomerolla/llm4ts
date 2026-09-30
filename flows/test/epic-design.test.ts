@@ -17,6 +17,7 @@ import {
   briefPath,
   designEpic,
   parseEpicDesignArgs,
+  proposePrompt,
   readPackIndex,
   renderBriefList,
   renderOutcome,
@@ -337,7 +338,12 @@ describe("epic-design: one run of the brief loop", () => {
     "a scenario refine dropped comes back only through an answered check point, which stays",
     () =>
       Effect.gen(function* () {
-        const { run, files, brief, edit } = yield* setup([selection, good, good, good])
+        const { run, files, brief, edit, seat } = yield* setup([
+          selection,
+          good,
+          good,
+          { ...good, openPoints: [] }
+        ])
         yield* files.writeAtomic(
           "/legacy/docs/modernization/decisions.md",
           [
@@ -364,14 +370,19 @@ describe("epic-design: one run of the brief loop", () => {
           EpicBrief.make({
             ...current,
             openPoints: current.openPoints.map((point) =>
-              OpenPoint.make({ ...point, answer: "kept: the business asked for it again" })
+              OpenPoint.make({ ...point, answer: "keep: the business asked for it again" })
             )
           })
         )
         const second = yield* run()
         assert.deepStrictEqual(second.problems, [])
         const kept = (yield* brief).openPoints.find((point) => point.question.startsWith("[check]"))
-        assert.strictEqual(kept?.answer, "kept: the business asked for it again")
+        assert.strictEqual(kept?.answer, "keep: the business asked for it again")
+        // The override is on file: the next run waits for approval and calls no model.
+        const calls = yield* seat.calls
+        const third = yield* run()
+        assert.strictEqual(third.action, "await-approval")
+        assert.strictEqual(yield* seat.calls, calls)
       })
   )
 })
@@ -580,4 +591,114 @@ describe("epic-design: which brief a run works on", () => {
     assert.include(entry, "LLM4TS_LEGACY_REPO")
     assert.include(entry, "runFlowMain(")
   })
+})
+
+describe("review findings: epic-design", () => {
+  it.effect("odd text from the model is normalized, and what is written parses back the same", () =>
+    Effect.gen(function* () {
+      const odd = {
+        ...good,
+        goal: "Intro.\n## A heading the model invented\nMore.",
+        dropped: [
+          {
+            program: "CONTO_MOVIMENTI",
+            scenario: "Export movements to fax",
+            note: "dead:\nfax gateway retired — 2019"
+          }
+        ]
+      }
+      const { run, files, brief } = yield* setup([selection, odd])
+      const outcome = yield* run()
+      assert.deepStrictEqual(outcome.problems, [])
+      const parsed = yield* brief
+      assert.strictEqual(parsed.dropped[0]?.note, "dead: fax gateway retired — 2019")
+      assert.include(parsed.goal, "### A heading the model invented")
+      assert.strictEqual(renderEpicBrief(parsed), yield* files.read(path))
+    })
+  )
+
+  it.effect("every scenario title reaches the model, however small the evidence budget", () =>
+    Effect.gen(function* () {
+      const { files } = yield* setup([])
+      const pack = yield* readPackIndex({ files, legacyRepo: "/legacy", specNames })
+      const prompt = proposePrompt({
+        request: "r",
+        programs: selection.programs,
+        pack,
+        budget: 10,
+        guidance: "",
+        packNote: undefined
+      })
+      for (const program of pack.index.programs) {
+        for (const scenario of program.scenarios) {
+          assert.include(prompt, `${program.name} › ${scenario}`)
+        }
+      }
+    })
+  )
+
+  it.effect("a selection with no program of the pack says so as an open point", () =>
+    Effect.gen(function* () {
+      const nothing = {
+        ...good,
+        scope: [],
+        dropped: [],
+        provided: [],
+        deferred: [],
+        openPoints: []
+      }
+      const { run, brief } = yield* setup([{ programs: [{ name: "GHOST", reason: "?" }] }, nothing])
+      yield* run()
+      const written = yield* brief
+      assert.deepStrictEqual(written.programs, [])
+      assert.include(written.openPoints[0]?.question ?? "", "No legacy program")
+    })
+  )
+
+  it.effect("an epic id cannot leave the epics folder", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(parseEpicDesignArgs(["--epic", "../outside", "text"]))
+      assert.include(error.message, "epic id")
+      assert.strictEqual(
+        (yield* parseEpicDesignArgs(["--epic=conto-corrente_2.1"])).epic,
+        "conto-corrente_2.1"
+      )
+    })
+  )
+
+  it.effect(
+    "epic-stories with no text picks up the one approved brief, and never guesses among several",
+    () =>
+      Effect.gen(function* () {
+        const briefs = [
+          { dir: "conto-corrente", request: "Current account", status: "approved" as const }
+        ]
+        assert.deepStrictEqual(
+          yield* chooseEpic({ text: "", epic: undefined, epics: [], briefs, defaultEpic: "demo" }),
+          { _tag: "Brief", dir: "conto-corrente", request: "Current account" }
+        )
+        // No briefs: exactly as before.
+        assert.deepStrictEqual(
+          yield* chooseEpic({
+            text: "",
+            epic: undefined,
+            epics: [],
+            briefs: [],
+            defaultEpic: "demo"
+          }),
+          { _tag: "Text", prompt: "demo" }
+        )
+        const two = yield* Effect.flip(
+          chooseEpic({
+            text: "",
+            epic: undefined,
+            epics: [],
+            briefs: [...briefs, { dir: "carte", request: "Cards", status: "draft" as const }],
+            defaultEpic: "demo"
+          })
+        )
+        assert.include(two.message, "conto-corrente")
+        assert.include(two.message, "carte")
+      })
+  )
 })
