@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
@@ -11,10 +14,14 @@ import { StoryState, StoryStateVersion } from "@llm4ts/flow/Stories"
 import { makeStoryPlanStore, Story, StoryPlan } from "@llm4ts/flow/StoryPlan"
 import { epicProgressOf } from "../lib/epic-design.ts"
 import {
+  epicIdFor,
+  epicOnDisk,
   epicUsage,
+  landRounds,
   loadRounds,
   parseEpicArgs,
   planRound,
+  refineEpic,
   refinePlanInstructions,
   renderEpicList,
   roundDir,
@@ -341,4 +348,102 @@ describe("refine rounds: planning", () => {
       assert.deepStrictEqual(Object.keys(yield* memory.files), [])
     })
   )
+})
+
+describe("refine rounds: the run", () => {
+  const summary: EpicSummary = {
+    dir: "bank-abc123",
+    stateDir,
+    epicId: "bank",
+    epic: "Conto e Bonifico",
+    stories: 2,
+    merged: 2,
+    landed: undefined,
+    rounds: []
+  }
+
+  it.effect("--refine works on an epic that has a plan, never on its feedback as a new epic", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* refineEpic({ _tag: "Existing", epic: summary }), summary)
+      const briefOnly = yield* Effect.flip(
+        refineEpic({ _tag: "Brief", dir: "carte", request: "Cards" })
+      )
+      assert.strictEqual(briefOnly._tag, "RefineRefused")
+      assert.include(briefOnly.message, "epic 'carte' cannot be refined: it has no story plan yet")
+      const none = yield* Effect.flip(refineEpic({ _tag: "Text", prompt: "the demo epic" }))
+      assert.strictEqual(none._tag, "ScriptUsage")
+      assert.include(none.message, "--refine needs a finished epic")
+      assert.notInclude(none.message, "the demo epic")
+    })
+  )
+
+  it("an epic rerun by its text is the same epic on disk, rounds included", () => {
+    const text = "Conto e Bonifico"
+    const onDisk = { ...summary, dir: epicIdFor(text) }
+    assert.strictEqual(epicOnDisk({ _tag: "Existing", epic: summary }, [onDisk]), summary)
+    assert.strictEqual(epicOnDisk({ _tag: "Text", prompt: text }, [summary, onDisk]), onDisk)
+    assert.isUndefined(epicOnDisk({ _tag: "Text", prompt: "Cards" }, [summary, onDisk]))
+    assert.isUndefined(epicOnDisk({ _tag: "Brief", dir: "carte", request: "Cards" }, [summary]))
+  })
+
+  it.effect("landing takes the rounds' plans, and refuses an unreadable one by name", () =>
+    Effect.gen(function* () {
+      const first = {
+        round: 1,
+        stateDir: roundDir(stateDir, 1),
+        plan: roundPlan(1, ["r1-a"]),
+        merged: 1,
+        notPlanned: 0,
+        unreadable: undefined
+      }
+      assert.deepStrictEqual(yield* landRounds("bank", "main", [first]), [
+        { plan: first.plan, stateDir: first.stateDir }
+      ])
+      const refused = yield* Effect.flip(
+        landRounds("bank", "main", [
+          first,
+          {
+            round: 2,
+            stateDir: roundDir(stateDir, 2),
+            plan: undefined,
+            merged: 0,
+            notPlanned: 0,
+            unreadable: "rounds/2/plan.md: no storyplan block"
+          }
+        ])
+      )
+      assert.strictEqual(refused._tag, "LandingFailed")
+      assert.include(refused.message, "round 2's plan cannot be read (rounds/2/plan.md")
+    })
+  )
+
+  it("the program decides, plans on the epic branch, runs the unit and lands with the rounds", () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "lib", "epic-stories.ts"),
+      "utf8"
+    )
+    const readme = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "README.md"),
+      "utf8"
+    )
+    assert.include(readme, "### Refining a finished epic")
+    assert.include(readme, "-- --refine")
+    const program = source.slice(source.indexOf("export const runEpicStories"))
+    assert.include(program, "runAction(")
+    assert.include(program, "epicOnDisk(choice, epics)")
+    assert.include(program, "refineEpic(")
+    assert.include(program, "rounds: yield* landRounds(")
+    // The planner reads the code as the person tried it.
+    const checkout = program.indexOf("context.git.checkoutOrCreate(epicBranch)")
+    assert.isAbove(checkout, 0)
+    assert.isAbove(program.indexOf("planRound("), checkout)
+    // The executor, its board, judge and verifier all work on the chosen unit.
+    assert.include(program, "plan: unit.plan")
+    assert.include(program, "stateDir: unit.stateDir")
+    assert.include(program, "makeLocalBoardSync(files, unit.stateDir, unit.label)")
+    assert.notInclude(
+      program.slice(program.indexOf("implementStoriesFlow(")),
+      "              plan,\n"
+    )
+  })
 })

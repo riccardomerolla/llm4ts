@@ -253,6 +253,42 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   `story/<epic-id>/<story-id>`, the board and `report.md` under
   `.llm4ts/epics/<epic-id>/`. Every usage figure is an estimate.
 
+### Refining a finished epic
+
+When every story is merged and you have tried the epic branch, feedback
+becomes a **refine round** (ADR 0021): follow-up stories planned from your
+text and run on the same `epic/<epic-id>` branch, before landing.
+
+```sh
+llm4ts run epic-stories --repo /path/to/portal -- --refine \
+  "Move the balance card above the movements list. Remove the export button.
+   The transfer form loses the amount when the IBAN is rejected."
+```
+
+- With `--refine` the text is the feedback, not an epic's text. The epic is
+  the one `--epic <id>` names, or the one epic not landed yet.
+- The reasoning seat reads the code on the epic branch and returns
+  follow-up stories plus a **not planned** list: items that are unclear,
+  contradict each other or cannot be tied to a file, each with the question
+  to answer. Nothing is guessed. Answer them in the next round's feedback.
+- A round lives in `.llm4ts/epics/<epic-id>/rounds/<n>/`: `feedback.md`,
+  `plan.md`, `not-planned.md`, and its own story states, board and
+  `report.md`. The epic's own plan and record are never rewritten.
+- `--refine --plan-only "…"` plans the round and stops; editing
+  `rounds/<n>/plan.md` is the approval. A plain rerun (no `--refine`)
+  finishes the open round.
+- Follow-up stories may claim files the merged stories own. Within a round
+  paths stay exclusive, so items that need the same file go into one story.
+  Story ids are prefixed `r<n>-`; branches are
+  `story/<epic-id>/r1-move-card`.
+- Rounds are sequential: `--refine` is refused while a story of the plan or
+  of an earlier round is unmerged, and on an epic that has landed.
+- `--land` waits for every round: it refuses while a round story is
+  unmerged, and afterwards removes the rounds' worktrees and branches too.
+  `--list` shows each round (`round 1: 3/3 merged, 1 not planned`).
+- Gates, seats, roster, concurrency and the story judge are the ones of the
+  epic. `epic-stories-board` refines the same way.
+
 ### The story judge as a ruleset (fork)
 
 `epic-stories-board` is `epic-stories` with one difference: each story is

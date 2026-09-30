@@ -617,6 +617,58 @@ describe("Stories executor", () => {
     })
   )
 
+  it.effect(
+    "a refine round runs as its own plan on the epic branch and leaves the epic's record alone",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const context = yield* makeContext(harness)
+        const options = yield* makeOptions(harness, diamond, context)
+        yield* implementStoriesFlow(context, options)
+        const epicRecord = yield* memoryFilesOf(options)
+        // Story a owns src/features/a: a follow-up of the round may claim a file under it.
+        const round = StoryPlan.make({
+          epicId: "diamond",
+          epic: "Move the card",
+          stories: [
+            Story.make({
+              id: "r1-move-card",
+              title: "Move the card",
+              description: "Move the card above the list.",
+              dependsOn: [],
+              owned: ["src/features/a/Card.tsx"],
+              sharedReadOnly: [],
+              provides: ["the card sits above the list"]
+            })
+          ]
+        })
+        const roundState = `${options.stateDir}/rounds/1`
+        const roundOptions = yield* makeOptions(harness, round, context, {
+          files: options.files,
+          stateDir: roundState,
+          board: makeLocalBoardSync(options.files, roundState, "diamond · round 1")
+        })
+        const report = yield* implementStoriesFlow(context, roundOptions)
+        assert.strictEqual(report.epicBranch, "epic/diamond")
+        assert.deepStrictEqual(
+          report.stories.map((outcome) => [outcome.id, outcome.status, outcome.branch]),
+          [["r1-move-card", "done", "story/diamond/r1-move-card"]]
+        )
+        const log = yield* Ref.get(harness.log)
+        assert.include(
+          log,
+          "worktree-new:story/diamond/r1-move-card@epic/diamond->/repo/.llm4ts/worktrees/r1-move-card"
+        )
+        assert.include(log, "merge:story/diamond/r1-move-card")
+        const after = yield* memoryFilesOf(options)
+        for (const [path, contents] of Object.entries(epicRecord)) {
+          assert.strictEqual(after[path], contents, path)
+        }
+        assert.include(after[`${roundState}/stories/r1-move-card.json`] ?? "", '"merged"')
+        assert.isDefined(after[`${roundState}/report.md`])
+      })
+  )
+
   it.effect("rerun skips merged stories, resumes unchanged ones, recreates changed ones", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness()

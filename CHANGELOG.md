@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **Refine rounds** for `epic-stories` (ADR 0021): feedback on a finished,
+  not yet landed epic becomes a round of follow-up stories on the same epic
+  branch.
+  - `epic-stories -- --refine "<feedback>"` has the reasoning seat read the
+    branch and plan follow-up stories; items it cannot place come back as a
+    **not planned** list with the question to answer, never as guesses.
+  - A round is its own story plan in `.llm4ts/epics/<epic>/rounds/<n>/`
+    (`feedback.md`, `plan.md`, `not-planned.md`, its states, board and
+    report), run by the unchanged story executor. Follow-up stories may
+    claim files that merged stories own; ids are prefixed `r<n>-`.
+  - `--refine --plan-only` plans and stops; a plain rerun finishes the open
+    round. A round starts only when everything before it is merged.
+  - `--land` waits for the rounds and cleans up after them; `--list` and
+    the coverage ledger's progress count them.
+  - `@llm4ts/flow/RefineRound`: `runAction`, `assembleRound`,
+    `RefineProposal`; `LandOptions.rounds`; the typed `RefineRefused`.
+    Without `--refine` and without round folders nothing changes.
+
 ## 2.18.0
 
 - The **coverage ledger** for `epic-design`: the epic briefs of a target

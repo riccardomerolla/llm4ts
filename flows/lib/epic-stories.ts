@@ -21,7 +21,13 @@ import {
   type BriefStatus
 } from "@llm4ts/flow/EpicBrief"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
-import { EpicBriefInvalid, EpicBriefNotApproved, type FlowError } from "@llm4ts/flow/FlowError"
+import {
+  EpicBriefInvalid,
+  EpicBriefNotApproved,
+  LandingFailed,
+  RefineRefused,
+  type FlowError
+} from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
 import {
@@ -32,6 +38,7 @@ import {
   refineProposalJsonSchema,
   renderNotPlanned,
   roundPrefix,
+  runAction,
   type EarlierStory,
   type NotPlanned,
   type RoundProgress
@@ -1060,6 +1067,64 @@ export const planRound = Effect.fn("flows/epic-stories.planRound")(function* (
   return { plan, notPlanned: proposal.notPlanned }
 })
 
+/**
+ * The epic a `--refine` run works on. The text on the command line is
+ * feedback, so it never names or creates an epic: only one with a story plan
+ * can take a round.
+ */
+export const refineEpic = (
+  choice: EpicChoice
+): Effect.Effect<EpicSummary, RefineRefused | ScriptUsage> =>
+  choice._tag === "Existing"
+    ? Effect.succeed(choice.epic)
+    : choice._tag === "Brief"
+      ? Effect.fail(
+          RefineRefused.make({
+            epicId: choice.dir,
+            reason: "it has no story plan yet: run the epic first"
+          })
+        )
+      : Effect.fail(
+          ScriptUsage.make({
+            message: `--refine needs a finished epic, and this repository has none to pick: run an epic first, or name one with --epic <id>\n${epicUsage}`
+          })
+        )
+
+/**
+ * The planned epic a choice lands on: the one picked, or the one whose folder
+ * the given text derives (an epic rerun by its text is still that epic).
+ */
+export const epicOnDisk = (
+  choice: EpicChoice,
+  epics: ReadonlyArray<EpicSummary>
+): EpicSummary | undefined =>
+  choice._tag === "Existing"
+    ? choice.epic
+    : choice._tag === "Text"
+      ? epics.find((epic) => epic.dir === epicIdFor(choice.prompt))
+      : undefined
+
+/** The rounds as the landing takes them; one whose plan cannot be read stops it. */
+export const landRounds = (
+  epicId: string,
+  target: string,
+  rounds: ReadonlyArray<RoundOnDisk>
+): Effect.Effect<
+  ReadonlyArray<{ readonly plan: StoryPlan; readonly stateDir: string }>,
+  LandingFailed
+> =>
+  Effect.forEach(rounds, (round) =>
+    round.plan === undefined
+      ? Effect.fail(
+          LandingFailed.make({
+            epicBranch: `epic/${epicId}`,
+            target,
+            reason: `round ${round.round}'s plan cannot be read (${round.unreadable ?? ""}); fix or remove it`
+          })
+        )
+      : Effect.succeed({ plan: round.plan, stateDir: round.stateDir })
+  )
+
 // ---- Usage ---------------------------------------------------------------------
 
 /** Sums two meters into one per-story estimate. */
@@ -1461,13 +1526,46 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
       yield* Console.log(renderEpicList(epics))
       return
     }
+    // With `--refine` the text is feedback on a finished epic, never an epic's text.
+    const feedback = flags.refine ? given.prompt.trim() : ""
     const choice = yield* chooseEpic({
-      text: given.prompt,
+      text: flags.refine ? "" : given.prompt,
       epic: flags.epic,
       epics,
       briefs: yield* listBriefs(files, given.workDir, yield* epicDirs(given.workDir)),
       defaultEpic
     })
+    if (flags.refine) {
+      yield* refineEpic(choice)
+    }
+    // What this run does (ADR 0021): the plan's stories, the open refine round,
+    // a new round, or the landing. Refusals come before any seat is resolved.
+    const existing = epicOnDisk(choice, epics)
+    const rounds = existing?.rounds ?? []
+    const action =
+      existing !== undefined
+        ? runAction({
+            planned: true,
+            stories: existing.stories,
+            merged: existing.merged,
+            landed: existing.landed,
+            rounds: roundProgress(rounds),
+            refine: flags.refine,
+            feedback,
+            land: flags.land !== undefined
+          })
+        : flags.land !== undefined
+          ? { _tag: "Land" as const }
+          : { _tag: "RunPlan" as const }
+    if (action._tag === "Refused") {
+      return yield* RefineRefused.make({
+        epicId: existing?.epicId ?? "",
+        reason: action.reason
+      })
+    }
+    if (action._tag === "Usage") {
+      return yield* ScriptUsage.make({ message: `${action.message}\n${epicUsage}` })
+    }
     const input = {
       ...given,
       prompt:
@@ -1562,8 +1660,78 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               message: `story plan: ${plan.stories.length} stories at ${planPath} (edit and rerun to re-plan)`
             })
           )
-          if (flags.planOnly) {
+          if (flags.planOnly && action._tag !== "PlanRound") {
             return
+          }
+          const epicBranch = `epic/${plan.epicId}`
+          // The unit the executor works on: the epic's plan, or one refine round.
+          // Same branch, seats, gates and judge; its own plan and state folder.
+          let unit = { plan, stateDir, label: `Epic: ${plan.epicId}` }
+          if (action._tag === "RunRound") {
+            const open = rounds.find((round) => round.round === action.round)
+            if (open?.plan !== undefined) {
+              unit = {
+                plan: open.plan,
+                stateDir: open.stateDir,
+                label: `Epic: ${plan.epicId} · round ${open.round}`
+              }
+              yield* events.publish(
+                Info.make({
+                  message: `refine round ${open.round}: ${open.merged}/${open.plan.stories.length} stories merged; finishing it`
+                })
+              )
+            }
+          }
+          if (action._tag === "PlanRound") {
+            // The planner reads the code as the person tried it.
+            yield* stage(events, "epic branch", context.git.checkoutOrCreate(epicBranch))
+            const roundBrief = yield* files.read(join(stateDir, "brief.md"))
+            const planned = yield* stage(
+              events,
+              `refine round ${action.round} plan`,
+              planRound({
+                files,
+                reasoning: reasoningMeter.service,
+                events,
+                stateDir,
+                epicId: plan.epicId,
+                round: action.round,
+                feedback,
+                guidance,
+                plans: [
+                  plan,
+                  ...rounds.flatMap((round) => (round.plan === undefined ? [] : [round.plan]))
+                ],
+                ...(roundBrief === undefined ? {} : { brief: roundBrief })
+              })
+            )
+            for (const left of planned.notPlanned) {
+              yield* events.publish(
+                Info.make({ message: `not planned: ${left.item} — ${left.reason}` })
+              )
+            }
+            if (planned.plan === undefined) {
+              yield* events.publish(
+                Info.make({
+                  message: `refine round ${action.round}: no feedback item could be planned; answer the questions above and run --refine again`
+                })
+              )
+              return
+            }
+            const dir = roundDir(stateDir, action.round)
+            yield* events.publish(
+              Info.make({
+                message: `refine round ${action.round}: ${planned.plan.stories.length} follow-up stories at ${join(dir, "plan.md")} (edit and rerun to re-plan)${planned.notPlanned.length === 0 ? "" : `; ${planned.notPlanned.length} item(s) not planned, listed in ${join(dir, "not-planned.md")}`}`
+              })
+            )
+            if (flags.planOnly) {
+              return
+            }
+            unit = {
+              plan: planned.plan,
+              stateDir: dir,
+              label: `Epic: ${plan.epicId} · round ${action.round}`
+            }
           }
           // Setup and gates run where the application is, in every checkout.
           const appDir = yield* appDirFor(input.workDir, process.env)
@@ -1592,6 +1760,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               files,
               stateDir,
               target: flags.land,
+              rounds: yield* landRounds(plan.epicId, flags.land, rounds),
               keepWorktrees: flags.keepWorktrees,
               gates: inAppDir(appDir, gatesIn(nodeProcessExecutor, events, commands)),
               system: ["House rules of the target repository (CONTRIBUTING.md):", guidance].join(
@@ -1637,11 +1806,12 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
           const report = yield* implementStoriesFlow(
             { ...context, reasoning: reasoningMeter.service },
             {
-              plan,
+              plan: unit.plan,
               files,
-              stateDir,
+              stateDir: unit.stateDir,
+              epicBranch,
               worktreeRoot: worktreeRootFor(input.workDir, plan.epicId, process.env),
-              board: makeLocalBoardSync(files, stateDir, `Epic: ${plan.epicId}`),
+              board: makeLocalBoardSync(files, unit.stateDir, unit.label),
               contextFor: (workDir, contextOptions) =>
                 Effect.gen(function* () {
                   const rebound = yield* contextFor(workDir, contextOptions)
@@ -1670,7 +1840,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               // With a roster, the judge and the verifier are leased per story,
               // away from the executor coding it (ADR 0019).
               judge: options.storyJudge({
-                plan,
+                plan: unit.plan,
                 budget: contextBudget,
                 reasoning: reasoningMeter.service,
                 events,
@@ -1682,7 +1852,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                   seats.context.roster?.forRole("verifier") ?? reasoningMeter.service,
                   events,
                   files,
-                  plan
+                  unit.plan
                 )(story, need, workDir),
               // A roster waits for its own executors (the story's next lease
               // does); without one, poll the single coder's engine.
@@ -1706,7 +1876,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
           )
           yield* events.publish(
             Info.make({
-              message: `epic ${report.epicId}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("waiting")} waiting — report at ${join(stateDir, "report.md")} (usage figures estimated)`
+              message: `${unit.label.replace("Epic: ", "epic ")}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("waiting")} waiting — report at ${join(unit.stateDir, "report.md")} (usage figures estimated)`
             })
           )
         })

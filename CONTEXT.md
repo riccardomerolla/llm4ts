@@ -95,6 +95,19 @@ produced, one producer per key, every export produced; unreachable Rules
 pruned. A value that runs many times.
 _Avoid_: pipeline, flow, module
 
+### Epic stories
+
+**Refine round**:
+A numbered round of follow-up stories planned from a person's feedback on a
+finished, not yet landed epic. Its own story plan and state folder, the
+epic's branch. Rounds are sequential.
+_Avoid_: iteration, patch, hotfix, follow-up epic
+
+**Not planned**:
+A feedback item a Refine round's planner left out, with the reason or the
+question whose answer would make it plannable.
+_Avoid_: skipped, rejected, open point (that is an epic brief's term)
+
 ### Existing evaluation terms (kept distinct from Judgment)
 
 **Judge**:
