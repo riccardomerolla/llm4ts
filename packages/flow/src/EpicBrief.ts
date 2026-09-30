@@ -328,3 +328,227 @@ export const parseEpicBrief = Effect.fn("@llm4ts/flow/EpicBrief.parse")(function
     feedback: text("feedback")
   })
 })
+
+// ---- Checks -------------------------------------------------------------------
+
+export interface PackProgram {
+  readonly name: string
+  /** The first paragraph of the program's spec. */
+  readonly summary: string
+  readonly scenarios: ReadonlyArray<string>
+}
+
+/** A disposition `modernize-refine` recorded in the legacy pack's decisions.md. */
+export interface RefineDisposition {
+  readonly program: string
+  /** Absent: the disposition covers every scenario of the program. */
+  readonly scenario?: string
+  readonly disposition: "drop" | "provided" | "defer" | "wrap"
+}
+
+/** What the checks need from the extract pack, built by the flow from its files. */
+export interface PackIndex {
+  readonly programs: ReadonlyArray<PackProgram>
+  readonly refine: ReadonlyArray<RefineDisposition>
+}
+
+export const BriefProblem = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("UnknownProgram"), program: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("UnknownScenario"),
+    program: Schema.String,
+    scenario: Schema.String,
+    closest: Schema.optionalKey(Schema.String)
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("MissingPointer"),
+    program: Schema.String,
+    scenario: Schema.String,
+    pointer: Schema.String
+  }),
+  Schema.Struct({ kind: Schema.Literal("MissingReason"), where: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("DuplicateDisposition"),
+    program: Schema.String,
+    scenario: Schema.String,
+    lists: Schema.Array(Schema.String)
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("Unaccounted"),
+    program: Schema.String,
+    scenario: Schema.String
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("RefineConflict"),
+    program: Schema.String,
+    scenario: Schema.String,
+    disposition: Schema.String
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("ApprovedWithOpenPoints"),
+    numbers: Schema.Array(Schema.Int)
+  })
+])
+export type BriefProblem = typeof BriefProblem.Type
+
+export const renderBriefProblem = (problem: BriefProblem): string => {
+  switch (problem.kind) {
+    case "UnknownProgram":
+      return `${problem.program} is not a program of the extract pack`
+    case "UnknownScenario":
+      return `${problem.program} has no scenario "${problem.scenario}"${
+        problem.closest === undefined ? "" : ` (did you mean "${problem.closest}"?)`
+      }`
+    case "MissingPointer":
+      return `${problem.program}${cite}${problem.scenario} is marked provided by "${problem.pointer}", which does not exist in the target`
+    case "MissingReason":
+      return `${problem.where} needs a reason`
+    case "DuplicateDisposition":
+      return `${problem.program}${cite}${problem.scenario} appears in several lists: ${problem.lists.join(", ")}`
+    case "Unaccounted":
+      return `${problem.program}${cite}${problem.scenario} has no disposition: put it in scope, or drop, mark provided or defer it`
+    case "RefineConflict":
+      return `${problem.program}${cite}${problem.scenario} is in scope, but modernize-refine marked it ${problem.disposition}`
+    case "ApprovedWithOpenPoints":
+      return `the brief is approved with unanswered open points: ${problem.numbers.join(", ")}`
+  }
+}
+
+/** The pointers of the provided entries: what the caller verifies before checking. */
+export const providedPointers = (brief: EpicBrief): ReadonlyArray<string> => [
+  ...new Set(brief.provided.map((entry) => entry.note).filter((note) => note.length > 0))
+]
+
+const loose = (text: string): string => text.trim().replace(/\s+/g, " ").toLowerCase()
+const slot = (program: string, scenario: string): string => `${program}\u0000${scenario}`
+
+export interface BriefCheckInputs {
+  readonly pack: PackIndex
+  /** The provided pointers that were found in the target (or its pack). */
+  readonly pointers: ReadonlySet<string>
+}
+
+/** Every problem of a brief against the pack, all at once; empty means acceptable. */
+export const checkEpicBrief = (
+  brief: EpicBrief,
+  inputs: BriefCheckInputs
+): ReadonlyArray<BriefProblem> => {
+  const problems: Array<BriefProblem> = []
+  const programs = new Map(inputs.pack.programs.map((program) => [program.name, program]))
+  const lists = new Map<string, Array<string>>()
+  const place = (list: string, program: string, scenario: string): void => {
+    const known = programs.get(program)
+    if (known === undefined) {
+      if (!problems.some((p) => p.kind === "UnknownProgram" && p.program === program)) {
+        problems.push({ kind: "UnknownProgram", program })
+      }
+      return
+    }
+    if (!known.scenarios.includes(scenario)) {
+      const closest = known.scenarios.find((title) => loose(title) === loose(scenario))
+      problems.push({
+        kind: "UnknownScenario",
+        program,
+        scenario,
+        ...(closest === undefined ? {} : { closest })
+      })
+      return
+    }
+    const key = slot(program, scenario)
+    const seen = lists.get(key) ?? []
+    if (!seen.includes(list)) lists.set(key, [...seen, list])
+  }
+
+  for (const item of brief.scope) {
+    if (item.citations.length === 0 && (item.newBehaviour ?? "").trim().length === 0) {
+      problems.push({
+        kind: "MissingReason",
+        where: `in-scope item "${item.title}" cites nothing and`
+      })
+    }
+    for (const citation of item.citations) place("in scope", citation.program, citation.scenario)
+  }
+  for (const entry of brief.dropped) {
+    place("dropped", entry.program, entry.scenario)
+    if (entry.note.trim().length === 0) {
+      problems.push({
+        kind: "MissingReason",
+        where: `dropped ${entry.program}${cite}${entry.scenario}`
+      })
+    }
+  }
+  for (const entry of brief.provided) {
+    place("provided", entry.program, entry.scenario)
+    if (!inputs.pointers.has(entry.note)) {
+      problems.push({
+        kind: "MissingPointer",
+        program: entry.program,
+        scenario: entry.scenario,
+        pointer: entry.note
+      })
+    }
+  }
+  for (const entry of brief.deferred) {
+    place("deferred", entry.program, entry.scenario)
+    if (entry.note.trim().length === 0) {
+      problems.push({
+        kind: "MissingReason",
+        where: `deferred ${entry.program}${cite}${entry.scenario}`
+      })
+    }
+  }
+
+  for (const [key, where] of lists) {
+    if (where.length > 1) {
+      const [program = "", scenario = ""] = key.split("\u0000")
+      problems.push({ kind: "DuplicateDisposition", program, scenario, lists: where })
+    }
+  }
+  for (const considered of brief.programs) {
+    const known = programs.get(considered.name)
+    if (known === undefined) {
+      if (!problems.some((p) => p.kind === "UnknownProgram" && p.program === considered.name)) {
+        problems.push({ kind: "UnknownProgram", program: considered.name })
+      }
+      continue
+    }
+    for (const scenario of known.scenarios) {
+      if (!lists.has(slot(known.name, scenario))) {
+        problems.push({ kind: "Unaccounted", program: known.name, scenario })
+      }
+    }
+  }
+
+  // A scenario refine took out of the pack's scope can come back only on purpose.
+  const justified = (program: string, scenario: string): boolean =>
+    brief.openPoints.some(
+      (point) =>
+        (point.answer ?? "").trim().length > 0 &&
+        point.question.includes(program) &&
+        point.question.includes(scenario)
+    )
+  for (const item of brief.scope) {
+    for (const citation of item.citations) {
+      const refined = inputs.pack.refine.find(
+        (entry) =>
+          entry.program === citation.program &&
+          (entry.scenario === undefined || entry.scenario === citation.scenario) &&
+          (entry.disposition === "drop" || entry.disposition === "provided")
+      )
+      if (refined !== undefined && !justified(citation.program, citation.scenario)) {
+        problems.push({
+          kind: "RefineConflict",
+          program: citation.program,
+          scenario: citation.scenario,
+          disposition: refined.disposition
+        })
+      }
+    }
+  }
+
+  const pending = unanswered(brief)
+  if (brief.status === "approved" && pending.length > 0) {
+    problems.push({ kind: "ApprovedWithOpenPoints", numbers: pending.map((point) => point.number) })
+  }
+  return problems
+}

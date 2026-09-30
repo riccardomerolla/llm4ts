@@ -2,18 +2,23 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { OpenPoint } from "@llm4ts/flow/Decisions"
 import {
+  checkEpicBrief,
   Citation,
   ConsideredProgram,
   Disposed,
   EpicBrief,
   parseEpicBrief,
+  providedPointers,
+  renderBriefProblem,
   renderEpicBrief,
   ScopeItem,
-  unanswered
+  unanswered,
+  type BriefProblem,
+  type PackIndex
 } from "@llm4ts/flow/EpicBrief"
 import { EpicBriefInvalid } from "@llm4ts/flow/FlowError"
 
-export const sampleBrief = EpicBrief.make({
+const sampleBrief = EpicBrief.make({
   epicId: "conto-corrente",
   status: "draft",
   request: "Current account: balance, movements",
@@ -190,4 +195,149 @@ describe("the epic brief file", () => {
       assert.isAtLeast(error.violations.length, 5)
     })
   )
+})
+
+const pack: PackIndex = {
+  programs: [
+    {
+      name: "CONTO_SALDO",
+      summary: "Balance inquiry.",
+      scenarios: ["Show the available balance", "Session timeout warning"]
+    },
+    {
+      name: "CONTO_MOVIMENTI",
+      summary: "Movements list.",
+      scenarios: [
+        "Filter movements by date range",
+        "Filter movements by amount",
+        "Export movements to fax"
+      ]
+    }
+  ],
+  refine: []
+}
+const pointers = new Set(["src/kit/session/SessionGuard.tsx"])
+const kinds = (problems: ReadonlyArray<BriefProblem>): ReadonlyArray<string> =>
+  problems.map((problem) => problem.kind).sort()
+const withBrief = (change: Partial<ConstructorParameters<typeof EpicBrief>[0]>): EpicBrief =>
+  EpicBrief.make({ ...sampleBrief, ...change })
+
+describe("checking an epic brief", () => {
+  it("a brief whose every scenario has one disposition and whose pointers exist is clean", () => {
+    assert.deepStrictEqual(checkEpicBrief(sampleBrief, { pack, pointers }), [])
+    assert.deepStrictEqual(providedPointers(sampleBrief), ["src/kit/session/SessionGuard.tsx"])
+  })
+
+  it("an unknown program and an unknown scenario are named, with the closest title", () => {
+    const problems = checkEpicBrief(
+      withBrief({
+        dropped: [
+          Disposed.make({
+            program: "CONTO_MOVIMENTI",
+            scenario: "export movements to FAX ",
+            note: "dead"
+          }),
+          Disposed.make({ program: "GHOST", scenario: "Anything", note: "dead" })
+        ]
+      }),
+      { pack, pointers }
+    )
+    const unknown = problems.find((problem) => problem.kind === "UnknownScenario")
+    assert.strictEqual(
+      unknown?.kind === "UnknownScenario" ? unknown.closest : undefined,
+      "Export movements to fax"
+    )
+    assert.include(kinds(problems), "UnknownProgram")
+    // The real title is then in no list.
+    assert.include(kinds(problems), "Unaccounted")
+  })
+
+  it("a provided pointer that was not found is a problem", () => {
+    const problems = checkEpicBrief(sampleBrief, { pack, pointers: new Set() })
+    assert.deepStrictEqual(kinds(problems), ["MissingPointer"])
+  })
+
+  it("a dropped entry needs a reason, an uncited item needs `new:`", () => {
+    const problems = checkEpicBrief(
+      withBrief({
+        dropped: [
+          Disposed.make({
+            program: "CONTO_MOVIMENTI",
+            scenario: "Export movements to fax",
+            note: ""
+          })
+        ],
+        scope: [...sampleBrief.scope, ScopeItem.make({ title: "Mystery", citations: [] })]
+      }),
+      { pack, pointers }
+    )
+    assert.deepStrictEqual(kinds(problems), ["MissingReason", "MissingReason"])
+  })
+
+  it("a scenario in two lists, and one in none, are both reported", () => {
+    const problems = checkEpicBrief(
+      withBrief({
+        dropped: [],
+        deferred: [
+          Disposed.make({
+            program: "CONTO_SALDO",
+            scenario: "Show the available balance",
+            note: "later"
+          })
+        ]
+      }),
+      { pack, pointers }
+    )
+    assert.deepStrictEqual(kinds(problems), ["DuplicateDisposition", "Unaccounted"])
+    const missing = problems.find((problem) => problem.kind === "Unaccounted")
+    assert.strictEqual(
+      missing?.kind === "Unaccounted" ? missing.scenario : undefined,
+      "Export movements to fax"
+    )
+  })
+
+  it("only the programs under consideration must be complete", () => {
+    const narrowed = withBrief({
+      programs: [ConsideredProgram.make({ name: "CONTO_SALDO", reason: "balance" })],
+      scope: [
+        ScopeItem.make({
+          title: "Balance card",
+          citations: [
+            Citation.make({ program: "CONTO_SALDO", scenario: "Show the available balance" })
+          ]
+        })
+      ],
+      dropped: []
+    })
+    assert.deepStrictEqual(checkEpicBrief(narrowed, { pack, pointers }), [])
+  })
+
+  it("a scenario refine dropped cannot be in scope without an answered open point about it", () => {
+    const refined: PackIndex = {
+      ...pack,
+      refine: [
+        { program: "CONTO_MOVIMENTI", scenario: "Filter movements by amount", disposition: "drop" }
+      ]
+    }
+    assert.deepStrictEqual(kinds(checkEpicBrief(sampleBrief, { pack: refined, pointers })), [
+      "RefineConflict"
+    ])
+    const justified = withBrief({
+      openPoints: [
+        OpenPoint.make({
+          number: 1,
+          question:
+            "Refine dropped CONTO_MOVIMENTI › Filter movements by amount; keep it in this epic?",
+          answer: "yes, the business asked for it again"
+        })
+      ]
+    })
+    assert.deepStrictEqual(checkEpicBrief(justified, { pack: refined, pointers }), [])
+  })
+
+  it("an approved brief with an unanswered open point is refused", () => {
+    const problems = checkEpicBrief(withBrief({ status: "approved" }), { pack, pointers })
+    assert.deepStrictEqual(kinds(problems), ["ApprovedWithOpenPoints"])
+    assert.include(problems.map(renderBriefProblem).join("\n"), "1")
+  })
 })
