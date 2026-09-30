@@ -237,6 +237,16 @@ export class LandingFailed extends Schema.TaggedError<LandingFailed>()("LandingF
   }
 }
 
+/** A refine round cannot start, or the epic cannot take one; the reason says what to do next (ADR 0021). */
+export class RefineRefused extends Schema.TaggedError<RefineRefused>()("RefineRefused", {
+  epicId: Schema.String,
+  reason: Schema.String
+}) {
+  get message(): string {
+    return `epic '${this.epicId}' cannot be refined: ${this.reason}`
+  }
+}
+
 /** The start of every `RosterExhausted` message, so it is recognisable once wrapped. */
 export const rosterExhaustedPrefix = "roster exhausted: no executor can ever take the role"
 
@@ -366,6 +376,7 @@ export const FlowError = Schema.Union([
   ContractConflict,
   ExtractPackMissing,
   EpicBriefInvalid,
-  EpicBriefNotApproved
+  EpicBriefNotApproved,
+  RefineRefused
 ])
 export type FlowError = typeof FlowError.Type

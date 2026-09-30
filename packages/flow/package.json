@@ -63,6 +63,7 @@
     "./PriceList": "./dist/PriceList.js",
     "./ProgramJudge": "./dist/ProgramJudge.js",
     "./Provenance": "./dist/Provenance.js",
+    "./RefineRound": "./dist/RefineRound.js",
     "./Replay": "./dist/Replay.js",
     "./Review": "./dist/Review.js",
     "./ReviewCache": "./dist/ReviewCache.js",
