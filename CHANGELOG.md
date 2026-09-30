@@ -10,6 +10,8 @@
     run; `q` returns to the classic view, which stays the default.
   - `llm4ts watch [trace] [--epic id] [--replay] [--speed n]` draws it from
     a trace: live, finished, or replayed on the trace's timestamps.
+  - A short terminal shrinks the session log first, then drops it; the
+    story boxes and status lines stay.
   - `@llm4ts/runner/AgentTree` is the pure core (`reduceTree`,
     `renderTree`, `onTreeKey`, `treeInputsOfTrace`);
     `@llm4ts/runner/AgentTreeSurface` and `@llm4ts/runner/Watch` host it.
