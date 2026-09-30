@@ -24,7 +24,9 @@ import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import {
   briefPath,
+  coverageReport,
   designEpic,
+  epicProgressOf,
   parseEpicDesignArgs,
   proposePrompt,
   readPackIndex,
@@ -405,7 +407,12 @@ describe("epic-design arguments", () => {
   it.effect("parses --list and --epic, leaving the request as the rest", () =>
     Effect.gen(function* () {
       const plain = yield* parseEpicDesignArgs(["Current account"])
-      assert.deepStrictEqual(plain, { list: false, epic: undefined, rest: ["Current account"] })
+      assert.deepStrictEqual(plain, {
+        list: false,
+        coverage: false,
+        epic: undefined,
+        rest: ["Current account"]
+      })
       const resumed = yield* parseEpicDesignArgs(["--epic", "conto-corrente"])
       assert.strictEqual(resumed.epic, "conto-corrente")
       assert.isTrue((yield* parseEpicDesignArgs(["--list"])).list)
@@ -833,6 +840,129 @@ describe("epic-design inherits from the approved briefs of other epics", () => {
       const outcome = yield* run()
       assert.deepStrictEqual(outcome.problems, [])
       assert.deepStrictEqual(outcome.inherited, [])
+    })
+  )
+})
+
+describe("epic-design --coverage", () => {
+  const owned = (epicId: string, parts: Partial<ConstructorParameters<typeof EpicBrief>[0]>) =>
+    renderEpicBrief(
+      EpicBrief.make({
+        epicId,
+        status: "approved",
+        request: epicId,
+        legacy: "/legacy",
+        goal: "",
+        programs: [ConsideredProgram.make({ name: "CONTO_MOVIMENTI", reason: "" })],
+        scope: [],
+        dropped: [],
+        provided: [],
+        deferred: [],
+        constraints: "",
+        openPoints: [],
+        feedback: "",
+        ...parts
+      })
+    )
+  const amount = { program: "CONTO_MOVIMENTI", scenario: "Filter movements by amount" }
+
+  it.effect("writes the report from every brief, with no model call and no brief touched", () =>
+    Effect.gen(function* () {
+      const { files, seat } = yield* setup([])
+      const a = owned("a", {
+        scope: [ScopeItem.make({ title: "Amount filter", citations: [Citation.make(amount)] })]
+      })
+      const b = owned("b", { dropped: [Disposed.make({ ...amount, note: "rarely used" })] })
+      yield* files.writeAtomic("/target/.llm4ts/epics/a/brief.md", a)
+      yield* files.writeAtomic("/target/.llm4ts/epics/b/brief.md", b)
+      yield* files.writeAtomic("/target/.llm4ts/epics/broken/brief.md", "not a brief")
+      const report = yield* coverageReport({
+        files,
+        targetDir: "/target",
+        legacyRepo: "/legacy",
+        specNames,
+        dirs: ["a", "b", "broken", "no-brief-here"],
+        epics: []
+      })
+      assert.strictEqual(report.path, "/target/.llm4ts/epics/coverage.md")
+      assert.strictEqual(
+        report.headline,
+        "5 scenarios · 0 accounted for (0%) · 0 delivered · 5 remaining · 1 conflict"
+      )
+      const text = (yield* files.read(report.path)) ?? ""
+      assert.include(text, report.headline)
+      assert.include(text, "## Conflicts")
+      assert.include(text, "a: in scope (Amount filter); b: dropped (rarely used)")
+      assert.include(text, "- broken: ")
+      assert.strictEqual(yield* files.read("/target/.llm4ts/epics/a/brief.md"), a)
+      assert.strictEqual(yield* files.read("/target/.llm4ts/epics/b/brief.md"), b)
+      assert.strictEqual(yield* seat.calls, 0)
+    })
+  )
+
+  it.effect("with no brief at all, every program is there and unclaimed", () =>
+    Effect.gen(function* () {
+      const { files } = yield* setup([])
+      const report = yield* coverageReport({
+        files,
+        targetDir: "/target",
+        legacyRepo: "/legacy",
+        specNames,
+        dirs: [],
+        epics: []
+      })
+      const text = (yield* files.read(report.path)) ?? ""
+      assert.include(text, "no epic brief yet")
+      assert.include(text, "| CONTO_MOVIMENTI | 3 | 0 | 0 | 0 | 0 | 0 | 3 | 0 | 0% |")
+      assert.include(text, "| CONTO_SALDO | 2 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0% |")
+    })
+  )
+
+  it.effect("an epic's recorded progress becomes the delivery state of what it owns", () =>
+    Effect.gen(function* () {
+      const { files } = yield* setup([])
+      yield* files.writeAtomic(
+        "/target/.llm4ts/epics/a/brief.md",
+        owned("a", {
+          scope: [ScopeItem.make({ title: "Amount filter", citations: [Citation.make(amount)] })]
+        })
+      )
+      const epics = [
+        {
+          dir: "a",
+          stateDir: "/target/.llm4ts/epics/a",
+          epicId: "a",
+          epic: "a",
+          stories: 3,
+          merged: 3,
+          landed: "main"
+        }
+      ]
+      assert.deepStrictEqual(epicProgressOf(epics), [
+        { epicId: "a", planned: true, stories: 3, merged: 3, landed: true }
+      ])
+      const report = yield* coverageReport({
+        files,
+        targetDir: "/target",
+        legacyRepo: "/legacy",
+        specNames,
+        dirs: ["a"],
+        epics
+      })
+      assert.include(report.headline, "1 accounted for (20%) · 1 delivered")
+      assert.include((yield* files.read(report.path)) ?? "", "- a — approved, landed")
+    })
+  )
+
+  it.effect("--coverage is a flag of the flow, and the entry runs the report", () =>
+    Effect.gen(function* () {
+      assert.isTrue((yield* parseEpicDesignArgs(["--coverage"])).coverage)
+      const entry = readFileSync(join(fixtures, "..", "..", "epic-design.ts"), "utf8")
+      assert.include(entry, "--coverage")
+      assert.include(entry, "coverageReport(")
+      // The entry loads the other briefs and hands them to designEpic.
+      assert.include(entry, "loadBriefs(")
+      assert.match(entry, /\n\s+others,\n/)
     })
   )
 })

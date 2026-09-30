@@ -4,6 +4,7 @@
 //     llm4ts run epic-design --repo ~/work/portal "Current account: balance, movements, statements"
 //   llm4ts run epic-design --repo ~/work/portal -- --epic <id>    # revise, or validate once approved
 //   llm4ts run epic-design --repo ~/work/portal -- --list         # the repository's briefs
+//   llm4ts run epic-design --repo ~/work/portal -- --coverage     # the ledger across every brief
 //
 // Runs rooted at the TARGET repository. The legacy repository must hold
 // modernize-extract's pack (docs/modernization/); modernize-refine's
@@ -18,6 +19,13 @@
 // from the approved brief. Seat: LLM4TS_REASONER (read-only, default
 // claude). LLM4TS_PACK describes the target stack when the target is new.
 // LLM4TS_CONTEXT_BUDGET bounds the legacy evidence in the prompt.
+//
+// Briefs of one repository are read together. What the approved briefs of
+// other epics decided is inherited: a scenario they dropped or found in the
+// target is not restated, one they own is not proposed again, one they
+// deferred is offered; deciding otherwise is a `[check]` open point naming
+// the other epic. --coverage writes .llm4ts/epics/coverage.md, the ledger of
+// every scenario of the pack against every brief, without calling a model.
 import { access, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import * as Console from "effect/Console"
@@ -35,20 +43,28 @@ import {
   stage
 } from "@llm4ts/runner"
 import {
+  coverageReport,
   designEpic,
   parseEpicDesignArgs,
   renderBriefList,
   renderOutcome,
   resolveDesignTarget
 } from "./lib/epic-design.ts"
-import { epicDirs, listBriefs, reasonerFromEnvironment } from "./lib/epic-stories.ts"
+import {
+  epicDirs,
+  listBriefs,
+  listEpics,
+  loadBriefs,
+  reasonerFromEnvironment
+} from "./lib/epic-stories.ts"
 import { ModDir } from "./lib/modernize-extract.ts"
 
 const program = Effect.gen(function* () {
   const flags = yield* parseEpicDesignArgs(process.argv.slice(2))
   const given = yield* resolveFlowInput("", flags.rest)
   const files = nodePlainFileStore
-  const briefs = yield* listBriefs(files, given.workDir, yield* epicDirs(given.workDir))
+  const dirs = yield* epicDirs(given.workDir)
+  const briefs = yield* listBriefs(files, given.workDir, dirs)
   if (flags.list) {
     yield* Console.log(renderBriefList(briefs))
     return
@@ -60,7 +76,6 @@ const program = Effect.gen(function* () {
         "LLM4TS_LEGACY_REPO is not set: point it at the legacy repository holding docs/modernization/"
     })
   }
-  const target = yield* resolveDesignTarget({ text: given.prompt, epic: flags.epic, briefs })
   const specNames = yield* Effect.tryPromise(() => readdir(join(legacyRepo, ModDir, "specs"))).pipe(
     Effect.map((names) =>
       names
@@ -69,6 +84,20 @@ const program = Effect.gen(function* () {
     ),
     Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([]))
   )
+  if (flags.coverage) {
+    const report = yield* coverageReport({
+      files,
+      targetDir: given.workDir,
+      legacyRepo,
+      specNames,
+      dirs,
+      epics: yield* listEpics(files, given.workDir)
+    })
+    yield* Console.log(`${report.headline}\n${report.path}`)
+    return
+  }
+  const target = yield* resolveDesignTarget({ text: given.prompt, epic: flags.epic, briefs })
+  const others = (yield* loadBriefs(files, given.workDir, dirs)).briefs
   const reasoning = asReadOnly(yield* reasonerFromEnvironment(process.env))
 
   yield* runNode(
@@ -125,6 +154,7 @@ const program = Effect.gen(function* () {
             budget: budget(process.env),
             guidance,
             packNote,
+            others,
             pathExists: (absolute) =>
               Effect.tryPromise(() => access(absolute)).pipe(
                 Effect.as(true),

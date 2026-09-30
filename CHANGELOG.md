@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- The **coverage ledger** for `epic-design`: the epic briefs of a target
+  repository are read together, against the whole legacy extract pack.
+  - `epic-design -- --coverage` writes `.llm4ts/epics/coverage.md` with no
+    model call: scenarios accounted for, delivered and remaining, a table
+    per program, conflicts between approved briefs, scenarios still
+    deferred, unclaimed ones, draft proposals and stale citations.
+  - A new brief inherits what the approved briefs of other epics decided:
+    dropped and provided scenarios are not restated and count towards
+    completeness, owned ones are not proposed again, deferred ones are
+    offered. Drafts bind nothing.
+  - Two new checks, `AlreadyOwned` and `ContradictsBrief`, raised as
+    `[check]` open points naming the other epic and overridable with
+    `keep: <why>`.
+  - `@llm4ts/flow/CoverageLedger`: `buildLedger`, `inheritedFrom`,
+    `renderLedger`. With a single brief in a repository nothing changes.
 - Docs: `docs/vertex-service-account.md`, a guide to running flows on
   Google Vertex AI with a service-account key: which CLI harnesses accept
   it (Claude Code, Gemini CLI, opencode, pi; not Codex), the variables each

@@ -150,6 +150,18 @@ LLM4TS_LEGACY_REPO=~/legacy/ib-core \
   `modernize-refine` dropped comes back only when you answer its `[check]`
   open point with `keep: <why>`; that answer stays in the brief as the record. What one fix round cannot clear is written into the brief as a
   `[check]` open point; nothing is hidden.
+- **Briefs of one repository are read together** (the coverage ledger).
+  What the approved briefs of other epics decided is inherited: a scenario
+  they dropped or found in the target is not restated, one they own is not
+  proposed again, and one they deferred is offered to the new brief.
+  Deciding otherwise is a `[check]` open point naming the other epic,
+  resolved like any override: move the scenario out, or answer
+  `keep: <why>`. Drafts bind nothing.
+- `-- --coverage` writes `.llm4ts/epics/coverage.md` without calling a
+  model: how many scenarios of the legacy pack are accounted for, delivered
+  and remaining, a table per program, and the lists that need someone:
+  conflicts between approved briefs, scenarios still deferred, unclaimed
+  ones, what drafts propose, and citations the pack no longer has.
 - Approve by setting `Status: approved`, then:
   `llm4ts run epic-stories --repo ~/work/portal -- --epic <epic-id>`. The
   planner reads the brief in place of a one-line epic; a draft brief stops

@@ -6,7 +6,15 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { cap } from "@llm4ts/flow/Context"
-import { buildLedger, inheritedFrom, type LedgerBrief } from "@llm4ts/flow/CoverageLedger"
+import {
+  buildLedger,
+  inheritedFrom,
+  ledgerHeadline,
+  renderLedger,
+  type CoverageLedger,
+  type EpicProgress,
+  type LedgerBrief
+} from "@llm4ts/flow/CoverageLedger"
 import { parseDecisions, scenarioTitles } from "@llm4ts/flow/Decisions"
 import {
   assembleBrief,
@@ -42,7 +50,13 @@ import {
 import type { FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { ScriptUsage } from "@llm4ts/runner"
-import { epicIdFor, epicsDir, type BriefSummary } from "./epic-stories.ts"
+import {
+  epicIdFor,
+  epicsDir,
+  loadBriefs,
+  type BriefSummary,
+  type EpicSummary
+} from "./epic-stories.ts"
 import { ModDir } from "./modernize-extract.ts"
 
 // ---- Arguments ----------------------------------------------------------------
@@ -52,11 +66,13 @@ export const epicDesignUsage = [
   "  LLM4TS_LEGACY_REPO=<path>  the legacy repository holding docs/modernization/ (required)",
   "  LLM4TS_PACK=<name|dir>     the pack describing the target stack (a new or empty target)",
   "  --epic <id>                revise or validate an existing brief, no text needed",
-  "  --list                     this repository's briefs and their status"
+  "  --list                     this repository's briefs and their status",
+  "  --coverage                 write the coverage ledger across every brief (no model call)"
 ].join("\n")
 
 export interface EpicDesignArgs {
   readonly list: boolean
+  readonly coverage: boolean
   readonly epic: string | undefined
   readonly rest: ReadonlyArray<string>
 }
@@ -66,12 +82,15 @@ export const parseEpicDesignArgs = (
 ): Effect.Effect<EpicDesignArgs, ScriptUsage> =>
   Effect.gen(function* () {
     let list = false
+    let coverage = false
     let epic: string | undefined
     const rest: Array<string> = []
     for (let index = 0; index < argv.length; index += 1) {
       const argument = argv[index] ?? ""
       if (argument === "--list") {
         list = true
+      } else if (argument === "--coverage") {
+        coverage = true
       } else if (argument === "--epic" || argument.startsWith("--epic=")) {
         const value = argument.includes("=") ? argument.slice("--epic=".length) : argv[index + 1]
         if (!argument.includes("=")) index += 1
@@ -91,7 +110,7 @@ export const parseEpicDesignArgs = (
         rest.push(argument)
       }
     }
-    return { list, epic, rest }
+    return { list, coverage, epic, rest }
   })
 
 // ---- Which brief ---------------------------------------------------------------
@@ -605,3 +624,53 @@ export const renderOutcome = (outcome: DesignOutcome, epicId: string): ReadonlyA
       ]
   }
 }
+
+// ---- The coverage ledger ---------------------------------------------------------
+
+export const coveragePath = (targetDir: string): string => join(epicsDir(targetDir), "coverage.md")
+
+/** What epic-stories recorded for each planned epic, as the ledger reads it. */
+export const epicProgressOf = (epics: ReadonlyArray<EpicSummary>): ReadonlyArray<EpicProgress> =>
+  epics.map((epic) => ({
+    epicId: epic.dir,
+    planned: true,
+    stories: epic.stories,
+    merged: epic.merged,
+    landed: epic.landed !== undefined
+  }))
+
+export interface CoverageReport {
+  readonly path: string
+  readonly headline: string
+  readonly ledger: CoverageLedger
+  readonly unreadable: ReadonlyArray<{ readonly dir: string; readonly reason: string }>
+}
+
+/**
+ * The ledger across every brief of the target, written as coverage.md. A
+ * read of the repository: no model is called and no brief is edited.
+ */
+export const coverageReport = Effect.fn("epic-design.coverage")(function* (options: {
+  readonly files: PlainFileStoreShape
+  readonly targetDir: string
+  readonly legacyRepo: string
+  readonly specNames: ReadonlyArray<string>
+  /** The names of the epic folders of the target repository. */
+  readonly dirs: ReadonlyArray<string>
+  readonly epics: ReadonlyArray<EpicSummary>
+}): Effect.fn.Return<CoverageReport, FlowError> {
+  const pack = yield* readPackIndex(options)
+  const loaded = yield* loadBriefs(options.files, options.targetDir, options.dirs)
+  const ledger = buildLedger({
+    pack: pack.index,
+    briefs: loaded.briefs,
+    epics: epicProgressOf(options.epics),
+    legacy: options.legacyRepo
+  })
+  const path = coveragePath(options.targetDir)
+  yield* options.files.writeAtomic(
+    path,
+    renderLedger(ledger, { legacy: options.legacyRepo, unreadable: loaded.unreadable })
+  )
+  return { path, headline: ledgerHeadline(ledger), ledger, unreadable: loaded.unreadable }
+})
