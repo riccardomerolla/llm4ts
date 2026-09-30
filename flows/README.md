@@ -304,7 +304,10 @@ its slots and a priority per role:
   provider settings stay in each harness's own config. API providers
   (`lm-studio`, `ollama`, `openai`, …) may reason but not code.
 
-The demo roster is `examples/internet-banking/roster.example.json`.
+The demo roster is `examples/internet-banking/roster.example.json`. A roster
+for Google Vertex AI with a service-account key, and how to configure each
+harness for it, is in `docs/vertex-service-account.md`
+(`examples/vertex/roster.example.json`).
 
 ### Local models
 

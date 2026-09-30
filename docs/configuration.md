@@ -42,6 +42,11 @@ selects `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, or
 
 `LLM4TS_VERBOSITY` accepts `quiet`, `normal`, `verbose`, or `debug`.
 
+With a Google Cloud project and a **Vertex AI service-account key** as the
+only model access, see `vertex-service-account.md`: which harnesses accept
+the key (Claude Code, Gemini CLI, opencode, pi; not Codex), the variables
+each reads, and a roster that combines them.
+
 ### Gemini ACP bridge (for `pi` without a model credential)
 
 When `pi` is the coder and the only paid model access available is a

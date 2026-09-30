@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Docs: `docs/vertex-service-account.md`, a guide to running flows on
+  Google Vertex AI with a service-account key: which CLI harnesses accept
+  it (Claude Code, Gemini CLI, opencode, pi; not Codex), the variables each
+  reads, and an executor roster that combines them
+  (`examples/vertex/roster.example.json`, loaded by a test so the guide and
+  the loader cannot drift).
+
 ## 2.17.0
 
 - New flow `epic-design`: from a legacy `modernize-extract` pack and a
