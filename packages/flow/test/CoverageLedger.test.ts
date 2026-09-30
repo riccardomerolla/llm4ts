@@ -1,5 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
-import { buildLedger, inheritedFrom, type EpicProgress } from "@llm4ts/flow/CoverageLedger"
+import {
+  buildLedger,
+  inheritedFrom,
+  ledgerHeadline,
+  renderLedger,
+  type EpicProgress
+} from "@llm4ts/flow/CoverageLedger"
 import { OpenPoint } from "@llm4ts/flow/Decisions"
 import {
   Citation,
@@ -12,7 +18,7 @@ import {
   type PackIndex
 } from "@llm4ts/flow/EpicBrief"
 
-export const pack: PackIndex = {
+const pack: PackIndex = {
   programs: [
     { name: "P", summary: "Program P.", scenarios: ["s1", "s2", "s3", "s4", "s5", "s6"] },
     { name: "Q", summary: "Program Q.", scenarios: ["q1", "q2"] }
@@ -22,11 +28,7 @@ export const pack: PackIndex = {
 
 type Parts = Partial<ConstructorParameters<typeof EpicBrief>[0]>
 
-export const briefOf = (
-  epicId: string,
-  status: "draft" | "approved",
-  parts: Parts = {}
-): EpicBrief =>
+const briefOf = (epicId: string, status: "draft" | "approved", parts: Parts = {}): EpicBrief =>
   EpicBrief.make({
     epicId,
     status,
@@ -44,13 +46,13 @@ export const briefOf = (
     ...parts
   })
 
-export const inScope = (title: string, ...scenarios: ReadonlyArray<string>): ScopeItem =>
+const inScope = (title: string, ...scenarios: ReadonlyArray<string>): ScopeItem =>
   ScopeItem.make({
     title,
     citations: scenarios.map((scenario) => Citation.make({ program: "P", scenario }))
   })
 
-export const out = (scenario: string, note: string, program = "P"): Disposed =>
+const out = (scenario: string, note: string, program = "P"): Disposed =>
   Disposed.make({ program, scenario, note })
 
 const kept = (problem: BriefProblem): OpenPoint =>
@@ -268,5 +270,77 @@ describe("the coverage ledger", () => {
       { program: "P", scenario: "s1", epic: "A", disposition: "in-scope", note: "Item one" },
       { program: "P", scenario: "s4", epic: "A", disposition: "deferred", note: "next epic" }
     ])
+  })
+})
+
+describe("the coverage report", () => {
+  const estate = ledgerOf(
+    [
+      briefOf("A", "approved", {
+        scope: [inScope("Item one", "s1")],
+        dropped: [out("s2", "dead")],
+        provided: [out("s3", "src/kit/x.ts")],
+        deferred: [out("s4", "waits for the document service")]
+      }),
+      briefOf("B", "approved", { dropped: [out("s1", "dead"), out("gone", "dead")] }),
+      briefOf("D", "draft", { scope: [inScope("Draft item", "s5")] }),
+      briefOf("X", "approved", { legacy: "/other-legacy" })
+    ],
+    [{ epicId: "A", planned: true, stories: 3, merged: 1, landed: false }],
+    "/legacy"
+  )
+
+  it("opens with the headline, the legacy path and the briefs it read", () => {
+    assert.strictEqual(
+      ledgerHeadline(estate),
+      "8 scenarios · 2 accounted for (25%) · 2 delivered · 6 remaining · 1 conflict"
+    )
+    const text = renderLedger(estate, { legacy: "/legacy" })
+    assert.include(text, "# Coverage ledger")
+    assert.include(text, ledgerHeadline(estate))
+    assert.include(text, "Legacy: /legacy")
+    assert.include(text, "- A — approved, in progress")
+    assert.include(text, "- D — draft")
+  })
+
+  it("has one table row per program, touched or not", () => {
+    const text = renderLedger(estate, { legacy: "/legacy" })
+    assert.include(text, "| P | 6 | 0 | 1 | 1 | 1 | 1 | 1 | 1 | 33% |")
+    assert.include(text, "| Q | 2 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0% |")
+  })
+
+  it("lists what needs a human: conflicts, deferred, unclaimed, proposed, stale, skipped", () => {
+    const text = renderLedger(estate, {
+      legacy: "/legacy",
+      unreadable: [{ dir: "broken", reason: "missing the `Status:` line" }]
+    })
+    assert.include(text, "## Conflicts")
+    assert.include(text, "- P › s1 — A: in scope (Item one); B: dropped (dead)")
+    assert.include(text, "## Deferred, still waiting")
+    assert.include(text, "- P › s4 — deferred by A: waits for the document service")
+    assert.include(text, "## Unclaimed")
+    assert.include(text, "- Q: q1; q2")
+    assert.include(text, "## Proposed by drafts")
+    assert.include(text, "- P › s5 — D: in scope (Draft item)")
+    assert.include(text, "## Stale citations")
+    assert.include(text, "- B cites P › gone (dropped), which the pack no longer has")
+    assert.include(text, "## Skipped briefs")
+    assert.include(text, "- X")
+    assert.include(text, "## Briefs that could not be read")
+    assert.include(text, "- broken: missing the `Status:` line")
+  })
+
+  it("an estate with no brief is all unclaimed, and an empty pack does not divide by zero", () => {
+    const none = ledgerOf([])
+    assert.strictEqual(
+      ledgerHeadline(none),
+      "8 scenarios · 0 accounted for (0%) · 0 delivered · 8 remaining · 0 conflicts"
+    )
+    const text = renderLedger(none, { legacy: "/legacy" })
+    assert.include(text, "no epic brief yet")
+    assert.notInclude(text, "## Conflicts")
+    assert.notInclude(text, "## Stale citations")
+    const empty = buildLedger({ pack: { programs: [], refine: [] }, briefs: [], epics: [] })
+    assert.include(ledgerHeadline(empty), "0 scenarios · 0 accounted for (0%)")
   })
 })

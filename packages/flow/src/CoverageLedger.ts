@@ -345,3 +345,143 @@ export const inheritedFrom = (ledger: CoverageLedger): ReadonlyArray<InheritedDe
         note: claim.note
       }))
   )
+
+// ---- The report -----------------------------------------------------------------
+
+const percent = (part: number, whole: number): string =>
+  `${whole === 0 ? 0 : Math.round((part / whole) * 100)}%`
+
+const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`
+
+/** `142 scenarios · 96 accounted for (68%) · 58 delivered · 46 remaining · 2 conflicts`. */
+export const ledgerHeadline = (ledger: CoverageLedger): string => {
+  const totals = ledger.totals
+  return [
+    plural(totals.scenarios, "scenario"),
+    `${totals.accounted} accounted for (${percent(totals.accounted, totals.scenarios)})`,
+    `${totals.delivered} delivered`,
+    `${totals.remaining} remaining`,
+    plural(totals.conflicts, "conflict")
+  ].join(" · ")
+}
+
+const deliveryWords: Readonly<Record<DeliveryState, string>> = {
+  approved: "approved",
+  planned: "planned",
+  "in-progress": "in progress",
+  landed: "landed"
+}
+
+const claimText = (claim: Claim): string =>
+  `${claim.epicId}: ${dispositionWords[claim.disposition]}${claim.note.length === 0 ? "" : ` (${claim.note})`}`
+
+const titled = (title: string, lines: ReadonlyArray<string>): ReadonlyArray<string> =>
+  lines.length === 0 ? [] : [`## ${title}`, "", ...lines, ""]
+
+export interface RenderLedgerOptions {
+  /** The legacy repository the pack was read from. */
+  readonly legacy: string
+  /** Brief files that did not parse, with the first thing wrong in each. */
+  readonly unreadable?: ReadonlyArray<{ readonly dir: string; readonly reason: string }>
+}
+
+/**
+ * The ledger as a page a person reads: the headline, a table per program,
+ * then only the lists that need someone: conflicts, scenarios still
+ * deferred, unclaimed ones, what drafts propose, stale citations.
+ */
+export const renderLedger = (ledger: CoverageLedger, options: RenderLedgerOptions): string => {
+  const of = (status: LedgerStatus): ReadonlyArray<LedgerEntry> =>
+    ledger.entries.filter((entry) => entry.status === status)
+  const name = (entry: LedgerEntry): string => `${entry.program} › ${entry.scenario}`
+  const unclaimed = ledger.programs.flatMap((program) => {
+    const open = of("unclaimed").filter((entry) => entry.program === program.program)
+    return open.length === 0
+      ? []
+      : [`- ${program.program}: ${open.map((entry) => entry.scenario).join("; ")}`]
+  })
+  return [
+    "# Coverage ledger",
+    "",
+    ledgerHeadline(ledger),
+    "",
+    `Legacy: ${options.legacy}`,
+    "",
+    "Derived from the epic briefs of this repository and the legacy extract pack. Regenerate",
+    "it with `epic-design --coverage`; to change it, change a brief.",
+    "",
+    "## Briefs",
+    "",
+    ...(ledger.briefs.length === 0
+      ? ["no epic brief yet"]
+      : ledger.briefs.map((brief) => {
+          const delivery =
+            brief.delivery === undefined || brief.delivery === "approved"
+              ? ""
+              : `, ${deliveryWords[brief.delivery]}`
+          return `- ${brief.epicId} — ${brief.status}${delivery}`
+        })),
+    "",
+    "## Programs",
+    "",
+    "| Program | Scenarios | In scope | Dropped | Provided | Deferred | Proposed | Unclaimed | Conflicts | Accounted |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ...ledger.programs.map(
+      (program) =>
+        `| ${[
+          program.program,
+          program.scenarios,
+          program.inScope,
+          program.dropped,
+          program.provided,
+          program.deferred,
+          program.proposed,
+          program.unclaimed,
+          program.conflicts,
+          percent(program.inScope + program.dropped + program.provided, program.scenarios)
+        ].join(" | ")} |`
+    ),
+    "",
+    ...titled(
+      "Conflicts",
+      of("conflict").map(
+        (entry) =>
+          `- ${name(entry)} — ${entry.claims
+            .filter((claim) => claim.approved)
+            .map(claimText)
+            .join("; ")}`
+      )
+    ),
+    ...titled(
+      "Deferred, still waiting",
+      of("deferred").map((entry) => {
+        const claim = entry.claims.find((c) => c.approved && c.disposition === "deferred")
+        return `- ${name(entry)} — deferred by ${claim?.epicId ?? entry.owners.join(", ")}${
+          claim === undefined || claim.note.length === 0 ? "" : `: ${claim.note}`
+        }`
+      })
+    ),
+    ...titled("Unclaimed", unclaimed),
+    ...titled(
+      "Proposed by drafts",
+      of("proposed").map((entry) => `- ${name(entry)} — ${entry.claims.map(claimText).join("; ")}`)
+    ),
+    ...titled(
+      "Stale citations",
+      ledger.stale.map(
+        (claim) =>
+          `- ${claim.epicId} cites ${claim.program} › ${claim.scenario} (${dispositionWords[claim.disposition]}), which the pack no longer has`
+      )
+    ),
+    ...titled(
+      "Skipped briefs",
+      ledger.skipped.map((epicId) => `- ${epicId}`)
+    ),
+    ...titled(
+      "Briefs that could not be read",
+      (options.unreadable ?? []).map((brief) => `- ${brief.dir}: ${brief.reason}`)
+    )
+  ]
+    .join("\n")
+    .replace(/\n+$/, "\n")
+}
