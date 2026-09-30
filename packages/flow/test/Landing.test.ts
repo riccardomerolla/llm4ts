@@ -370,4 +370,97 @@ describe("landEpic", () => {
       assert.isFalse(entries.some((entry) => entry.startsWith("checkout:main")))
     })
   )
+
+  describe("with refine rounds", () => {
+    const roundDir = `${stateDir}/rounds/1`
+    const roundPlan = StoryPlan.make({
+      epicId: "bank",
+      epic: "Move the balance card",
+      stories: [story("r1-move-card"), story("r1-remove-export")]
+    })
+    const roundMerged = (files: PlainFileStoreShape, id: string) =>
+      saveVersioned(
+        files,
+        `${roundDir}/stories/${id}.json`,
+        StoryStateVersion,
+        StoryState,
+        StoryState.make({
+          id,
+          hash: "h",
+          branch: `story/bank/${id}`,
+          worktree: `/wt/${id}`,
+          status: "merged"
+        })
+      )
+
+    it.effect("refuses while a round story is unmerged or was never started", () =>
+      Effect.gen(function* () {
+        const memory = yield* makeMemoryPlainFileStore()
+        yield* merged(memory.store, "a")
+        yield* merged(memory.store, "b")
+        yield* roundMerged(memory.store, "r1-move-card")
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const error = yield* Effect.flip(
+          landEpic(
+            contextFor(
+              gitFor(log, { behind: false, conflicts: [] }),
+              coder(() => Effect.void),
+              events
+            ),
+            {
+              plan,
+              files: memory.store,
+              stateDir,
+              rounds: [{ plan: roundPlan, stateDir: roundDir }],
+              gates: () => Effect.succeed(clean)
+            }
+          )
+        )
+        assert.strictEqual(error._tag, "EpicIncomplete")
+        assert.include(error.message, "not merged yet: r1-remove-export")
+        assert.deepStrictEqual(yield* Ref.get(log), [])
+      })
+    )
+
+    it.effect("lands once every round is merged, and clears the rounds' worktrees too", () =>
+      Effect.gen(function* () {
+        const memory = yield* makeMemoryPlainFileStore()
+        yield* merged(memory.store, "a")
+        yield* merged(memory.store, "b")
+        yield* roundMerged(memory.store, "r1-move-card")
+        yield* roundMerged(memory.store, "r1-remove-export")
+        yield* memory.store.writeAtomic("/wt/r1-move-card/.git", "gitdir: x")
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const base = gitFor(log, { behind: false, conflicts: [] })
+        const report = yield* landEpic(
+          contextFor(
+            {
+              ...base,
+              branchExists: () => Effect.succeed(true),
+              removeWorktree: (path) =>
+                Ref.update(log, (all) => [...all, `worktree-remove:${path}`]),
+              deleteBranch: (name) => Ref.update(log, (all) => [...all, `branch-delete:${name}`])
+            },
+            coder(() => Effect.void),
+            events
+          ),
+          {
+            plan,
+            files: memory.store,
+            stateDir,
+            rounds: [{ plan: roundPlan, stateDir: roundDir }],
+            gates: () => Effect.succeed(clean)
+          }
+        )
+        assert.strictEqual(report.removedWorktrees, 1)
+        assert.strictEqual(report.deletedBranches, 4)
+        const entries = yield* Ref.get(log)
+        assert.include(entries, "worktree-remove:/wt/r1-move-card")
+        assert.include(entries, "branch-delete:story/bank/r1-remove-export")
+        assert.include(entries, "merge:epic/bank:bank: land epic/bank")
+      })
+    )
+  })
 })

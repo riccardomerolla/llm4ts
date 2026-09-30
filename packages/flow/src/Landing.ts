@@ -49,6 +49,11 @@ export interface LandOptions {
   readonly maxRounds?: number
   /** Keep the story worktrees and branches after landing. Default false: they go. */
   readonly keepWorktrees?: boolean
+  /**
+   * The epic's refine rounds (ADR 0021), each with its own plan and state
+   * folder: they must be merged too, and their worktrees go with the plan's.
+   */
+  readonly rounds?: ReadonlyArray<{ readonly plan: StoryPlan; readonly stateDir: string }>
 }
 
 export interface LandReport {
@@ -88,11 +93,15 @@ export const landEpic = Effect.fn("@llm4ts/flow/Landing.land")(function* (
   const failed = (reason: string) => LandingFailed.make({ epicBranch, target, reason })
 
   // 1. Only a finished epic lands.
+  // The plan's stories, then each round's, every one against its own state folder.
+  const tracked = [{ plan, stateDir: options.stateDir }, ...(options.rounds ?? [])].flatMap(
+    (part) => part.plan.stories.map((story) => ({ id: story.id, stateDir: part.stateDir }))
+  )
   const unmerged: Array<string> = []
-  for (const story of plan.stories) {
+  for (const story of tracked) {
     const state = yield* loadVersioned(
       files,
-      join(options.stateDir, `stories/${story.id}.json`),
+      join(story.stateDir, `stories/${story.id}.json`),
       StoryStateVersion,
       StoryState
     )
@@ -211,10 +220,10 @@ export const landEpic = Effect.fn("@llm4ts/flow/Landing.land")(function* (
   let deletedBranches = 0
   if (options.keepWorktrees !== true) {
     const kept: Array<string> = []
-    for (const story of plan.stories) {
+    for (const story of tracked) {
       const state = yield* loadVersioned(
         files,
-        join(options.stateDir, `stories/${story.id}.json`),
+        join(story.stateDir, `stories/${story.id}.json`),
         StoryStateVersion,
         StoryState
       )
