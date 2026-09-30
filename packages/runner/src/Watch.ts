@@ -13,7 +13,6 @@ import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistenc
 import { readTrace } from "@llm4ts/flow/Replay"
 import {
   emptyTree,
-  fitToRows,
   initialView,
   onTreeKey,
   reduceTree,
@@ -176,16 +175,17 @@ const home = "\u001b[H\u001b[2J"
 const pollInterval = Duration.millis(500)
 const replayGapCap = 2_000
 
-const draw = (state: TreeState, view: TreeView, output: WatchOutput): string =>
+const draw = (state: TreeState, view: TreeView, output: WatchOutput, height?: number): string =>
   renderTree(state, {
     width: Math.max(90, output.columns() ?? 90),
     colour: output.colour,
-    view
+    view,
+    ...(height === undefined ? {} : { height })
   }).join("\n")
 
 /** A full-screen frame: no taller than the terminal. */
 const drawScreen = (state: TreeState, view: TreeView, output: WatchOutput): string =>
-  fitToRows(draw(state, view, output).split("\n"), output.rows()).join("\n")
+  draw(state, view, output, output.rows())
 
 export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function* (
   options: WatchOptions,

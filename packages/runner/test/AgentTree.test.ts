@@ -83,6 +83,42 @@ describe("agent tree", () => {
     golden("agent-tree.executors-90.txt", 90, { ...initialView, mode: "executors" })
   })
 
+  it("fits a short terminal by shrinking the log first, then dropping it", () => {
+    const state = fixtureRun()
+    const full = renderTree(state, { width: 90, colour: false, view: initialView })
+    const at = (height: number) =>
+      renderTree(state, { width: 90, colour: false, view: initialView, height })
+    const logRows = (lines: ReadonlyArray<string>) =>
+      lines.filter((line) => /^│ \d\d:\d\d:\d\d /u.test(line)).length
+    const lanesAndStatus = (lines: ReadonlyArray<string>) => {
+      assert.strictEqual(lines.filter((line) => line.includes("│ ◐ running")).length, 1)
+      assert.include(lines.at(-2) ?? "", "stories [1/6 done")
+      assert.include(lines.at(-1) ?? "", "run [live]")
+    }
+    assert.strictEqual(logRows(full), 5)
+    assert.deepStrictEqual(at(full.length), full)
+
+    const shrunk = at(full.length - 3)
+    assert.strictEqual(shrunk.length, full.length - 3)
+    assert.strictEqual(logRows(shrunk), 2)
+    assert.include(shrunk.join("\n"), "codex → coder · overview")
+    lanesAndStatus(shrunk)
+
+    const oneLine = at(full.length - 4)
+    assert.strictEqual(logRows(oneLine), 1)
+    lanesAndStatus(oneLine)
+
+    const noLog = at(full.length - 5)
+    assert.isAtMost(noLog.length, full.length - 5)
+    assert.notInclude(noLog.join("\n"), "session log")
+    lanesAndStatus(noLog)
+
+    // Shorter still: cut from the middle, the status lines stay.
+    const cut = at(12)
+    assert.strictEqual(cut.length, 12)
+    assert.include(cut.at(-1) ?? "", "run [live]")
+  })
+
   it("colours a frame without changing its text", () => {
     const state = fixtureRun()
     const plain = renderTree(state, { width: 90, colour: false, view: initialView })

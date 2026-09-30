@@ -542,8 +542,8 @@ const logStyle: Readonly<Record<LogSource, Style>> = {
 const logLines = 5
 const fullLogLines = 30
 
-const logOf = (state: TreeState, full: boolean): Array<Line> => {
-  const recent = state.log.slice(full ? -fullLogLines : -logLines)
+const logOf = (state: TreeState, count: number): Array<Line> => {
+  const recent = state.log.slice(-count)
   return recent.length === 0
     ? [[span("—", "dim")]]
     : recent.map((entry) => [
@@ -640,6 +640,8 @@ export interface TreeRenderOptions {
   readonly width: number
   readonly colour: boolean
   readonly view: TreeView
+  /** The terminal's rows; the frame fits them (see `renderTree`). */
+  readonly height?: number
 }
 
 const railWidth = 26
@@ -881,7 +883,12 @@ const mainOf = (state: TreeState, width: number, view: TreeView): Array<Line> =>
   ]
 }
 
-export const renderTree = (state: TreeState, options: TreeRenderOptions): ReadonlyArray<string> => {
+/** A frame with the session log at `logCount` lines, or without it. */
+const frameOf = (
+  state: TreeState,
+  options: TreeRenderOptions,
+  logCount: number | "none"
+): ReadonlyArray<string> => {
   const { width } = options
   const mainWidth = width - railWidth - 2
   const chips = chipsOf(state)
@@ -896,8 +903,9 @@ export const renderTree = (state: TreeState, options: TreeRenderOptions): Readon
     [span("═".repeat(width), "dim")],
     [],
     ...beside([railOf(state), mainOf(state, mainWidth, options.view)], [railWidth, mainWidth]),
-    [],
-    ...box(width, "log", logOf(state, options.view.fullLog), "session log"),
+    ...(logCount === "none"
+      ? []
+      : [[], ...box(width, "log", logOf(state, logCount), "session log")]),
     [
       span(
         `stories [${count("done")}/${chips.length} done · ${count("running")} running · ${count("failed")} failed · ${count("waiting")} waiting]  roster [${busy}/${state.executors.length} busy]`
@@ -913,10 +921,31 @@ export const renderTree = (state: TreeState, options: TreeRenderOptions): Readon
 }
 
 /**
+ * The tree at a width and, when `height` is given, no taller: the session
+ * log gives way first — fewer lines, down to one, then none — and only then
+ * is the frame cut, keeping its status lines, so a redraw never scrolls.
+ */
+export const renderTree = (state: TreeState, options: TreeRenderOptions): ReadonlyArray<string> => {
+  const wanted = options.view.fullLog ? fullLogLines : logLines
+  const full = frameOf(state, options, wanted)
+  const { height } = options
+  if (height === undefined || full.length <= height) {
+    return full
+  }
+  for (let count = wanted - 1; count >= 1; count -= 1) {
+    const shorter = frameOf(state, options, count)
+    if (shorter.length <= height) {
+      return shorter
+    }
+  }
+  return fitToRows(frameOf(state, options, "none"), height)
+}
+
+/**
  * A frame cut to a terminal's height: the top of the tree and its two status
  * lines, so a full-screen redraw never scrolls.
  */
-export const fitToRows = (
+const fitToRows = (
   lines: ReadonlyArray<string>,
   rows: number | undefined
 ): ReadonlyArray<string> =>

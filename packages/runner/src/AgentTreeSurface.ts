@@ -8,7 +8,6 @@ import * as Stream from "effect/Stream"
 import { awaitConsumed, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
 import {
   emptyTree,
-  fitToRows,
   initialView,
   onTreeKey,
   reduceTree,
@@ -71,9 +70,10 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
       const lines = renderTree(yield* Ref.get(state), {
         width: Math.max(90, output.columns() ?? 90),
         colour: output.colour,
-        view: yield* Ref.get(view)
+        view: yield* Ref.get(view),
+        ...(rows === undefined ? {} : { height: rows })
       })
-      return fitToRows(lines, rows).join("\n")
+      return lines.join("\n")
     })
   /** The full screen fits the terminal; the last frame left behind is whole. */
   const frame = render(undefined)

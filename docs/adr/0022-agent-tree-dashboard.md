@@ -84,7 +84,8 @@ roster, the judge seat and a session log.
 8. **The classic surface stays the default**, and is used whenever stdout is
    not a TTY, `NO_COLOR` is set, or the terminal is narrower than 90
    columns. Rendering stays hand-rolled ANSI; no TUI library. A full-screen
-   frame is cut to the terminal's height, keeping its two status lines.
+   frame fits the terminal's height: the session log shrinks to one line,
+   then goes, before anything else is cut, and the status lines always stay.
 
 Stage nesting is derived per lane from `StageStarted`/`StageCompleted`
 pairs, as the classic surface does; events get no parent id. Cost is an
