@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.17.0
 
 - New flow `epic-design`: from a legacy `modernize-extract` pack and a
   target repository to an approved **epic brief** that `epic-stories` plans
