@@ -1,6 +1,8 @@
 import { join } from "node:path"
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Ref from "effect/Ref"
 import type * as Scope from "effect/Scope"
 import type { ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
@@ -55,7 +57,7 @@ import {
   type FlowEventsShape
 } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
-import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
+import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
 import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog"
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
 import { makeGitTool } from "@llm4ts/flow/GitTool"
@@ -827,8 +829,12 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
             surface.log(palette.fail(`cost ledger not written: ${describeFlowError(error)}`))
           )
         )
-  return yield* body(bundle.context).pipe(
-    Effect.provideService(FlowContext, bundle.context),
+  const context: FlowContextShape =
+    tracePath === undefined
+      ? bundle.context
+      : { ...bundle.context, trace: { runId: bundle.runId, path: tracePath } }
+  return yield* body(context).pipe(
+    Effect.provideService(FlowContext, context),
     Effect.andThen((value) => Effect.as(enforceBudget, value)),
     Effect.ensuring(
       Effect.all(
@@ -896,9 +902,20 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
           )}`
         )
       })
+    ),
+    // Last, after every event is in: the trace's final line says how it ended.
+    Effect.onExit((exit) =>
+      recorder === undefined ? Effect.void : recorder.end(runOutcomeOf(exit))
     )
   )
 })
+
+const runOutcomeOf = <A, E>(exit: Exit.Exit<A, E>): RunOutcome =>
+  Exit.isSuccess(exit)
+    ? "completed"
+    : Cause.hasInterruptsOnly(exit.cause)
+      ? "interrupted"
+      : "failed"
 
 export const runEmbedded = Effect.fn("@llm4ts/runner/FlowRunner.runEmbedded")(function* <A, E, R>(
   options: FlowRunnerOptions,

@@ -34,12 +34,14 @@ export const parseVerbosity = (value: string | undefined): Verbosity => {
 export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean => {
   switch (event._tag) {
     // Advise mode publishes a separate Info event for the operator; progress
-    // feeds the status rows; a blackboard run is for the trace file. None is
-    // a line of its own.
+    // feeds the status rows; a blackboard run is for the trace file; a lease
+    // ending is routine; the story's outcome already says whether the judge
+    // cleared it. None is a line of its own.
     case "JudgmentObserved":
     case "BlackboardRun":
     case "UsageProgress":
     case "ExecutorReleased":
+    case "StoryJudged":
       return false
     case "StageStarted":
     case "StageCompleted":
@@ -239,6 +241,7 @@ export const terminalLine = (
     case "JudgmentObserved":
     case "BlackboardRun":
     case "UsageProgress":
+    case "StoryJudged":
       return ""
     case "StageStarted":
       return palette.stageStart(safe(event.stage))

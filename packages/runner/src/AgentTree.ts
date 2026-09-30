@@ -67,6 +67,26 @@ export interface TreeJudge {
   readonly verdicts: number
 }
 
+/** The latest story verdict (`StoryJudged`). */
+export interface TreeVerdict {
+  readonly lane: string
+  readonly round: number
+  readonly cleared: boolean
+  readonly issues: number
+  readonly dimensions: ReadonlyArray<{
+    readonly id: string
+    readonly score: number
+    readonly max: number
+  }>
+}
+
+/** The latest typed judgment per key (`JudgmentObserved`). */
+export interface TreeJudgment {
+  readonly key: string
+  readonly certainty: number
+  readonly decision: string
+}
+
 export interface TreeState {
   readonly title: string
   /** The board's stories, in plan order; lanes not on it are added after. */
@@ -83,6 +103,8 @@ export interface TreeState {
   /** Executors out of the round, with the roster's reason. */
   readonly exclusions: ReadonlyArray<{ readonly executor: string; readonly reason: string }>
   readonly judge: TreeJudge
+  readonly verdict: TreeVerdict | undefined
+  readonly judgments: ReadonlyArray<TreeJudgment>
   readonly log: ReadonlyArray<TreeLogEntry>
   readonly tokens: number
   /** Estimated: the backend's own figure when it reports one, else the price list. */
@@ -107,6 +129,8 @@ export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   leases: [],
   exclusions: [],
   judge: { executor: undefined, reviews: 0, verdicts: 0 },
+  verdict: undefined,
+  judgments: [],
   log: [],
   tokens: 0,
   costUsd: 0,
@@ -179,6 +203,11 @@ const reduceLease = (state: TreeState, at: number, lease: TreeLease): TreeState 
       return held
   }
 }
+
+const issueCount = (issues: number): string => `${issues} issue${issues === 1 ? "" : "s"}`
+
+const verdictWords = (verdict: TreeVerdict): string =>
+  verdict.cleared ? "cleared" : issueCount(verdict.issues)
 
 const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState => {
   const lane =
@@ -258,6 +287,32 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           })
         : current
     }
+    case "StoryJudged": {
+      const verdict: TreeVerdict = {
+        lane: event.lane,
+        round: event.round,
+        cleared: event.cleared,
+        issues: event.issues,
+        dimensions: event.dimensions
+      }
+      return logged(
+        { ...current, verdict },
+        {
+          at,
+          source: "judge",
+          who: "judge",
+          what: `${verdict.lane} r${verdict.round} · ${verdictWords(verdict)} → ${verdict.cleared ? "merge" : "coder"}`
+        }
+      )
+    }
+    case "JudgmentObserved":
+      return {
+        ...current,
+        judgments: [
+          ...current.judgments.filter((judgment) => judgment.key !== event.key),
+          { key: event.key, certainty: event.certainty, decision: event.decision }
+        ]
+      }
     case "ExecutorLeased":
       return reduceLease(current, at, {
         executor: event.executor,
@@ -588,7 +643,14 @@ const railOf = (state: TreeState): Array<Line> =>
     centre([span(`${state.judge.executor ?? "—"} · on call`)], railWidth - 4),
     [],
     [span("last verdict:")],
-    [span("» none yet", "judge")],
+    [
+      span(
+        state.verdict === undefined
+          ? "» none yet"
+          : `» ${state.verdict.lane} r${state.verdict.round}: ${verdictWords(state.verdict)}`,
+        "judge"
+      )
+    ],
     [],
     counter("reviews", state.judge.reviews),
     counter("verdicts", state.judge.verdicts)
@@ -719,6 +781,51 @@ const expandedLane = (lane: TreeLane, width: number, now: number | undefined): A
     `${lane.id} · ${lane.executor ?? "(leasing)"}`
   )
 
+const barWidth = 10
+const judgmentRows = 3
+
+const meter = (fraction: number): ReadonlyArray<Span> => {
+  const filled = Math.round(Math.max(0, Math.min(1, fraction)) * barWidth)
+  return [span("█".repeat(filled), "judgment"), span("░".repeat(barWidth - filled), "dim")]
+}
+
+const judgmentOf = (state: TreeState, width: number): Array<Line> => {
+  const { verdict } = state
+  const rows: Array<Line> = [
+    ...(verdict?.dimensions ?? []).map(
+      (dimension): Line => [
+        span(dimension.id.padEnd(16)),
+        ...meter(dimension.max === 0 ? 0 : dimension.score / dimension.max),
+        span(`  ${dimension.score}/${dimension.max}`)
+      ]
+    ),
+    ...state.judgments
+      .slice(-judgmentRows)
+      .map(
+        (judgment): Line => [
+          span(judgment.key.padEnd(16)),
+          ...meter(judgment.certainty),
+          span(`  ${judgment.certainty.toFixed(2)} ${judgment.decision}`)
+        ]
+      ),
+    ...(verdict === undefined
+      ? []
+      : [
+          [
+            verdict.cleared
+              ? span("cleared → merge", "judgment")
+              : span(`${issueCount(verdict.issues)} → coder`, "judge")
+          ]
+        ])
+  ]
+  return box(
+    width,
+    "judgment",
+    rows.length === 0 ? [[span("no verdicts yet", "dim")]] : rows,
+    verdict === undefined ? "JUDGMENT" : `JUDGMENT · ${verdict.lane} r${verdict.round}`
+  )
+}
+
 const mainOf = (state: TreeState, width: number, view: TreeView): Array<Line> => {
   const running = state.lanes.filter((lane) => lane.status === "running")
   const orchestratorWidth = Math.min(46, width)
@@ -750,7 +857,7 @@ const mainOf = (state: TreeState, width: number, view: TreeView): Array<Line> =>
   return [
     ...orchestrator.map((line) => centre(line, width)),
     centre([span("•", "orchestrator")], width),
-    ...box(width, "judgment", [[span("no verdicts yet", "dim")]], "JUDGMENT"),
+    ...judgmentOf(state, width),
     centre([span(`delegate to roster · ${running.length} running`)], width),
     centre([span("▼", "dim")], width),
     ...lanes,

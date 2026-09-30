@@ -46,8 +46,9 @@ import {
   type NotPlanned,
   type RoundProgress
 } from "@llm4ts/flow/RefineRound"
+import { EpicRun, appendEpicRun } from "@llm4ts/flow/EpicRuns"
 import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { BlockedVerdict, StoryState, StoryStateVersion } from "@llm4ts/flow/Stories"
+import { BlockedVerdict, StoryState, StoryStateVersion, StoryVerdict } from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import {
@@ -58,6 +59,7 @@ import {
   pathsNamedIn,
   type Story
 } from "@llm4ts/flow/StoryPlan"
+import * as Clock from "effect/Clock"
 import * as Console from "effect/Console"
 import { CliConnectorConfig, type ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { budget } from "@llm4ts/flow/Context"
@@ -1261,7 +1263,7 @@ export const judgeStory = (
   diff: string,
   budget: number,
   plan?: StoryPlan
-): Effect.Effect<ReviewResult, FlowError> =>
+): Effect.Effect<StoryVerdict, FlowError> =>
   judge(reasoning, storyDimensions)
     .evaluate(
       Sample.make({
@@ -1271,7 +1273,16 @@ export const judgeStory = (
     )
     .pipe(
       Effect.mapError(FlowLlmError.from),
-      Effect.map((scored) => subBar(scored, story))
+      Effect.map((scored) =>
+        StoryVerdict.make({
+          ...subBar(scored, story),
+          dimensions: scored.scores.map((score) => ({
+            id: score.name,
+            score: score.score,
+            max: storyDimensions.find((dimension) => dimension.name === score.name)?.maxScore ?? 2
+          }))
+        })
+      )
     )
 
 // ---- App directory ----------------------------------------------------------------
@@ -1648,6 +1659,20 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
       (context) =>
         Effect.gen(function* () {
           const events = context.events
+          // The epic remembers which trace each run wrote (`llm4ts watch --epic`).
+          if (context.trace !== undefined) {
+            yield* appendEpicRun(
+              files,
+              stateDir,
+              EpicRun.make({
+                runId: context.trace.runId,
+                tracePath: context.trace.path,
+                action: action._tag,
+                ...("round" in action ? { round: action.round } : {}),
+                startedAt: yield* Clock.currentTimeMillis
+              })
+            )
+          }
           const reasoningMeter = yield* makeEstimatedUsageMeter(context.reasoning, estimateOptions)
           const guidance = yield* Effect.map(
             files.read(join(input.workDir, "CONTRIBUTING.md")),

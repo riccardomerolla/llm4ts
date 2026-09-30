@@ -10,12 +10,15 @@ import {
   ExecutorReleased,
   ExecutorResumed,
   Info,
+  JudgmentObserved,
+  StoryJudged,
   StageStarted,
   TokensUsed,
   ToolUse,
   type FlowEvent
 } from "@llm4ts/flow/FlowEvents"
 import { TokenUsage } from "@llm4ts/core/Models"
+import { origins, truth, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import {
   emptyTree,
@@ -337,5 +340,64 @@ describe("agent tree", () => {
     assert.include(executors, "│ judge · home")
     assert.include(executors, "│ ✗ out: for this … │")
     assert.include(executors, "│ ○ idle")
+  })
+
+  it("shows the latest story verdict's scores, typed judgments, and the judge's last word", () => {
+    const observed = (key: string, certainty: number, decision: "act" | "caution" | "hold") =>
+      JudgmentObserved.make({
+        consumer: "story-board",
+        key,
+        state: "diff",
+        question: truth(`${key}?`),
+        answer: truthAnswer(certainty, origins.fake()),
+        judgmentIdentity: "fake:test",
+        decision,
+        certainty,
+        support: 1,
+        origin: origins.fake(),
+        outcome: { _tag: "StoryBoard", dimension: key, score: 2, mergeable: true },
+        mode: "observe"
+      })
+    const state = fold([
+      at(0, StageStarted.make({ stage: "story home", lane: "home" })),
+      at(
+        5,
+        StoryJudged.make({
+          lane: "home",
+          round: 1,
+          cleared: false,
+          issues: 1,
+          dimensions: [
+            { id: "house-style", score: 2, max: 2 },
+            { id: "tests", score: 1, max: 2 }
+          ]
+        })
+      ),
+      at(9, observed("scope", 0.96, "act")),
+      at(10, observed("tests", 0.5, "hold"))
+    ])
+    const text = frame(state).join("\n")
+    assert.include(text, "┌─ JUDGMENT · home r1")
+    assert.include(text, "│ house-style     ██████████  2/2")
+    assert.include(text, "│ tests           █████░░░░░  1/2")
+    assert.include(text, "│ scope           ██████████  0.96 act")
+    assert.include(text, "│ tests           █████░░░░░  0.50 hold")
+    assert.include(text, "│ 1 issue → coder")
+    assert.include(text, "│ » home r1: 1 issue")
+    assert.include(text, "judge            home r1 · 1 issue → coder")
+
+    const cleared = frame(
+      fold(
+        [
+          at(
+            20,
+            StoryJudged.make({ lane: "home", round: 2, cleared: true, issues: 0, dimensions: [] })
+          )
+        ],
+        state
+      )
+    ).join("\n")
+    assert.include(cleared, "│ » home r2: cleared")
+    assert.include(cleared, "judge            home r2 · cleared → merge")
   })
 })

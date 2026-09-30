@@ -28,7 +28,7 @@ import {
   StoryFailed,
   type FlowError
 } from "./FlowError.ts"
-import { Info, withLane, type FlowEventsShape } from "./FlowEvents.ts"
+import { Info, JudgedDimension, StoryJudged, withLane, type FlowEventsShape } from "./FlowEvents.ts"
 import { statusPaths, type GitToolShape } from "./GitTool.ts"
 import {
   checkPerimeter,
@@ -70,6 +70,11 @@ const join = (root: string, path: string): string =>
 // ---- Story seats ----------------------------------------------------------
 
 /** A flow context rooted in a story's worktree, plus that story's own usage totals. */
+/** A story judge's review with the rubric's scores; a plain `ReviewResult` has none. */
+export class StoryVerdict extends ReviewResult.extend<StoryVerdict>("StoryVerdict")({
+  dimensions: Schema.Array(JudgedDimension)
+}) {}
+
 export interface StorySeats {
   readonly context: FlowContextShape
   /** Running usage of this story's seats — estimates where the backend reports none. */
@@ -986,6 +991,15 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           return yield* failed(story, "the story branch has no changes against the epic branch")
         }
         const verdict = yield* judge(story, diff, watchedSeats)
+        yield* laneOf(story).publish(
+          StoryJudged.make({
+            lane: story.id,
+            round,
+            cleared: verdict.isClean,
+            issues: verdict.issues.length,
+            dimensions: verdict instanceof StoryVerdict ? verdict.dimensions : []
+          })
+        )
         if (verdict.isClean) {
           judgeNote = `judge cleared (round ${round})`
           break

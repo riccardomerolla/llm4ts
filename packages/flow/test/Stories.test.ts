@@ -11,7 +11,7 @@ import { ConnectorCapabilities, LlmChunk, TokenUsage } from "@llm4ts/core/Models
 import { makeLocalBoardSync, type BoardStatus } from "@llm4ts/flow/BoardSync"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { FlowAborted, MergeConflict, type FlowError } from "@llm4ts/flow/FlowError"
-import { makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
+import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { makeMemoryPlainFileStore, saveVersioned } from "@llm4ts/flow/Persistence"
@@ -20,6 +20,7 @@ import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 import {
   BlockedVerdict,
   StoryState,
+  StoryVerdict,
   StoryStateVersion,
   blockedOnIn,
   blockedRebuttal,
@@ -614,6 +615,49 @@ describe("Stories executor", () => {
       assert.include(b?.reason ?? "", "judge not cleared after 2 round(s)")
       const log = yield* Ref.get(harness.log)
       assert.include(log, "commit:/repo/.llm4ts/worktrees/a:a: address judge feedback")
+    })
+  )
+
+  it.effect("every judge verdict is published on the story's lane with its scores", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const events = yield* makeCollectingFlowEvents
+      const context = { ...(yield* makeContext(harness)), events }
+      const verdicts = yield* Ref.make(0)
+      const scores = (tests: number) => [
+        { id: "house-style", score: 2, max: 2 },
+        { id: "tests", score: tests, max: 2 }
+      ]
+      const options = yield* makeOptions(harness, diamond, context, {
+        concurrency: 1,
+        judge: (item, _diff) =>
+          item.id === "a"
+            ? Effect.map(
+                Ref.getAndUpdate(verdicts, (n) => n + 1),
+                (n) =>
+                  n === 0
+                    ? StoryVerdict.make({ ...red("tests scored 1"), dimensions: scores(1) })
+                    : StoryVerdict.make({ ...clean, dimensions: scores(2) })
+              )
+            : Effect.succeed(clean)
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories.find((outcome) => outcome.id === "a")?.status, "done")
+      const judged = (yield* events.recorded).flatMap((event) =>
+        event._tag === "StoryJudged" ? [event] : []
+      )
+      assert.deepStrictEqual(
+        judged
+          .filter((event) => event.lane === "a")
+          .map((event) => [event.round, event.cleared, event.issues, event.dimensions]),
+        [
+          [1, false, 1, scores(1)],
+          [2, true, 0, scores(2)]
+        ]
+      )
+      // A judge that returns a plain review is published too, without scores.
+      const c = judged.find((event) => event.lane === "c")
+      assert.deepStrictEqual([c?.round, c?.cleared, c?.dimensions], [1, true, []])
     })
   )
 

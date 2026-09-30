@@ -37,6 +37,7 @@ import { completeAndPublish } from "@llm4ts/flow/Flow"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { JudgmentObservation, judgmentLogPath } from "@llm4ts/flow/JudgmentLog"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
+import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import { makeFlowRunnerContext, runWithBundle } from "@llm4ts/runner/FlowRunner"
 import { plainTerminalPalette, type TerminalSurface } from "@llm4ts/runner/Terminal"
 
@@ -372,6 +373,69 @@ describe("runner cost ledger", () => {
         assert.strictEqual(contents.split("\n").filter((line) => line.length > 0).length, 1)
       })
     )
+  )
+
+  it.effect("tells the flow its trace, and ends the trace with how the run ended", () =>
+    Effect.gen(function* () {
+      const endOf = (body: Effect.Effect<string, FlowError>) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const process = yield* makeFakeProcessExecutor()
+            const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+            const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+            const dependencies = {
+              registry: makeConnectorRegistry([
+                {
+                  connectorId: ConnectorIds.Mock,
+                  kind: "Api",
+                  create: (_configuration) => Effect.succeed(mock)
+                }
+              ]),
+              process: process.executor,
+              files: files(state)
+            }
+            const options = {
+              workDir: "/repo",
+              workspace: "/repo",
+              userPrompt: "do it",
+              coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+              surface: {
+                palette: plainTerminalPalette,
+                log: (_line: string) => Effect.void,
+                setStatus: (_label: string | undefined) => Effect.void,
+                suspend: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+              },
+              tracePath: "trace.jsonl",
+              runId: "run-1"
+            }
+            const bundle = yield* makeFlowRunnerContext(options, dependencies)
+            const seen = yield* Ref.make<unknown>(undefined)
+            yield* Effect.exit(
+              runWithBundle(
+                bundle,
+                options,
+                (context) => Effect.andThen(Ref.set(seen, context.trace), body),
+                dependencies
+              )
+            )
+            assert.deepStrictEqual(yield* Ref.get(seen), {
+              runId: bundle.runId,
+              path: "trace.jsonl"
+            })
+            const last = ((yield* Ref.get(state))["trace.jsonl"] ?? "").trim().split("\n").at(-1)
+            const line = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TraceLine))(
+              last ?? ""
+            )
+            return [line.kind, line.fields.outcome]
+          })
+        )
+      assert.deepStrictEqual(yield* endOf(Effect.succeed("done")), ["RunEnded", "completed"])
+      assert.deepStrictEqual(yield* endOf(Effect.fail(FlowAborted.make({ message: "no" }))), [
+        "RunEnded",
+        "failed"
+      ])
+      assert.deepStrictEqual(yield* endOf(Effect.interrupt), ["RunEnded", "interrupted"])
+    })
   )
 
   it.effect("records the trace and the ledger under workDir/.llm4ts by default", () =>

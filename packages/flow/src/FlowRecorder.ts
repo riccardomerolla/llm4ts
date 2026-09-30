@@ -20,11 +20,17 @@ export class TraceLine extends Schema.Class<TraceLine>("TraceLine")({
   fields: Schema.Record(Schema.String, Schema.Json)
 }) {}
 
+/** How a run ended, as its trace's last line says (ADR 0022). */
+export const RunOutcome = Schema.Literals(["completed", "failed", "interrupted"])
+export type RunOutcome = typeof RunOutcome.Type
+
 export interface FlowRecorderShape extends StreamRecorder {
   readonly runId: string
   readonly tracePath: string
   readonly record: (event: FlowEvent) => Effect.Effect<void>
   readonly consume: (hub: FlowEventHub) => Effect.Effect<void, never, Scope.Scope>
+  /** Appends the `RunEnded` line: a reader knows the run is over, not stalled. */
+  readonly end: (outcome: RunOutcome) => Effect.Effect<void>
   /** Waits for this recorder to catch up; `false` means it gave up first. */
   readonly awaitDrained: (hub: FlowEventHub, timeout?: Duration.Input) => Effect.Effect<boolean>
 }
@@ -104,6 +110,7 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
           Effect.asVoid
         )
       }),
+    end: (outcome) => append("RunEnded", { outcome }),
     awaitDrained: (hub, timeout) => awaitConsumed(hub, consumed, timeout)
   }
   return recorder

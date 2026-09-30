@@ -51,6 +51,8 @@ export interface FlowContextShape {
    * this context's coder. Absent on a run with one executor per seat.
    */
   readonly roster?: RosterView
+  /** The trace this run writes (ADR 0022), when it writes one: the root context only. */
+  readonly trace?: { readonly runId: string; readonly path: string }
 }
 
 export class FlowContext extends Context.Service<FlowContext, FlowContextShape>()(

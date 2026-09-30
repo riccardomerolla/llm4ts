@@ -441,24 +441,35 @@ describe("epic-stories flags and seats", () => {
       })
   )
 
-  it.effect("the story judge turns sub-bar dimensions into critical issues", () =>
-    Effect.gen(function* () {
-      const story = parsedFixture.stories[0]
-      if (story === undefined) {
-        return yield* FlowAborted.make({ message: "fixture has no stories" })
-      }
-      const strict = structured({
-        scores: [
-          { name: "provides", score: 2, reasoning: "" },
-          { name: "scope", score: 1, reasoning: "touched the kit" },
-          { name: "house-style", score: 2, reasoning: "" },
-          { name: "tests", score: 2, reasoning: "" }
-        ]
+  it.effect(
+    "the story judge turns sub-bar dimensions into critical issues and keeps the scores",
+    () =>
+      Effect.gen(function* () {
+        const story = parsedFixture.stories[0]
+        if (story === undefined) {
+          return yield* FlowAborted.make({ message: "fixture has no stories" })
+        }
+        const strict = structured({
+          scores: [
+            { name: "provides", score: 2, reasoning: "" },
+            { name: "scope", score: 1, reasoning: "touched the kit" },
+            { name: "house-style", score: 2, reasoning: "" },
+            { name: "tests", score: 2, reasoning: "" }
+          ]
+        })
+        const verdict = yield* judgeStory(strict, story, "diff", 1000)
+        assert.strictEqual(verdict.issues.length, 1)
+        assert.include(verdict.issues[0]?.title ?? "", "scope scored 1")
+        assert.deepStrictEqual(
+          verdict.dimensions.map((dimension) => [dimension.id, dimension.score, dimension.max]),
+          [
+            ["provides", 2, 2],
+            ["scope", 1, 2],
+            ["house-style", 2, 2],
+            ["tests", 2, 2]
+          ]
+        )
       })
-      const verdict = yield* judgeStory(strict, story, "diff", 1000)
-      assert.strictEqual(verdict.issues.length, 1)
-      assert.include(verdict.issues[0]?.title ?? "", "scope scored 1")
-    })
   )
 })
 

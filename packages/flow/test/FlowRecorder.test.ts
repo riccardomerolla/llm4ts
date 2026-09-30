@@ -39,6 +39,19 @@ describe("FlowRecorder", () => {
     })
   )
 
+  it.effect("ends the trace with the run's outcome", () =>
+    Effect.gen(function* () {
+      const contents = yield* Ref.make<Readonly<Record<string, string>>>({})
+      const recorder = yield* makeFlowRecorder(memoryFiles(contents), "trace.jsonl", "run-1")
+      yield* recorder.record(StageStarted.make({ stage: "plan" }))
+      yield* recorder.end("interrupted")
+      const last = (yield* Ref.get(contents))["trace.jsonl"]?.trim().split("\n").at(-1) ?? ""
+      assert.match(last, /"seq":1/)
+      assert.match(last, /"kind":"RunEnded"/)
+      assert.match(last, /"fields":\{"outcome":"interrupted"\}/)
+    })
+  )
+
   it.effect("subscribes before returning and records hub events", () =>
     Effect.scoped(
       Effect.gen(function* () {

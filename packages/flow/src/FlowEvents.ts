@@ -181,6 +181,25 @@ export class BlackboardRun extends Schema.TaggedClass<BlackboardRun>()("Blackboa
   result: RunResult
 }) {}
 
+/** One rubric dimension of a story verdict: its score out of `max`. */
+export const JudgedDimension = Schema.Struct({
+  id: Schema.String,
+  score: Schema.Number,
+  max: Schema.Number
+})
+export type JudgedDimension = typeof JudgedDimension.Type
+
+/** The story judge ruled on a story's branch (ADR 0022): one event per judge round. */
+export class StoryJudged extends Schema.TaggedClass<StoryJudged>()("StoryJudged", {
+  lane: Schema.String,
+  round: Schema.Int,
+  cleared: Schema.Boolean,
+  /** Issues the coder gets back when it is not cleared. */
+  issues: Schema.Int,
+  /** The rubric's scores, when the judge reports them. */
+  dimensions: Schema.Array(JudgedDimension)
+}) {}
+
 /**
  * The executor roster's events (ADR 0019, 0022). `label` names who holds the
  * lease — a story's id, or "the run" — so a view can put an executor on its lane.
@@ -283,7 +302,8 @@ export const FlowEvent = Schema.Union([
   ExecutorReleased,
   ExecutorExcluded,
   ExecutorResumed,
-  ExecutorHandedOver
+  ExecutorHandedOver,
+  StoryJudged
 ])
 export type FlowEvent = typeof FlowEvent.Type
 

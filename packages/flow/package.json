@@ -34,6 +34,7 @@
     "./Decisions": "./dist/Decisions.js",
     "./Domains": "./dist/Domains.js",
     "./EpicBrief": "./dist/EpicBrief.js",
+    "./EpicRuns": "./dist/EpicRuns.js",
     "./Equiv": "./dist/Equiv.js",
     "./EquivReport": "./dist/EquivReport.js",
     "./EstimatedUsage": "./dist/EstimatedUsage.js",
