@@ -5,6 +5,7 @@ import { readdir } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
@@ -12,6 +13,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { TokenUsage, type JsonSchema } from "@llm4ts/core/Models"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import { cap } from "@llm4ts/flow/Context"
+import type { LedgerBrief } from "@llm4ts/flow/CoverageLedger"
 import {
   parseEpicBrief,
   renderEpicBrief,
@@ -293,6 +295,39 @@ export const listBriefs = (
       if (brief !== undefined) briefs.push({ dir, request: brief.request, status: brief.status })
     }
     return briefs
+  })
+
+/**
+ * Every brief of the repository, parsed, for the coverage ledger. A folder
+ * without a brief is skipped; a brief that does not parse is reported with
+ * the first thing wrong in it, never dropped silently.
+ */
+export const loadBriefs = (
+  files: PlainFileStoreShape,
+  workDir: string,
+  dirs: ReadonlyArray<string>
+): Effect.Effect<
+  {
+    readonly briefs: ReadonlyArray<LedgerBrief>
+    readonly unreadable: ReadonlyArray<{ readonly dir: string; readonly reason: string }>
+  },
+  FlowError
+> =>
+  Effect.gen(function* () {
+    const briefs: Array<LedgerBrief> = []
+    const unreadable: Array<{ readonly dir: string; readonly reason: string }> = []
+    for (const dir of dirs) {
+      const path = join(epicsDir(workDir), dir, "brief.md")
+      const text = yield* files.read(path)
+      if (text === undefined) continue
+      const parsed = yield* Effect.result(parseEpicBrief(text, path))
+      if (Result.isSuccess(parsed)) {
+        briefs.push({ epicId: dir, brief: parsed.success })
+      } else {
+        unreadable.push({ dir, reason: parsed.failure.violations[0] ?? "does not parse" })
+      }
+    }
+    return { briefs, unreadable }
   })
 
 /**

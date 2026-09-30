@@ -6,11 +6,13 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { cap } from "@llm4ts/flow/Context"
+import { buildLedger, inheritedFrom, type LedgerBrief } from "@llm4ts/flow/CoverageLedger"
 import { parseDecisions, scenarioTitles } from "@llm4ts/flow/Decisions"
 import {
   assembleBrief,
   checkEpicBrief,
   diffBriefs,
+  dispositionWords,
   EpicBriefProposal,
   epicBriefProposalJsonSchema,
   loopAction,
@@ -25,6 +27,7 @@ import {
   type BriefProblem,
   type ConsideredProgram,
   type EpicBrief,
+  type InheritedDecision,
   type LoopAction,
   type PackIndex,
   type RefineDisposition
@@ -244,12 +247,21 @@ export interface ProposePromptOptions {
   readonly current?: EpicBrief
   /** A fix round: what the checks found in the previous proposal. */
   readonly problems?: ReadonlyArray<BriefProblem>
+  /** What approved briefs of other epics decided (the coverage ledger). */
+  readonly inherited?: ReadonlyArray<InheritedDecision>
 }
 
 export const proposePrompt = (options: ProposePromptOptions): string => {
   const perProgram = Math.max(
     2_000,
     Math.floor(options.budget / Math.max(1, options.programs.length))
+  )
+  const selected = new Set(options.programs.map((program) => program.name))
+  const inherited = (options.inherited ?? []).filter((decision) => selected.has(decision.program))
+  const decided = inherited.filter((decision) => decision.disposition !== "deferred")
+  const available = inherited.filter((decision) => decision.disposition === "deferred")
+  const settled = new Set(
+    decided.map((decision) => `${decision.program}\u0000${decision.scenario}`)
   )
   const evidence = options.programs.flatMap((program) => [
     `===== ${program.name} — spec =====`,
@@ -301,11 +313,41 @@ export const proposePrompt = (options: ProposePromptOptions): string => {
     options.guidance,
     ...(options.packNote === undefined ? [] : ["", "The target stack's pack:", options.packNote]),
     "",
+    ...(decided.length === 0
+      ? []
+      : [
+          "Already decided by other epics (do not restate; they are inherited):",
+          ...decided.map(
+            (decision) =>
+              `- ${decision.program} › ${decision.scenario} — ${
+                decision.disposition === "dropped"
+                  ? `dropped by epic ${decision.epic}`
+                  : `${dispositionWords[decision.disposition]} in epic ${decision.epic}`
+              }${decision.note.length === 0 ? "" : ` (${decision.note})`}`
+          ),
+          ""
+        ]),
+    ...(available.length === 0
+      ? []
+      : [
+          "Deferred by other epics, available to this one (claim them if they belong here):",
+          ...available.map(
+            (decision) =>
+              `- ${decision.program} › ${decision.scenario} — deferred by epic ${decision.epic}${
+                decision.note.length === 0 ? "" : `: ${decision.note}`
+              }`
+          ),
+          ""
+        ]),
     "Every scenario to give a disposition to (the complete list; the evidence below may be",
     "abridged, these titles are not):",
     ...options.pack.index.programs
-      .filter((program) => options.programs.some((selected) => selected.name === program.name))
-      .flatMap((program) => program.scenarios.map((scenario) => `- ${program.name} › ${scenario}`)),
+      .filter((program) => selected.has(program.name))
+      .flatMap((program) =>
+        program.scenarios
+          .filter((scenario) => !settled.has(`${program.name}\u0000${scenario}`))
+          .map((scenario) => `- ${program.name} › ${scenario}`)
+      ),
     "",
     "Legacy evidence:",
     ...evidence
@@ -330,6 +372,12 @@ export interface DesignDeps {
   /** What the target stack's pack says, when LLM4TS_PACK names one. */
   readonly packNote: string | undefined
   readonly pathExists: (absolute: string) => Effect.Effect<boolean, FlowError>
+  /**
+   * The briefs of the repository's other epics. What the approved ones
+   * decided is inherited: told to the proposal, counted by the checks. The
+   * brief being designed is ignored if it is among them.
+   */
+  readonly others?: ReadonlyArray<LedgerBrief>
 }
 
 export interface DesignOutcome {
@@ -341,6 +389,8 @@ export interface DesignOutcome {
   /** Problems the fix round could not clear; each is a `[check]` open point in the file. */
   readonly problems: ReadonlyArray<BriefProblem>
   readonly openPoints: number
+  /** Decisions of other epics this brief inherited, per epic. */
+  readonly inherited: ReadonlyArray<{ readonly epic: string; readonly scenarios: number }>
 }
 
 const packPointer = "pack:"
@@ -366,11 +416,39 @@ const verifiedPointers = (
 const check = (
   deps: DesignDeps,
   pack: PackData,
-  brief: EpicBrief
+  brief: EpicBrief,
+  others: ReadonlyArray<InheritedDecision>
 ): Effect.Effect<ReadonlyArray<BriefProblem>, FlowError> =>
   Effect.map(verifiedPointers(deps, brief), (pointers) =>
-    checkEpicBrief(brief, { pack: pack.index, pointers })
+    checkEpicBrief(brief, { pack: pack.index, pointers, others })
   )
+
+/** What the approved briefs of the other epics decided, against this pack. */
+const inheritedBy = (deps: DesignDeps, pack: PackData): ReadonlyArray<InheritedDecision> =>
+  inheritedFrom(
+    buildLedger({
+      pack: pack.index,
+      briefs: (deps.others ?? []).filter((other) => other.epicId !== deps.epicId),
+      epics: [],
+      legacy: deps.legacyRepo
+    })
+  )
+
+/** Per epic, how many scenarios of the considered programs a brief inherits. */
+const inheritedSummary = (
+  inherited: ReadonlyArray<InheritedDecision>,
+  programs: ReadonlyArray<ConsideredProgram>
+): ReadonlyArray<{ readonly epic: string; readonly scenarios: number }> => {
+  const considered = new Set(programs.map((program) => program.name))
+  const perEpic = new Map<string, Set<string>>()
+  for (const decision of inherited) {
+    if (decision.disposition === "deferred" || !considered.has(decision.program)) continue
+    const seen = perEpic.get(decision.epic) ?? new Set<string>()
+    seen.add(`${decision.program}\u0000${decision.scenario}`)
+    perEpic.set(decision.epic, seen)
+  }
+  return [...perEpic].map(([epic, scenarios]) => ({ epic, scenarios: scenarios.size }))
+}
 
 export const designEpic = Effect.fn("epic-design.design")(function* (
   deps: DesignDeps
@@ -380,11 +458,21 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
   const onDisk = yield* deps.files.read(path)
   const current = onDisk === undefined ? undefined : yield* parseEpicBrief(onDisk, path)
   const action = loopAction(current)
+  const inherited = inheritedBy(deps, pack)
   const outcome = (
     changes: ReadonlyArray<string>,
     problems: ReadonlyArray<BriefProblem>,
-    openPoints: number
-  ): DesignOutcome => ({ action, path, targetDir: deps.targetDir, changes, problems, openPoints })
+    openPoints: number,
+    considered: ReadonlyArray<ConsideredProgram> = []
+  ): DesignOutcome => ({
+    action,
+    path,
+    targetDir: deps.targetDir,
+    changes,
+    problems,
+    openPoints,
+    inherited: inheritedSummary(inherited, considered)
+  })
 
   if (current !== undefined && action === "halt") {
     return yield* OpenPointsPending.make({
@@ -396,7 +484,7 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
     return outcome([], [], 0)
   }
   if (current !== undefined && action === "validate") {
-    const problems = yield* check(deps, pack, current)
+    const problems = yield* check(deps, pack, current, inherited)
     if (problems.length > 0) {
       return yield* EpicBriefInvalid.make({ path, violations: problems.map(renderBriefProblem) })
     }
@@ -427,6 +515,7 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
         budget: deps.budget,
         guidance: deps.guidance,
         packNote: deps.packNote,
+        inherited,
         ...(current === undefined ? {} : { current }),
         ...(problems === undefined ? {} : { problems })
       }),
@@ -456,11 +545,11 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
       : EpicBriefProposal.make({ ...proposed, openPoints: [noPrograms, ...proposed.openPoints] })
 
   let proposal = withNotice(yield* propose())
-  let problems = yield* check(deps, pack, assemble(proposal))
+  let problems = yield* check(deps, pack, assemble(proposal), inherited)
   if (problems.length > 0) {
     // One bounded fix round; what still fails is shown to the human, never hidden.
     proposal = withNotice(yield* propose(problems))
-    problems = yield* check(deps, pack, assemble(proposal))
+    problems = yield* check(deps, pack, assemble(proposal), inherited)
   }
   const next = assemble(proposal, problems)
   // What is written must read back as the same brief: a file that parses to
@@ -475,7 +564,7 @@ export const designEpic = Effect.fn("epic-design.design")(function* (
     })
   }
   yield* deps.files.writeAtomic(path, written)
-  return outcome(diffBriefs(current, next), problems, next.openPoints.length)
+  return outcome(diffBriefs(current, next), problems, next.openPoints.length, next.programs)
 })
 
 /** What the flow prints after a run. */
@@ -497,6 +586,16 @@ export const renderOutcome = (outcome: DesignOutcome, epicId: string): ReadonlyA
       return [
         `${outcome.action === "propose" ? "proposed" : "revised"} ${outcome.path}:`,
         ...outcome.changes.map((change) => `  ${change}`),
+        ...(outcome.inherited.length === 0
+          ? []
+          : [
+              `  inherited from ${outcome.inherited
+                .map(
+                  (entry) =>
+                    `${entry.epic} (${entry.scenarios} scenario${entry.scenarios === 1 ? "" : "s"})`
+                )
+                .join(", ")}: not restated here; see \`epic-design --coverage\``
+            ]),
         ...(outcome.problems.length === 0
           ? []
           : [`  ${outcome.problems.length} check(s) still failing, raised as [check] open points`]),

@@ -3,7 +3,16 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { parseEpicBrief, renderEpicBrief, EpicBrief } from "@llm4ts/flow/EpicBrief"
+import type { LedgerBrief } from "@llm4ts/flow/CoverageLedger"
+import {
+  Citation,
+  ConsideredProgram,
+  Disposed,
+  EpicBrief,
+  parseEpicBrief,
+  renderEpicBrief,
+  ScopeItem
+} from "@llm4ts/flow/EpicBrief"
 import { OpenPoint } from "@llm4ts/flow/Decisions"
 import {
   EpicBriefInvalid,
@@ -93,7 +102,11 @@ const wrongCitation = {
   ]
 }
 
-const setup = (replies: ReadonlyArray<unknown>, names: ReadonlyArray<string> = specNames) =>
+const setup = (
+  replies: ReadonlyArray<unknown>,
+  names: ReadonlyArray<string> = specNames,
+  others: ReadonlyArray<LedgerBrief> = []
+) =>
   Effect.gen(function* () {
     const memory = yield* makeMemoryPlainFileStore()
     for (const file of packFiles) {
@@ -115,7 +128,8 @@ const setup = (replies: ReadonlyArray<unknown>, names: ReadonlyArray<string> = s
         budget: 50_000,
         guidance: readFileSync(join(fixtures, "target/CONTRIBUTING.md"), "utf8"),
         packNote: undefined,
-        pathExists: (absolute) => Effect.map(files.read(absolute), (text) => text !== undefined)
+        pathExists: (absolute) => Effect.map(files.read(absolute), (text) => text !== undefined),
+        others
       })
     const brief = Effect.gen(function* () {
       const text = yield* files.read(path)
@@ -700,5 +714,125 @@ describe("review findings: epic-design", () => {
         assert.include(two.message, "conto-corrente")
         assert.include(two.message, "carte")
       })
+  )
+})
+
+describe("epic-design inherits from the approved briefs of other epics", () => {
+  /** Another epic's brief: it owns the amount filter, dropped the fax, deferred the timeout. */
+  const saldo = (status: "draft" | "approved", epicId = "saldo"): LedgerBrief => ({
+    epicId,
+    brief: EpicBrief.make({
+      epicId,
+      status,
+      request: "Balance",
+      legacy: "/legacy",
+      goal: "",
+      programs: [ConsideredProgram.make({ name: "CONTO_MOVIMENTI", reason: "" })],
+      scope: [
+        ScopeItem.make({
+          title: "Amount filter",
+          citations: [
+            Citation.make({ program: "CONTO_MOVIMENTI", scenario: "Filter movements by amount" })
+          ]
+        })
+      ],
+      dropped: [
+        Disposed.make({
+          program: "CONTO_MOVIMENTI",
+          scenario: "Export movements to fax",
+          note: "fax gateway retired"
+        })
+      ],
+      provided: [],
+      deferred: [
+        Disposed.make({
+          program: "CONTO_SALDO",
+          scenario: "Session timeout warning",
+          note: "with the session epic"
+        })
+      ],
+      constraints: "",
+      openPoints: [],
+      feedback: ""
+    })
+  })
+  /** Disposes only of what is still open: nothing the other epic decided is restated. */
+  const onlyOpen = {
+    ...good,
+    scope: [good.scope[0], { title: "Date filter", citations: [good.scope[1]?.citations[0]] }],
+    dropped: [],
+    openPoints: []
+  }
+
+  it.effect("the proposal is told what is decided, and need not restate it", () =>
+    Effect.gen(function* () {
+      const { run, seat, brief } = yield* setup([selection, onlyOpen], specNames, [
+        saldo("approved")
+      ])
+      const outcome = yield* run()
+      assert.deepStrictEqual(outcome.problems, [])
+      assert.deepStrictEqual(outcome.inherited, [{ epic: "saldo", scenarios: 2 }])
+      assert.include(renderOutcome(outcome, epicId).join("\n"), "inherited from saldo")
+      const prompt = (yield* seat.prompts)[1] ?? ""
+      assert.include(prompt, "Already decided by other epics")
+      assert.include(
+        prompt,
+        "- CONTO_MOVIMENTI › Export movements to fax — dropped by epic saldo (fax gateway retired)"
+      )
+      assert.include(
+        prompt,
+        "- CONTO_MOVIMENTI › Filter movements by amount — in scope in epic saldo"
+      )
+      assert.include(
+        prompt,
+        "- CONTO_SALDO › Session timeout warning — deferred by epic saldo: with the session epic"
+      )
+      const open = prompt.slice(
+        prompt.indexOf("Every scenario to give a disposition to"),
+        prompt.indexOf("Legacy evidence:")
+      )
+      assert.include(open, "Filter movements by date range")
+      assert.include(open, "Session timeout warning")
+      assert.notInclude(open, "Export movements to fax")
+      assert.notInclude(open, "Filter movements by amount")
+      // The brief does not repeat the inherited decisions.
+      assert.deepStrictEqual((yield* brief).dropped, [])
+    })
+  )
+
+  it.effect("claiming what another epic owns is raised as a check point naming it", () =>
+    Effect.gen(function* () {
+      const { run, brief } = yield* setup([selection, good, good], specNames, [saldo("approved")])
+      const outcome = yield* run()
+      assert.deepStrictEqual(
+        outcome.problems.map((problem) => problem.kind),
+        ["AlreadyOwned"]
+      )
+      assert.include((yield* brief).openPoints.at(-1)?.question ?? "", "epic saldo")
+    })
+  )
+
+  it.effect("a draft of another epic feeds nothing and eases nothing", () =>
+    Effect.gen(function* () {
+      const { run, seat } = yield* setup([selection, onlyOpen, onlyOpen], specNames, [
+        saldo("draft")
+      ])
+      const outcome = yield* run()
+      assert.deepStrictEqual(outcome.inherited, [])
+      assert.deepStrictEqual(outcome.problems.map((problem) => problem.kind).sort(), [
+        "Unaccounted",
+        "Unaccounted"
+      ])
+      assert.notInclude((yield* seat.prompts)[1] ?? "", "Already decided by other epics")
+    })
+  )
+
+  it.effect("a brief never inherits from, or conflicts with, itself", () =>
+    Effect.gen(function* () {
+      const { run } = yield* setup([selection, good], specNames, [saldo("approved", epicId)])
+      const outcome = yield* run()
+      assert.deepStrictEqual(outcome.problems, [])
+      assert.deepStrictEqual(outcome.inherited, [])
+    })
   )
 })
