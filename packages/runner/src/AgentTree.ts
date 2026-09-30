@@ -89,6 +89,7 @@ export interface TreeJudgment {
 
 export interface TreeState {
   readonly title: string
+  readonly action: string | undefined
   /** The board's stories, in plan order; lanes not on it are added after. */
   readonly stories: ReadonlyArray<TreeStory>
   readonly startedAt: number | undefined
@@ -115,11 +116,14 @@ export interface TreeState {
 
 export interface TreeOptions {
   readonly title?: string
+  /** What the run set out to do ("run plan", "round 2"), when the caller knows. */
+  readonly action?: string
   readonly stories?: ReadonlyArray<TreeStory>
 }
 
 export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   title: options.title ?? "flow",
+  action: options.action,
   stories: options.stories ?? [],
   startedAt: undefined,
   now: undefined,
@@ -275,6 +279,14 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
       // A story's own milestones are `story <id>: …` (resuming, merged,
       // skipped); its other chatter stays in the expanded lane.
       if (event.lane === undefined) {
+        // Traces from before the roster's typed events (2.20) carry its notes
+        // as prose: leases are chatter, the rest (exclusions, handovers) stays.
+        const legacyRoster = /^roster: (.*)$/u.exec(event.message)?.[1]
+        if (legacyRoster !== undefined) {
+          return / takes \S+/u.test(legacyRoster)
+            ? current
+            : logged(current, { at, source: "roster", who: "roster", what: legacyRoster })
+        }
         return logged(current, { at, source: "run", who: "flow", what: event.message })
       }
       const prefix = `story ${event.lane}: `
@@ -834,6 +846,9 @@ const mainOf = (state: TreeState, width: number, view: TreeView): Array<Line> =>
     orchestratorWidth,
     "orchestrator",
     [
+      ...(state.action === undefined
+        ? []
+        : [centre([span(state.action, "bold")], orchestratorWidth - 4)]),
       [span("stage  "), span(stage)],
       [span(`stories ${chipsOf(state).length}  elapsed ${elapsed(state.startedAt, state.now)}`)]
     ],

@@ -400,4 +400,17 @@ describe("agent tree", () => {
     assert.include(cleared, "│ » home r2: cleared")
     assert.include(cleared, "judge            home r2 · cleared → merge")
   })
+
+  it("keeps an older trace's roster lease lines out of the log, but not its other roster notes", () => {
+    const state = fold([
+      at(0, Info.make({ message: "roster: claude takes judge for home" })),
+      at(1, Info.make({ message: "roster: codex out of the round for this run: not logged in" }))
+    ])
+    const text = frame(state).join("\n")
+    assert.notInclude(text, "takes judge")
+    assert.include(
+      text,
+      "│ 00:00:01  roster           codex out of the round for this run: not logged in"
+    )
+  })
 })

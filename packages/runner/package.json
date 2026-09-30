@@ -38,6 +38,7 @@
     "./ReviewFingerprint": "./dist/ReviewFingerprint.js",
     "./Terminal": "./dist/Terminal.js",
     "./TerminalInteraction": "./dist/TerminalInteraction.js",
+    "./Watch": "./dist/Watch.js",
     "./Package": "./dist/Package.js",
     "./package.json": "./package.json",
     "./WindowsCommand": "./dist/WindowsCommand.js"

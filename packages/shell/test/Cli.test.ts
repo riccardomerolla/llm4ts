@@ -6,7 +6,13 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as Effect from "effect/Effect"
 import type { FileSystem } from "effect/FileSystem"
 import * as Option from "effect/Option"
-import { costsOptionsFrom, renderFlowList, renderKitList, resolveFlow } from "@llm4ts/shell/Cli"
+import {
+  costsOptionsFrom,
+  renderFlowList,
+  renderKitList,
+  resolveFlow,
+  watchOptionsFrom
+} from "@llm4ts/shell/Cli"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
 
 const flows: ReadonlyArray<DiscoveredFlow> = [
@@ -215,6 +221,60 @@ describe("costsOptionsFrom", () => {
       assert.match(badZone.message, /--tz/)
       assert.strictEqual(badRuns._tag, "ShellUsage")
       assert.match(badRuns.message, /--runs-per-day/)
+    })
+  )
+})
+
+describe("watchOptionsFrom", () => {
+  const none = {
+    trace: Option.none(),
+    repo: Option.none(),
+    epic: Option.none(),
+    replay: false,
+    speed: Option.none()
+  }
+
+  it.effect("resolves the repository and the trace against the current directory", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* watchOptionsFrom(none, "/work"), { repo: "/work" })
+      assert.deepStrictEqual(
+        yield* watchOptionsFrom(
+          {
+            ...none,
+            trace: Option.some(".llm4ts/trace-1.jsonl"),
+            repo: Option.some("../portal"),
+            replay: true,
+            speed: Option.some(20)
+          },
+          "/work/llm4ts"
+        ),
+        {
+          repo: "/work/portal",
+          trace: "/work/llm4ts/.llm4ts/trace-1.jsonl",
+          replay: true,
+          speed: 20
+        }
+      )
+      assert.deepStrictEqual(
+        yield* watchOptionsFrom({ ...none, epic: Option.some("conto") }, "/work"),
+        { repo: "/work", epic: "conto" }
+      )
+    })
+  )
+
+  it.effect("rejects a trace together with an epic, and a speed that is not positive", () =>
+    Effect.gen(function* () {
+      const both = yield* Effect.flip(
+        watchOptionsFrom(
+          { ...none, trace: Option.some("t.jsonl"), epic: Option.some("conto") },
+          "/work"
+        )
+      )
+      const slow = yield* Effect.flip(watchOptionsFrom({ ...none, speed: Option.some(0) }, "/work"))
+      assert.strictEqual(both._tag, "ShellUsage")
+      assert.match(both.message, /either a trace or --epic/)
+      assert.strictEqual(slow._tag, "ShellUsage")
+      assert.match(slow.message, /--speed/)
     })
   )
 })

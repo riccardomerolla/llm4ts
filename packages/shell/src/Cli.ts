@@ -25,6 +25,7 @@ import {
   rosterReport
 } from "@llm4ts/runner/ExecutorRoster"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
+import { makeWatchProgram, nodeWatchDependencies, type WatchOptions } from "@llm4ts/runner/Watch"
 import { describeExclusion } from "@llm4ts/flow/Roster"
 import { builtinKitsDir, discoverKits, kitTierPaths, type DiscoveredKit } from "@llm4ts/runner/Kits"
 import {
@@ -467,6 +468,76 @@ const costsCommand = Command.make(
   )
 )
 
+export interface WatchFlags {
+  readonly trace: Option.Option<string>
+  readonly repo: Option.Option<string>
+  readonly epic: Option.Option<string>
+  readonly replay: boolean
+  readonly speed: Option.Option<number>
+}
+
+/** Turns the `watch` flags into program options; every rejection is a usage error. */
+export const watchOptionsFrom = (
+  flags: WatchFlags,
+  cwd: string = process.cwd()
+): Effect.Effect<WatchOptions, ShellUsageError> =>
+  Effect.gen(function* () {
+    if (Option.isSome(flags.trace) && Option.isSome(flags.epic)) {
+      return yield* new ShellUsageError({
+        message: "watch takes either a trace or --epic, not both"
+      })
+    }
+    const speed = Option.getOrUndefined(flags.speed)
+    if (speed !== undefined && speed <= 0) {
+      return yield* new ShellUsageError({ message: "--speed must be positive" })
+    }
+    return {
+      repo: resolve(
+        cwd,
+        Option.getOrElse(flags.repo, () => ".")
+      ),
+      ...(Option.isSome(flags.trace) ? { trace: resolve(cwd, flags.trace.value) } : {}),
+      ...(Option.isSome(flags.epic) ? { epic: flags.epic.value } : {}),
+      ...(flags.replay ? { replay: true } : {}),
+      ...(speed === undefined ? {} : { speed })
+    }
+  })
+
+const watchCommand = Command.make(
+  "watch",
+  {
+    trace: Argument.String("trace").pipe(
+      Argument.optional,
+      Argument.withDescription("A trace file (default: the newest in the repository's .llm4ts/)")
+    ),
+    repo: Flag.String("repo").pipe(
+      Flag.optional,
+      Flag.withDescription("Repository whose .llm4ts/ to read (defaults to the current directory)")
+    ),
+    epic: Flag.String("epic").pipe(
+      Flag.optional,
+      Flag.withDescription("Open this epic's latest run (epics/<id>/runs.jsonl)")
+    ),
+    replay: Flag.Boolean("replay").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Replay the run on its own timestamps")
+    ),
+    speed: Flag.Int("speed").pipe(
+      Flag.optional,
+      Flag.withDescription("Replay speed-up (default 10)")
+    )
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const options = yield* watchOptionsFrom(config)
+      yield* makeWatchProgram(options, nodeWatchDependencies())
+    })
+).pipe(
+  Command.withDescription(
+    "The agent tree of a running or finished flow: lanes on the roster, the judge, the log (ADR 0022)"
+  )
+)
+
 const rosterSource = (repo: Option.Option<string>) => ({
   files: nodePlainFileStore,
   environment: process.env,
@@ -552,6 +623,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     askCommand,
     refineCommand,
     costsCommand,
+    watchCommand,
     rosterCommand,
     doctorCommand
   ])
