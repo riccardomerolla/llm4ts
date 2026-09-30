@@ -30,6 +30,7 @@
     "./CostLedger": "./dist/CostLedger.js",
     "./CostReport": "./dist/CostReport.js",
     "./CostTracker": "./dist/CostTracker.js",
+    "./CoverageLedger": "./dist/CoverageLedger.js",
     "./Decisions": "./dist/Decisions.js",
     "./Domains": "./dist/Domains.js",
     "./EpicBrief": "./dist/EpicBrief.js",

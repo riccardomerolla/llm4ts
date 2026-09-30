@@ -474,6 +474,24 @@ export const BriefProblem = Schema.Union([
     disposition: Schema.String
   }),
   Schema.Struct({
+    kind: Schema.Literal("AlreadyOwned"),
+    program: Schema.String,
+    scenario: Schema.String,
+    /** The approved epic that already has the scenario in scope. */
+    epic: Schema.String
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("ContradictsBrief"),
+    program: Schema.String,
+    scenario: Schema.String,
+    /** The approved epic that decided otherwise. */
+    epic: Schema.String,
+    /** This brief's disposition, in words. */
+    here: Schema.String,
+    /** The other epic's disposition, in words. */
+    disposition: Schema.String
+  }),
+  Schema.Struct({
     kind: Schema.Literal("ApprovedWithOpenPoints"),
     numbers: Schema.Array(Schema.Int)
   })
@@ -498,10 +516,45 @@ export const renderBriefProblem = (problem: BriefProblem): string => {
       return `${problem.program}${cite}${problem.scenario} has no disposition: put it in scope, or drop, mark provided or defer it`
     case "RefineConflict":
       return `${problem.program}${cite}${problem.scenario} is in scope, but modernize-refine marked it ${problem.disposition}; answer \`keep: <why>\` to keep it in scope, or move it out`
+    case "AlreadyOwned":
+      return `${problem.program}${cite}${problem.scenario} is in scope here and in epic ${problem.epic}; answer \`keep: <why>\` to share it, or move it out`
+    case "ContradictsBrief":
+      return `${problem.program}${cite}${problem.scenario} is ${problem.here} here, but epic ${problem.epic} has it ${problem.disposition}; answer \`keep: <why>\` to keep this brief's decision, or follow the other`
     case "ApprovedWithOpenPoints":
       return `the brief is approved with unanswered open points: ${problem.numbers.join(", ")}`
   }
 }
+
+/** How a brief disposes of a scenario. */
+export type BriefDisposition = "in-scope" | "dropped" | "provided" | "deferred"
+
+export const dispositionWords: Readonly<Record<BriefDisposition, string>> = {
+  "in-scope": "in scope",
+  dropped: "dropped",
+  provided: "provided",
+  deferred: "deferred"
+}
+
+/** What an approved brief of another epic decided about a scenario (the coverage ledger). */
+export interface InheritedDecision {
+  readonly program: string
+  readonly scenario: string
+  readonly epic: string
+  readonly disposition: BriefDisposition
+  readonly note: string
+}
+
+/**
+ * Whether the brief overrides a check on purpose: the check's own `[check]`
+ * question, answered `keep: <why>`. Any other answer, or an answer to
+ * another question, overrides nothing.
+ */
+export const hasOverride = (brief: EpicBrief, problem: BriefProblem): boolean =>
+  brief.openPoints.some(
+    (point) =>
+      point.question === `${checkMark} ${renderBriefProblem(problem)}` &&
+      (point.answer ?? "").trim().toLowerCase().startsWith("keep")
+  )
 
 /** The pointers of the provided entries: what the caller verifies before checking. */
 export const providedPointers = (brief: EpicBrief): ReadonlyArray<string> => [
@@ -617,13 +670,6 @@ export const checkEpicBrief = (
   }
 
   // A scenario refine took out of the pack's scope can come back only on purpose.
-  // The override is explicit: the check's own question, answered `keep: <why>`.
-  const justified = (conflict: BriefProblem): boolean =>
-    brief.openPoints.some(
-      (point) =>
-        point.question === `${checkMark} ${renderBriefProblem(conflict)}` &&
-        (point.answer ?? "").trim().toLowerCase().startsWith("keep")
-    )
   for (const item of brief.scope) {
     for (const citation of item.citations) {
       const refined = inputs.pack.refine.find(
@@ -639,7 +685,7 @@ export const checkEpicBrief = (
           scenario: citation.scenario,
           disposition: refined.disposition
         }
-        if (!justified(conflict)) problems.push(conflict)
+        if (!hasOverride(brief, conflict)) problems.push(conflict)
       }
     }
   }
