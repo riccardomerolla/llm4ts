@@ -1,13 +1,21 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import { OpenPoint } from "@llm4ts/flow/Decisions"
 import {
+  assembleBrief,
   checkEpicBrief,
   Citation,
   ConsideredProgram,
+  diffBriefs,
   Disposed,
   EpicBrief,
+  EpicBriefProposal,
+  epicBriefProposalJsonSchema,
+  loopAction,
   parseEpicBrief,
+  ProgramSelection,
+  programSelectionJsonSchema,
   providedPointers,
   renderBriefProblem,
   renderEpicBrief,
@@ -340,4 +348,129 @@ describe("checking an epic brief", () => {
     assert.deepStrictEqual(kinds(problems), ["ApprovedWithOpenPoints"])
     assert.include(problems.map(renderBriefProblem).join("\n"), "1")
   })
+})
+
+const proposal = EpicBriefProposal.make({
+  goal: "Balance and movements in the portal.",
+  scope: sampleBrief.scope,
+  dropped: sampleBrief.dropped,
+  provided: sampleBrief.provided,
+  deferred: [],
+  constraints: "Amounts are integer cents.",
+  openPoints: ["Which date range is the default?"]
+})
+
+describe("the loop over the brief", () => {
+  it("decides what a run does from the file alone", () => {
+    assert.strictEqual(loopAction(undefined), "propose")
+    // Point 2 is answered: there is something to fold in.
+    assert.strictEqual(loopAction(sampleBrief), "revise")
+    const pending = withBrief({
+      openPoints: [OpenPoint.make({ number: 1, question: "q?" })]
+    })
+    assert.strictEqual(loopAction(pending), "halt")
+    assert.strictEqual(loopAction(withBrief({ ...pending, feedback: "add statements" })), "revise")
+    assert.strictEqual(loopAction(withBrief({ openPoints: [] })), "await-approval")
+    assert.strictEqual(loopAction(withBrief({ status: "approved", openPoints: [] })), "validate")
+    // Approved wins: validation is what reports its unanswered points.
+    assert.strictEqual(loopAction(withBrief({ status: "approved" })), "validate")
+  })
+
+  it("assembles a draft from a proposal: numbered points, check-raised points last", () => {
+    const brief = assembleBrief({
+      epicId: "conto-corrente",
+      request: "Current account",
+      legacy: "~/legacy",
+      programs: sampleBrief.programs,
+      proposal,
+      problems: [
+        { kind: "Unaccounted", program: "CONTO_SALDO", scenario: "Session timeout warning" }
+      ]
+    })
+    assert.strictEqual(brief.status, "draft")
+    assert.strictEqual(brief.feedback, "")
+    assert.deepStrictEqual(
+      brief.openPoints.map((point) => [point.number, point.question.slice(0, 7)]),
+      [
+        [1, "Which d"],
+        [2, "[check]"]
+      ]
+    )
+    assert.include(brief.openPoints[1]?.question ?? "", "Session timeout warning")
+  })
+
+  it("a revision drops answered points, keeps unanswered ones it did not restate, empties feedback", () => {
+    const previous = withBrief({
+      openPoints: [
+        OpenPoint.make({ number: 1, question: "Are pending movements shown?" }),
+        OpenPoint.make({ number: 2, question: "Default range?", answer: "30 days" })
+      ],
+      feedback: "move the fax export back in"
+    })
+    const brief = assembleBrief({
+      epicId: previous.epicId,
+      request: previous.request,
+      legacy: previous.legacy,
+      programs: previous.programs,
+      proposal,
+      previous
+    })
+    assert.deepStrictEqual(
+      brief.openPoints.map((point) => point.question),
+      ["Which date range is the default?", "Are pending movements shown?"]
+    )
+    assert.deepStrictEqual(
+      brief.openPoints.map((point) => point.number),
+      [1, 2]
+    )
+    assert.strictEqual(brief.feedback, "")
+  })
+
+  it("says what changed between two revisions", () => {
+    const next = withBrief({
+      programs: [
+        ...sampleBrief.programs,
+        ConsideredProgram.make({ name: "ESTRATTO", reason: "statements" })
+      ],
+      dropped: [],
+      scope: [
+        ...sampleBrief.scope,
+        ScopeItem.make({
+          title: "Fax export, kept after all",
+          citations: [
+            Citation.make({ program: "CONTO_MOVIMENTI", scenario: "Export movements to fax" })
+          ]
+        })
+      ],
+      openPoints: [OpenPoint.make({ number: 1, question: "A new question?" })]
+    })
+    const changes = diffBriefs(sampleBrief, next).join("\n")
+    assert.include(changes, "CONTO_MOVIMENTI › Export movements to fax: dropped → in scope")
+    assert.include(changes, "program added: ESTRATTO")
+    assert.include(changes, "open point raised: A new question?")
+    assert.include(changes, "open point closed: Which date is the default range?")
+    assert.deepStrictEqual(diffBriefs(sampleBrief, sampleBrief), [])
+    assert.include(diffBriefs(undefined, sampleBrief).join("\n"), "in scope: 3 item(s)")
+  })
+
+  it.effect("the structured-output schemas decode what the JSON schemas describe", () =>
+    Effect.gen(function* () {
+      const selection = yield* Schema.decodeUnknownEffect(ProgramSelection)({
+        programs: [{ name: "CONTO_SALDO", reason: "balance" }]
+      })
+      assert.strictEqual(selection.programs[0]?.name, "CONTO_SALDO")
+      const decoded = yield* Schema.decodeUnknownEffect(EpicBriefProposal)({
+        goal: "g",
+        scope: [{ title: "t", citations: [{ program: "P", scenario: "s" }] }],
+        dropped: [],
+        provided: [{ program: "P", scenario: "s2", note: "src/x.ts" }],
+        deferred: [],
+        constraints: "",
+        openPoints: []
+      })
+      assert.strictEqual(decoded.provided[0]?.note, "src/x.ts")
+      assert.strictEqual(programSelectionJsonSchema.type, "object")
+      assert.strictEqual(epicBriefProposalJsonSchema.type, "object")
+    })
+  )
 })

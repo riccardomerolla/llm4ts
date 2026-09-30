@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import type { JsonSchema } from "@llm4ts/core/Models"
 import { makeOpenPointsCollector, OpenPoint } from "./Decisions.ts"
 import { EpicBriefInvalid } from "./FlowError.ts"
 
@@ -551,4 +552,195 @@ export const checkEpicBrief = (
     problems.push({ kind: "ApprovedWithOpenPoints", numbers: pending.map((point) => point.number) })
   }
   return problems
+}
+
+// ---- Proposals ----------------------------------------------------------------
+
+/** The programs of the pack a request touches; the model's first typed reply. */
+export class ProgramSelection extends Schema.Class<ProgramSelection>("ProgramSelection")({
+  programs: Schema.Array(ConsideredProgram)
+}) {}
+
+/** The model's typed proposal for a brief; checked before anything is written. */
+export class EpicBriefProposal extends Schema.Class<EpicBriefProposal>("EpicBriefProposal")({
+  goal: Schema.String,
+  scope: Schema.Array(ScopeItem),
+  dropped: Schema.Array(Disposed),
+  provided: Schema.Array(Disposed),
+  deferred: Schema.Array(Disposed),
+  constraints: Schema.String,
+  /** Questions only a human can answer. */
+  openPoints: Schema.Array(Schema.String)
+}) {}
+
+const text: JsonSchema = { type: "string" }
+const disposedList = (note: string): JsonSchema => ({
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      program: text,
+      scenario: text,
+      note: { type: "string", description: note }
+    },
+    required: ["program", "scenario", "note"]
+  }
+})
+
+export const programSelectionJsonSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    programs: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { name: text, reason: text },
+        required: ["name", "reason"]
+      }
+    }
+  },
+  required: ["programs"]
+}
+
+export const epicBriefProposalJsonSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    goal: text,
+    scope: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          title: text,
+          citations: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { program: text, scenario: text },
+              required: ["program", "scenario"]
+            }
+          },
+          newBehaviour: {
+            type: "string",
+            description: "only for an item with no citation: why it has no legacy counterpart"
+          }
+        },
+        required: ["title", "citations"]
+      }
+    },
+    dropped: disposedList("why the behaviour is not carried over"),
+    provided: disposedList("the target path that already does it"),
+    deferred: disposedList("why it waits and for what"),
+    constraints: text,
+    openPoints: { type: "array", items: text }
+  },
+  required: ["goal", "scope", "dropped", "provided", "deferred", "constraints", "openPoints"]
+}
+
+export interface AssembleOptions {
+  readonly epicId: string
+  readonly request: string
+  readonly legacy: string
+  readonly programs: ReadonlyArray<ConsideredProgram>
+  readonly proposal: EpicBriefProposal
+  /** The brief this one revises: its unanswered points the proposal did not restate are kept. */
+  readonly previous?: EpicBrief
+  /** Problems the fix round could not clear: raised as `[check]` open points. */
+  readonly problems?: ReadonlyArray<BriefProblem>
+}
+
+export const checkMark = "[check]"
+
+/** The next draft: never approved, feedback consumed, open points renumbered. */
+export const assembleBrief = (options: AssembleOptions): EpicBrief => {
+  const questions = [
+    ...options.proposal.openPoints,
+    ...(options.previous === undefined
+      ? []
+      : unanswered(options.previous)
+          .map((point) => point.question)
+          .filter((question) => !question.startsWith(checkMark))),
+    ...(options.problems ?? []).map((problem) => `${checkMark} ${renderBriefProblem(problem)}`)
+  ]
+  const unique = questions.filter((question, index) => questions.indexOf(question) === index)
+  return EpicBrief.make({
+    epicId: options.epicId,
+    status: "draft",
+    request: options.request,
+    legacy: options.legacy,
+    goal: options.proposal.goal,
+    programs: options.programs,
+    scope: options.proposal.scope,
+    dropped: options.proposal.dropped,
+    provided: options.proposal.provided,
+    deferred: options.proposal.deferred,
+    constraints: options.proposal.constraints,
+    openPoints: unique.map((question, index) => OpenPoint.make({ number: index + 1, question })),
+    feedback: ""
+  })
+}
+
+// ---- The loop -----------------------------------------------------------------
+
+export type LoopAction = "propose" | "revise" | "halt" | "await-approval" | "validate"
+
+/** What one run does, decided from the file alone. */
+export const loopAction = (brief: EpicBrief | undefined): LoopAction => {
+  if (brief === undefined) return "propose"
+  if (brief.status === "approved") return "validate"
+  const answered = brief.openPoints.some((point) => (point.answer ?? "").trim().length > 0)
+  if (answered || brief.feedback.trim().length > 0) return "revise"
+  return unanswered(brief).length > 0 ? "halt" : "await-approval"
+}
+
+const dispositions = (brief: EpicBrief): ReadonlyMap<string, string> => {
+  const found = new Map<string, string>()
+  const add = (list: string, program: string, scenario: string): void => {
+    found.set(`${program}${cite}${scenario}`, list)
+  }
+  for (const item of brief.scope) {
+    for (const citation of item.citations) add("in scope", citation.program, citation.scenario)
+  }
+  for (const entry of brief.dropped) add("dropped", entry.program, entry.scenario)
+  for (const entry of brief.provided) add("provided", entry.program, entry.scenario)
+  for (const entry of brief.deferred) add("deferred", entry.program, entry.scenario)
+  return found
+}
+
+/** What a revision changed, in lines a person reads; empty when nothing did. */
+export const diffBriefs = (
+  previous: EpicBrief | undefined,
+  next: EpicBrief
+): ReadonlyArray<string> => {
+  if (previous === undefined) {
+    return [
+      `programs considered: ${next.programs.map((program) => program.name).join(", ") || "none"}`,
+      `in scope: ${next.scope.length} item(s); dropped: ${next.dropped.length}; provided by the target: ${next.provided.length}; deferred: ${next.deferred.length}`,
+      `open points: ${next.openPoints.length}`
+    ]
+  }
+  const changes: Array<string> = []
+  const before = new Set(previous.programs.map((program) => program.name))
+  const after = new Set(next.programs.map((program) => program.name))
+  for (const name of after) if (!before.has(name)) changes.push(`program added: ${name}`)
+  for (const name of before) if (!after.has(name)) changes.push(`program removed: ${name}`)
+  const was = dispositions(previous)
+  const is = dispositions(next)
+  for (const [scenario, list] of is) {
+    const old = was.get(scenario)
+    if (old === undefined) changes.push(`${scenario}: added to ${list}`)
+    else if (old !== list) changes.push(`${scenario}: ${old} → ${list}`)
+  }
+  for (const [scenario, list] of was) {
+    if (!is.has(scenario)) changes.push(`${scenario}: removed (was ${list})`)
+  }
+  const asked = new Set(previous.openPoints.map((point) => point.question))
+  const asking = new Set(next.openPoints.map((point) => point.question))
+  for (const question of asking)
+    if (!asked.has(question)) changes.push(`open point raised: ${question}`)
+  for (const question of asked)
+    if (!asking.has(question)) changes.push(`open point closed: ${question}`)
+  if (previous.goal !== next.goal) changes.push("goal rewritten")
+  if (previous.constraints !== next.constraints) changes.push("constraints rewritten")
+  return changes
 }
