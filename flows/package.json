@@ -6,6 +6,7 @@
   "scripts": {
     "hello": "node --experimental-strip-types hello.ts",
     "implement": "node --experimental-strip-types implement.ts",
+    "epic-design": "node --experimental-strip-types epic-design.ts",
     "epic-stories": "node --experimental-strip-types epic-stories.ts",
     "epic-stories-board": "node --experimental-strip-types epic-stories-board.ts",
     "issue-pr": "node --experimental-strip-types issue-pr.ts",

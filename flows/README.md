@@ -10,6 +10,7 @@ one-line description. These scripts double as the built-in flows of the
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
 | `hello.ts`                  | One prompt to the configured provider, mock by default                                                                            | none                       |
 | `implement.ts`              | Persistent plan, branch, task review/fix, and commits                                                                             | selected CLI + Git         |
+| `epic-design.ts`            | Legacy extract pack + target repo → an approved epic brief for `epic-stories`                                                     | reasoner CLI               |
 | `epic-stories.ts`           | Epic → story DAG → parallel coders in worktrees → epic branch                                                                     | reasoner CLI + pi + Git    |
 | `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                               | selected CLI + GitHub      |
 | `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                            | selected CLI + Maven       |
@@ -115,6 +116,45 @@ pnpm --filter @llm4ts/flows implement -- \
 Accepted values are `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`,
 `cursor`, and `opencode`. The inherited `LLM4ZIO_CODER` name is no longer read
 for migration.
+
+## Designing an epic from a legacy analysis
+
+`epic-design` is for the common modernization case: the legacy application
+has been through `modernize-extract`, and what you want to build in the
+target is a slice, not a program-by-program conversion. Some legacy code is
+dead, some behaviour the target stack already provides. The flow distils the
+extract pack into an **epic brief** with you, and `epic-stories` plans from
+the approved brief.
+
+```sh
+LLM4TS_LEGACY_REPO=~/legacy/ib-core \
+  llm4ts run epic-design --repo ~/work/portal "Current account: balance, movements, statements"
+```
+
+- It runs rooted at the **target** repository. `LLM4TS_LEGACY_REPO` must hold
+  `docs/modernization/` (the extract pack); it refuses to start without it.
+  `LLM4TS_PACK` describes the target stack when the target is new.
+- The brief is a file, `.llm4ts/epics/<epic-id>/brief.md`, and the file is
+  the state. Its sections: Goal, Legacy programs considered, In scope,
+  Dropped, Provided by the target, Deferred, Constraints, Open points,
+  Feedback. Evidence is cited as `PROGRAM › scenario title`.
+- One run does one thing, decided from the file:
+  - no brief: select the relevant programs, propose, check, write a draft;
+  - answers or feedback in the file: revise it (your direct edits stay);
+  - unanswered open points and no feedback: stop and name them;
+  - `Status: approved`: validate it and print the `epic-stories` command.
+- Checks run on every proposal and on the approved brief: every citation
+  exists in the pack, every "provided" pointer exists in the target, every
+  dropped or deferred entry has a reason, and **every scenario of every
+  program the brief considers has exactly one disposition**. A scenario
+  `modernize-refine` dropped comes back only through an answered open
+  point. What one fix round cannot clear is written into the brief as a
+  `[check]` open point; nothing is hidden.
+- Approve by setting `Status: approved`, then:
+  `llm4ts run epic-stories --repo ~/work/portal -- --epic <epic-id>`. The
+  planner reads the brief in place of a one-line epic; a draft brief stops
+  `epic-stories` rather than being ignored. `--list` shows the briefs;
+  `--epic <id>` resumes one without retyping the text.
 
 ## Parallel stories from an epic
 

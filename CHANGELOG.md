@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- New flow `epic-design`: from a legacy `modernize-extract` pack and a
+  target repository to an approved **epic brief** that `epic-stories` plans
+  from. Give it the epic in a sentence and `LLM4TS_LEGACY_REPO`; it selects
+  the relevant legacy programs, proposes what the epic carries over, drops,
+  finds already provided by the target or defers, and writes
+  `.llm4ts/epics/<epic-id>/brief.md`. The file is the state: answer its open
+  points, write feedback, rerun to revise, set `Status: approved` to
+  approve. Every citation and pointer is checked, every scenario of a
+  considered program must have one disposition, and what a fix round cannot
+  clear is raised as a `[check]` open point.
+- `epic-stories` (and `epic-stories-board`) plan from an approved brief in
+  the epic's folder: `--epic <id>` finds a folder that holds a brief and no
+  plan yet, the planner reads the brief in place of the one-line epic, and
+  a draft brief stops the run. Without a brief nothing changes.
+- `@llm4ts/flow/EpicBrief`: the brief's schema, parser, renderer and checks.
+
 ## 2.16.0
 
 - `soap-ace`: new flow `soap-explore`, one command from a WSDL to a

@@ -38,7 +38,7 @@ import {
 import type { FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { ScriptUsage } from "@llm4ts/runner"
-import { epicsDir } from "./epic-stories.ts"
+import { epicIdFor, epicsDir, type BriefSummary } from "./epic-stories.ts"
 import { ModDir } from "./modernize-extract.ts"
 
 // ---- Arguments ----------------------------------------------------------------
@@ -83,6 +83,56 @@ export const parseEpicDesignArgs = (
     }
     return { list, epic, rest }
   })
+
+// ---- Which brief ---------------------------------------------------------------
+
+export const renderBriefList = (briefs: ReadonlyArray<BriefSummary>): string =>
+  briefs.length === 0
+    ? "no epic brief in this repository yet"
+    : briefs.map((brief) => `${brief.dir}  ${brief.status}  ${brief.request}`).join("\n")
+
+export interface DesignTarget {
+  readonly epicId: string
+  readonly request: string
+}
+
+/**
+ * The brief a run works on. Text names it (its id derives from the text, as
+ * in epic-stories, so a rerun with the same text resumes it); `--epic` picks
+ * a folder, new when text comes with it; with neither, the one draft.
+ */
+export const resolveDesignTarget = (args: {
+  readonly text: string
+  readonly epic: string | undefined
+  readonly briefs: ReadonlyArray<BriefSummary>
+}): Effect.Effect<DesignTarget, ScriptUsage> => {
+  const text = args.text.trim()
+  if (args.epic !== undefined) {
+    const found = args.briefs.find((brief) => brief.dir === args.epic)
+    if (found !== undefined) return Effect.succeed({ epicId: found.dir, request: found.request })
+    return text.length > 0
+      ? Effect.succeed({ epicId: args.epic, request: text })
+      : Effect.fail(
+          ScriptUsage.make({
+            message: `no brief '${args.epic}' in this repository; give the epic's text to start one\n${renderBriefList(args.briefs)}`
+          })
+        )
+  }
+  if (text.length > 0) return Effect.succeed({ epicId: epicIdFor(text), request: text })
+  const drafts = args.briefs.filter((brief) => brief.status === "draft")
+  const [only] = drafts
+  if (drafts.length === 1 && only !== undefined) {
+    return Effect.succeed({ epicId: only.dir, request: only.request })
+  }
+  return Effect.fail(
+    ScriptUsage.make({
+      message:
+        drafts.length === 0
+          ? `${epicDesignUsage}\n${renderBriefList(args.briefs)}`
+          : `several briefs are in draft; pick one with --epic <id>\n${renderBriefList(drafts)}`
+    })
+  )
+}
 
 // ---- The extract pack -----------------------------------------------------------
 

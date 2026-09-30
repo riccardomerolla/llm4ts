@@ -198,6 +198,12 @@ repository they run in. The source-compatible approval marker is
 Phase bodies receive their LLM, repository, workspace, and forge dependencies
 through `runNode`; no provider is selected inside the flow package.
 
+`epic-design` reads an extract pack from a second repository:
+`LLM4TS_LEGACY_REPO=<path>` is the legacy repository holding
+`docs/modernization/` (required). The flow itself runs rooted at the target
+repository (`--repo <target>`), writes `.llm4ts/epics/<epic-id>/brief.md`
+there, and takes `LLM4TS_PACK` only to describe a target that is still empty.
+
 ### mlx-lm
 
 `mlx-lm` serves MLX models on Apple Silicon over the OpenAI wire format and

@@ -18,7 +18,9 @@ import {
   designEpic,
   parseEpicDesignArgs,
   readPackIndex,
-  renderOutcome
+  renderBriefList,
+  renderOutcome,
+  resolveDesignTarget
 } from "../lib/epic-design.ts"
 import { chooseEpic, generateStoryPlan, listBriefs, plannerInput } from "../lib/epic-stories.ts"
 import { scripted } from "./support.ts"
@@ -513,4 +515,69 @@ describe("epic-stories plans from an approved brief", () => {
       assert.include(prompt, "Balance and movements in the portal.")
     })
   )
+})
+
+describe("epic-design: which brief a run works on", () => {
+  const briefs = [
+    { dir: "conto-corrente", request: "Current account", status: "draft" as const },
+    { dir: "bonifici", request: "Wire transfers", status: "approved" as const }
+  ]
+
+  it.effect("text starts (or resumes) the brief its id derives from", () =>
+    Effect.gen(function* () {
+      const target = yield* resolveDesignTarget({
+        text: "Statements archive",
+        epic: undefined,
+        briefs
+      })
+      assert.strictEqual(target.request, "Statements archive")
+      assert.match(target.epicId, /^statements-archive-[0-9a-f]{6}$/)
+    })
+  )
+
+  it.effect("--epic resumes a brief by folder, or names a new one when text is given", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(
+        yield* resolveDesignTarget({ text: "", epic: "conto-corrente", briefs }),
+        { epicId: "conto-corrente", request: "Current account" }
+      )
+      assert.deepStrictEqual(
+        yield* resolveDesignTarget({ text: "Card limits", epic: "carte", briefs }),
+        { epicId: "carte", request: "Card limits" }
+      )
+      const error = yield* Effect.flip(resolveDesignTarget({ text: "", epic: "carte", briefs }))
+      assert.include(error.message, "no brief 'carte'")
+    })
+  )
+
+  it.effect("with neither, the one draft is resumed; none or several stop with the list", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* resolveDesignTarget({ text: "", epic: undefined, briefs }), {
+        epicId: "conto-corrente",
+        request: "Current account"
+      })
+      const none = yield* Effect.flip(
+        resolveDesignTarget({ text: "", epic: undefined, briefs: [] })
+      )
+      assert.include(none.message, "Usage: epic-design")
+      const two = yield* Effect.flip(
+        resolveDesignTarget({
+          text: "",
+          epic: undefined,
+          briefs: [...briefs, { dir: "carte", request: "Cards", status: "draft" as const }]
+        })
+      )
+      assert.include(two.message, "conto-corrente")
+      assert.include(two.message, "carte")
+      assert.include(renderBriefList(briefs), "bonifici  approved  Wire transfers")
+    })
+  )
+
+  it("the flow entry describes itself on its first line and runs designEpic", () => {
+    const entry = readFileSync(join(fixtures, "..", "..", "epic-design.ts"), "utf8")
+    assert.match(entry.split("\n")[0] ?? "", /^\/\/ .*epic brief/)
+    assert.include(entry, "designEpic(")
+    assert.include(entry, "LLM4TS_LEGACY_REPO")
+    assert.include(entry, "runFlowMain(")
+  })
 })
