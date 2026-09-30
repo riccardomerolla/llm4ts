@@ -41,6 +41,8 @@ selects `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, or
 `opencode`. The llm4zio-era `LLM4ZIO_CODER` name is no longer read (2.0).
 
 `LLM4TS_VERBOSITY` accepts `quiet`, `normal`, `verbose`, or `debug`.
+`LLM4TS_UI=tree` (what `llm4ts run --ui tree` sets) draws the full-screen
+agent tree instead of the classic view (ADR 0022).
 
 With a Google Cloud project and a **Vertex AI service-account key** as the
 only model access, see `vertex-service-account.md`: which harnesses accept

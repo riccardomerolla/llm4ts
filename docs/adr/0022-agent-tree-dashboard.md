@@ -42,32 +42,39 @@ roster, the judge seat and a session log.
 1. **One pure core, two hosts.** `reduce(state, FlowEvent)` and
    `view(state, width)` live in `packages/runner/src/AgentTree.ts`. They know
    nothing about where events come from. Two hosts feed them:
-   - **in-process**, a `TreeSurface` behind `llm4ts run <flow> --ui tree`,
-     subscribed to the hub. The shell passes the choice to the flow child as
+   - **in-process**, `makeAgentTreeHost` (`AgentTreeSurface.ts`) behind
+     `llm4ts run <flow> --ui tree`, subscribed to the hub. The shell passes the choice to the flow child as
      `LLM4TS_UI=tree`, as it passes `--verbose`;
-   - **out of process**, `llm4ts watch`, which tails a trace file. The shell
-     owns the command; the runner still knows nothing of the shell.
+   - **out of process**, `llm4ts watch`, which tails a trace file. The
+     program is `Watch.ts` in the runner, as `llm4ts costs` is; the shell
+     only parses its flags.
 2. **The trace is the log.** Live watching, a finished run and a replay are
    the same fold over the same lines: `watch` follows a trace that has no
    end marker, shows the last frame of one that has, and
    `watch --replay [--speed n]` re-folds it on its timestamps (gaps over
    2 s shortened). Golden-frame tests fold fixture traces; no network.
-3. **Typed roster events.** `Roster` publishes `ExecutorLeased`,
-   `ExecutorReleased`, `ExecutorExcluded` and `ExecutorResumed` (executor,
-   role, lane when the lease belongs to a story, reason for an exclusion)
-   in place of its `roster:` `Info` lines. The classic terminal renders the
-   new events, so its output does not change.
-4. **Typed story verdicts.** The story judge publishes `StoryJudged` (lane,
-   round, dimensions with score and maximum, cleared). The judgment box
+3. **Typed roster events.** `Roster` and `RosterSeats` publish
+   `ExecutorLeased`, `ExecutorReleased`, `ExecutorExcluded`,
+   `ExecutorResumed` and `ExecutorHandedOver` (executor, role, the lease's
+   `label` — a story id — and the roster's reason) in place of their
+   `roster:` `Info` lines. `rosterEventMessage` gives the classic terminal
+   the words it printed before, so its output does not change; a release is
+   not shown.
+4. **Typed story verdicts.** `implementStoriesFlow` publishes `StoryJudged`
+   (lane, round, cleared, issue count, dimensions with score and maximum) on
+   every judge round. A judge that knows its scores returns a
+   `StoryVerdict`, a `ReviewResult` with `dimensions`, so every existing
+   judge keeps its signature; the rubric judge of `epic-stories` does. The judgment box
    renders it as score bars; for a flow that publishes `JudgmentObserved`
    (`epic-stories-board`) it renders certainty bars. Both are shown when both
    exist.
 5. **The trace records the end of a run.** The recorder appends a
    `RunEnded` line (outcome: completed, failed, interrupted) when the run's
    scope closes. It is a trace line like `StreamError`, not a flow event.
-6. **An epic knows its runs.** `epic-stories` appends
-   `{runId, tracePath, round, startedAt}` to `.llm4ts/epics/<id>/runs.jsonl`
-   at start, so `watch --epic <id>` opens the latest run and a future
+6. **An epic knows its runs.** The root `FlowContext` carries `trace`
+   (run id and path) when the run records one, and `epic-stories` appends
+   `EpicRun{runId, tracePath, action, round, startedAt}` to
+   `.llm4ts/epics/<id>/runs.jsonl` at start (`@llm4ts/flow/EpicRuns`), so `watch --epic <id>` opens the latest run and a future
    `--list` can reach every run that touched the epic.
 7. **Read-only.** Keys select and expand a lane, switch lanes between
    stories and executors, toggle the full log and quit. `q` detaches
@@ -76,7 +83,8 @@ roster, the judge seat and a session log.
    (pause, restart, approve) is not decided here.
 8. **The classic surface stays the default**, and is used whenever stdout is
    not a TTY, `NO_COLOR` is set, or the terminal is narrower than 90
-   columns. Rendering stays hand-rolled ANSI; no TUI library.
+   columns. Rendering stays hand-rolled ANSI; no TUI library. A full-screen
+   frame is cut to the terminal's height, keeping its two status lines.
 
 Stage nesting is derived per lane from `StageStarted`/`StageCompleted`
 pairs, as the classic surface does; events get no parent id. Cost is an
@@ -84,6 +92,11 @@ estimate from `TokensUsed` and the pricing that `llm4ts costs` uses, shown
 as `~$`.
 
 ## Consequences
+
+- A trace written before these events renders from what it has: lanes,
+  stages, tools, tokens and failures; its prose roster lines stay out of
+  the log except exclusions and handovers, and without `runs.jsonl` it has
+  no board, so stories that never started are missing.
 
 - The new events are additive; the trace keeps schema version 1 and older
   readers skip kinds they do not know. `llm4ts costs` is unaffected.

@@ -100,6 +100,69 @@ meant to be committed.)
 Every task is its own commit on the flow's branch, so `git log` on that
 branch is the story of the run and `git diff main` is the whole change.
 
+## Watching a run: the agent tree
+
+A run with several stories in flight (`epic-stories` on an executor roster)
+is easier to follow as a tree than as a scrolling log. Add `--ui tree` to
+`llm4ts run` and the terminal shows, full-screen, the orchestrator, the
+judge's latest verdict, one box per running story with the executor that
+holds it, every other story as a status chip, the judge seat, a session
+log, and the run's tokens and estimated cost:
+
+```text
+                        LLM4TS AGENT TREE  ·  epic conto-bonifico
+══════════════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────┐          ┌─ epic conto-bonifico ──────────────────────┐
+│       JUDGE SEAT       │          │ stage  implement stories                   │
+│    claude · on call    │          │ stories 6  elapsed 7m10s                   │
+│                        │          └────────────────────────────────────────────┘
+│ last verdict:          │                                •
+│ » accounts r2: cleared │  ┌─ JUDGMENT · accounts r2 ───────────────────────────────────┐
+│                        │  │ provides        ██████████  2/2                            │
+│ reviews            1   │  │ scope           ██████████  2/2                            │
+│ verdicts           2   │  │ house-style     ██████████  2/2                            │
+└────────────────────────┘  │ tests           ██████████  2/2                            │
+                            │ cleared → merge                                            │
+                            └────────────────────────────────────────────────────────────┘
+                                            delegate to roster · 2 running
+                                                          ▼
+                            ┌────────────────────────────┐  ┌────────────────────────────┐
+                            │ payments                   │  │ overview                   │
+                            │ pi-lmstudio                │  │ codex                      │
+                            │ Payments fake routes       │  │ story overview: setup      │
+                            │ bash pnpm typecheck && pn… │  │ read src/features/conto/p… │
+                            │ 7m06s · 92.5k tok          │  │ 29s · 0 tok                │
+                            │ ◐ running                  │  │ ◐ running                  │
+                            └────────────────────────────┘  └────────────────────────────┘
+
+                            ✓ accounts  ◐ payments  ✗ iban  ◐ overview  · movimenti
+                            ◌ bonifico
+
+┌─ session log ──────────────────────────────────────────────────────────────────────────┐
+│ 00:05:30  judge            accounts r1 · 1 issue → coder                               │
+│ 00:06:35  judge            accounts r2 · cleared → merge                               │
+│ 00:06:39  accounts         merged into epic/conto-bonifico                             │
+│ 00:06:40  accounts         done                                                        │
+│ 00:06:42  roster           codex → coder · overview                                    │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+stories [1/6 done · 2 running · 1 failed · 1 waiting]  roster [2/4 busy]
+tokens [383.5k]  cost [~$0.38]  run [live]
+```
+
+Keys: `↑`/`↓` or `1`–`9` select a story, `enter` expands it (its stages and
+last tool calls), `e` switches to one column per executor, `l` shows the
+whole log, `q` hands the screen back to the classic view while the run goes
+on. `ctrl-c` still aborts. Off a terminal, below 90 columns, or with
+`NO_COLOR` set, the classic view is used.
+
+`llm4ts watch` draws the same tree from a trace file, from another terminal
+or after the run: `llm4ts watch --epic <id>` opens an epic's latest run,
+`llm4ts watch <trace>` a given one, and bare `llm4ts watch` the newest
+trace in the repository. A live trace is followed as it grows; a finished
+one shows its last frame; `--replay [--speed n]` plays it back on its own
+timestamps. Piped, `watch` prints one frame and exits.
+
 ## Exit codes and resuming
 
 | Code | Meaning                                                      |

@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.20.0
+
+- The **agent tree** (ADR 0022): a full-screen view of a running flow — the
+  orchestrator, the judge's latest verdict with its scores, one box per
+  story in flight with the executor that holds it, the other stories as
+  status chips, the judge seat, a session log, tokens and estimated cost.
+  - `llm4ts run <flow> --ui tree` (`LLM4TS_UI=tree`) shows it during the
+    run; `q` returns to the classic view, which stays the default.
+  - `llm4ts watch [trace] [--epic id] [--replay] [--speed n]` draws it from
+    a trace: live, finished, or replayed on the trace's timestamps.
+  - `@llm4ts/runner/AgentTree` is the pure core (`reduceTree`,
+    `renderTree`, `onTreeKey`, `treeInputsOfTrace`);
+    `@llm4ts/runner/AgentTreeSurface` and `@llm4ts/runner/Watch` host it.
+- New flow events, additive (the trace stays schema version 1):
+  - `ExecutorLeased`, `ExecutorReleased`, `ExecutorExcluded`,
+    `ExecutorResumed`, `ExecutorHandedOver` replace the roster's
+    `roster: …` Info lines; `rosterEventMessage` gives the classic
+    terminal the same words.
+  - `StoryJudged` on every judge round; a story judge may return a
+    `StoryVerdict` (a `ReviewResult` with the rubric's scores), as the
+    rubric judge of `epic-stories` now does.
+- The trace ends with a `RunEnded` line (completed, failed, interrupted);
+  the root `FlowContext` carries `trace` (run id and path), and
+  `epic-stories` records each run in `.llm4ts/epics/<id>/runs.jsonl`
+  (`@llm4ts/flow/EpicRuns`).
+
 ## 2.19.0
 
 - **Refine rounds** for `epic-stories` (ADR 0021): feedback on a finished,

@@ -54,6 +54,11 @@ cost per day, per hour, per run, and per model, with a projection for the
 run rate you expect — the numbers a budget needs. Measured token counts and
 character-count estimates stay in separate columns.
 
+`llm4ts run epic-stories --ui tree …` draws the run as an **agent tree**:
+the stories in flight on their executors, the judge's verdicts, the session
+log. `llm4ts watch` draws the same tree from any trace, live or afterwards,
+and replays it. More: [chapter 2](docs/guide/02-run-a-flow.md#watching-a-run-the-agent-tree).
+
 ## Write a flow
 
 A flow is one TypeScript file in `.llm4ts/flows/` of the directory you
