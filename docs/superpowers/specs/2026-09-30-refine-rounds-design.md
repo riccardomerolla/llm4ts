@@ -200,7 +200,8 @@ What a run does is one pure decision, tested on values:
 | any          | any                   | `--land`       | lands, or refuses naming stories |
 | landed       | any                   | `--refine "…"` | refused: the epic has landed     |
 
-`--refine` without text and without an open round is a usage error.
+`--refine` without text and without an open round is a usage error. So is
+`--refine` with feedback beside `--land`: the feedback would be dropped.
 
 ## Error handling
 

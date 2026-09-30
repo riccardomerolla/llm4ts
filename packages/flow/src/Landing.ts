@@ -15,7 +15,7 @@ import { statusPaths } from "./GitTool.ts"
 import { loadVersioned, saveVersioned, type PlainFileStoreShape } from "./Persistence.ts"
 import type { ReviewResult } from "./Review.ts"
 import { StoryState, StoryStateVersion } from "./Stories.ts"
-import type { StoryPlan } from "./StoryPlan.ts"
+import type { Story, StoryPlan } from "./StoryPlan.ts"
 
 const join = (root: string, path: string): string =>
   `${root.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`
@@ -142,7 +142,16 @@ export const landEpic = Effect.fn("@llm4ts/flow/Landing.land")(function* (
     events,
     agent: "coder"
   })
-  const stories = plan.stories.map((story) => `- ${story.id}: ${story.provides.join("; ")}`)
+  const provided = (story: Story): string => `- ${story.id}: ${story.provides.join("; ")}`
+  // A round changed what the plan's stories built (it may have removed some of
+  // it): the coder must not resolve a conflict back to the older intent.
+  const stories = [
+    ...plan.stories.map(provided),
+    ...(options.rounds ?? []).flatMap((round, index) => [
+      `and later changed on feedback (refine round ${index + 1}, which wins over the above):`,
+      ...round.plan.stories.map(provided)
+    ])
+  ]
   let rounds = 0
   while (true) {
     const withMarkers: Array<string> = []

@@ -120,6 +120,25 @@ describe("what a run does", () => {
     })
   })
 
+  it("--land with feedback is a usage error: the feedback is never dropped", () => {
+    const both = runAction({ ...finished, land: true, refine: true, feedback: "move the card" })
+    assert.strictEqual(both._tag, "Usage")
+    assert.match(both._tag === "Usage" ? both.message : "", /--refine.*--land/)
+    // --refine with no text beside --land asks for nothing: the landing decides.
+    assert.deepStrictEqual(runAction({ ...finished, land: true, refine: true }), { _tag: "Land" })
+  })
+
+  it("an unreadable round is fixed or removed as a folder, never by deleting its plan", () => {
+    const action = runAction({
+      ...finished,
+      rounds: [{ round: 2, stories: 0, merged: 0, unreadable: "rounds/2/plan.md: broken" }]
+    })
+    assert.match(
+      action._tag === "Refused" ? action.reason : "",
+      /fix the plan, or delete the folder rounds\/2 and every later round/
+    )
+  })
+
   it("--land is always the landing's own decision", () => {
     assert.deepStrictEqual(runAction({ ...finished, land: true, rounds: [round(1, 2, 0)] }), {
       _tag: "Land"

@@ -24,11 +24,13 @@ import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import {
   EpicBriefInvalid,
   EpicBriefNotApproved,
+  EpicCheckoutDirty,
   LandingFailed,
   RefineRefused,
   type FlowError
 } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import { statusPaths } from "@llm4ts/flow/GitTool"
 import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
 import {
   RefineProposal,
@@ -38,6 +40,7 @@ import {
   refineProposalJsonSchema,
   renderNotPlanned,
   roundPrefix,
+  roundRepair,
   runAction,
   type EarlierStory,
   type NotPlanned,
@@ -259,7 +262,19 @@ export const loadRounds = (
       const path = join(dir, "plan.md")
       const text = yield* files.read(path)
       if (text === undefined) {
-        return rounds
+        // A plan missing while the next round has one is a hole, not the end.
+        if ((yield* files.read(join(roundDir(stateDir, round + 1), "plan.md"))) === undefined) {
+          return rounds
+        }
+        rounds.push({
+          round,
+          stateDir: dir,
+          plan: undefined,
+          merged: 0,
+          notPlanned: 0,
+          unreadable: `${path} is missing while round ${round + 1} exists`
+        })
+        continue
       }
       const notPlanned = countNotPlanned((yield* files.read(join(dir, "not-planned.md"))) ?? "")
       const parsed = yield* Effect.result(
@@ -343,7 +358,22 @@ export const listEpics = (
         stories: plan.stories.length,
         merged,
         landed: landed?.target,
-        rounds: yield* loadRounds(files, stateDir).pipe(Effect.catch(() => Effect.succeed([])))
+        // Rounds that cannot be read are reported, never dropped: an epic
+        // must not look free of rounds when it lands.
+        rounds: yield* loadRounds(files, stateDir).pipe(
+          Effect.catch((error) =>
+            Effect.succeed<ReadonlyArray<RoundOnDisk>>([
+              {
+                round: 1,
+                stateDir: roundDir(stateDir, 1),
+                plan: undefined,
+                merged: 0,
+                notPlanned: 0,
+                unreadable: `${join(stateDir, "rounds")}: ${error.message}`
+              }
+            ])
+          )
+        )
       })
     }
     return summaries
@@ -1056,12 +1086,11 @@ export const planRound = Effect.fn("flows/epic-stories.planRound")(function* (
   )
   const dir = roundDir(deps.stateDir, deps.round)
   yield* deps.files.writeAtomic(join(dir, "feedback.md"), `${deps.feedback}\n`)
-  if (proposal.notPlanned.length > 0) {
-    yield* deps.files.writeAtomic(
-      join(dir, "not-planned.md"),
-      renderNotPlanned(deps.round, proposal.notPlanned)
-    )
-  }
+  // Always written: a reused folder must not keep an older round's list.
+  yield* deps.files.writeAtomic(
+    join(dir, "not-planned.md"),
+    renderNotPlanned(deps.round, proposal.notPlanned)
+  )
   // The plan goes last: it is what makes the folder a round.
   yield* makeStoryPlanStore(deps.files).save(join(dir, "plan.md"), plan)
   return { plan, notPlanned: proposal.notPlanned }
@@ -1119,7 +1148,7 @@ export const landRounds = (
           LandingFailed.make({
             epicBranch: `epic/${epicId}`,
             target,
-            reason: `round ${round.round}'s plan cannot be read (${round.unreadable ?? ""}); fix or remove it`
+            reason: `round ${round.round}'s plan cannot be read (${round.unreadable ?? ""}); ${roundRepair(round.round)}`
           })
         )
       : Effect.succeed({ plan: round.plan, stateDir: round.stateDir })
@@ -1683,7 +1712,12 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             }
           }
           if (action._tag === "PlanRound") {
-            // The planner reads the code as the person tried it.
+            // The planner reads the code as the person tried it: the epic
+            // branch, with nothing uncommitted carried over onto it.
+            const stray = statusPaths(yield* context.git.status)
+            if (stray.length > 0) {
+              return yield* EpicCheckoutDirty.make({ checkout: input.workDir, paths: stray })
+            }
             yield* stage(events, "epic branch", context.git.checkoutOrCreate(epicBranch))
             const roundBrief = yield* files.read(join(stateDir, "brief.md"))
             const planned = yield* stage(

@@ -90,6 +90,10 @@ export const assembleRound = (inputs: {
   })
 }
 
+/** What to do about a round whose plan cannot be read: a plan alone is never deleted. */
+export const roundRepair = (round: number): string =>
+  `fix the plan, or delete the folder rounds/${round} and every later round`
+
 /** A round as the run decision sees it. */
 export interface RoundProgress {
   readonly round: number
@@ -130,14 +134,21 @@ export interface RunInputs {
  */
 export const runAction = (inputs: RunInputs): RunAction => {
   if (inputs.land) {
-    return { _tag: "Land" }
+    // Landing with feedback in hand would drop the feedback for good.
+    return inputs.refine && inputs.feedback.trim().length > 0
+      ? {
+          _tag: "Usage",
+          message:
+            "--refine with feedback and --land do not go together: run the round first, then land"
+        }
+      : { _tag: "Land" }
   }
   const planOpen = inputs.merged < inputs.stories
   const unreadable = inputs.rounds.find((round) => round.unreadable !== undefined)
   const open = inputs.rounds.find((round) => round.merged < round.stories)
   const broken = (round: RoundProgress): RunAction => ({
     _tag: "Refused",
-    reason: `round ${round.round}'s plan cannot be read (${round.unreadable ?? ""}); fix or remove it`
+    reason: `round ${round.round}'s plan cannot be read (${round.unreadable ?? ""}); ${roundRepair(round.round)}`
   })
   if (!inputs.refine) {
     if (planOpen) {

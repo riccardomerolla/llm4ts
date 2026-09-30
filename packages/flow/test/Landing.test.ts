@@ -423,6 +423,45 @@ describe("landEpic", () => {
       })
     )
 
+    it.effect("the coder resolving conflicts is told what the rounds changed", () =>
+      Effect.gen(function* () {
+        const memory = yield* makeMemoryPlainFileStore()
+        yield* merged(memory.store, "a")
+        yield* merged(memory.store, "b")
+        yield* roundMerged(memory.store, "r1-move-card")
+        yield* roundMerged(memory.store, "r1-remove-export")
+        yield* memory.store.writeAtomic(
+          "/repo/src/App.tsx",
+          "<<<<<<< HEAD\nconst a = 1\n=======\nconst a = 2\n>>>>>>> main\n"
+        )
+        const asked = yield* Ref.make<ReadonlyArray<string>>([])
+        const service = coder((prompt) =>
+          Ref.update(asked, (all) => [...all, prompt]).pipe(
+            Effect.andThen(
+              Effect.orDie(memory.store.writeAtomic("/repo/src/App.tsx", "const a = 2\n"))
+            )
+          )
+        )
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        yield* landEpic(
+          contextFor(gitFor(log, { behind: true, conflicts: ["src/App.tsx"] }), service, events),
+          {
+            plan,
+            files: memory.store,
+            stateDir,
+            rounds: [{ plan: roundPlan, stateDir: roundDir }],
+            gates: () => Effect.succeed(clean)
+          }
+        )
+        const prompt = (yield* Ref.get(asked))[0] ?? ""
+        assert.include(prompt, "- a: a screen")
+        assert.include(prompt, "later changed on feedback")
+        assert.include(prompt, "- r1-remove-export: r1-remove-export screen")
+        assert.isAbove(prompt.indexOf("- r1-remove-export"), prompt.indexOf("- a: a screen"))
+      })
+    )
+
     it.effect("lands once every round is merged, and clears the rounds' worktrees too", () =>
       Effect.gen(function* () {
         const memory = yield* makeMemoryPlainFileStore()

@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
@@ -17,7 +19,9 @@ import {
   epicIdFor,
   epicOnDisk,
   epicUsage,
+  epicsDir,
   landRounds,
+  listEpics,
   loadRounds,
   parseEpicArgs,
   planRound,
@@ -28,6 +32,7 @@ import {
   roundProgress,
   type EpicSummary
 } from "../lib/epic-stories.ts"
+import { nodePlainFileStore } from "@llm4ts/runner"
 import { scripted } from "./support.ts"
 
 const stateDir = "/repo/.llm4ts/epics/bank"
@@ -159,6 +164,49 @@ describe("refine rounds: on disk", () => {
       const [round] = yield* loadRounds(memory.store, stateDir)
       assert.include(round?.unreadable ?? "", "both own")
     })
+  )
+
+  it.effect("a missing plan between rounds is a broken round, not the end of the list", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* makeStoryPlanStore(memory.store).save(
+        `${roundDir(stateDir, 2)}/plan.md`,
+        roundPlan(2, ["r2-a"])
+      )
+      const rounds = yield* loadRounds(memory.store, stateDir)
+      assert.deepStrictEqual(
+        rounds.map((round) => [round.round, round.plan?.stories.length]),
+        [
+          [1, undefined],
+          [2, 1]
+        ]
+      )
+      assert.include(rounds[0]?.unreadable ?? "", `${stateDir}/rounds/1/plan.md is missing`)
+    })
+  )
+
+  it.effect("rounds that cannot be read at all are reported on the epic, never dropped", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* Effect.acquireRelease(
+          Effect.promise(() => mkdtemp(join(tmpdir(), "llm4ts-rounds-"))),
+          (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true }))
+        )
+        const epicState = join(epicsDir(root), "bank")
+        yield* makeStoryPlanStore(nodePlainFileStore).save(join(epicState, "plan.md"), epicPlan)
+        // A directory where the round's plan file should be: the read fails.
+        yield* Effect.promise(() =>
+          mkdir(join(roundDir(epicState, 1), "plan.md"), { recursive: true })
+        )
+        const [epic] = yield* listEpics(nodePlainFileStore, root)
+        assert.strictEqual(epic?.rounds.length, 1)
+        assert.include(epic?.rounds[0]?.unreadable ?? "", "rounds")
+        assert.strictEqual(
+          (yield* Effect.flip(landRounds("bank", "main", epic?.rounds ?? [])))._tag,
+          "LandingFailed"
+        )
+      })
+    )
   )
 
   it("--list and the coverage progress count the rounds", () => {
@@ -308,8 +356,12 @@ describe("refine rounds: planning", () => {
       assert.include(prompt, "- **adjust the header** — adjust how?")
       assert.include(prompt, "- r1-a: Title of r1-a")
       assert.include(prompt, "# Epic brief: bank")
-      // Nothing left out: no not-planned file for this round.
-      assert.isUndefined(yield* files.read(`${roundDir(stateDir, 2)}/not-planned.md`))
+      // Nothing left out: the file says so, and replaces whatever a reused folder held.
+      assert.include(
+        (yield* files.read(`${roundDir(stateDir, 2)}/not-planned.md`)) ?? "",
+        "Every feedback item was planned."
+      )
+      assert.strictEqual((yield* loadRounds(files, stateDir))[1]?.notPlanned, 0)
     })
   )
 
@@ -434,6 +486,9 @@ describe("refine rounds: the run", () => {
     assert.include(program, "refineEpic(")
     assert.include(program, "rounds: yield* landRounds(")
     // The planner reads the code as the person tried it.
+    const dirty = program.indexOf("EpicCheckoutDirty.make(")
+    assert.isAbove(dirty, 0)
+    assert.isBelow(dirty, program.indexOf("context.git.checkoutOrCreate(epicBranch)"))
     const checkout = program.indexOf("context.git.checkoutOrCreate(epicBranch)")
     assert.isAbove(checkout, 0)
     assert.isAbove(program.indexOf("planRound("), checkout)
