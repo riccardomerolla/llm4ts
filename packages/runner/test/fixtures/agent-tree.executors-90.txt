@@ -7,13 +7,13 @@
 │                        │          └────────────────────────────────────────────┘        
 │ last verdict:          │                                •                               
 │ » none yet             │  ┌─ JUDGMENT ─────────────────────────────────────────────────┐
-└────────────────────────┘  │ no verdicts yet                                            │
-                            └────────────────────────────────────────────────────────────┘
-                                            delegate to roster · 2 running                
-                                                          ▼                               
+│                        │  │ no verdicts yet                                            │
+│ reviews            0   │  └────────────────────────────────────────────────────────────┘
+│ verdicts           0   │                  delegate to roster · 2 running                
+└────────────────────────┘                                ▼                               
                             ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐ 
                             │ codex           │  │ pi-lmstudio     │  │ lemonade        │ 
-                            │ coder · overvi… │  │ coder · paymen… │  │ no coder lease  │ 
+                            │ coder · overvi… │  │ coder · paymen… │  │ no lease        │ 
                             │ ◐ busy          │  │ ◐ busy          │  │ ○ idle          │ 
                             └─────────────────┘  └─────────────────┘  └─────────────────┘ 
                                                                                           

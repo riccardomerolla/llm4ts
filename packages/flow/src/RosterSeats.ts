@@ -12,7 +12,7 @@ import { ConfigError, type LlmError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { Message, type ConnectorCapabilities, type LlmChunk } from "@llm4ts/core/Models"
 import { describeFlowError, type FlowError } from "./FlowError.ts"
-import { Info, type FlowEventsShape } from "./FlowEvents.ts"
+import { ExecutorHandedOver, ExecutorLeased, type FlowEventsShape } from "./FlowEvents.ts"
 import {
   describeExclusion,
   hasRole,
@@ -50,9 +50,6 @@ export interface RosterView {
 /** A roster failure seen through an `LlmServiceShape`, whose failures are `LlmError`s. */
 const asLlmError = (error: FlowError): LlmError =>
   ConfigError.make({ message: describeFlowError(error) })
-
-const say = (events: FlowEventsShape, message: string): Effect.Effect<void> =>
-  events.publish(Info.make({ message: `roster: ${message}` }))
 
 /** Shared plumbing: every service method as "run this on some seat". */
 interface SeatRunner {
@@ -133,9 +130,13 @@ export const rosterSeat = (
       if (avoid.length > 0 && !(yield* roster.canEverServe(role, avoid))) {
         const borrowed = options.borrow === undefined ? undefined : yield* options.borrow
         if (borrowed !== undefined && hasRole(borrowed, role)) {
-          yield* say(
-            options.events,
-            `${borrowed.id} takes ${role}${options.label === undefined ? "" : ` for ${options.label}`} on its own coder's slot — not independent (no other executor can take ${role})`
+          yield* options.events.publish(
+            ExecutorLeased.make({
+              executor: borrowed.id,
+              role,
+              ...(options.label === undefined ? {} : { label: options.label }),
+              borrowed: true
+            })
           )
           return borrowed
         }
@@ -167,9 +168,14 @@ export const rosterSeat = (
       const avoid = options.avoid === undefined ? [] : yield* options.avoid
       const other = yield* roster.canEverServe(role, [...avoid, executor.id])
       if (other) {
-        yield* say(
-          options.events,
-          `${role}${options.label === undefined ? "" : ` for ${options.label}`} moves off ${executor.id} (${describeExclusion(exclusion)})`
+        yield* options.events.publish(
+          ExecutorHandedOver.make({
+            from: executor.id,
+            role,
+            ...(options.label === undefined ? {} : { label: options.label }),
+            reason: describeExclusion(exclusion),
+            scope: "call"
+          })
         )
       }
       return other
@@ -318,9 +324,14 @@ export const makeHeldCoder = Effect.fn("@llm4ts/flow/RosterSeats.heldCoder")(fun
       yield* Ref.set(prefer, undefined)
       yield* held.lease.release
       yield* Ref.set(current, undefined)
-      yield* say(
-        options.events,
-        `${options.label ?? workDir}: handing the coder over from ${held.lease.executor.id} (${describeExclusion(exclusion)})`
+      yield* options.events.publish(
+        ExecutorHandedOver.make({
+          from: held.lease.executor.id,
+          role: "coder",
+          label: options.label ?? workDir,
+          reason: describeExclusion(exclusion),
+          scope: "coder"
+        })
       )
       return takeoverNote(held.lease.executor.id, exclusion.reason)
     })

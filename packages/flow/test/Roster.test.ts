@@ -15,7 +15,11 @@ import {
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { ConnectorCapabilities, LlmChunk, Message } from "@llm4ts/core/Models"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
-import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
+import {
+  makeCollectingFlowEvents,
+  rosterEventMessage,
+  type FlowEvent
+} from "@llm4ts/flow/FlowEvents"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import {
   Exclusion,
@@ -32,6 +36,13 @@ import {
   rosterViolations
 } from "@llm4ts/flow/Roster"
 import { makeHeldCoder, rosterSeat, type RosterSeat } from "@llm4ts/flow/RosterSeats"
+
+/** What the classic terminal shows for the roster's events, in order. */
+const rosterLines = (recorded: ReadonlyArray<FlowEvent>): ReadonlyArray<string> =>
+  recorded.flatMap((event) => {
+    const message = rosterEventMessage(event)
+    return message === undefined ? (event._tag === "Info" ? [event.message] : []) : [message]
+  })
 
 const executor = (
   id: string,
@@ -188,13 +199,52 @@ describe("Roster leasing", () => {
         assert.strictEqual((yield* roster.lease("judge")).executor.id, "claude")
         assert.strictEqual((yield* roster.lease("judge")).executor.id, "codex")
         const recorded = yield* events.recorded
-        assert.isTrue(
-          recorded.some(
-            (event) => event._tag === "Info" && event.message === "roster: pi-local takes coder"
-          )
+        const leased = recorded.find((event) => event._tag === "ExecutorLeased")
+        assert.deepStrictEqual(
+          leased?._tag === "ExecutorLeased" ? [leased.executor, leased.role] : [],
+          ["pi-local", "coder"]
         )
+        assert.isFalse(recorded.some((event) => event._tag === "Info"))
+        assert.include(rosterLines(recorded), "roster: pi-local takes coder")
       })
     )
+  )
+
+  it.effect(
+    "publishes typed events for a story's lease, its release, an exclusion and a resume",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const events = yield* makeCollectingFlowEvents
+          const roster = yield* makeRoster({ executors: [codex, claude], events })
+          const lease = yield* roster.lease("coder", { label: "home" })
+          yield* lease.release
+          yield* lease.release
+          yield* roster.exclude(
+            Exclusion.make({ id: "claude", kind: "run", reason: "not logged in" })
+          )
+          yield* roster.resume("claude")
+          const recorded = (yield* events.recorded).filter((event) =>
+            event._tag.startsWith("Executor")
+          )
+          assert.deepStrictEqual(
+            recorded.map((event) => event._tag),
+            ["ExecutorLeased", "ExecutorReleased", "ExecutorExcluded", "ExecutorResumed"]
+          )
+          const [leased, released] = recorded
+          assert.isTrue(
+            leased?._tag === "ExecutorLeased" &&
+              leased.executor === lease.executor.id &&
+              leased.label === "home"
+          )
+          assert.isTrue(released?._tag === "ExecutorReleased" && released.label === "home")
+          assert.deepStrictEqual(rosterLines(recorded), [
+            `roster: ${lease.executor.id} takes coder for home`,
+            "roster: claude out of the round for this run: not logged in",
+            "roster: claude resumed"
+          ])
+        })
+      )
   )
 
   it.effect("a preferred executor wins while it ranks with the best free one", () =>
@@ -233,9 +283,7 @@ describe("Roster leasing", () => {
         yield* TestClock.adjust("31 seconds")
         const lease = yield* Fiber.join(waiting)
         assert.strictEqual(lease.executor.id, "codex")
-        const recorded = (yield* events.recorded).flatMap((event) =>
-          event._tag === "Info" ? [event.message] : []
-        )
+        const recorded = rosterLines(yield* events.recorded)
         assert.isTrue(
           recorded.some((message) =>
             message.startsWith("roster: waiting for an executor to take coder")
@@ -441,11 +489,16 @@ describe("Roster seats", () => {
           snapshot.find((status) => status.executor.id === "claude")?.exclusion?.kind,
           "run"
         )
-        const recorded = (yield* events.recorded).flatMap((event) =>
-          event._tag === "Info" ? [event.message] : []
-        )
+        const recorded = yield* events.recorded
         assert.isTrue(
-          recorded.some((message) => message.includes("judge for story a moves off claude"))
+          rosterLines(recorded).some((message) =>
+            message.includes("judge for story a moves off claude")
+          )
+        )
+        const moved = recorded.find((event) => event._tag === "ExecutorHandedOver")
+        assert.deepStrictEqual(
+          moved?._tag === "ExecutorHandedOver" ? [moved.from, moved.role, moved.label] : [],
+          ["claude", "judge", "story a"]
         )
         // A failure that says nothing about the executor is the call's own.
         const flaky = rosterSeat(
@@ -479,9 +532,7 @@ describe("Roster seats", () => {
           borrow: Effect.succeed(claude)
         })
         assert.strictEqual(yield* text(verifier, "verify a"), "claude ok")
-        const recorded = (yield* events.recorded).flatMap((event) =>
-          event._tag === "Info" ? [event.message] : []
-        )
+        const recorded = rosterLines(yield* events.recorded)
         assert.isTrue(recorded.some((message) => message.includes("not independent")))
         // The slot went back when the call ended.
         assert.strictEqual(yield* roster.available("judge"), 2 + 3)

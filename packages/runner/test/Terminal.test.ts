@@ -14,6 +14,11 @@ import {
   UsageProgress,
   ReviewFinding,
   ReviewFindings,
+  ExecutorExcluded,
+  ExecutorHandedOver,
+  ExecutorLeased,
+  ExecutorReleased,
+  ExecutorResumed,
   makeFlowEventHub,
   withLane
 } from "@llm4ts/flow/FlowEvents"
@@ -39,6 +44,36 @@ import {
 } from "@llm4ts/runner/Terminal"
 
 describe("terminal rendering", () => {
+  it("shows roster events as the roster lines they replaced, and a release not at all", () => {
+    const shown = [
+      ExecutorLeased.make({ executor: "codex", role: "coder", label: "home" }),
+      ExecutorLeased.make({ executor: "claude", role: "judge", label: "home", borrowed: true }),
+      ExecutorExcluded.make({ executor: "claude", reason: "for this run: not logged in" }),
+      ExecutorResumed.make({ executor: "claude", why: "health" }),
+      ExecutorHandedOver.make({
+        from: "codex",
+        role: "coder",
+        label: "home",
+        reason: "until 10:00: usage limit",
+        scope: "coder"
+      })
+    ]
+    assert.isTrue(shown.every((event) => rendersEvent("Normal", event)))
+    assert.deepStrictEqual(
+      shown.map((event) => terminalLine(event)),
+      [
+        "· roster: codex takes coder for home",
+        "· roster: claude takes judge for home on its own coder's slot — not independent (no other executor can take judge)",
+        "· roster: claude out of the round for this run: not logged in",
+        "· roster: claude answers its health check again; back in the round",
+        "· roster: home: handing the coder over from codex (until 10:00: usage limit)"
+      ]
+    )
+    const release = ExecutorReleased.make({ executor: "codex", role: "coder", label: "home" })
+    assert.isFalse(rendersEvent("Verbose", release))
+    assert.strictEqual(terminalLine(release), "")
+  })
+
   it("leaves judgment telemetry silent; advice arrives as Info", () => {
     const event = JudgmentObserved.make({
       consumer: "satisfied-probe",

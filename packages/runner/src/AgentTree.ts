@@ -53,6 +53,20 @@ export interface TreeStory {
   readonly status: "planned" | "active" | "waiting" | "done" | "failed" | "skipped"
 }
 
+/** A lease an executor holds now: its role and who it is for (a story id). */
+export interface TreeLease {
+  readonly executor: string
+  readonly role: string
+  readonly label: string | undefined
+}
+
+/** The judge seat: who sits in it, and how often it was asked. */
+export interface TreeJudge {
+  readonly executor: string | undefined
+  readonly reviews: number
+  readonly verdicts: number
+}
+
 export interface TreeState {
   readonly title: string
   /** The board's stories, in plan order; lanes not on it are added after. */
@@ -65,6 +79,10 @@ export interface TreeState {
   readonly lanes: ReadonlyArray<TreeLane>
   /** Executors in the order the run first named them. */
   readonly executors: ReadonlyArray<string>
+  readonly leases: ReadonlyArray<TreeLease>
+  /** Executors out of the round, with the roster's reason. */
+  readonly exclusions: ReadonlyArray<{ readonly executor: string; readonly reason: string }>
+  readonly judge: TreeJudge
   readonly log: ReadonlyArray<TreeLogEntry>
   readonly tokens: number
   /** Estimated: the backend's own figure when it reports one, else the price list. */
@@ -86,6 +104,9 @@ export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   stages: [],
   lanes: [],
   executors: [],
+  leases: [],
+  exclusions: [],
+  judge: { executor: undefined, reviews: 0, verdicts: 0 },
   log: [],
   tokens: 0,
   costUsd: 0,
@@ -115,6 +136,48 @@ const updateLane = (
 const withoutLast = <A>(items: ReadonlyArray<A>, item: A): ReadonlyArray<A> => {
   const index = items.lastIndexOf(item)
   return index < 0 ? items : [...items.slice(0, index), ...items.slice(index + 1)]
+}
+
+const withExecutor = (state: TreeState, executor: string): TreeState =>
+  state.executors.includes(executor)
+    ? state
+    : { ...state, executors: [...state.executors, executor] }
+
+const rosterLog = (state: TreeState, at: number, what: string): TreeState =>
+  logged(state, { at, source: "roster", who: "roster", what })
+
+const reduceLease = (state: TreeState, at: number, lease: TreeLease): TreeState => {
+  const held = { ...withExecutor(state, lease.executor), leases: [...state.leases, lease] }
+  switch (lease.role) {
+    case "coder": {
+      const lane = held.lanes.find((candidate) => candidate.id === lease.label)
+      const placed =
+        lane === undefined
+          ? held
+          : updateLane(held, lane.id, (open) => ({ ...open, executor: lease.executor }))
+      return rosterLog(
+        placed,
+        at,
+        `${lease.executor} → coder${lease.label === undefined ? "" : ` · ${lease.label}`}`
+      )
+    }
+    case "reviewer":
+      return {
+        ...held,
+        judge: {
+          ...held.judge,
+          executor: held.judge.executor ?? lease.executor,
+          reviews: held.judge.reviews + 1
+        }
+      }
+    case "judge":
+      return {
+        ...held,
+        judge: { ...held.judge, executor: lease.executor, verdicts: held.judge.verdicts + 1 }
+      }
+    default:
+      return held
+  }
 }
 
 const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState => {
@@ -195,6 +258,53 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           })
         : current
     }
+    case "ExecutorLeased":
+      return reduceLease(current, at, {
+        executor: event.executor,
+        role: event.role,
+        label: event.label
+      })
+    case "ExecutorReleased": {
+      const index = current.leases.findIndex(
+        (lease) =>
+          lease.executor === event.executor &&
+          lease.role === event.role &&
+          lease.label === event.label
+      )
+      return index < 0
+        ? current
+        : {
+            ...current,
+            leases: [...current.leases.slice(0, index), ...current.leases.slice(index + 1)]
+          }
+    }
+    case "ExecutorExcluded":
+      return rosterLog(
+        {
+          ...withExecutor(current, event.executor),
+          exclusions: [
+            ...current.exclusions.filter((out) => out.executor !== event.executor),
+            { executor: event.executor, reason: event.reason }
+          ]
+        },
+        at,
+        `${event.executor} out · ${event.reason}`
+      )
+    case "ExecutorResumed":
+      return rosterLog(
+        {
+          ...current,
+          exclusions: current.exclusions.filter((out) => out.executor !== event.executor)
+        },
+        at,
+        `${event.executor} back · ${event.why}`
+      )
+    case "ExecutorHandedOver":
+      return rosterLog(
+        current,
+        at,
+        `${event.label ?? "the run"}: ${event.role} leaves ${event.from} · ${event.reason}`
+      )
     case "ToolUse":
       return lane === undefined
         ? current
@@ -468,13 +578,20 @@ export interface TreeRenderOptions {
 const railWidth = 26
 const maxLaneBoxes = 3
 
-const railOf = (): Array<Line> =>
+const counter = (label: string, value: number): Line => [
+  span(`${label.padEnd(15)}${String(value).padStart(5)}`)
+]
+
+const railOf = (state: TreeState): Array<Line> =>
   box(railWidth, "judge", [
     centre([span("JUDGE SEAT", "bold")], railWidth - 4),
-    centre([span("— · on call")], railWidth - 4),
+    centre([span(`${state.judge.executor ?? "—"} · on call`)], railWidth - 4),
     [],
     [span("last verdict:")],
-    [span("» none yet", "judge")]
+    [span("» none yet", "judge")],
+    [],
+    counter("reviews", state.judge.reviews),
+    counter("verdicts", state.judge.verdicts)
   ])
 
 const laneBox = (
@@ -544,14 +661,34 @@ const wrapChips = (chips: ReadonlyArray<Line>, width: number): Array<Line> => {
   return row.length === 0 ? rows : [...rows, row]
 }
 
+/**
+ * What an executor holds: its leases, or — for a trace from before the
+ * roster's events — the running lanes that name it.
+ */
+const heldBy = (state: TreeState, executor: string): ReadonlyArray<string> => {
+  const leases = state.leases
+    .filter((lease) => lease.executor === executor)
+    .map((lease) => `${lease.role}${lease.label === undefined ? "" : ` · ${lease.label}`}`)
+  return leases.length > 0
+    ? leases
+    : runningLanes(state)
+        .filter((lane) => lane.executor === executor)
+        .map((lane) => `coder · ${lane.id}`)
+}
+
 const executorBox = (state: TreeState, executor: string, width: number): Array<Line> => {
-  const held = state.lanes.filter((lane) => lane.status === "running" && lane.executor === executor)
+  const held = heldBy(state, executor)
+  const out = state.exclusions.find((exclusion) => exclusion.executor === executor)
   return box(width, "running", [
     [span(executor, "bold")],
-    held.length === 0
-      ? [span("no coder lease", "dim")]
-      : [span(`coder · ${held.map((lane) => lane.id).join(", ")}`)],
-    held.length === 0 ? [span("○ idle", "dim")] : [span("◐ busy", "running")]
+    ...(held.length === 0
+      ? [[span("no lease", "dim")]]
+      : held.slice(0, 3).map((lease): Line => [span(lease)])),
+    out !== undefined
+      ? [span(`✗ out: ${out.reason}`)]
+      : held.length === 0
+        ? [span("○ idle", "dim")]
+        : [span("◐ busy", "running")]
   ])
 }
 
@@ -626,9 +763,7 @@ export const renderTree = (state: TreeState, options: TreeRenderOptions): Readon
   const { width } = options
   const mainWidth = width - railWidth - 2
   const chips = chipsOf(state)
-  const busy = new Set(
-    runningLanes(state).flatMap((lane) => (lane.executor === undefined ? [] : [lane.executor]))
-  ).size
+  const busy = state.executors.filter((executor) => heldBy(state, executor).length > 0).length
   const count = (status: ChipStatus): number =>
     chips.filter((chip) => chip.status === status).length
   const lines: Array<Line> = [
@@ -638,7 +773,7 @@ export const renderTree = (state: TreeState, options: TreeRenderOptions): Readon
     ),
     [span("═".repeat(width), "dim")],
     [],
-    ...beside([railOf(), mainOf(state, mainWidth, options.view)], [railWidth, mainWidth]),
+    ...beside([railOf(state), mainOf(state, mainWidth, options.view)], [railWidth, mainWidth]),
     [],
     ...box(width, "log", logOf(state, options.view.fullLog), "session log"),
     [

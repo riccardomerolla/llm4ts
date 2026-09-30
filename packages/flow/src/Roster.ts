@@ -14,7 +14,14 @@ import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import type { LlmError } from "@llm4ts/core/Errors"
 import { RosterExhausted, type FlowError } from "./FlowError.ts"
-import { Info, type FlowEventsShape } from "./FlowEvents.ts"
+import {
+  ExecutorExcluded,
+  ExecutorLeased,
+  ExecutorReleased,
+  ExecutorResumed,
+  Info,
+  type FlowEventsShape
+} from "./FlowEvents.ts"
 import { loadVersioned, saveVersioned, type PlainFileStoreShape } from "./Persistence.ts"
 import { isOutage } from "./TransientRetry.ts"
 
@@ -541,11 +548,22 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
       )
       .pipe(Effect.andThen(signal))
 
-  const leaseOf = (spec: ExecutorSpec, role: Role): Effect.Effect<Lease, never, Scope.Scope> =>
+  const leaseOf = (
+    spec: ExecutorSpec,
+    role: Role,
+    label: string | undefined
+  ): Effect.Effect<Lease, never, Scope.Scope> =>
     Effect.gen(function* () {
+      const labelled = label === undefined ? {} : { label }
+      yield* events.publish(ExecutorLeased.make({ executor: spec.id, role, ...labelled }))
       const done = yield* Ref.make(false)
       const free = Effect.flatMap(Ref.getAndSet(done, true), (was) =>
-        was ? Effect.void : release(spec, role)
+        was
+          ? Effect.void
+          : Effect.andThen(
+              release(spec, role),
+              events.publish(ExecutorReleased.make({ executor: spec.id, role, ...labelled }))
+            )
       )
       yield* Effect.addFinalizer(() => free)
       return { executor: spec, role, release: free }
@@ -577,7 +595,9 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         })
       )
       if (back.length > 0) {
-        yield* say(`${back.join(", ")} back in the round`)
+        yield* Effect.forEach(back, (id) =>
+          events.publish(ExecutorResumed.make({ executor: id, why: "expired" }))
+        )
         yield* persist
       }
       return spec
@@ -638,7 +658,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         })
       )
       if (up) {
-        yield* say(`${exclusion.id} answers its health check again; back in the round`)
+        yield* events.publish(ExecutorResumed.make({ executor: exclusion.id, why: "health" }))
         yield* persist
         yield* signal
       }
@@ -693,10 +713,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
       while (true) {
         const spec = yield* attempt(role, leaseOptions)
         if (spec !== undefined) {
-          yield* say(
-            `${spec.id} takes ${role}${leaseOptions.label === undefined ? "" : ` for ${leaseOptions.label}`}`
-          )
-          return yield* leaseOf(spec, role)
+          return yield* leaseOf(spec, role, leaseOptions.label)
         }
         if (!(yield* canEverServe(role, avoid))) {
           const reasons = yield* lock.withPermit(
@@ -723,10 +740,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         yield* probeDue
         const recovered = yield* attempt(role, leaseOptions)
         if (recovered !== undefined) {
-          yield* say(
-            `${recovered.id} takes ${role}${leaseOptions.label === undefined ? "" : ` for ${leaseOptions.label}`}`
-          )
-          return yield* leaseOf(recovered, role)
+          return yield* leaseOf(recovered, role, leaseOptions.label)
         }
         const probing = yield* lock.withPermit(
           Effect.sync(() =>
@@ -744,7 +758,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
     leaseOptions: LeaseOptions = {}
   ): Effect.Effect<Lease | undefined, never, Scope.Scope> =>
     Effect.flatMap(attempt(role, leaseOptions), (spec) =>
-      spec === undefined ? Effect.succeed(undefined) : leaseOf(spec, role)
+      spec === undefined ? Effect.succeed(undefined) : leaseOf(spec, role, leaseOptions.label)
     )
 
   const exclude = (exclusion: Exclusion): Effect.Effect<void> =>
@@ -753,7 +767,9 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         return
       }
       yield* lock.withPermit(Effect.sync(() => exclusions.set(exclusion.id, exclusion)))
-      yield* say(`${exclusion.id} out of the round ${describeExclusion(exclusion)}`)
+      yield* events.publish(
+        ExecutorExcluded.make({ executor: exclusion.id, reason: describeExclusion(exclusion) })
+      )
       yield* persist
       yield* signal
     })
@@ -790,7 +806,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
     Effect.gen(function* () {
       const removed = yield* lock.withPermit(Effect.sync(() => exclusions.delete(id)))
       if (removed) {
-        yield* say(`${id} resumed`)
+        yield* events.publish(ExecutorResumed.make({ executor: id, why: "resumed" }))
         yield* persist
         yield* signal
       }

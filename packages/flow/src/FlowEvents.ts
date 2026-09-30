@@ -181,6 +181,87 @@ export class BlackboardRun extends Schema.TaggedClass<BlackboardRun>()("Blackboa
   result: RunResult
 }) {}
 
+/**
+ * The executor roster's events (ADR 0019, 0022). `label` names who holds the
+ * lease — a story's id, or "the run" — so a view can put an executor on its lane.
+ */
+export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("ExecutorLeased", {
+  executor: Schema.String,
+  role: Schema.String,
+  label: Schema.optionalKey(Schema.String),
+  /** Took the role on its own context's coder slot: nobody independent could. */
+  borrowed: Schema.optionalKey(Schema.Boolean)
+}) {}
+
+export class ExecutorReleased extends Schema.TaggedClass<ExecutorReleased>()("ExecutorReleased", {
+  executor: Schema.String,
+  role: Schema.String,
+  label: Schema.optionalKey(Schema.String)
+}) {}
+
+export class ExecutorExcluded extends Schema.TaggedClass<ExecutorExcluded>()("ExecutorExcluded", {
+  executor: Schema.String,
+  /** How long and why, as the roster describes it ("for this run: not logged in"). */
+  reason: Schema.String
+}) {}
+
+export class ExecutorResumed extends Schema.TaggedClass<ExecutorResumed>()("ExecutorResumed", {
+  executor: Schema.String,
+  /** `expired`: its exclusion ran out; `health`: its engine answers again; `resumed`: by hand. */
+  why: Schema.Literals(["expired", "health", "resumed"])
+}) {}
+
+export class ExecutorHandedOver extends Schema.TaggedClass<ExecutorHandedOver>()(
+  "ExecutorHandedOver",
+  {
+    from: Schema.String,
+    role: Schema.String,
+    label: Schema.optionalKey(Schema.String),
+    reason: Schema.String,
+    /** `call`: one call moves to another executor; `coder`: a context's coder changes hands. */
+    scope: Schema.Literals(["call", "coder"])
+  }
+) {}
+
+export type RosterEvent =
+  | ExecutorLeased
+  | ExecutorReleased
+  | ExecutorExcluded
+  | ExecutorResumed
+  | ExecutorHandedOver
+
+const resumedWords: Readonly<Record<ExecutorResumed["why"], string>> = {
+  expired: "back in the round",
+  health: "answers its health check again; back in the round",
+  resumed: "resumed"
+}
+
+/**
+ * The line the classic terminal shows for a roster event — the same words
+ * the roster used to publish as `Info` — or `undefined` for one it does not
+ * show (a release) and for any other event.
+ */
+export const rosterEventMessage = (event: FlowEvent): string | undefined => {
+  const forLabel = (label: string | undefined): string =>
+    label === undefined ? "" : ` for ${label}`
+  switch (event._tag) {
+    case "ExecutorLeased":
+      return event.borrowed === true
+        ? `roster: ${event.executor} takes ${event.role}${forLabel(event.label)} on its own coder's slot — not independent (no other executor can take ${event.role})`
+        : `roster: ${event.executor} takes ${event.role}${forLabel(event.label)}`
+    case "ExecutorExcluded":
+      return `roster: ${event.executor} out of the round ${event.reason}`
+    case "ExecutorResumed":
+      return `roster: ${event.executor} ${resumedWords[event.why]}`
+    case "ExecutorHandedOver":
+      return event.scope === "coder"
+        ? `roster: ${event.label ?? "the run"}: handing the coder over from ${event.from} (${event.reason})`
+        : `roster: ${event.role}${forLabel(event.label)} moves off ${event.from} (${event.reason})`
+    default:
+      return undefined
+  }
+}
+
 export const FlowEvent = Schema.Union([
   JudgmentObserved,
   BlackboardRun,
@@ -197,7 +278,12 @@ export const FlowEvent = Schema.Union([
   CapabilityUsedEvent,
   CapabilityDeniedEvent,
   CapabilityUnenforceable,
-  Declassified
+  Declassified,
+  ExecutorLeased,
+  ExecutorReleased,
+  ExecutorExcluded,
+  ExecutorResumed,
+  ExecutorHandedOver
 ])
 export type FlowEvent = typeof FlowEvent.Type
 

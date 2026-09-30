@@ -11,6 +11,7 @@ import {
   awaitConsumed,
   type FlowEvent,
   type FlowEventHub,
+  rosterEventMessage,
   type ReviewFindings
 } from "@llm4ts/flow/FlowEvents"
 
@@ -38,6 +39,7 @@ export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean =>
     case "JudgmentObserved":
     case "BlackboardRun":
     case "UsageProgress":
+    case "ExecutorReleased":
       return false
     case "StageStarted":
     case "StageCompleted":
@@ -266,6 +268,14 @@ export const terminalLine = (
       return palette.fail(`capability unenforceable: ${safe(event.detail)}`)
     case "Declassified":
       return palette.info(`declassified: ${safe(event.label)}`)
+    case "ExecutorLeased":
+    case "ExecutorReleased":
+    case "ExecutorExcluded":
+    case "ExecutorResumed":
+    case "ExecutorHandedOver": {
+      const message = rosterEventMessage(event)
+      return message === undefined ? "" : palette.info(safe(message))
+    }
   }
 }
 

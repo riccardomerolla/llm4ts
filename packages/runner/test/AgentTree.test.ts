@@ -4,6 +4,11 @@ import * as Schema from "effect/Schema"
 import {
   StageCompleted,
   StageFailed,
+  ExecutorExcluded,
+  ExecutorHandedOver,
+  ExecutorLeased,
+  ExecutorReleased,
+  ExecutorResumed,
   Info,
   StageStarted,
   TokensUsed,
@@ -288,5 +293,49 @@ describe("agent tree", () => {
     assert.include(text, "roster [1/2 busy]")
     assert.include(text, "│ 3s · 0 tok")
     assert.notInclude(text, "~$0.00 ")
+  })
+
+  it("puts roster leases on lanes, executor columns and the judge seat", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "story home", lane: "home" })),
+      at(1, ExecutorLeased.make({ executor: "codex", role: "coder", label: "home" })),
+      at(2, ExecutorLeased.make({ executor: "claude", role: "reviewer", label: "home" })),
+      at(3, ExecutorReleased.make({ executor: "claude", role: "reviewer", label: "home" })),
+      at(4, ExecutorLeased.make({ executor: "claude", role: "reviewer", label: "home" })),
+      at(5, ExecutorLeased.make({ executor: "claude", role: "judge", label: "home" })),
+      at(6, ExecutorExcluded.make({ executor: "lemonade", reason: "until 10:05: engine down" })),
+      at(7, ExecutorResumed.make({ executor: "lemonade", why: "health" })),
+      at(8, ExecutorExcluded.make({ executor: "pi", reason: "for this run: not logged in" })),
+      at(
+        9,
+        ExecutorHandedOver.make({
+          from: "codex",
+          role: "coder",
+          label: "home",
+          reason: "until 11:00: usage limit",
+          scope: "coder"
+        })
+      )
+    ])
+    const lanes = frame(state).join("\n")
+    assert.include(lanes, "│ codex")
+    assert.include(lanes, "│    claude · on call    │")
+    assert.include(lanes, "│ reviews            2   │")
+    assert.include(lanes, "│ verdicts           1   │")
+    assert.include(lanes, "roster           codex → coder · home")
+    assert.include(lanes, "roster           lemonade back · health")
+    assert.include(lanes, "roster           pi out · for this run: not logged in")
+    assert.include(lanes, "roster           home: coder leaves codex · until 11:00: usage limit")
+    assert.notInclude(lanes, "claude → reviewer")
+
+    const executors = renderTree(state, {
+      width: 120,
+      colour: false,
+      view: { ...initialView, mode: "executors" }
+    }).join("\n")
+    assert.include(executors, "│ coder · home")
+    assert.include(executors, "│ judge · home")
+    assert.include(executors, "│ ✗ out: for this … │")
+    assert.include(executors, "│ ○ idle")
   })
 })
