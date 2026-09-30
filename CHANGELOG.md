@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.19.0
 
 - **Refine rounds** for `epic-stories` (ADR 0021): feedback on a finished,
   not yet landed epic becomes a round of follow-up stories on the same epic
