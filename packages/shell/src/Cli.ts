@@ -207,6 +207,12 @@ const runCommand = Command.make(
       Flag.withDescription(
         "Only these roster executors (comma-separated ids), forwarded as LLM4TS_EXECUTORS"
       )
+    ),
+    ui: Flag.Literals("ui", ["classic", "tree"]).pipe(
+      Flag.withDefault("classic"),
+      Flag.withDescription(
+        "`tree` draws the agent tree full-screen (ADR 0022; `q` returns to the classic view), forwarded as LLM4TS_UI"
+      )
     )
   },
   (config) =>
@@ -225,6 +231,9 @@ const runCommand = Command.make(
       }
       if (config.pack._tag === "Some") {
         environment.LLM4TS_PACK = config.pack.value
+      }
+      if (config.ui === "tree") {
+        environment.LLM4TS_UI = "tree"
       }
       const exitCode = yield* launchFlow({
         flowPath,

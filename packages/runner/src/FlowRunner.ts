@@ -58,6 +58,7 @@ import {
 } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
+import { makeAgentTreeHost, nodeTreeKeys } from "./AgentTreeSurface.ts"
 import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog"
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
 import { makeGitTool } from "@llm4ts/flow/GitTool"
@@ -750,7 +751,23 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     options.costLedgerPath ??
     (persistRun ? join(options.workDir, ".llm4ts", CostLedgerFileName) : undefined)
   const tracker = bundle.tracker
-  const surface = options.surface ?? (yield* makeTerminalSurface(environment))
+  const classic = options.surface ?? (yield* makeTerminalSurface(environment))
+  // The agent tree (ADR 0022) takes the screen only where it fits: a real
+  // terminal, colour allowed, at least 90 columns; the classic view otherwise.
+  const tree =
+    options.surface === undefined && wantsAgentTree(environment, process.stdout, process.stdin)
+      ? yield* makeAgentTreeHost(
+          bundle.events,
+          classic,
+          {
+            write: (text) => Effect.sync(() => void process.stdout.write(text)),
+            columns: () => process.stdout.columns,
+            colour: true
+          },
+          nodeTreeKeys("interrupt")
+        )
+      : undefined
+  const surface = tree?.surface ?? classic
   const palette = surface.palette
   const terminal = yield* consumeTerminalEvents(bundle.events, surface, verbosity, {
     timestamps: environment.LLM4TS_TIMESTAMPS === "1" || environment.LLM4TS_TIMESTAMPS === "true"
@@ -865,6 +882,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
                 )
               )
         ),
+        Effect.andThen(tree === undefined ? Effect.void : tree.close),
         Effect.andThen(appendLedger),
         Effect.andThen(surface.setStatus(undefined)),
         Effect.andThen(tracker.summary),
@@ -909,6 +927,17 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     )
   )
 })
+
+const wantsAgentTree = (
+  environment: Readonly<Record<string, string | undefined>>,
+  output: { readonly isTTY?: boolean; readonly columns?: number },
+  input: { readonly isTTY?: boolean }
+): boolean =>
+  environment.LLM4TS_UI === "tree" &&
+  environment.NO_COLOR === undefined &&
+  output.isTTY === true &&
+  input.isTTY === true &&
+  (output.columns ?? 0) >= 90
 
 const runOutcomeOf = <A, E>(exit: Exit.Exit<A, E>): RunOutcome =>
   Exit.isSuccess(exit)

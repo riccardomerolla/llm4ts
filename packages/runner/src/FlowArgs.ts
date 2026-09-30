@@ -32,6 +32,7 @@ commands:
 environment:
   LLM4TS_CODER            coding agent: claude|codex|gemini|pi|agy|grok|cursor|opencode (default: claude)
   LLM4TS_VERBOSITY        terminal verbosity: quiet|normal|verbose
+  LLM4TS_UI               tree: the full-screen agent tree (ADR 0022; q returns to the classic view)
   OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY
                           credentials for API providers
 

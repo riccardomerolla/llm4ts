@@ -22,6 +22,7 @@ import {
   type TreeState,
   type TreeView
 } from "./AgentTree.ts"
+import { nodeTreeKeys } from "./AgentTreeSurface.ts"
 import { nodeListTraces, TraceDirectoryName } from "./Costs.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 
@@ -259,55 +260,6 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
 
 // ── node wiring ─────────────────────────────────────────────────────────────
 
-const keyNames: Readonly<Record<string, string>> = {
-  "\u001b[A": "up",
-  "\u001b[B": "down",
-  "\u001b[C": "right",
-  "\u001b[D": "left",
-  "\r": "enter",
-  "\n": "enter",
-  "\u001b": "escape",
-  // In `watch`, ctrl-c only detaches the viewer.
-  "\u0003": "q"
-}
-
-/** Raw terminal input as key names; a burst of plain characters is one key each. */
-export const keyNamesOf = (chunk: string): ReadonlyArray<string> => {
-  const named = keyNames[chunk]
-  if (named !== undefined) {
-    return [named]
-  }
-  return chunk.startsWith("\u001b") ? [] : [...chunk]
-}
-
-const nodeKeys: Stream.Stream<string> = Stream.callback<string>((queue) =>
-  Effect.acquireRelease(
-    Effect.sync(() => {
-      const input = process.stdin
-      if (!input.isTTY) {
-        return undefined
-      }
-      const onData = (data: Buffer) => {
-        for (const key of keyNamesOf(data.toString("utf8"))) {
-          Queue.offerUnsafe(queue, key)
-        }
-      }
-      input.setRawMode(true)
-      input.resume()
-      input.on("data", onData)
-      return onData
-    }),
-    (onData) =>
-      Effect.sync(() => {
-        if (onData !== undefined) {
-          process.stdin.off("data", onData)
-          process.stdin.setRawMode(false)
-          process.stdin.pause()
-        }
-      })
-  )
-)
-
 const nodeListEpics = (directory: string): ReadonlyArray<string> =>
   existsSync(directory)
     ? readdirSync(directory).filter((name) => statSync(join(directory, name)).isDirectory())
@@ -327,6 +279,6 @@ export const nodeWatchDependencies = (
       interactive,
       colour: process.stdout.isTTY === true && environment.NO_COLOR === undefined
     },
-    keys: nodeKeys
+    keys: nodeTreeKeys("detach")
   }
 }
