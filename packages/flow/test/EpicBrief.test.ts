@@ -23,6 +23,7 @@ import {
   ScopeItem,
   unanswered,
   type BriefProblem,
+  type InheritedDecision,
   type PackIndex
 } from "@llm4ts/flow/EpicBrief"
 import { EpicBriefInvalid } from "@llm4ts/flow/FlowError"
@@ -608,5 +609,112 @@ describe("review findings: the brief file", () => {
     assert.include(changes, "item added: Movement filters")
     assert.include(changes, "item removed: Empty state for an account with no movements")
     assert.include(changes, "open point closed: Which date is the default range? (answer: 30 days)")
+  })
+})
+
+describe("checking a brief against the approved briefs of other epics", () => {
+  const decided = (
+    scenario: string,
+    disposition: InheritedDecision["disposition"],
+    epic = "bonifici",
+    program = "CONTO_MOVIMENTI"
+  ): InheritedDecision => ({ program, scenario, epic, disposition, note: "n" })
+  const check = (brief: EpicBrief, others: ReadonlyArray<InheritedDecision>) =>
+    checkEpicBrief(brief, { pack, pointers, others })
+
+  it("a scenario another epic already disposed of need not be restated", () => {
+    const narrow = withBrief({
+      programs: [ConsideredProgram.make({ name: "CONTO_MOVIMENTI", reason: "filters" })],
+      scope: [
+        ScopeItem.make({
+          title: "Date filter",
+          citations: [
+            Citation.make({
+              program: "CONTO_MOVIMENTI",
+              scenario: "Filter movements by date range"
+            })
+          ]
+        })
+      ],
+      dropped: [],
+      provided: []
+    })
+    assert.deepStrictEqual(kinds(checkEpicBrief(narrow, { pack, pointers })), [
+      "Unaccounted",
+      "Unaccounted"
+    ])
+    const others = [
+      decided("Filter movements by amount", "in-scope"),
+      decided("Export movements to fax", "dropped")
+    ]
+    assert.deepStrictEqual(check(narrow, others), [])
+    // A program inherited whole: considered, nothing of it disposed of here.
+    const inheritedWhole = withBrief({
+      programs: [ConsideredProgram.make({ name: "CONTO_MOVIMENTI", reason: "context" })],
+      scope: [],
+      dropped: [],
+      provided: []
+    })
+    assert.deepStrictEqual(
+      check(inheritedWhole, [...others, decided("Filter movements by date range", "deferred")]),
+      []
+    )
+  })
+
+  it("claiming what another epic owns is AlreadyOwned, unless kept on purpose", () => {
+    const others = [decided("Filter movements by amount", "in-scope")]
+    const problems = check(sampleBrief, others)
+    assert.deepStrictEqual(kinds(problems), ["AlreadyOwned"])
+    const [owned] = problems
+    assert.include(owned === undefined ? "" : renderBriefProblem(owned), "epic bonifici")
+    const shared = withBrief({
+      openPoints: [
+        OpenPoint.make({
+          number: 1,
+          question: `[check] ${owned === undefined ? "" : renderBriefProblem(owned)}`,
+          answer: "keep: both epics need the filter"
+        })
+      ]
+    })
+    assert.deepStrictEqual(check(shared, others), [])
+  })
+
+  it("deciding otherwise than an approved brief is ContradictsBrief, in every direction", () => {
+    const inScopeVsDropped = check(sampleBrief, [decided("Filter movements by amount", "dropped")])
+    assert.deepStrictEqual(kinds(inScopeVsDropped), ["ContradictsBrief"])
+    const [first] = inScopeVsDropped
+    assert.deepStrictEqual(
+      first?.kind === "ContradictsBrief" ? [first.here, first.disposition, first.epic] : [],
+      ["in scope", "dropped", "bonifici"]
+    )
+    assert.deepStrictEqual(
+      kinds(check(sampleBrief, [decided("Export movements to fax", "provided")])),
+      ["ContradictsBrief"]
+    )
+    assert.deepStrictEqual(
+      kinds(check(sampleBrief, [decided("Export movements to fax", "in-scope")])),
+      ["ContradictsBrief"]
+    )
+    const kept = withBrief({
+      openPoints: [
+        OpenPoint.make({
+          number: 1,
+          question: `[check] ${first === undefined ? "" : renderBriefProblem(first)}`,
+          answer: "keep: it came back into scope"
+        })
+      ]
+    })
+    assert.deepStrictEqual(check(kept, [decided("Filter movements by amount", "dropped")]), [])
+  })
+
+  it("claiming a deferred scenario, or restating the same decision, is no problem", () => {
+    assert.deepStrictEqual(
+      check(sampleBrief, [
+        decided("Filter movements by amount", "deferred"),
+        decided("Export movements to fax", "dropped"),
+        decided("Session timeout warning", "provided", "login", "CONTO_SALDO")
+      ]),
+      []
+    )
   })
 })

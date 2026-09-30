@@ -568,6 +568,12 @@ export interface BriefCheckInputs {
   readonly pack: PackIndex
   /** The provided pointers that were found in the target (or its pack). */
   readonly pointers: ReadonlySet<string>
+  /**
+   * What approved briefs of other epics decided (the coverage ledger). Their
+   * decisions are inherited: they count towards completeness, and deciding
+   * otherwise here is a problem. Absent: the brief is checked on its own.
+   */
+  readonly others?: ReadonlyArray<InheritedDecision>
 }
 
 /** Every problem of a brief against the pack, all at once; empty means acceptable. */
@@ -646,6 +652,11 @@ export const checkEpicBrief = (
       problems.push({ kind: "DuplicateDisposition", program, scenario, lists: where })
     }
   }
+  const inherited = new Map<string, Array<InheritedDecision>>()
+  for (const decision of inputs.others ?? []) {
+    const key = slot(decision.program, decision.scenario)
+    inherited.set(key, [...(inherited.get(key) ?? []), decision])
+  }
   // Complete means every program the brief touches: the ones it lists as
   // considered, and any it cites or disposes of without listing.
   const touched = [
@@ -663,7 +674,7 @@ export const checkEpicBrief = (
       continue
     }
     for (const scenario of known.scenarios) {
-      if (!lists.has(slot(known.name, scenario))) {
+      if (!lists.has(slot(known.name, scenario)) && !inherited.has(slot(known.name, scenario))) {
         problems.push({ kind: "Unaccounted", program: known.name, scenario })
       }
     }
@@ -687,6 +698,31 @@ export const checkEpicBrief = (
         }
         if (!hasOverride(brief, conflict)) problems.push(conflict)
       }
+    }
+  }
+
+  // Approved briefs of other epics stand. A scenario they deferred is free to
+  // take; agreeing with them is fine; anything else is said, and is overridable
+  // only on purpose.
+  for (const [key, where] of lists) {
+    const [program = "", scenario = ""] = key.split("\u0000")
+    const here = where[0] ?? ""
+    for (const other of inherited.get(key) ?? []) {
+      if (other.disposition === "deferred") continue
+      const theirs = dispositionWords[other.disposition]
+      if (here === theirs && other.disposition !== "in-scope") continue
+      const problem: BriefProblem =
+        here === theirs
+          ? { kind: "AlreadyOwned", program, scenario, epic: other.epic }
+          : {
+              kind: "ContradictsBrief",
+              program,
+              scenario,
+              epic: other.epic,
+              here,
+              disposition: theirs
+            }
+      if (!hasOverride(brief, problem)) problems.push(problem)
     }
   }
 
