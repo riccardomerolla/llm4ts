@@ -5,7 +5,12 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { parseEpicBrief, renderEpicBrief, EpicBrief } from "@llm4ts/flow/EpicBrief"
 import { OpenPoint } from "@llm4ts/flow/Decisions"
-import { EpicBriefInvalid, ExtractPackMissing, OpenPointsPending } from "@llm4ts/flow/FlowError"
+import {
+  EpicBriefInvalid,
+  EpicBriefNotApproved,
+  ExtractPackMissing,
+  OpenPointsPending
+} from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import {
@@ -15,6 +20,7 @@ import {
   readPackIndex,
   renderOutcome
 } from "../lib/epic-design.ts"
+import { chooseEpic, generateStoryPlan, listBriefs, plannerInput } from "../lib/epic-stories.ts"
 import { scripted } from "./support.ts"
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "epic-design")
@@ -378,6 +384,133 @@ describe("epic-design arguments", () => {
       assert.isTrue((yield* parseEpicDesignArgs(["--list"])).list)
       const error = yield* Effect.flip(parseEpicDesignArgs(["--epic"]))
       assert.include(error.message, "--epic needs an epic id")
+    })
+  )
+})
+
+describe("epic-stories plans from an approved brief", () => {
+  const stateDir = "/target/.llm4ts/epics/conto-corrente"
+  const planPath = `${stateDir}/plan.md`
+  const written = (status: "draft" | "approved", answered: boolean) =>
+    renderEpicBrief(
+      EpicBrief.make({
+        epicId: "conto-corrente",
+        status,
+        request: "Current account: balance and movements",
+        legacy: "/legacy",
+        goal: "Balance and movements in the portal.",
+        programs: [],
+        scope: [],
+        dropped: [],
+        provided: [],
+        deferred: [],
+        constraints: "",
+        openPoints: answered ? [] : [OpenPoint.make({ number: 1, question: "Pending movements?" })],
+        feedback: ""
+      })
+    )
+
+  it.effect("no brief, or a plan already written: nothing changes", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      assert.isUndefined(yield* plannerInput(memory.store, stateDir, planPath))
+      yield* memory.store.writeAtomic(`${stateDir}/brief.md`, written("draft", true))
+      yield* memory.store.writeAtomic(planPath, "# Epic: already planned")
+      assert.isUndefined(yield* plannerInput(memory.store, stateDir, planPath))
+    })
+  )
+
+  it.effect(
+    "an approved brief is the planner's input; a draft or an open point refuses the run",
+    () =>
+      Effect.gen(function* () {
+        const memory = yield* makeMemoryPlainFileStore()
+        yield* memory.store.writeAtomic(`${stateDir}/brief.md`, written("approved", true))
+        const input = yield* plannerInput(memory.store, stateDir, planPath)
+        assert.include(input ?? "", "# Epic brief: conto-corrente")
+        assert.include(input ?? "", "Balance and movements in the portal.")
+
+        yield* memory.store.writeAtomic(`${stateDir}/brief.md`, written("draft", true))
+        const draft = yield* Effect.flip(plannerInput(memory.store, stateDir, planPath))
+        assert.instanceOf(draft, EpicBriefNotApproved)
+        assert.include(draft.message, "epic-design")
+
+        yield* memory.store.writeAtomic(`${stateDir}/brief.md`, written("approved", false))
+        const pending = yield* Effect.flip(plannerInput(memory.store, stateDir, planPath))
+        assert.instanceOf(pending, EpicBriefInvalid)
+
+        yield* memory.store.writeAtomic(`${stateDir}/brief.md`, "not a brief")
+        const broken = yield* Effect.flip(plannerInput(memory.store, stateDir, planPath))
+        assert.instanceOf(broken, EpicBriefInvalid)
+      })
+  )
+
+  it.effect("--epic finds a folder that holds a brief and no plan yet", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic(`${stateDir}/brief.md`, written("approved", true))
+      yield* memory.store.writeAtomic("/target/.llm4ts/epics/broken/brief.md", "not a brief")
+      const briefs = yield* listBriefs(memory.store, "/target", [
+        "broken",
+        "conto-corrente",
+        "empty"
+      ])
+      assert.deepStrictEqual(briefs, [
+        {
+          dir: "conto-corrente",
+          request: "Current account: balance and movements",
+          status: "approved"
+        }
+      ])
+      const choice = yield* chooseEpic({
+        text: "",
+        epic: "conto-corrente",
+        epics: [],
+        briefs,
+        defaultEpic: "default"
+      })
+      assert.deepStrictEqual(choice, {
+        _tag: "Brief",
+        dir: "conto-corrente",
+        request: "Current account: balance and movements"
+      })
+      const unknown = yield* Effect.flip(
+        chooseEpic({ text: "", epic: "nope", epics: [], briefs, defaultEpic: "default" })
+      )
+      assert.include(unknown.message, "no epic 'nope'")
+    })
+  )
+
+  it.effect("the planner reads the brief; the plan keeps the request as its epic", () =>
+    Effect.gen(function* () {
+      const seat = yield* scripted([
+        {
+          epicId: "x",
+          epic: "whatever the model echoed",
+          stories: [
+            {
+              id: "conto-saldo",
+              title: "Balance card",
+              description: "Show the balance",
+              owned: ["src/features/conto/"]
+            }
+          ]
+        }
+      ])
+      const events = yield* makeCollectingFlowEvents
+      const plan = yield* generateStoryPlan(
+        seat.service,
+        events,
+        "Current account: balance and movements",
+        "conto-corrente",
+        "house rules",
+        written("approved", true)
+      )
+      assert.strictEqual(plan.epic, "Current account: balance and movements")
+      assert.strictEqual(plan.epicId, "conto-corrente")
+      const prompt = (yield* seat.prompts)[0] ?? ""
+      assert.include(prompt, "# Epic brief: conto-corrente")
+      assert.include(prompt, "Balance and movements in the portal.")
     })
   )
 })

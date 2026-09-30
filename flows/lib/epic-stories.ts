@@ -12,8 +12,14 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { TokenUsage, type JsonSchema } from "@llm4ts/core/Models"
 import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import { cap } from "@llm4ts/flow/Context"
+import {
+  parseEpicBrief,
+  renderEpicBrief,
+  unanswered,
+  type BriefStatus
+} from "@llm4ts/flow/EpicBrief"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
-import { type FlowError } from "@llm4ts/flow/FlowError"
+import { EpicBriefInvalid, EpicBriefNotApproved, type FlowError } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
 import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
@@ -249,6 +255,78 @@ export const renderEpicList = (epics: ReadonlyArray<EpicSummary>): string =>
 export type EpicChoice =
   | { readonly _tag: "Text"; readonly prompt: string }
   | { readonly _tag: "Existing"; readonly epic: EpicSummary }
+  /** A folder `epic-design` wrote a brief into, not planned yet. */
+  | { readonly _tag: "Brief"; readonly dir: string; readonly request: string }
+
+/** An epic folder holding a brief (`epic-design`), whatever its plan's state. */
+export interface BriefSummary {
+  readonly dir: string
+  readonly request: string
+  readonly status: BriefStatus
+}
+
+/** The names of the epic folders of a repository. */
+export const epicDirs = (workDir: string): Effect.Effect<ReadonlyArray<string>> =>
+  Effect.tryPromise(() => readdir(epicsDir(workDir), { withFileTypes: true })).pipe(
+    Effect.map(
+      (entries): ReadonlyArray<string> =>
+        entries
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name)
+          .sort()
+    ),
+    Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([]))
+  )
+
+/** The briefs among `dirs`; a folder without one, or with one that does not parse, is skipped. */
+export const listBriefs = (
+  files: PlainFileStoreShape,
+  workDir: string,
+  dirs: ReadonlyArray<string>
+): Effect.Effect<ReadonlyArray<BriefSummary>, FlowError> =>
+  Effect.gen(function* () {
+    const briefs: Array<BriefSummary> = []
+    for (const dir of dirs) {
+      const text = yield* files.read(join(epicsDir(workDir), dir, "brief.md"))
+      if (text === undefined) continue
+      const brief = yield* parseEpicBrief(text).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (brief !== undefined) briefs.push({ dir, request: brief.request, status: brief.status })
+    }
+    return briefs
+  })
+
+/**
+ * What the story planner reads in place of the one-line epic: the approved
+ * brief in the epic's folder. Undefined when the plan is already written (the
+ * brief has done its job) or there is no brief. A draft, or an approved brief
+ * with an unanswered open point, stops the run: planning from the bare
+ * sentence beside an unfinished brief would silently ignore it.
+ */
+export const plannerInput = (
+  files: PlainFileStoreShape,
+  stateDir: string,
+  planPath: string
+): Effect.Effect<string | undefined, FlowError> =>
+  Effect.gen(function* () {
+    if ((yield* files.read(planPath)) !== undefined) return undefined
+    const path = join(stateDir, "brief.md")
+    const text = yield* files.read(path)
+    if (text === undefined) return undefined
+    const brief = yield* parseEpicBrief(text, path)
+    if (brief.status !== "approved") {
+      return yield* EpicBriefNotApproved.make({ path })
+    }
+    const pending = unanswered(brief)
+    if (pending.length > 0) {
+      return yield* EpicBriefInvalid.make({
+        path,
+        violations: [
+          `the brief is approved with unanswered open points: ${pending.map((point) => point.number).join(", ")}`
+        ]
+      })
+    }
+    return renderEpicBrief(brief)
+  })
 
 /**
  * The epic text given wins (a new epic, or the existing one with that exact
@@ -260,10 +338,16 @@ export const chooseEpic = (args: {
   readonly text: string
   readonly epic: string | undefined
   readonly epics: ReadonlyArray<EpicSummary>
+  /** Folders with a brief; one with no plan yet is reachable by `--epic`. */
+  readonly briefs?: ReadonlyArray<BriefSummary>
   readonly defaultEpic: string
 }): Effect.Effect<EpicChoice, ScriptUsage> => {
   if (args.epic !== undefined) {
     const found = args.epics.find((epic) => epic.dir === args.epic || epic.epicId === args.epic)
+    const brief = (args.briefs ?? []).find((candidate) => candidate.dir === args.epic)
+    if (found === undefined && brief !== undefined) {
+      return Effect.succeed({ _tag: "Brief", dir: brief.dir, request: brief.request })
+    }
     return found === undefined
       ? Effect.fail(
           ScriptUsage.make({
@@ -646,12 +730,14 @@ export const generateStoryPlan = (
   events: FlowEventsShape,
   epic: string,
   epicId: string,
-  guidance: string
+  guidance: string,
+  /** An approved epic brief (`epic-design`): what the planner reads in place of the sentence. */
+  brief?: string
 ): Effect.Effect<StoryPlan, FlowLlmError> =>
   structuredAndPublish(
     reasoning,
     events,
-    `${storyPlanInstructions(epicId, guidance)}\n\nEpic:\n${epic}`,
+    `${storyPlanInstructions(epicId, guidance)}\n\nEpic:\n${brief ?? epic}`,
     StoryPlan,
     storyPlanJsonSchema
   ).pipe(
@@ -1064,11 +1150,17 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
       text: given.prompt,
       epic: flags.epic,
       epics,
+      briefs: yield* listBriefs(files, given.workDir, yield* epicDirs(given.workDir)),
       defaultEpic
     })
     const input = {
       ...given,
-      prompt: choice._tag === "Existing" ? choice.epic.epic : choice.prompt
+      prompt:
+        choice._tag === "Existing"
+          ? choice.epic.epic
+          : choice._tag === "Brief"
+            ? choice.request
+            : choice.prompt
     }
     const coderFlags = flagsFromEnvironment(process.env.LLM4TS_CODER_FLAGS)
     const reasoning = withExtraFlags(
@@ -1088,7 +1180,12 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
     const localServer = localCoderServer(process.env.LLM4TS_CODER_MODEL, coderFlags, process.env)
     // A new epic's id (and state folder) is derived from its text; an existing
     // one keeps its folder, whatever text is on the command line.
-    const epicId = choice._tag === "Existing" ? choice.epic.dir : epicIdFor(input.prompt)
+    const epicId =
+      choice._tag === "Existing"
+        ? choice.epic.dir
+        : choice._tag === "Brief"
+          ? choice.dir
+          : epicIdFor(input.prompt)
     const stateDir = join(epicsDir(input.workDir), epicId)
     const planPath = join(stateDir, "plan.md")
     const estimateOptions = estimatedUsageOptionsFromEnv(process.env)
@@ -1115,6 +1212,18 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             (text) => cap(text ?? "(no CONTRIBUTING.md in the target repository)", 24_000).text
           )
 
+          // An approved epic brief in the epic's folder is what the planner reads.
+
+          const brief = yield* plannerInput(files, stateDir, planPath)
+
+          if (brief !== undefined) {
+            yield* events.publish(
+              Info.make({
+                message: `planning from the approved brief at ${join(stateDir, "brief.md")}`
+              })
+            )
+          }
+
           const store = makeStoryPlanStore(files)
           const plan = yield* stage(
             events,
@@ -1122,7 +1231,14 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             store
               .recoverOrCreate(
                 planPath,
-                generateStoryPlan(reasoningMeter.service, events, input.prompt, epicId, guidance)
+                generateStoryPlan(
+                  reasoningMeter.service,
+                  events,
+                  input.prompt,
+                  epicId,
+                  guidance,
+                  brief
+                )
               )
               .pipe(Effect.flatMap(validateStoryPlan))
           )
