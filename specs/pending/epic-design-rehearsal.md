@@ -1,6 +1,7 @@
 # Rehearsal: `epic-design` on a real extract pack
 
-Parked on 2026-09-30. `epic-design` shipped in 2.17.0: given an epic in a
+Parked on 2026-09-30. `epic-design` shipped in 2.17.0 (its coverage ledger in
+2.18.0): given an epic in a
 sentence, a legacy repository holding a `modernize-extract` pack and a
 target repository, it proposes an **epic brief**, settles open points with
 the user in the file, and hands the approved brief to `epic-stories`
@@ -88,6 +89,17 @@ live:
       brief; whether the story plan reflects the brief (dropped behaviour
       absent, provided behaviour not rebuilt, constraints in the stories),
       compared with a plan generated from the one-line request alone.
+- [ ] The coverage ledger (2.18.0), with a second epic designed on the same
+      pack: whether the second brief inherited what the first approved one
+      dropped, provided and owns (count the scenarios it did not restate);
+      whether a scenario the first deferred was offered and claimed; one
+      deliberate contradiction raised as a `[check]` point naming the first
+      epic and settled with `keep: <why>`; both briefs still validating
+      afterwards.
+- [ ] `epic-design -- --coverage` on the real pack: whether the headline and
+      the per-program table match a hand count for one program; whether the
+      unclaimed and deferred lists are what an analyst would take to a
+      steering committee, or what is missing from the page.
 - [ ] Cost and time: reasoning calls and estimated tokens per run (propose,
       revise), from the run's cost summary.
 - [ ] A recommendation with the evidence above: what to change in the
