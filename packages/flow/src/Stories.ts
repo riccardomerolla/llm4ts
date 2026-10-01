@@ -37,7 +37,7 @@ import {
   withLane,
   type FlowEventsShape
 } from "./FlowEvents.ts"
-import { timeEffect } from "./Timing.ts"
+import { timeEffect, withTimedRole } from "./Timing.ts"
 import { statusPaths, type GitToolShape } from "./GitTool.ts"
 import {
   checkPerimeter,
@@ -921,9 +921,10 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         }
         let rebuttal = blockedRebuttal(plan, story, need)
         if (rebuttal === undefined && options.verifyBlocked !== undefined) {
-          const verdict = yield* options
-            .verifyBlocked(story, need, state.worktree, watchedSeats)
-            .pipe(Effect.catch(() => Effect.succeed(undefined)))
+          const verdict = yield* withTimedRole(
+            "verifier",
+            options.verifyBlocked(story, need, state.worktree, watchedSeats)
+          ).pipe(Effect.catch(() => Effect.succeed(undefined)))
           rebuttal = verdict === undefined || verdict.real ? undefined : verdict.reason
         }
         if (rebuttal === undefined) {
@@ -1078,7 +1079,10 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
                 ],
                 summary: `judge:${story.id}`
               })
-            : yield* judge(story, subject, watchedSeats, empty ? "code" : "diff")
+            : yield* withTimedRole(
+                "judge",
+                judge(story, subject, watchedSeats, empty ? "code" : "diff")
+              )
         yield* laneOf(story).publish(
           StoryJudged.make({
             lane: story.id,

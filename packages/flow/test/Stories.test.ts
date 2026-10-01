@@ -32,6 +32,7 @@ import {
   type StorySeats
 } from "@llm4ts/flow/Stories"
 import { Story, StoryPlan, storyHash } from "@llm4ts/flow/StoryPlan"
+import { timedSeat } from "@llm4ts/flow/Timing"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
 // ---- Fakes -------------------------------------------------------------------
@@ -47,6 +48,20 @@ const red = (title: string): ReviewResult =>
     issues: [ReviewIssue.make({ severity: "Critical", title, description: "" })],
     summary: "red"
   })
+
+/** A reasoning seat whose structured answer is always "ok". */
+const reasoner: LlmServiceShape = {
+  executeStream: (_prompt) => Stream.empty,
+  executeStreamWithHistory: (_messages) => Stream.empty,
+  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
+  executeStructured: <A, E, RD, RE>(
+    _prompt: string,
+    schema: Schema.ConstraintCodec<A, E, RD, RE>
+  ) => Schema.decodeUnknownEffect(schema)("ok").pipe(Effect.mapError(() => unused)),
+  executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+  scoreLabels: unsupportedScoreLabels,
+  isAvailable: Effect.succeed(true)
+}
 
 /** A coder that replies `reply` to every chat turn. */
 const coder = (reply: string): LlmServiceShape => ({
@@ -652,6 +667,27 @@ describe("Stories executor", () => {
       // Every gate run, in a worktree or on the epic after a merge, knows its story.
       assert.isAbove(lanes.length, 0)
       assert.notInclude(lanes, undefined)
+    })
+  )
+
+  it.effect("the judge's model calls are timed as the judge's, not as the seat's", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const events = yield* makeCollectingFlowEvents
+      const context = { ...(yield* makeContext(harness)), events }
+      const options = yield* makeOptions(harness, diamond, context, {
+        concurrency: 1,
+        judge: (_item, _diff, seats) =>
+          // One seat for reviews and verdicts, as without a roster.
+          timedSeat(reasoner, seats.context.events, "reasoning")
+            .executeStructured("verdict", Schema.String, {})
+            .pipe(Effect.as(clean), Effect.orDie)
+      })
+      yield* implementStoriesFlow(context, options)
+      const judged = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Timed" && event.kind === "model" ? [event.label] : []
+      )
+      assert.deepStrictEqual(judged, ["judge", "judge", "judge", "judge"])
     })
   )
 

@@ -1508,7 +1508,8 @@ export const rubricStoryJudge =
   (context: StoryJudgeContext): StoryJudge =>
   (story, diff, seats, subject) =>
     judgeStory(
-      seats.context.roster?.forRole("judge") ?? context.reasoning,
+      // The story's own seat, not the run's: its time counts for the story.
+      seats.context.roster?.forRole("judge") ?? seats.context.reasoning,
       story,
       diff,
       context.budget,
@@ -1922,7 +1923,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               }),
               verifyBlocked: (story, need, workDir, seats) =>
                 verifyBlockedOn(
-                  seats.context.roster?.forRole("verifier") ?? reasoningMeter.service,
+                  seats.context.roster?.forRole("verifier") ?? seats.context.reasoning,
                   events,
                   files,
                   unit.plan

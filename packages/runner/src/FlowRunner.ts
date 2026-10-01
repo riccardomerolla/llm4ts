@@ -10,7 +10,7 @@ import { CliConnectorConfig, defaultReasoningConfig } from "@llm4ts/core/Connect
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import type { HttpClientShape } from "@llm4ts/core/HttpClient"
 import type { JudgmentBackend } from "@llm4ts/core/judgment/Schemas"
-import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
+import type { JudgmentInput, JudgmentShape } from "@llm4ts/core/judgment/Judgment"
 import { LlmJudgmentConfig, makeLlmJudgment } from "@llm4ts/core/judgment/LlmJudgment"
 import { makeTypeSafeJudgment } from "@llm4ts/core/judgment/TypeSafeJudgment"
 import * as Redacted from "effect/Redacted"
@@ -58,7 +58,7 @@ import {
 } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
-import { timedSeat } from "@llm4ts/flow/Timing"
+import { timedJudgment, timedSeat, withTimedRole } from "@llm4ts/flow/Timing"
 import { idleAfterFrom } from "./AgentTree.ts"
 import { makeAgentTreeHost, nodeTreeKeys } from "./AgentTreeSurface.ts"
 import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog"
@@ -459,7 +459,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       // Every call is timed on the lane's events, under its role.
       reasoning: timedSeat(seats.reasoning, laneEvents, "reasoning"),
       coder: { ...seats.coder, ...timedSeat(seats.coder, laneEvents, "coder") },
-      judgment: seats.judgment,
+      judgment: timedJudgment(seats.judgment, laneEvents),
       git: makeGitTool(dependencies.process, workDir, laneEvents),
       hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
       events: laneEvents,
@@ -651,7 +651,15 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             : yield* resolveSeat(
                 prepareConnector(bridged(options.judgment), workDir, runEnvironment)
               ).pipe(ScopeModule.provide(runScope))
-        const judgment = yield* judgmentFor(judgmentSeat, judgmentConfig, runEnvironment)
+        const judged = yield* judgmentFor(judgmentSeat, judgmentConfig, runEnvironment)
+        // Over the roster's judge seat the calls are timed already; name them.
+        const judgment =
+          options.judgment === undefined
+            ? {
+                ...judged,
+                judge: (input: JudgmentInput) => withTimedRole("judgment", judged.judge(input))
+              }
+            : timedJudgment(judged, laneEvents)
         return FlowContext.of({
           reasoning: view.forRole(rebind ? "planner" : "reviewer"),
           coder: timedSeat(held.service, laneEvents, "coder"),

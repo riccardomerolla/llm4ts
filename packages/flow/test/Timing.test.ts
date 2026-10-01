@@ -10,7 +10,8 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 import { makeCollectingFlowEvents, type FlowEvent } from "@llm4ts/flow/FlowEvents"
-import { timedSeat } from "@llm4ts/flow/Timing"
+import { timedJudgment, timedSeat, withTimedRole } from "@llm4ts/flow/Timing"
+import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -79,6 +80,35 @@ describe("timedSeat", () => {
       assert.strictEqual((yield* Fiber.join(fiber))._tag, "InvalidRequestError")
       const [timed] = timings(yield* events.recorded)
       assert.deepStrictEqual([timed?.label, timed?.ms, timed?.failed], ["reviewer", 4_000, true])
+    })
+  )
+
+  it.effect("names a call by the role it is made for, when the caller says", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const seat = timedSeat(
+        serviceOf({ executeStream: () => Stream.make(chunk("ok")) }),
+        events,
+        "reasoning"
+      )
+      yield* collect(seat.executeStream("plain"))
+      yield* withTimedRole("judge", collect(seat.executeStream("verdict")))
+      assert.deepStrictEqual(
+        timings(yield* events.recorded).map((timed) => timed.label),
+        ["reasoning", "judge"]
+      )
+    })
+  )
+
+  it.effect("times a typed judgment as a judgment call", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const judgment = timedJudgment((yield* makeFakeJudgment({})).judgment, events)
+      yield* Effect.exit(judgment.judge({ state: "s", questions: {} }))
+      assert.deepStrictEqual(
+        timings(yield* events.recorded).map((timed) => [timed.kind, timed.label]),
+        [["model", "judgment"]]
+      )
     })
   )
 })
