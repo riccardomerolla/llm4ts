@@ -161,6 +161,7 @@ const makeFakeGit = (log: Ref.Ref<GitLog>): GitToolShape => ({
   defaultBase: Effect.succeed("main"),
   diffVsBase: (_base, _threeDot) => Effect.succeed(""),
   diffVsBaseScoped: (_base, _paths, _threeDot) => Effect.succeed(""),
+  listFiles: () => Effect.succeed([]),
   changedFilesVsBase: (_base, _threeDot) => Effect.succeed([]),
   addRemote: (_name, _url) => Effect.void,
   checkout: (_name) => Effect.void,

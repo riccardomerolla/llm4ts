@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.23.0
+
+Fewer, cheaper coder steps in `epic-stories`, and a profile that shows them.
+
+- **The coder no longer re-runs the gates.** Every story coder's system
+  prompt says the flow runs typecheck, lint and the tests after each task
+  and hands failures back, so it runs at most the one test file covering its
+  change. Traces showed coders re-running `pnpm test`/`typecheck` many times
+  per task, each a model round trip plus a slow command.
+- **The coder starts with the code in front of it.** Its system prompt now
+  carries the code the story starts from: the shared read-only files it
+  uses, then its owned files, each capped, within `contextChars` (default
+  40 000 characters; `LLM4TS_STORY_CONTEXT_CHARS`, 0 to leave it out). This
+  replaces the `ls`/`find`/`grep`/`cat` round trips coders spent exploring.
+- **`llm4ts profile`** adds steps per coder turn and the model's time per
+  step (each tool call is a round trip), and coder tool time by kind of work
+  (explore, edit, test, build, install, git, other). The kind is worked out
+  where the tool runs; only its name is kept, so the report stays
+  content-free.
+- **Breaking for implementers of `GitToolShape`:** it gains `listFiles`
+  (`git ls-files`). Code that only calls the git tool is unaffected.
+
 ## 2.22.2
 
 - **Less "unaccounted" in `llm4ts profile`.** Time that was measured but

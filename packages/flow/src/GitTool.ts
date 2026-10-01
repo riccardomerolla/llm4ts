@@ -40,6 +40,10 @@ export interface GitToolShape {
     paths: ReadonlyArray<string>,
     threeDot?: boolean
   ) => Effect.Effect<string, FlowError>
+  /** Tracked files under `paths` (`git ls-files`), relative to the repository. */
+  readonly listFiles: (
+    paths: ReadonlyArray<string>
+  ) => Effect.Effect<ReadonlyArray<string>, FlowError>
   readonly changedFilesVsBase: (
     base: string,
     threeDot?: boolean
@@ -350,6 +354,20 @@ export const makeGitTool = (
           paths.length === 0
             ? Effect.succeed("")
             : runOrFail(["diff", `${base}${threeDot ? "..." : ".."}HEAD`, "--", ...paths])
+        )
+      ),
+    listFiles: (paths) =>
+      read(
+        "git ls-files",
+        Effect.suspend(() =>
+          paths.length === 0 ? Effect.succeed("") : runOrFail(["ls-files", "--", ...paths])
+        )
+      ).pipe(
+        Effect.map((output) =>
+          output
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0)
         )
       ),
     changedFilesVsBase: (base, threeDot = true) =>

@@ -48,6 +48,8 @@ describe("GitTool", () => {
           "one\n"
         )
         assert.strictEqual(yield* git.status, "")
+        assert.deepStrictEqual(yield* git.listFiles(["value.txt", "missing"]), ["value.txt"])
+        assert.deepStrictEqual(yield* git.listFiles([]), [])
         // Every operation is timed by its name, never its arguments.
         const timed = (yield* events.recorded).flatMap((event) =>
           event._tag === "Timed" ? [`${event.kind}:${event.label}`] : []

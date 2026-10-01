@@ -14,6 +14,7 @@ import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
+import { cap } from "./Context.ts"
 import type { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import type { LlmError } from "@llm4ts/core/Errors"
 import { BoardItem, type BoardSyncShape } from "./BoardSync.ts"
@@ -294,6 +295,71 @@ export const perimeterRules = (story: Story, where?: StoryWhereabouts): string =
     "- Everything you provide must be implemented completely: other stories depend on it."
   ].join("\n")
 
+/**
+ * The gates run after every task (typecheck, lint, tests, perimeter), so a
+ * coder that runs them itself spends minutes on work the flow repeats.
+ */
+export const gateRules = [
+  "After each task the flow runs the project's gates on your worktree (typecheck, lint, the",
+  "tests) and hands any failure back to you as a finding. Do not run the full test suite,",
+  "typecheck or lint yourself. If you need to check your work, run only the one test file",
+  "that covers your change."
+].join("\n")
+
+const defaultContextChars = 40_000
+const fileChars = 8_000
+
+/**
+ * The code a story starts from, for its coder's system prompt: the shared
+ * read-only files it builds on, then the files it owns, each capped, until
+ * `budget` runs out; the rest by path only. Reading them up front saves the
+ * `ls`/`find`/`cat` round trips the coder would otherwise spend on them.
+ */
+export const startingCodeOf = (
+  story: Story,
+  git: GitToolShape,
+  files: PlainFileStoreShape,
+  worktree: string,
+  budget: number
+): Effect.Effect<string | undefined, FlowError> =>
+  Effect.gen(function* () {
+    if (budget <= 0) {
+      return undefined
+    }
+    const shared = yield* git.listFiles(story.sharedReadOnly)
+    const owned = yield* git.listFiles(story.owned)
+    if (shared.length + owned.length === 0) {
+      return undefined
+    }
+    let left = budget
+    const leftOut: Array<string> = []
+    const section = (title: string, paths: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        const parts: Array<string> = []
+        for (const path of paths) {
+          const text = yield* Effect.orElseSucceed(
+            files.read(join(worktree, path)),
+            () => undefined
+          )
+          if (text === undefined || left <= 0) {
+            leftOut.push(path)
+            continue
+          }
+          const shown = cap(text, Math.min(fileChars, left)).text
+          left -= shown.length
+          parts.push(`### ${path}\n\`\`\`\n${shown}\n\`\`\``)
+        }
+        return parts.length === 0 ? [] : [title, ...parts]
+      })
+    return [
+      "## The code you start from",
+      "Read this before exploring: it is the current content of the files below.",
+      ...(yield* section("Shared, read-only — use these as they are:", shared)),
+      ...(yield* section("Yours — the story's owned files so far:", owned)),
+      ...(leftOut.length === 0 ? [] : [`Not shown (over the budget): ${leftOut.join(", ")}`])
+    ].join("\n\n")
+  })
+
 export const storyPrompt = (story: Story): string =>
   [`Story: ${story.title}`, "", story.description.trim()].join("\n")
 
@@ -507,6 +573,13 @@ export interface StoriesOptions {
    * story's plan (coder, review, gates, commit). Default 2: one revision.
    */
   readonly judgeRounds?: number
+  /**
+   * How much of the code a story starts from goes into its coder's system
+   * prompt, in characters: the shared read-only files it uses, then its own.
+   * Each file read up front is a model round trip the coder does not spend
+   * exploring. Default 40 000; 0 leaves it out.
+   */
+  readonly contextChars?: number
   /** Extra system context per story (house rules, shared read-only excerpts). */
   readonly system?: (story: Story) => Effect.Effect<string, FlowError>
   /** How a story's task plan is produced. Default: the story's own coder plans it. */
@@ -828,6 +901,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     const extra = options.system === undefined ? undefined : yield* options.system(story)
     const system = [
       perimeterRules(story, { plan, worktree: state.worktree, epicCheckout: context.workDir }),
+      gateRules,
       extra
     ]
       .filter((part): part is string => part !== undefined && part.trim().length > 0)
@@ -995,6 +1069,17 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     })
 
     const planTasks = options.planTasks ?? defaultPlanTasks
+    // Taken after catch-up and setup: the code as the first task finds it.
+    const startingCode = yield* startingCodeOf(
+      story,
+      git,
+      files,
+      state.worktree,
+      options.contextChars ?? defaultContextChars
+    )
+    const taskSystem = [system, startingCode]
+      .filter((part): part is string => part !== undefined)
+      .join("\n\n")
     const implementTasks = implementPlanFlow(storyContext, {
       store: makePlanStore(files),
       planPath: planPath(story),
@@ -1005,7 +1090,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         prompt,
         laneOf(story)
       ),
-      system,
+      system: taskSystem,
       chatPerTask: true,
       checkoutBranch: false,
       lint: gates,

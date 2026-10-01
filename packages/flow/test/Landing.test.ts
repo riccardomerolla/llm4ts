@@ -109,6 +109,7 @@ const gitFor = (log: Ref.Ref<ReadonlyArray<string>>, scenario: Scenario): GitToo
     defaultBase: Effect.succeed("main"),
     diffVsBase: () => Effect.succeed(""),
     diffVsBaseScoped: () => Effect.succeed(""),
+    listFiles: () => Effect.succeed([]),
     changedFilesVsBase: () => Effect.succeed([]),
     addRemote: () => ok,
     checkout: (name) => record(`checkout:${name}`),

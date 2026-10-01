@@ -179,7 +179,9 @@ re-runs and failures), **merge**, **waiting** (the merge lock, a free
 executor) and what is left **unaccounted**. It also lists model calls by
 role and executor (with time to first output, and the API and tool time the
 Gemini CLI reports), the coder's turns and how much their prompts grew, and
-the time each story queued before starting. It opens with the three biggest
+the time each story queued before starting, the steps per coder turn and the
+model's time per step, and the coder's tool time by kind of work (explore,
+edit, test, build, install, git). It opens with the three biggest
 sinks in plain words, for example ``gate `pnpm test`: 14 runs, 22m10s (31%
 of story time), 3 failed``.
 

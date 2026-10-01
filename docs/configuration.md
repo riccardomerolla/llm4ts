@@ -45,6 +45,9 @@ selects `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, or
 agent tree instead of the classic view (ADR 0022). `LLM4TS_IDLE_AFTER`
 (`90s`, `5m`, `1h`; default `2m`) is how long a story may go without an
 event, and without a tool running, before the tree marks it idle.
+`LLM4TS_STORY_CONTEXT_CHARS` (default `40000`, `0` to turn it off) is how much
+of the code a story starts from goes into its coder's system prompt in
+`epic-stories`.
 
 With a Google Cloud project and a **Vertex AI service-account key** as the
 only model access, see `vertex-service-account.md`: which harnesses accept

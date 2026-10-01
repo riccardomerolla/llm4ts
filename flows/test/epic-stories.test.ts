@@ -59,6 +59,7 @@ import {
   judgeStory,
   localCoderServer,
   rubricStoryJudge,
+  storyContextChars,
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
@@ -151,6 +152,7 @@ const gitOver = (log: Ref.Ref<ReadonlyArray<string>>, prefix: string): GitToolSh
     defaultBase: Effect.succeed("main"),
     diffVsBase: () => Effect.succeed("diff --git a/file b/file\n+story"),
     diffVsBaseScoped: () => Effect.succeed(""),
+    listFiles: () => Effect.succeed([]),
     changedFilesVsBase: () => Effect.succeed([]),
     addRemote: () => Effect.void,
     checkout: () => Effect.void,
@@ -695,6 +697,19 @@ describe("the story judge", () => {
   })
 })
 
+describe("storyContextChars", () => {
+  it("reads LLM4TS_STORY_CONTEXT_CHARS, and leaves the default to the executor otherwise", () => {
+    assert.deepStrictEqual(storyContextChars({}), {})
+    assert.deepStrictEqual(storyContextChars({ LLM4TS_STORY_CONTEXT_CHARS: "0" }), {
+      contextChars: 0
+    })
+    assert.deepStrictEqual(storyContextChars({ LLM4TS_STORY_CONTEXT_CHARS: "80000" }), {
+      contextChars: 80_000
+    })
+    assert.deepStrictEqual(storyContextChars({ LLM4TS_STORY_CONTEXT_CHARS: "lots" }), {})
+  })
+})
+
 describe("the demo roster", () => {
   it.effect("loads and validates, with the agreed coder order and reasoning order", () =>
     Effect.gen(function* () {
@@ -797,6 +812,7 @@ describe("epic-stories demo plan", () => {
                 ...context,
                 git: {
                   ...gitOver(log, `${workDir.split("/").at(-1) ?? ""}:`),
+                  listFiles: () => Effect.succeed([]),
                   changedFilesVsBase: () =>
                     Effect.succeed(
                       (plan.story(workDir.split("/").at(-1) ?? "")?.owned ?? []).map((path) =>

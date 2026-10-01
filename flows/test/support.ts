@@ -62,6 +62,7 @@ export const idleGit: GitToolShape = {
   defaultBase: Effect.succeed("main"),
   diffVsBase: () => Effect.succeed(""),
   diffVsBaseScoped: () => Effect.succeed(""),
+  listFiles: () => Effect.succeed([]),
   changedFilesVsBase: () => Effect.succeed([]),
   addRemote: () => Effect.void,
   checkout: () => Effect.void,

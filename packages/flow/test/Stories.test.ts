@@ -166,6 +166,7 @@ const baseGit: GitToolShape = {
   defaultBase: Effect.succeed("main"),
   diffVsBase: () => Effect.succeed("diff --git a/file b/file\n+story work"),
   diffVsBaseScoped: () => Effect.succeed(""),
+  listFiles: () => Effect.succeed([]),
   changedFilesVsBase: () => Effect.succeed([]),
   addRemote: () => Effect.void,
   checkout: () => Effect.void,
@@ -667,6 +668,57 @@ describe("Stories executor", () => {
       // Every gate run, in a worktree or on the epic after a merge, knows its story.
       assert.isAbove(lanes.length, 0)
       assert.notInclude(lanes, undefined)
+    })
+  )
+
+  it.effect("gives the coder the code it starts from, and says the gates run after each task", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const memory = yield* makeMemoryPlainFileStore({
+        "/repo/.llm4ts/worktrees/a/src/kit/Button.tsx": "export const Button = () => null",
+        "/repo/.llm4ts/worktrees/a/src/features/a/index.ts": "export const a = 1"
+      })
+      const systems: Array<string> = []
+      const listed: Readonly<Record<string, ReadonlyArray<string>>> = {
+        "src/kit": ["src/kit/Button.tsx"],
+        "src/features/a": ["src/features/a/index.ts"]
+      }
+      const options = yield* makeOptions(harness, diamond, context, {
+        concurrency: 1,
+        files: memory.store,
+        contextFor: (workDir) => {
+          const story = storyOf(diamond, workDir)
+          return Effect.succeed({
+            context: {
+              ...context,
+              coder: {
+                ...coder("done"),
+                executeStreamWithHistory: (messages) => {
+                  for (const message of messages) {
+                    if (message.role === "System") systems.push(message.content)
+                  }
+                  return Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" }))
+                }
+              },
+              git: {
+                ...worktreeGit(harness, workDir, story),
+                listFiles: (paths) =>
+                  Effect.succeed(
+                    story.id === "a" ? paths.flatMap((path) => listed[path] ?? []) : []
+                  )
+              },
+              workDir
+            }
+          })
+        }
+      })
+      yield* implementStoriesFlow(context, options)
+      const all = systems.join("\n---\n")
+      assert.include(all, "Do not run the full test suite")
+      assert.include(all, "### src/kit/Button.tsx")
+      assert.include(all, "export const Button = () => null")
+      assert.include(all, "### src/features/a/index.ts")
     })
   )
 

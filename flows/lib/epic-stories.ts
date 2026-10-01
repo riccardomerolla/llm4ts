@@ -1503,6 +1503,21 @@ export interface StoryJudgeContext {
   readonly houseRules: string
 }
 
+/**
+ * LLM4TS_STORY_CONTEXT_CHARS: how much of the code a story starts from its
+ * coder sees up front (0 leaves it out); the executor's default otherwise.
+ */
+export const storyContextChars = (
+  environment: Readonly<Record<string, string | undefined>>
+): { readonly contextChars?: number } => {
+  const value = Number(environment.LLM4TS_STORY_CONTEXT_CHARS?.trim() ?? "")
+  return environment.LLM4TS_STORY_CONTEXT_CHARS === undefined ||
+    !Number.isInteger(value) ||
+    value < 0
+    ? {}
+    : { contextChars: value }
+}
+
 /** Today's story judge: the rubric judge over the four dimensions. */
 export const rubricStoryJudge =
   (context: StoryJudgeContext): StoryJudge =>
@@ -1913,6 +1928,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               gates,
               // With a roster, the judge and the verifier are leased per story,
               // away from the executor coding it (ADR 0019).
+              ...storyContextChars(process.env),
               judge: options.storyJudge({
                 plan: unit.plan,
                 budget: contextBudget,
