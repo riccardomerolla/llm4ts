@@ -105,7 +105,10 @@ export const withSnapshots = <R>(
   snapshotInterval: Duration.Input = "500 millis"
 ): Stream.Stream<string, LlmError, R> =>
   stream.pipe(
-    Stream.scan("", (content, chunk) => content + chunk.delta),
+    Stream.scan(
+      () => "",
+      (content, chunk) => content + chunk.delta
+    ),
     Stream.debounce(snapshotInterval)
   )
 

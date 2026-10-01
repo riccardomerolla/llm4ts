@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import type { HttpApiClient, HttpApiGroup } from "effect/unstable/httpapi"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
+import type { HttpApiClient, HttpApiGroup } from "effect/http-api"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAuth } from "./auth.tsx"
 import { useConfig } from "./config.tsx"

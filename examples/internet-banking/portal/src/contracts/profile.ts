@@ -3,7 +3,7 @@
 // transport answers it in memory (`profile.fake.ts`), a real backend
 // implements it, and `pnpm openapi` renders it into contracts/openapi/.
 import * as Schema from "effect/Schema"
-import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup } from "effect/http-api"
 
 export class Address extends Schema.Class<Address>("Address")({
   street: Schema.String,

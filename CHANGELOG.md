@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.21.0
+
+- **Effect 4.0.0 (stable).** Every `effect` and `@effect/*` pin moves from
+  `4.0.0-rc.115` to `4.0.0`, including the packages' exact `effect` peer
+  dependency: an application that embeds `@llm4ts/*` moves to Effect 4.0.0
+  with it. No llm4ts API changes.
+  - The shell's CLI and prompts import the now-stable `effect/cli` (was
+    `effect/unstable/cli`).
+  - `Stream.scan` takes a lazy initial value (`withSnapshots`).
+  - The internet-banking portal fixture imports `effect/http` and
+    `effect/http-api` (was `effect/unstable/http`, `effect/unstable/httpapi`);
+    its generated OpenAPI document is unchanged apart from key order.
+
 ## 2.20.0
 
 - The **agent tree** (ADR 0022): a full-screen view of a running flow — the

@@ -7,9 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { FileSystem } from "effect/FileSystem"
 import * as Schema from "effect/Schema"
-import * as Argument from "effect/unstable/cli/Argument"
-import * as Command from "effect/unstable/cli/Command"
-import * as Flag from "effect/unstable/cli/Flag"
+import { Argument, Command, Flag } from "effect/cli"
 import { makeCliProgram } from "@llm4ts/runner/Cli"
 import {
   CostsResult,

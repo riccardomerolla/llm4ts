@@ -2,7 +2,7 @@ import { userInfo } from "node:os"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import { FileSystem } from "effect/FileSystem"
-import * as Prompt from "effect/unstable/cli/Prompt"
+import { Prompt } from "effect/cli"
 import {
   Decisions,
   DeepenMark,

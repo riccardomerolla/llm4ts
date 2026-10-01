@@ -36,7 +36,7 @@ Verbs: `run <flow> [task…] [--verbose]`, `list [--json]`, `view <flow>`,
 `ask`, `doctor`, plus `--help`/`--version`. No arguments on a real terminal
 opens the interactive menu (Run a flow · View a flow · Exit); off a tty it is
 a usage error. Built on `effect/unstable/cli` (`Command`, `Flag`, `Prompt`)
-from the pinned Effect 4 beta, with `@effect/platform-node` (version-aligned)
+from the pinned Effect 4 beta (since 2.21.0 and Effect 4.0.0: `effect/cli`), with `@effect/platform-node` (version-aligned)
 providing the terminal/filesystem services — the one new dependency, confined
 to the shell package.
 

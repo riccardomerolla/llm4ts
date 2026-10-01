@@ -1,7 +1,7 @@
 // Fake routes for the Profile contract: deterministic fixture data and an
 // in-memory store that lives as long as the page, so an update is visible on
 // the next read. No randomness, no clocks: tests depend on that.
-import { HttpApiClient } from "effect/unstable/httpapi"
+import { HttpApiClient } from "effect/http-api"
 import { domain } from "../kit/api.ts"
 import { notFound, unprocessable, type FakeRoutes } from "../kit/fake-transport.ts"
 import { ProfileApi } from "./profile.ts"

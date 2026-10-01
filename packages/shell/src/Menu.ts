@@ -1,7 +1,7 @@
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import { FileSystem } from "effect/FileSystem"
-import * as Prompt from "effect/unstable/cli/Prompt"
+import { Prompt } from "effect/cli"
 import { coderChoices, findOnPath, resolvedCoderToken } from "./CoderChoice.ts"
 import { discoverFlows, type DiscoveredFlow, type FlowTierPaths } from "./FlowCatalog.ts"
 import { launchFlow } from "./FlowLaunch.ts"

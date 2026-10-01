@@ -92,31 +92,33 @@
   },
   "components": {
     "schemas": {
-      "AddressEncoded": {
+      "effect_HttpApiError_UnprocessableEntityEncoded": {
         "type": "object",
         "properties": {
-          "street": {
-            "type": "string"
-          },
-          "postalCode": {
-            "type": "string"
-          },
-          "city": {
-            "type": "string"
-          },
-          "province": {
-            "type": "string"
-          },
-          "country": {
-            "type": "string"
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "UnprocessableEntity"
+            ]
           }
         },
         "required": [
-          "street",
-          "postalCode",
-          "city",
-          "province",
-          "country"
+          "_tag"
+        ],
+        "additionalProperties": false
+      },
+      "effect_HttpApiError_NotFoundEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": [
+              "NotFound"
+            ]
+          }
+        },
+        "required": [
+          "_tag"
         ],
         "additionalProperties": false
       },
@@ -160,18 +162,31 @@
         ],
         "additionalProperties": false
       },
-      "effect_HttpApiError_NotFoundEncoded": {
+      "AddressEncoded": {
         "type": "object",
         "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": [
-              "NotFound"
-            ]
+          "street": {
+            "type": "string"
+          },
+          "postalCode": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "province": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
           }
         },
         "required": [
-          "_tag"
+          "street",
+          "postalCode",
+          "city",
+          "province",
+          "country"
         ],
         "additionalProperties": false
       },
@@ -188,21 +203,6 @@
         "required": [
           "email",
           "phone"
-        ],
-        "additionalProperties": false
-      },
-      "effect_HttpApiError_UnprocessableEntityEncoded": {
-        "type": "object",
-        "properties": {
-          "_tag": {
-            "type": "string",
-            "enum": [
-              "UnprocessableEntity"
-            ]
-          }
-        },
-        "required": [
-          "_tag"
         ],
         "additionalProperties": false
       }

@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/shell",
-  "version": "2.20.0",
+  "version": "2.21.0",
   "description": "Interactive shell and CLI for llm4ts: flow discovery, run-a-flow, and view",
   "license": "MIT",
   "type": "module",
@@ -54,16 +54,16 @@
     "typescript"
   ],
   "dependencies": {
-    "@effect/platform-node": "4.0.0-rc.115",
-    "@effect/platform-node-shared": "4.0.0-rc.115",
+    "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
     "@llm4ts/core": "workspace:*",
     "@llm4ts/flow": "workspace:*",
     "@llm4ts/runner": "workspace:*"
   },
   "peerDependencies": {
-    "effect": "4.0.0-rc.115"
+    "effect": "4.0.0"
   },
   "devDependencies": {
-    "effect": "4.0.0-rc.115"
+    "effect": "4.0.0"
   }
 }

@@ -5,7 +5,7 @@
 import { readdirSync, writeFileSync, mkdirSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
-import { HttpApi, OpenApi } from "effect/unstable/httpapi"
+import { HttpApi, OpenApi } from "effect/http-api"
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..")
 const contracts = join(root, "src", "contracts")

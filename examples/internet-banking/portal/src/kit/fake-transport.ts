@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import type { HttpClientRequest } from "effect/unstable/http"
+import { HttpClient, HttpClientResponse } from "effect/http"
+import type { HttpClientRequest } from "effect/http"
 
 /**
  * The client-only stand-in for a service API. Each domain declares its
