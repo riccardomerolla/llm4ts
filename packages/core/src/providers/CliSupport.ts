@@ -80,13 +80,37 @@ export const toolEventChunk = (name: string, input: JsonValue | undefined, id?: 
   })
 
 /**
+ * A tool result's text: a plain string, or the text parts of a content list
+ * (`[{type:"text",text}]`, as Claude and pi send it).
+ */
+export const toolResultText = (value: JsonValue | undefined): string | undefined => {
+  if (typeof value === "string") {
+    return value
+  }
+  if (Array.isArray(value)) {
+    const parts = value.flatMap((part) => {
+      const text = jsonStringField(part, "text")
+      return text === undefined ? [] : [text]
+    })
+    return parts.length === 0 ? undefined : parts.join("\n")
+  }
+  return undefined
+}
+
+/**
  * The end of a tool call: `id` pairs it with its `toolEventChunk`;
  * without one, the oldest open call is meant. `tool` and `input` are for a
  * harness that only reports a tool once it is done, so it still shows.
  */
 export const toolResultChunk = (
   id: string | undefined,
-  options: { readonly failed?: boolean; readonly tool?: string; readonly input?: JsonValue } = {}
+  options: {
+    readonly failed?: boolean
+    readonly tool?: string
+    readonly input?: JsonValue
+    /** What the tool returned, for an opt-in transcript; never in the trace. */
+    readonly output?: string
+  } = {}
 ): LlmChunk =>
   LlmChunk.make({
     delta: "",
@@ -95,7 +119,8 @@ export const toolResultChunk = (
       ...(id === undefined || id.length === 0 ? {} : { tool_id: id }),
       ...(options.failed === true ? { tool_failed: "true" } : {}),
       ...(options.tool === undefined ? {} : { tool_name: options.tool }),
-      ...(options.input === undefined ? {} : { tool_input: jsonText(options.input) })
+      ...(options.input === undefined ? {} : { tool_input: jsonText(options.input) }),
+      ...(options.output === undefined ? {} : { tool_content: options.output })
     }
   })
 

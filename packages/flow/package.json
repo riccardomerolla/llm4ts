@@ -76,6 +76,7 @@
     "./StoryPlan": "./dist/StoryPlan.js",
     "./Survey": "./dist/Survey.js",
     "./Timing": "./dist/Timing.js",
+    "./Transcript": "./dist/Transcript.js",
     "./TransientRetry": "./dist/TransientRetry.js",
     "./Usage": "./dist/Usage.js",
     "./Wall": "./dist/Wall.js",

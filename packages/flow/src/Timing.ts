@@ -25,6 +25,10 @@ const TimedRole = Context.Reference<string | undefined>("@llm4ts/flow/Timing/Tim
   defaultValue: () => undefined
 })
 
+/** The role the current call is made for: the caller's, or else `label`. */
+export const roleOr = (label: string): Effect.Effect<string> =>
+  Effect.map(TimedRole, (role) => role ?? label)
+
 /** Times the seat calls `effect` makes under `role` instead of the seat's own label. */
 export const withTimedRole = <A, E, R>(role: string, effect: Effect.Effect<A, E, R>) =>
   Effect.provideService(effect, TimedRole, role)

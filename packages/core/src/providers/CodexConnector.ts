@@ -109,7 +109,10 @@ export const parseCodexStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
             toolResultChunk(jsonStringField(item, "id"), {
               failed: exitCode !== undefined && exitCode !== 0,
               tool: "Bash",
-              input: { command: jsonStringField(item, "command") ?? "" }
+              input: { command: jsonStringField(item, "command") ?? "" },
+              ...(jsonStringField(item, "aggregated_output") === undefined
+                ? {}
+                : { output: jsonStringField(item, "aggregated_output") ?? "" })
             })
           ]
         }

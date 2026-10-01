@@ -28,7 +28,9 @@ import {
   sortedFlagArgs,
   toolEventChunk,
   toolResultChunk,
-  usageEventChunk
+  toolResultText,
+  usageEventChunk,
+  type JsonValue
 } from "./CliSupport.ts"
 
 /**
@@ -70,6 +72,11 @@ export const claudeCliErrorResult = (line: string): string | undefined => {
   return failed && text !== undefined && text.trim().length > 0 ? text : undefined
 }
 
+const outputOf = (value: JsonValue | undefined): { readonly output?: string } => {
+  const output = toolResultText(value)
+  return output === undefined ? {} : { output }
+}
+
 export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
   const json = parseJsonLine(line)
   if (json === undefined) {
@@ -105,7 +112,8 @@ export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> 
           jsonStringField(block, "type") === "tool_result"
             ? [
                 toolResultChunk(jsonStringField(block, "tool_use_id"), {
-                  failed: jsonField(block, "is_error") === true
+                  failed: jsonField(block, "is_error") === true,
+                  ...outputOf(jsonField(block, "content"))
                 })
               ]
             : []

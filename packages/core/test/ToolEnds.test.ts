@@ -64,4 +64,33 @@ describe("tool start and end, per CLI", () => {
       [["tool_result", "i1", "Bash", "true"]]
     )
   })
+
+  it("carries what the tool returned, for a transcript", () => {
+    const output = (chunks: ReadonlyArray<{ readonly metadata: Readonly<Record<string, string>> }>) =>
+      chunks.map((chunk) => chunk.metadata.tool_content)
+    assert.deepStrictEqual(
+      output(
+        parseClaudeCliStreamLine(
+          '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":[{"type":"text","text":"3 passed"}]}]}}'
+        )
+      ),
+      ["3 passed"]
+    )
+    assert.deepStrictEqual(
+      output(
+        parseCodexStreamLine(
+          '{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"cargo test","aggregated_output":"ok","exit_code":0}}'
+        )
+      ),
+      ["ok"]
+    )
+    assert.deepStrictEqual(
+      output(
+        parsePiStreamLine(
+          '{"type":"tool_execution_end","toolCallId":"p1","result":{"content":[{"type":"text","text":"README.md"}]},"isError":false}'
+        )
+      ),
+      ["README.md"]
+    )
+  })
 })

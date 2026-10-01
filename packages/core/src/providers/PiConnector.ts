@@ -17,6 +17,7 @@ import {
   sortedFlagArgs,
   toolEventChunk,
   toolResultChunk,
+  toolResultText,
   usageEventChunk
 } from "./CliSupport.ts"
 
@@ -57,7 +58,11 @@ export const parsePiStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
     case "tool_execution_end":
       return [
         toolResultChunk(jsonStringField(json, "toolCallId"), {
-          failed: jsonField(json, "isError") === true
+          failed: jsonField(json, "isError") === true,
+          ...(() => {
+            const output = toolResultText(jsonField(jsonField(json, "result"), "content"))
+            return output === undefined ? {} : { output }
+          })()
         })
       ]
     case "message_end":
