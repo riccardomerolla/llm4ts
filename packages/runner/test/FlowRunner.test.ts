@@ -37,6 +37,7 @@ import { completeAndPublish } from "@llm4ts/flow/Flow"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { JudgmentObservation, judgmentLogPath } from "@llm4ts/flow/JudgmentLog"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
+import { makeMemoryTranscriptSink } from "@llm4ts/flow/Transcript"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import { makeFlowRunnerContext, runWithBundle } from "@llm4ts/runner/FlowRunner"
 import { plainTerminalPalette, type TerminalSurface } from "@llm4ts/runner/Terminal"
@@ -373,6 +374,68 @@ describe("runner cost ledger", () => {
         assert.strictEqual(contents.split("\n").filter((line) => line.length > 0).length, 1)
       })
     )
+  )
+
+  it.live("records a transcript of the seats' calls only when asked to", () =>
+    Effect.gen(function* () {
+      const transcriptOf = (environment: Record<string, string>) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const process = yield* makeFakeProcessExecutor()
+            const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+            const transcript = yield* makeMemoryTranscriptSink
+            const directories: Array<string> = []
+            const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+            const dependencies = {
+              registry: makeConnectorRegistry([
+                {
+                  connectorId: ConnectorIds.Mock,
+                  kind: "Api",
+                  create: (_configuration) => Effect.succeed(mock)
+                }
+              ]),
+              process: process.executor,
+              files: files(state),
+              transcriptSink: (directory: string) => {
+                directories.push(directory)
+                return transcript.sink
+              }
+            }
+            const options = {
+              workDir: "/repo",
+              workspace: "/repo",
+              userPrompt: "do it",
+              coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+              environment,
+              surface: {
+                palette: plainTerminalPalette,
+                log: (_line: string) => Effect.void,
+                setStatus: (_label: string | undefined) => Effect.void,
+                suspend: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+              },
+              tracePath: "trace.jsonl",
+              runId: "run-7"
+            }
+            const bundle = yield* makeFlowRunnerContext(options, dependencies)
+            yield* runWithBundle(
+              bundle,
+              options,
+              (context) => collect(context.coder.executeStream("hello")),
+              dependencies
+            )
+            return { directories, entries: yield* transcript.entries }
+          })
+        )
+      const on = yield* transcriptOf({ LLM4TS_TRANSCRIPT: "on" })
+      assert.deepStrictEqual(on.directories, ["/repo/.llm4ts/transcripts/run-7"])
+      const first = on.entries[0]?.entry
+      assert.deepStrictEqual(first?._tag === "Call" ? [first.role, first.input] : [], [
+        "coder",
+        "hello"
+      ])
+      const off = yield* transcriptOf({})
+      assert.deepStrictEqual([off.directories, off.entries], [[], []])
+    })
   )
 
   it.live("times every seat call into the trace under its role", () =>

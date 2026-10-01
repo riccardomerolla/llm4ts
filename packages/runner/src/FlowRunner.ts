@@ -59,6 +59,8 @@ import {
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
 import { timedJudgment, timedSeat, withTimedRole } from "@llm4ts/flow/Timing"
+import { transcriptSeat, type TranscriptSink } from "@llm4ts/flow/Transcript"
+import { nodeTranscriptSink, transcriptsWanted } from "./Transcripts.ts"
 import { idleAfterFrom } from "./AgentTree.ts"
 import { makeAgentTreeHost, nodeTreeKeys } from "./AgentTreeSurface.ts"
 import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog"
@@ -116,6 +118,8 @@ export interface FlowRunnerDependencies {
   readonly readPiModelsJson?: () => string | undefined
   /** For the hosted TypeSafe judgment backend; defaults to the Node client. */
   readonly http?: HttpClientShape
+  /** Where `--transcript` writes, given its directory; files on disk by default. */
+  readonly transcriptSink?: (directory: string) => TranscriptSink
 }
 
 export interface NodeConnectorDependencies {
@@ -285,6 +289,28 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
 ): Effect.fn.Return<FlowRunnerBundle, FlowError, Scope.Scope> {
   const events = yield* makeFlowEventHub()
   const runId = options.runId ?? `run-${(yield* Clock.currentTimeMillis).toString()}`
+  // `llm4ts run --transcript`: what each seat is told and answers, per story,
+  // in its own files — never in the trace.
+  const transcriptOn =
+    transcriptsWanted(options.environment ?? process.env) && options.persistRun !== false
+  const transcripts = transcriptOn
+    ? (dependencies.transcriptSink ?? nodeTranscriptSink)(
+        join(options.workDir, ".llm4ts", "transcripts", runId)
+      )
+    : undefined
+  const recorded = (
+    service: LlmServiceShape,
+    lane: string | undefined,
+    role: string,
+    executor?: Effect.Effect<string | undefined>
+  ): LlmServiceShape =>
+    transcripts === undefined
+      ? service
+      : transcriptSeat(service, transcripts, {
+          role,
+          ...(lane === undefined ? {} : { lane }),
+          ...(executor === undefined ? {} : { executor })
+        })
   const judgmentLog =
     options.judgmentLog === true
       ? yield* makeJudgmentLog({ files: dependencies.files, root: options.workDir, runId })
@@ -453,17 +479,23 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       readonly judgment: JudgmentShape
     },
     rebind: boolean,
-    laneEvents: FlowEventsShape = events
+    laneEvents: FlowEventsShape = events,
+    lane?: string
   ): FlowContextShape =>
     FlowContext.of({
       // Every call is timed on the lane's events, under its role.
-      reasoning: timedSeat(seats.reasoning, laneEvents, "reasoning"),
-      coder: { ...seats.coder, ...timedSeat(seats.coder, laneEvents, "coder") },
+      reasoning: recorded(timedSeat(seats.reasoning, laneEvents, "reasoning"), lane, "reasoning"),
+      coder: {
+        ...seats.coder,
+        ...recorded(timedSeat(seats.coder, laneEvents, "coder"), lane, "coder")
+      },
       judgment: timedJudgment(seats.judgment, laneEvents),
       git: makeGitTool(dependencies.process, workDir, laneEvents),
       hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
       events: laneEvents,
-      reviewers: seats.reviewers.map((reviewer) => timedSeat(reviewer, laneEvents, "reviewer")),
+      reviewers: seats.reviewers.map((reviewer) =>
+        recorded(timedSeat(reviewer, laneEvents, "reviewer"), lane, "reviewer")
+      ),
       coderCapabilities: seats.coder.capabilities,
       userPrompt: options.userPrompt,
       workDir,
@@ -480,7 +512,8 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
                   false,
                   contextOptions?.label === undefined
                     ? events
-                    : withLane(events, { lane: contextOptions.label, workDir: directory })
+                    : withLane(events, { lane: contextOptions.label, workDir: directory }),
+                  contextOptions?.label
                 )
               )
           }
@@ -618,17 +651,22 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       held: HeldCoder,
       workDir: string,
       label: string,
-      laneEvents: FlowEventsShape
+      laneEvents: FlowEventsShape,
+      lane: string | undefined
     ): RosterView => ({
       forRole: (role) =>
-        timedSeat(
-          rosterSeat(roster, source, role, workDir, {
-            events: laneEvents,
-            avoid: Effect.map(held.executor, (id) => (id === undefined ? [] : [id])),
-            borrow: held.lease,
-            label
-          }),
-          laneEvents,
+        recorded(
+          timedSeat(
+            rosterSeat(roster, source, role, workDir, {
+              events: laneEvents,
+              avoid: Effect.map(held.executor, (id) => (id === undefined ? [] : [id])),
+              borrow: held.lease,
+              label
+            }),
+            laneEvents,
+            role
+          ),
+          lane,
           role
         ),
       available: roster.available,
@@ -644,7 +682,8 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       laneEvents: FlowEventsShape
     ): Effect.Effect<FlowContextShape, FlowError> =>
       Effect.gen(function* () {
-        const view = viewFor(held, workDir, label, laneEvents)
+        const lane = rebind ? undefined : label
+        const view = viewFor(held, workDir, label, laneEvents, lane)
         const judgmentSeat =
           options.judgment === undefined
             ? view.forRole("judge")
@@ -662,7 +701,12 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             : timedJudgment(judged, laneEvents)
         return FlowContext.of({
           reasoning: view.forRole(rebind ? "planner" : "reviewer"),
-          coder: timedSeat(held.service, laneEvents, "coder"),
+          coder: recorded(
+            timedSeat(held.service, laneEvents, "coder"),
+            lane,
+            "coder",
+            held.executor
+          ),
           judgment,
           git: makeGitTool(dependencies.process, workDir, laneEvents),
           hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),

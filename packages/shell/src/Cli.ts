@@ -213,6 +213,12 @@ const runCommand = Command.make(
         "Only these roster executors (comma-separated ids), forwarded as LLM4TS_EXECUTORS"
       )
     ),
+    transcript: Flag.Boolean("transcript").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription(
+        "Record what each seat is told and answers under .llm4ts/transcripts/ (owner-only, secrets redacted), for llm4ts watch --tail; forwarded as LLM4TS_TRANSCRIPT"
+      )
+    ),
     ui: Flag.Literals("ui", ["classic", "tree"]).pipe(
       Flag.withDefault("classic"),
       Flag.withDescription(
@@ -239,6 +245,9 @@ const runCommand = Command.make(
       }
       if (config.ui === "tree") {
         environment.LLM4TS_UI = "tree"
+      }
+      if (config.transcript) {
+        environment.LLM4TS_TRANSCRIPT = "on"
       }
       const exitCode = yield* launchFlow({
         flowPath,

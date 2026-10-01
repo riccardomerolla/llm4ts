@@ -66,8 +66,9 @@ describe("tool start and end, per CLI", () => {
   })
 
   it("carries what the tool returned, for a transcript", () => {
-    const output = (chunks: ReadonlyArray<{ readonly metadata: Readonly<Record<string, string>> }>) =>
-      chunks.map((chunk) => chunk.metadata.tool_content)
+    const output = (
+      chunks: ReadonlyArray<{ readonly metadata: Readonly<Record<string, string>> }>
+    ) => chunks.map((chunk) => chunk.metadata.tool_content)
     assert.deepStrictEqual(
       output(
         parseClaudeCliStreamLine(
