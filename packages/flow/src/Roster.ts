@@ -20,6 +20,7 @@ import {
   ExecutorReleased,
   ExecutorResumed,
   Info,
+  Timed,
   type FlowEventsShape
 } from "./FlowEvents.ts"
 import { loadVersioned, saveVersioned, type PlainFileStoreShape } from "./Persistence.ts"
@@ -710,9 +711,24 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
     Effect.gen(function* () {
       const avoid = leaseOptions.avoid ?? []
       let announced = false
+      const asked = yield* Clock.currentTimeMillis
+      // A lease that had to wait says how long, for the story it is for (ADR 0023).
+      const waited: Effect.Effect<void> = Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        announced
+          ? events.publish(
+              Timed.make({
+                kind: "wait",
+                label: `roster ${role}`,
+                ms: now - asked,
+                ...(leaseOptions.label === undefined ? {} : { lane: leaseOptions.label })
+              })
+            )
+          : Effect.void
+      )
       while (true) {
         const spec = yield* attempt(role, leaseOptions)
         if (spec !== undefined) {
+          yield* waited
           return yield* leaseOf(spec, role, leaseOptions.label)
         }
         if (!(yield* canEverServe(role, avoid))) {
@@ -740,6 +756,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         yield* probeDue
         const recovered = yield* attempt(role, leaseOptions)
         if (recovered !== undefined) {
+          yield* waited
           return yield* leaseOf(recovered, role, leaseOptions.label)
         }
         const probing = yield* lock.withPermit(

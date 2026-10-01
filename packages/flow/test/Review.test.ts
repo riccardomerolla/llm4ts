@@ -10,7 +10,16 @@ import { makeChat } from "@llm4ts/flow/Chat"
 import { ProcessError } from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents, ReviewFinding } from "@llm4ts/flow/FlowEvents"
 import { Reviewer } from "@llm4ts/flow/Pack"
-import { ReviewIssue, ReviewResult, llmDriven, reviewAndFixLoop } from "@llm4ts/flow/Review"
+import {
+  ReviewIssue,
+  ReviewResult,
+  lintCommand,
+  llmDriven,
+  reviewAndFixLoop
+} from "@llm4ts/flow/Review"
+import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
+import * as Fiber from "effect/Fiber"
+import { TestClock } from "effect/testing"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
 import { JudgmentBackendError } from "@llm4ts/core/judgment/Judgment"
@@ -508,6 +517,37 @@ describe("structured-output robustness", () => {
 
       assert.strictEqual(error._tag, "Llm")
       assert.strictEqual(yield* Ref.get(calls), 2)
+    })
+  )
+})
+
+describe("lintCommand timing", () => {
+  it.effect("times a gate command with its exit code, never its output", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const process = makeProcessExecutor({
+        run: (argv, _cwd, _env) =>
+          Effect.as(
+            Effect.sleep("42 seconds"),
+            ProcessResult.make({
+              stdout: ["FAIL src/a.test.ts secret detail"],
+              exitCode: argv[1] === "test" ? 1 : 0
+            })
+          ),
+        runStreaming: () => Stream.empty
+      })
+      const fiber = yield* Effect.forkChild(lintCommand(process, events, ["pnpm", "test"], "/wt/a"))
+      yield* TestClock.adjust("42 seconds")
+      const result = yield* Fiber.join(fiber)
+      assert.isFalse(result.isClean)
+      const timed = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Timed" ? [event] : []
+      )
+      assert.deepStrictEqual(
+        timed.map((event) => [event.kind, event.label, event.ms, event.exitCode]),
+        [["gate", "pnpm test", 42_000, 1]]
+      )
+      assert.notInclude(JSON.stringify(timed), "secret")
     })
   )
 })

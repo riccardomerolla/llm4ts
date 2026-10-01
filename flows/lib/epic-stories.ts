@@ -1379,8 +1379,8 @@ const output = (result: ReviewResult): string =>
 /** Runs the setup command in a worktree; a non-zero exit fails the story with the output. */
 export const setupIn =
   (process: ProcessExecutorShape, events: FlowEventsShape, command: ReadonlyArray<string>) =>
-  (workDir: string): Effect.Effect<void, FlowError> =>
-    Effect.flatMap(lintCommand(process, events, command, workDir), (result) =>
+  (workDir: string, laneEvents?: FlowEventsShape): Effect.Effect<void, FlowError> =>
+    Effect.flatMap(lintCommand(process, laneEvents ?? events, command, workDir), (result) =>
       result.isClean
         ? Effect.void
         : FlowAborted.make({
@@ -1462,11 +1462,11 @@ export const gatesIn =
     events: FlowEventsShape,
     commands: ReadonlyArray<ReadonlyArray<string>>
   ) =>
-  (workDir: string): Effect.Effect<ReviewResult, FlowError> =>
+  (workDir: string, laneEvents?: FlowEventsShape): Effect.Effect<ReviewResult, FlowError> =>
     Effect.gen(function* () {
       const results: Array<ReviewResult> = []
       for (const command of commands) {
-        const result = yield* lintCommand(process, events, command, workDir)
+        const result = yield* lintCommand(process, laneEvents ?? events, command, workDir)
         results.push(result)
         if (!result.isClean) {
           break

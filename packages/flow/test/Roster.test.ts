@@ -290,6 +290,10 @@ describe("Roster leasing", () => {
           )
         )
         assert.isTrue(recorded.includes("roster: codex back in the round"))
+        const waited = (yield* events.recorded).flatMap((event) =>
+          event._tag === "Timed" ? [[event.kind, event.label, event.ms]] : []
+        )
+        assert.deepStrictEqual(waited, [["wait", "roster coder", 60_000]])
 
         yield* roster.exclude(Exclusion.make({ id: "codex", kind: "run", reason: "not logged in" }))
         const exhausted = yield* Effect.flip(roster.lease("judge"))

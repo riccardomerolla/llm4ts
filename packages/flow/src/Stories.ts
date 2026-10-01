@@ -4,6 +4,7 @@
 // merges back only after its judge and perimeter checks pass, and the
 // target's gates run on the epic branch after every merge. Scheduling,
 // gating, resume and failure policy live here; seats come from `contextFor`.
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Queue from "effect/Queue"
@@ -28,7 +29,15 @@ import {
   StoryFailed,
   type FlowError
 } from "./FlowError.ts"
-import { Info, JudgedDimension, StoryJudged, withLane, type FlowEventsShape } from "./FlowEvents.ts"
+import {
+  Info,
+  JudgedDimension,
+  StoryJudged,
+  Timed,
+  withLane,
+  type FlowEventsShape
+} from "./FlowEvents.ts"
+import { timeEffect } from "./Timing.ts"
 import { statusPaths, type GitToolShape } from "./GitTool.ts"
 import {
   checkPerimeter,
@@ -464,7 +473,7 @@ export interface StoriesOptions {
    * installed dependencies, so the gates cannot run there without this.
    * Runs on every start and resume; a failure fails the story.
    */
-  readonly setup?: (workDir: string) => Effect.Effect<void, FlowError>
+  readonly setup?: (workDir: string, events?: FlowEventsShape) => Effect.Effect<void, FlowError>
   /**
    * When setup fails, give the story's coder ONE turn to make the worktree
    * ready (install, warm a cache, generate a client), then run setup again as
@@ -473,7 +482,14 @@ export interface StoriesOptions {
    */
   readonly setupAgent?: boolean
   /** The target's gates, run in a worktree per task and on the epic checkout after each merge. */
-  readonly gates: (workDir: string) => Effect.Effect<ReviewResult, FlowError>
+  /**
+   * The target's gates in a directory. `events` is the story's lane, so a
+   * gate's timing names its story (ADR 0023); a gate may ignore it.
+   */
+  readonly gates: (
+    workDir: string,
+    events?: FlowEventsShape
+  ) => Effect.Effect<ReviewResult, FlowError>
   /** Story-level judge over the branch's diff against the epic branch; omit to skip. */
   readonly judge?: (
     story: Story,
@@ -624,24 +640,37 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
   /** Merge the story branch into the epic branch and re-gate the epic head, one story at a time. */
   const integrate = (story: Story, branch: string): Effect.Effect<void, FlowError> =>
-    mergeLock.withPermit(
-      Effect.gen(function* () {
-        yield* epicCheckoutClean(story)
-        const checkpoint = yield* context.git.checkpoint
-        yield* context.git.merge(branch, `${plan.epicId}: merge story ${story.id}`)
-        const gate = yield* options.gates(context.workDir)
-        if (!gate.isClean) {
-          // Never leave a red epic head for the next story to inherit.
-          yield* context.git.rollback(checkpoint)
-          return yield* failed(
-            story,
-            `epic gates failed after merging; merge undone:\n${issueLines(gate)}`
+    Effect.flatMap(Clock.currentTimeMillis, (requested) =>
+      mergeLock.withPermit(
+        Effect.gen(function* () {
+          const lane = laneOf(story)
+          // Merges are one at a time: how long this story queued for its turn.
+          const turn = yield* Clock.currentTimeMillis
+          yield* lane.publish(
+            Timed.make({ kind: "wait", label: "merge lock", ms: turn - requested })
           )
-        }
-        yield* laneOf(story).publish(
-          Info.make({ message: `story ${story.id}: merged into ${epicBranch}` })
-        )
-      })
+          yield* epicCheckoutClean(story)
+          const checkpoint = yield* context.git.checkpoint
+          yield* timeEffect(
+            lane,
+            context.git.merge(branch, `${plan.epicId}: merge story ${story.id}`),
+            (ms, failed) =>
+              Timed.make({ kind: "merge", label: "merge", ms, ...(failed ? { failed } : {}) })
+          )
+          const gate = yield* options.gates(context.workDir, lane)
+          if (!gate.isClean) {
+            // Never leave a red epic head for the next story to inherit.
+            yield* context.git.rollback(checkpoint)
+            return yield* failed(
+              story,
+              `epic gates failed after merging; merge undone:\n${issueLines(gate)}`
+            )
+          }
+          yield* laneOf(story).publish(
+            Info.make({ message: `story ${story.id}: merged into ${epicBranch}` })
+          )
+        })
+      )
     )
 
   /** The worktree and branch for a story, honouring the hash-guarded resume rules. */
@@ -794,7 +823,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     // Catch up before setup: the epic may have changed the manifest too.
     yield* catchUp(story, git)
     if (options.setup !== undefined) {
-      const setup = options.setup(state.worktree)
+      const setup = options.setup(state.worktree, laneOf(story))
       yield* stage(
         laneOf(story),
         `story ${story.id}: setup`,
@@ -835,7 +864,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     // The target's gates plus the perimeter: a stray path is a gate failure
     // the task review loop hands back to the coder before anything commits.
     const gates: Effect.Effect<ReviewResult, FlowError> = Effect.gen(function* () {
-      const target = yield* options.gates(state.worktree)
+      const target = yield* options.gates(state.worktree, laneOf(story))
       const changed = yield* perimeterNow(story, git)
       return combined(target, perimeterGate([...changed.sharedReadOnly, ...changed.outside], story))
     })

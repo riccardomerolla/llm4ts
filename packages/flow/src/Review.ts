@@ -1,3 +1,4 @@
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type { LlmError } from "@llm4ts/core/Errors"
@@ -14,6 +15,7 @@ import {
   ReviewFinding,
   ReviewFindings,
   publishJudgmentObserved,
+  Timed,
   type FlowEventsShape
 } from "./FlowEvents.ts"
 import { Reviewer } from "./Reviewer.ts"
@@ -260,6 +262,7 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
   if (executable === undefined) {
     return ReviewResult.make({ issues: [], summary: "" })
   }
+  const started = yield* Clock.currentTimeMillis
   const result = yield* guarded(
     Capabilities.Exec(executable),
     `lint: ${command.join(" ")}`,
@@ -272,6 +275,16 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
         })
       )
     )
+  )
+  // The command as configured and its exit code: never its output (ADR 0023).
+  yield* events.publish(
+    Timed.make({
+      kind: "gate",
+      label: command.join(" "),
+      ms: (yield* Clock.currentTimeMillis) - started,
+      exitCode: result.exitCode,
+      ...(result.exitCode === 0 ? {} : { failed: true })
+    })
   )
   if (result.exitCode === 0) {
     return ReviewResult.make({ issues: [], summary: "lint passed" })

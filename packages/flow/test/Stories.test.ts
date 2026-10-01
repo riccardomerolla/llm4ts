@@ -618,6 +618,33 @@ describe("Stories executor", () => {
     })
   )
 
+  it.effect("times every merge and its wait for the merge lock on the story's lane", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const events = yield* makeCollectingFlowEvents
+      const context = { ...(yield* makeContext(harness)), events }
+      const lanes: Array<string | undefined> = []
+      const options = yield* makeOptions(harness, diamond, context, {
+        gates: (_workDir, laneEvents) =>
+          Effect.sync(() => {
+            lanes.push(laneEvents === undefined ? undefined : "lane")
+            return clean
+          })
+      })
+      yield* implementStoriesFlow(context, options)
+      const timed = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Timed" ? [`${event.lane}:${event.kind}:${event.label}`] : []
+      )
+      for (const id of ["a", "b", "c", "d"]) {
+        assert.include(timed, `${id}:wait:merge lock`)
+        assert.include(timed, `${id}:merge:merge`)
+      }
+      // Every gate run, in a worktree or on the epic after a merge, knows its story.
+      assert.isAbove(lanes.length, 0)
+      assert.notInclude(lanes, undefined)
+    })
+  )
+
   it.effect("every judge verdict is published on the story's lane with its scores", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness()
