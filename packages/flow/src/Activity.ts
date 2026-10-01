@@ -126,7 +126,54 @@ const nextCall: Effect.Effect<string> = Effect.sync(() => {
 interface OpenTool {
   readonly id: string | undefined
   readonly tool: string
+  readonly category: ToolCategory
   readonly at: number
+}
+
+export type ToolCategory = "explore" | "edit" | "test" | "build" | "install" | "git" | "other"
+
+const exploreTools =
+  /^(read|read_file|read_many_files|glob|grep|search|search_file_content|list|ls|list_directory|find|view|web_fetch|google_web_search)$/iu
+const editTools = /^(edit|write|write_file|replace|multiedit|apply_patch|create|str_replace)$/iu
+const shellTools = /^(bash|shell|run_shell_command|exec|command_execution)$/iu
+
+/**
+ * What kind of work a coder's tool call is, for "where does the time go":
+ * reading the code, editing it, or a shell command sorted by what it runs.
+ * Only this name is kept — never the command.
+ */
+export const toolCategory = (tool: string, args: string): ToolCategory => {
+  if (editTools.test(tool)) {
+    return "edit"
+  }
+  if (!shellTools.test(tool)) {
+    return exploreTools.test(tool) ? "explore" : "other"
+  }
+  // `cd <worktree> && …`: the command is what follows.
+  const command = args.replace(/^\s*cd\s+\S+\s*&&\s*/u, "").trim()
+  if (/\b(test|vitest|jest|pytest|mocha|playwright)\b/u.test(command)) {
+    return "test"
+  }
+  if (/\b(typecheck|tsc|lint|eslint|build|compile|prettier|format)\b/u.test(command)) {
+    return "build"
+  }
+  if (
+    /\b(install|ci|add)\b/u.test(command) &&
+    /^(pnpm|npm|yarn|bun|pip|poetry|mvn|gradle)\b/u.test(command)
+  ) {
+    return "install"
+  }
+  if (/^git\b/u.test(command)) {
+    return "git"
+  }
+  if (
+    /^(ls|find|grep|rg|cat|head|tail|sed|awk|wc|tree|pwd|echo|stat|file|less|more|du)\b/u.test(
+      command
+    )
+  ) {
+    return "explore"
+  }
+  return "other"
 }
 
 const toolIdOf = (chunk: LlmChunk): string | undefined => {
@@ -167,6 +214,7 @@ const toolEnded = (
       Timed.make({
         kind: "tool",
         label: started.tool,
+        category: started.category,
         ms: now - started.at,
         ...(failed ? { failed: true } : {})
       })
@@ -202,7 +250,12 @@ export const withToolActivity = <R>(
                   Effect.flatMap(Clock.currentTimeMillis, (at) =>
                     Ref.update(open, (calls) => [
                       ...calls,
-                      { id: toolIdOf(chunk), tool: event.tool, at }
+                      {
+                        id: toolIdOf(chunk),
+                        tool: event.tool,
+                        category: toolCategory(event.tool, event.args),
+                        at
+                      }
                     ])
                   )
                 )

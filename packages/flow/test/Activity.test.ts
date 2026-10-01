@@ -5,7 +5,12 @@ import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 import { toolEventChunk, toolResultChunk } from "@llm4ts/core/providers/CliSupport"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
-import { summariseToolArgs, toolUseFrom, withToolActivity } from "@llm4ts/flow/Activity"
+import {
+  summariseToolArgs,
+  toolCategory,
+  toolUseFrom,
+  withToolActivity
+} from "@llm4ts/flow/Activity"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 
 const toolChunk = (name: string, input: string): LlmChunk =>
@@ -181,6 +186,45 @@ describe("withToolActivity", () => {
         ),
         ["Bash|cargo test"]
       )
+    })
+  )
+
+  it("sorts a tool call into a category from its name and command, keeping nothing else", () => {
+    const cases: ReadonlyArray<readonly [string, string, string]> = [
+      ["read_file", "src/a.ts", "explore"],
+      ["grep", "useAccounts", "explore"],
+      ["edit", "src/a.ts", "edit"],
+      ["write_file", "src/b.ts", "edit"],
+      ["run_shell_command", "ls -R src", "explore"],
+      ["bash", "cd /wt/a && find src -name '*.tsx'", "explore"],
+      ["bash", "cd /wt/a && pnpm test src/a.test.ts", "test"],
+      ["Bash", "npx vitest run", "test"],
+      ["bash", "pnpm typecheck && pnpm lint", "build"],
+      ["bash", "pnpm install --offline", "install"],
+      ["bash", "git status --short", "git"],
+      ["bash", "node scripts/seed.mjs", "other"]
+    ]
+    for (const [tool, args, category] of cases) {
+      assert.strictEqual(toolCategory(tool, args), category, `${tool} ${args}`)
+    }
+  })
+
+  it.effect("puts the category on a tool's timing", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      yield* Stream.runDrain(
+        withToolActivity(
+          events,
+          Stream.make(
+            toolEventChunk("bash", { command: "cd /wt/a && pnpm test" }, "t1"),
+            toolResultChunk("t1")
+          )
+        )
+      )
+      const timed = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Timed" ? [[event.label, event.category]] : []
+      )
+      assert.deepStrictEqual(timed, [["bash", "test"]])
     })
   )
 })

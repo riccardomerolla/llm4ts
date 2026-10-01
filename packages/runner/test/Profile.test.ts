@@ -124,7 +124,7 @@ describe("profileOf", () => {
     assert.deepStrictEqual(
       report.findings.slice(0, 3).map((finding) => finding.text),
       [
-        "coder turns: 3, 12m00s (40% of story time), avg 4m00s, first output after 20s",
+        "coder turns: 3, 12m00s (40% of story time), avg 4m00s, first output after 20s, 0.3 steps per turn, 2m50s of model per step",
         "gate `pnpm test`: 3 runs, 12m00s (40% of story time), 1 failed",
         "stories queued before starting (dependencies, free coder slots): 5m00s in all"
       ]
@@ -164,6 +164,42 @@ describe("profileOf", () => {
     const text = renderProfile(report)
     assert.include(text, "home: 5m00s between a coder tool call and a judge verdict")
     assert.include(text, "Timed outside any story")
+  })
+
+  it("counts the steps in a coder turn, the model time per step, and tool time by category", () => {
+    const report = profileOf([
+      at(0, StageStarted.make({ stage: "story home", lane: "home" })),
+      // One 10-minute turn: 4 tool calls taking 2 minutes, so 8 minutes of model over 5 steps.
+      ...[1, 2, 3, 4].map((n) =>
+        at(
+          n * 100,
+          Timed.make({
+            kind: "tool",
+            label: "run_shell_command",
+            category: n <= 2 ? "test" : "explore",
+            ms: 30_000,
+            lane: "home"
+          })
+        )
+      ),
+      at(600, Timed.make({ kind: "model", label: "coder", ms: 600_000, lane: "home" })),
+      at(600, StageCompleted.make({ stage: "story home", lane: "home" }))
+    ])
+    const [home] = report.stories
+    assert.deepStrictEqual([home?.turns.avgSteps, home?.turns.avgStepMs], [4, 96_000])
+    assert.deepStrictEqual(
+      report.toolCategories.map((row) => [row.label, row.count, row.ms]),
+      [
+        ["test", 2, 60_000],
+        ["explore", 2, 60_000]
+      ]
+    )
+    const findings = report.findings.map((finding) => finding.text).join("\n")
+    assert.include(
+      findings,
+      "coder turns: 1, 10m00s (100% of story time), avg 10m00s, 4 steps per turn, 1m36s of model per step"
+    )
+    assert.include(findings, "coder tools, test: 2 calls, 1m00s (10% of story time)")
   })
 
   it("counts a coder turn still running as model time, less its tools so far", () => {

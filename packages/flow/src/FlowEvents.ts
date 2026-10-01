@@ -201,6 +201,8 @@ export class Timed extends Schema.TaggedClass<Timed>()("Timed", {
   apiMs: Schema.optionalKey(Schema.Number),
   toolMs: Schema.optionalKey(Schema.Number),
   exitCode: Schema.optionalKey(Schema.Int),
+  /** A coder tool's kind of work: explore, edit, test, build, install, git, other. */
+  category: Schema.optionalKey(Schema.String),
   /** It ended in a failure (the time was still spent). */
   failed: Schema.optionalKey(Schema.Boolean),
   lane: Schema.optionalKey(Schema.String),

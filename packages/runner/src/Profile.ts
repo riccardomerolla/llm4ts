@@ -47,7 +47,11 @@ export const TurnStats = Schema.Struct({
   lastPrompt: Schema.optionalKey(Schema.Int),
   maxPrompt: Schema.optionalKey(Schema.Int),
   /** The last prompt is more than three times the first. */
-  promptGrowth: Schema.Boolean
+  promptGrowth: Schema.Boolean,
+  /** Tool calls per finished turn: each is a model round trip. */
+  avgSteps: Schema.Number,
+  /** The model's own time per round trip: a turn's time less its tools, over its steps + 1. */
+  avgStepMs: Ms
 })
 export type TurnStats = typeof TurnStats.Type
 
@@ -118,6 +122,8 @@ export const ProfileReport = Schema.Struct({
   models: Schema.Array(ModelRow),
   gates: Schema.Array(GateRow),
   tools: Schema.Array(CountRow),
+  /** Coder tool time by kind of work: explore, edit, test, build, install, git, other. */
+  toolCategories: Schema.Array(CountRow),
   waits: Schema.Array(CountRow),
   /** Timed on the run's events, in no story: the run's own planning, or a seat no story owns. */
   outside: Schema.Array(CountRow),
@@ -450,7 +456,20 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
       ms: sum(items.map((item) => item.event.ms))
     }))
   const tools = counted("tool")
+  const toolCategories = [
+    ...groupBy(
+      allTimed.filter((item) => item.event.kind === "tool" && item.event.category !== undefined),
+      (item) => item.event.category ?? ""
+    ).entries()
+  ]
+    .map(([label, items]) => ({
+      label,
+      count: items.length,
+      ms: sum(items.map((item) => item.event.ms))
+    }))
+    .sort((left, right) => right.ms - left.ms)
   const waits = counted("wait")
+  const steps = stepStats(estimated ? [] : [...lanes.values()].flatMap(turnSteps))
   const outside = [
     ...groupBy(
       allTimed.filter((item) => item.event.lane === undefined),
@@ -485,10 +504,47 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
     models,
     gates,
     tools,
+    toolCategories,
     waits,
     outside,
-    findings: findingsOf({ stories, models, gates, tools, waits, merges, storyTime, estimated })
+    findings: findingsOf({
+      steps,
+      toolCategories,
+      stories,
+      models,
+      gates,
+      tools,
+      waits,
+      merges,
+      storyTime,
+      estimated
+    })
   }
+}
+
+const stepStats = (
+  turns: ReadonlyArray<{ readonly steps: number; readonly stepMs: number }>
+): { readonly avgSteps: number; readonly avgStepMs: number } => ({
+  avgSteps: average(turns.map((turn) => turn.steps)) ?? 0,
+  avgStepMs: average(turns.map((turn) => turn.stepMs)) ?? 0
+})
+
+/** Each finished coder turn's steps (its tool calls) and model time per step. */
+const turnSteps = (
+  lane: Lane
+): ReadonlyArray<{ readonly steps: number; readonly stepMs: number }> => {
+  const tools = lane.timed.filter((item) => item.event.kind === "tool")
+  return lane.timed
+    .filter((item) => item.event.kind === "model" && item.event.label === "coder")
+    .map((turn) => {
+      const start = turn.at - turn.event.ms
+      const inside = tools.filter((tool) => tool.at > start && tool.at <= turn.at)
+      const toolMs = sum(inside.map((tool) => tool.event.ms))
+      return {
+        steps: inside.length,
+        stepMs: Math.max(0, turn.event.ms - toolMs) / (inside.length + 1)
+      }
+    })
 }
 
 const storyProfile = (
@@ -540,6 +596,7 @@ const storyProfile = (
       ...(firstPrompt === undefined ? {} : { firstPrompt }),
       ...(lastPrompt === undefined ? {} : { lastPrompt }),
       ...(maxPrompt === undefined ? {} : { maxPrompt }),
+      ...stepStats(estimated ? [] : turnSteps(lane)),
       promptGrowth:
         firstPrompt !== undefined &&
         lastPrompt !== undefined &&
@@ -564,11 +621,16 @@ export const duration = (ms: number): string => {
   return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`
 }
 
+const stepsText = (steps: number): string =>
+  `${Number.isInteger(steps) ? steps : steps.toFixed(1)} step${steps === 1 ? "" : "s"}`
+
 const share = (ms: number, of: number): string => (of <= 0 ? "" : `${Math.round((ms / of) * 100)}%`)
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`
 
 const findingsOf = (facts: {
+  readonly steps: { readonly avgSteps: number; readonly avgStepMs: number }
+  readonly toolCategories: ReadonlyArray<CountRow>
   readonly stories: ReadonlyArray<StoryProfile>
   readonly models: ReadonlyArray<ModelRow>
   readonly gates: ReadonlyArray<GateRow>
@@ -589,7 +651,11 @@ const findingsOf = (facts: {
       ms,
       text:
         role === "coder"
-          ? `coder turns: ${calls}, ${ofStories(ms)}, avg ${duration(ms / calls)}${first}`
+          ? `coder turns: ${calls}, ${ofStories(ms)}, avg ${duration(ms / calls)}${first}${
+              facts.steps.avgSteps > 0
+                ? `, ${stepsText(facts.steps.avgSteps)} per turn, ${duration(facts.steps.avgStepMs)} of model per step`
+                : ""
+            }`
           : `${role} calls: ${calls}, ${ofStories(ms)}, avg ${duration(ms / calls)}${first}`
     }
   })
@@ -601,10 +667,16 @@ const findingsOf = (facts: {
         row.failed === 0 ? "" : `, ${row.failed} failed`
       }`
     })),
-    ...facts.tools.map((row) => ({
-      ms: row.ms,
-      text: `coder tool \`${row.label}\`: ${plural(row.count, "call")}, ${ofStories(row.ms)}`
-    })),
+    // By kind of work when the trace has it (2.23), else by tool name.
+    ...(facts.toolCategories.length > 0
+      ? facts.toolCategories.map((row) => ({
+          ms: row.ms,
+          text: `coder tools, ${row.label}: ${plural(row.count, "call")}, ${ofStories(row.ms)}`
+        }))
+      : facts.tools.map((row) => ({
+          ms: row.ms,
+          text: `coder tool \`${row.label}\`: ${plural(row.count, "call")}, ${ofStories(row.ms)}`
+        }))),
     ...facts.waits.map((row) => ({
       ms: row.ms,
       text: `waiting for the ${row.label}: ${row.count}×, ${ofStories(row.ms)}`
@@ -708,6 +780,8 @@ export const renderProfile = (report: ProfileReport): string => {
         "other",
         "turns",
         "avg turn",
+        "steps/turn",
+        "model/step",
         "prompt ×"
       ],
       report.stories.map((story) => [
@@ -723,6 +797,8 @@ export const renderProfile = (report: ProfileReport): string => {
         duration(story.time.unaccounted),
         String(story.turns.count),
         duration(story.turns.avgMs),
+        story.turns.avgSteps === 0 ? "" : story.turns.avgSteps.toFixed(1),
+        story.turns.avgSteps === 0 ? "" : duration(story.turns.avgStepMs),
         story.turns.firstPrompt !== undefined &&
         story.turns.lastPrompt !== undefined &&
         story.turns.firstPrompt > 0
@@ -795,6 +871,21 @@ export const renderProfile = (report: ProfileReport): string => {
               duration(row.ms),
               duration(row.avgMs),
               String(row.failed)
+            ])
+          )
+        ]),
+    ...(report.toolCategories.length === 0
+      ? []
+      : [
+          "",
+          "Coder tools by kind",
+          ...table(
+            ["kind", "calls", "total", "avg"],
+            report.toolCategories.map((row) => [
+              row.label,
+              String(row.count),
+              duration(row.ms),
+              duration(row.ms / row.count)
             ])
           )
         ])
