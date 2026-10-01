@@ -1,6 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Stream from "effect/Stream"
+import { TestClock } from "effect/testing"
+import { toolEventChunk, toolResultChunk } from "@llm4ts/core/providers/CliSupport"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import { summariseToolArgs, toolUseFrom, withToolActivity } from "@llm4ts/flow/Activity"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
@@ -120,5 +123,64 @@ describe("withToolActivity", () => {
         // One call, one id.
         assert.strictEqual(new Set(progress.map((event) => event.call)).size, 1)
       })
+  )
+
+  it.effect("times each tool from its start to its end, by id or in order", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const at = (seconds: number, chunk: LlmChunk) =>
+        Stream.fromEffect(Effect.as(Effect.sleep(`${seconds} seconds`), chunk))
+      const fiber = yield* Effect.forkChild(
+        Stream.runDrain(
+          withToolActivity(
+            events,
+            Stream.concat(
+              at(0, toolEventChunk("read", { path: "a.ts" }, "t1")),
+              Stream.concat(
+                at(1, toolEventChunk("bash", { command: "pnpm test" }, "t2")),
+                Stream.concat(
+                  at(2, toolResultChunk("t1")),
+                  Stream.concat(
+                    at(60, toolResultChunk("t2", { failed: true })),
+                    Stream.concat(
+                      at(0, toolEventChunk("edit", { path: "b.ts" })),
+                      at(4, toolResultChunk(undefined))
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+      yield* TestClock.adjust("2 minutes")
+      yield* Fiber.join(fiber)
+      const timed = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Timed" ? [[event.kind, event.label, event.ms, event.failed]] : []
+      )
+      assert.deepStrictEqual(timed, [
+        ["tool", "read", 3_000, undefined],
+        ["tool", "bash", 62_000, true],
+        ["tool", "edit", 4_000, undefined]
+      ])
+    })
+  )
+
+  it.effect("reports a tool seen only at its end (an older codex) as it used to", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      yield* Stream.runDrain(
+        withToolActivity(
+          events,
+          Stream.make(toolResultChunk("c1", { tool: "Bash", input: { command: "cargo test" } }))
+        )
+      )
+      assert.deepStrictEqual(
+        (yield* events.recorded).map((event) =>
+          event._tag === "ToolUse" ? `${event.tool}|${event.args}` : event._tag
+        ),
+        ["Bash|cargo test"]
+      )
+    })
   )
 })

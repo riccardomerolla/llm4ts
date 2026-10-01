@@ -27,6 +27,7 @@ import {
   parseJsonLine,
   sortedFlagArgs,
   toolEventChunk,
+  toolResultChunk,
   usageEventChunk,
   type JsonValue
 } from "./CliSupport.ts"
@@ -81,6 +82,18 @@ export const parseCodexStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
   }
 
   switch (jsonStringField(json, "type")) {
+    case "item.started": {
+      const item = jsonField(json, "item")
+      return jsonStringField(item, "type") === "command_execution"
+        ? [
+            toolEventChunk(
+              "Bash",
+              { command: jsonStringField(item, "command") ?? "" },
+              jsonStringField(item, "id")
+            )
+          ]
+        : []
+    }
     case "item.completed": {
       const item = jsonField(json, "item")
       switch (jsonStringField(item, "type")) {
@@ -88,12 +101,18 @@ export const parseCodexStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
           const text = jsonStringField(item, "text")
           return text === undefined || text.length === 0 ? [] : [LlmChunk.make({ delta: text })]
         }
-        case "command_execution":
+        // The command's end; it carries the command too, for a codex that
+        // reports no start, so the tool still shows.
+        case "command_execution": {
+          const exitCode = jsonIntField(item, "exit_code")
           return [
-            toolEventChunk("Bash", {
-              command: jsonStringField(item, "command") ?? ""
+            toolResultChunk(jsonStringField(item, "id"), {
+              failed: exitCode !== undefined && exitCode !== 0,
+              tool: "Bash",
+              input: { command: jsonStringField(item, "command") ?? "" }
             })
           ]
+        }
         default:
           return []
       }

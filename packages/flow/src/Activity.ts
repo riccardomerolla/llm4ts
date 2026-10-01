@@ -1,9 +1,10 @@
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import type { LlmError } from "@llm4ts/core/Errors"
-import type { LlmChunk } from "@llm4ts/core/Models"
-import { ToolUse, UsageProgress, type FlowEventsShape } from "./FlowEvents.ts"
+import { LlmChunk } from "@llm4ts/core/Models"
+import { Timed, ToolUse, UsageProgress, type FlowEventsShape } from "./FlowEvents.ts"
 
 /**
  * Live agent activity.
@@ -122,6 +123,62 @@ const nextCall: Effect.Effect<string> = Effect.sync(() => {
  * tool call it carries. Wrap a connector stream with this before `collect` so
  * the run reports what the agent is doing while it is doing it.
  */
+interface OpenTool {
+  readonly id: string | undefined
+  readonly tool: string
+  readonly at: number
+}
+
+const toolIdOf = (chunk: LlmChunk): string | undefined => {
+  const id = chunk.metadata.tool_id ?? chunk.metadata.toolId
+  return id === undefined || id.length === 0 ? undefined : id
+}
+
+/**
+ * The `Timed{kind:"tool"}` a tool's end closes (ADR 0023): the open call with
+ * the same id, or the oldest open one when the harness sends no ids. A
+ * harness that reports a tool only at its end (an older codex) gets its
+ * `ToolUse` published then, untimed, as before.
+ */
+const toolEnded = (
+  events: FlowEventsShape,
+  open: Ref.Ref<ReadonlyArray<OpenTool>>,
+  chunk: LlmChunk
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const id = toolIdOf(chunk)
+    const started = yield* Ref.modify(open, (calls) => {
+      const index = id === undefined ? 0 : calls.findIndex((call) => call.id === id)
+      const found = index < 0 ? undefined : calls[index]
+      return [
+        found,
+        found === undefined ? calls : [...calls.slice(0, index), ...calls.slice(index + 1)]
+      ] as const
+    })
+    if (started === undefined) {
+      const late = toolUseFrom(
+        LlmChunk.make({ delta: "", metadata: { ...chunk.metadata, event: "tool_use" } })
+      )
+      return late === undefined ? undefined : yield* events.publish(late)
+    }
+    const now = yield* Clock.currentTimeMillis
+    const failed = chunk.metadata.tool_failed === "true" || chunk.metadata.tool_status === "error"
+    yield* events.publish(
+      Timed.make({
+        kind: "tool",
+        label: started.tool,
+        ms: now - started.at,
+        ...(failed ? { failed: true } : {})
+      })
+    )
+  })
+
+/**
+ * Republishes the stream unchanged, publishing a `ToolUse` event for every
+ * tool call it carries, and a `Timed` one when the call ends. Wrap a
+ * connector stream with this before `collect` so the run reports what the
+ * agent is doing while it is doing it.
+ */
 export const withToolActivity = <R>(
   events: FlowEventsShape,
   stream: Stream.Stream<LlmChunk, LlmError, R>
@@ -130,22 +187,37 @@ export const withToolActivity = <R>(
   // display-only progress, so a long agent turn shows its tokens growing; a
   // call that reported any closes with `done` so the display drops it.
   Stream.unwrap(
-    Effect.map(Effect.all([nextCall, Ref.make(false)]), ([call, reported]) =>
-      Stream.tap(stream, (chunk) => {
-        const event = toolUseFrom(chunk)
-        const tool = event === undefined ? Effect.void : events.publish(event)
-        return chunk.usage === undefined
-          ? tool
-          : tool.pipe(
-              Effect.andThen(events.publish(UsageProgress.make({ call, usage: chunk.usage }))),
-              Effect.andThen(Ref.set(reported, true))
+    Effect.map(
+      Effect.all([nextCall, Ref.make(false), Ref.make<ReadonlyArray<OpenTool>>([])]),
+      ([call, reported, open]) =>
+        Stream.tap(stream, (chunk) => {
+          const event = toolUseFrom(chunk)
+          const tool =
+            event === undefined
+              ? chunk.metadata.event === "tool_result"
+                ? toolEnded(events, open, chunk)
+                : Effect.void
+              : Effect.andThen(
+                  events.publish(event),
+                  Effect.flatMap(Clock.currentTimeMillis, (at) =>
+                    Ref.update(open, (calls) => [
+                      ...calls,
+                      { id: toolIdOf(chunk), tool: event.tool, at }
+                    ])
+                  )
+                )
+          return chunk.usage === undefined
+            ? tool
+            : tool.pipe(
+                Effect.andThen(events.publish(UsageProgress.make({ call, usage: chunk.usage }))),
+                Effect.andThen(Ref.set(reported, true))
+              )
+        }).pipe(
+          Stream.ensuring(
+            Effect.flatMap(Ref.get(reported), (any) =>
+              any ? events.publish(UsageProgress.make({ call, done: true })) : Effect.void
             )
-      }).pipe(
-        Stream.ensuring(
-          Effect.flatMap(Ref.get(reported), (any) =>
-            any ? events.publish(UsageProgress.make({ call, done: true })) : Effect.void
           )
         )
-      )
     )
   )

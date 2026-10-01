@@ -30,6 +30,7 @@ import {
   isLoopDetectedMessage,
   jsonField,
   jsonIntField,
+  jsonNumberField,
   jsonObjectEntries,
   jsonStringField,
   jsonText,
@@ -74,7 +75,11 @@ export class GeminiStreamStats extends Schema.Class<GeminiStreamStats>("GeminiSt
   totalTokens: Schema.optionalKey(Schema.Int),
   inputTokens: Schema.optionalKey(Schema.Int),
   outputTokens: Schema.optionalKey(Schema.Int),
-  cached: Schema.optionalKey(Schema.Int)
+  cached: Schema.optionalKey(Schema.Int),
+  /** The CLI's own model API time across its models (`models.*.api.totalLatencyMs`). */
+  apiMs: Schema.optionalKey(Schema.Number),
+  /** The CLI's own tool time (`tools.totalDurationMs`). */
+  toolMs: Schema.optionalKey(Schema.Number)
 }) {}
 
 export class GeminiCliResult extends Schema.TaggedClass<GeminiCliResult>()("Result", {
@@ -483,6 +488,18 @@ export const parseGeminiStreamStats = (
   let total = 0
   let cached = 0
   let sawModelTokens = false
+  let apiMs: number | undefined
+  for (const [, metrics] of jsonObjectEntries(jsonField(stats, "models"))) {
+    const latency = jsonNumberField(jsonField(metrics, "api"), "totalLatencyMs")
+    if (latency !== undefined) {
+      apiMs = (apiMs ?? 0) + latency
+    }
+  }
+  const toolMs = jsonNumberField(jsonField(stats, "tools"), "totalDurationMs")
+  const timing = {
+    ...(apiMs === undefined ? {} : { apiMs }),
+    ...(toolMs === undefined ? {} : { toolMs })
+  }
   for (const [, metrics] of jsonObjectEntries(jsonField(stats, "models"))) {
     const tokens = jsonField(metrics, "tokens")
     if (tokens === undefined) {
@@ -502,7 +519,8 @@ export const parseGeminiStreamStats = (
       inputTokens: prompt,
       outputTokens: completion,
       totalTokens: total > 0 ? total : prompt + completion + cached,
-      ...(cached === 0 ? {} : { cached })
+      ...(cached === 0 ? {} : { cached }),
+      ...timing
     })
   }
 
@@ -516,7 +534,8 @@ export const parseGeminiStreamStats = (
     ...(flat.totalTokens === undefined ? {} : { totalTokens: flat.totalTokens }),
     ...(flat.inputTokens === undefined ? {} : { inputTokens: flat.inputTokens }),
     ...(flat.outputTokens === undefined ? {} : { outputTokens: flat.outputTokens }),
-    ...(flat.cached === undefined ? {} : { cached: flat.cached })
+    ...(flat.cached === undefined ? {} : { cached: flat.cached }),
+    ...timing
   })
 }
 
@@ -676,9 +695,24 @@ export const makeGeminiCliProvider = (
     Effect.catch(() => Effect.succeed(unhealthy))
   )
 
+  // `gemini --version` is a second Node start-up; it ran before every turn
+  // (llm4zio does the same). Once it has answered, it is not asked again for
+  // this provider; a failed check is retried on the next turn (ADR 0023,
+  // docs/parity.md).
+  let installed = false
+  const checkInstalledOnce: Effect.Effect<void, LlmError> = Effect.suspend(() =>
+    installed
+      ? Effect.void
+      : Effect.tap(executor.checkGeminiInstalled, () =>
+          Effect.sync(() => {
+            installed = true
+          })
+        )
+  )
+
   const executeStream = (prompt: string): Stream.Stream<LlmChunk, LlmError> =>
     Stream.concat(
-      Stream.fromEffect(executor.checkGeminiInstalled).pipe(Stream.drain),
+      Stream.fromEffect(checkInstalledOnce).pipe(Stream.drain),
       Stream.unwrap(
         Effect.map(
           Ref.make<Readonly<Record<string, string>>>({
@@ -777,10 +811,19 @@ export const makeGeminiCliProvider = (
                     return Stream.fromEffect(
                       Effect.map(Ref.get(metadata), (current) => {
                         const usage = geminiUsage(event.stats)
+                        // The CLI's own timing, for the seat timer (ADR 0023).
+                        const timing = {
+                          ...(event.stats?.apiMs === undefined
+                            ? {}
+                            : { api_ms: String(event.stats.apiMs) }),
+                          ...(event.stats?.toolMs === undefined
+                            ? {}
+                            : { tools_ms: String(event.stats.toolMs) })
+                        }
                         return LlmChunk.make({
                           delta: "",
                           finishReason: "stop",
-                          metadata: current,
+                          metadata: { ...current, ...timing },
                           ...(usage === undefined ? {} : { usage })
                         })
                       })

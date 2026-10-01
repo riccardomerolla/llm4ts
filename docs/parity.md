@@ -523,3 +523,13 @@ reference release.
   the feature-level `convert-feature` flow with its multi-spec contract
   union (ADR 0012 addendum). llm4zio has no refinement phase between
   extract and seed. Additive; back-porting is out of scope.
+- Gemini CLI install check once per provider (2026-10-01): llm4zio runs
+  `gemini --version` before every streamed turn; llm4ts runs it until it
+  first succeeds and then trusts it for that provider. On a slow server
+  each check was a second Node start-up per turn. A failed check is still
+  retried on the next turn, so a missing CLI fails the same way.
+- Run timing beyond the pinned source (2026-10-01): the `Timed` flow event
+  (model calls, tools, gates, merges, waits), tool-end chunks from the
+  claude, codex, pi and gemini parsers, the Gemini CLI's own API and tool
+  time on its final usage chunk, and `llm4ts profile`. Additive; llm4zio
+  records no durations.

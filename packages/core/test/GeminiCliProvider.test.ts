@@ -134,10 +134,63 @@ describe("Gemini CLI session stats", () => {
         inputTokens: 900,
         outputTokens: 500,
         totalTokens: 1500,
-        cached: 100
+        cached: 100,
+        apiMs: 4200
       })
     )
   })
+
+  it.effect("checks the CLI is installed once, not before every turn", () =>
+    Effect.gen(function* () {
+      let checks = 0
+      const counting: GeminiCliExecutorShape = {
+        ...executor([GeminiCliMessage.make({ role: "assistant", content: "ok", delta: true })]),
+        checkGeminiInstalled: Effect.sync(() => {
+          checks += 1
+        })
+      }
+      const provider = makeGeminiCliProvider(config, counting)
+      yield* collect(provider.executeStream("one"))
+      yield* collect(provider.executeStream("two"))
+      yield* collect(
+        provider.executeStreamWithHistory([Message.make({ role: "User", content: "three" })])
+      )
+      assert.strictEqual(checks, 1)
+    })
+  )
+
+  it.effect("passes the CLI's own API and tool time on with the final usage", () =>
+    Effect.gen(function* () {
+      const provider = makeGeminiCliProvider(
+        config,
+        executor([
+          GeminiCliMessage.make({ role: "assistant", content: "done", delta: true }),
+          parseGeminiCliStreamEvent(
+            JSON.stringify({
+              type: "result",
+              status: "success",
+              stats: {
+                models: {
+                  "gemini-2.5-pro": {
+                    api: { totalLatencyMs: 4200 },
+                    tokens: { input: 10, candidates: 5, total: 15 }
+                  },
+                  "gemini-2.5-flash": {
+                    api: { totalLatencyMs: 800 },
+                    tokens: { input: 1, candidates: 1, total: 2 }
+                  }
+                },
+                tools: { totalCalls: 2, totalDurationMs: 61000 }
+              }
+            })
+          )
+        ])
+      )
+      const chunks = yield* Stream.runCollect(provider.executeStream("hello"))
+      const last = [...chunks].at(-1)
+      assert.deepStrictEqual([last?.metadata.api_ms, last?.metadata.tools_ms], ["5000", "61000"])
+    })
+  )
 
   it("sums every model a run touched and derives a missing input count", () => {
     assert.deepStrictEqual(

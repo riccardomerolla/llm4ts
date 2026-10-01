@@ -68,13 +68,34 @@ export const sortedFlagArgs = (flags: Readonly<Record<string, string>>): Readonl
 export const optionalModelArgs = (model: string | undefined): ReadonlyArray<string> =>
   model === undefined ? [] : ["--model", model]
 
-export const toolEventChunk = (name: string, input: JsonValue | undefined): LlmChunk =>
+export const toolEventChunk = (name: string, input: JsonValue | undefined, id?: string): LlmChunk =>
   LlmChunk.make({
     delta: "",
     metadata: {
       event: "tool_use",
       tool_name: name,
-      tool_input: input === undefined ? "{}" : jsonText(input)
+      tool_input: input === undefined ? "{}" : jsonText(input),
+      ...(id === undefined || id.length === 0 ? {} : { tool_id: id })
+    }
+  })
+
+/**
+ * The end of a tool call (ADR 0023): `id` pairs it with its `toolEventChunk`;
+ * without one, the oldest open call is meant. `tool` and `input` are for a
+ * harness that only reports a tool once it is done, so it still shows.
+ */
+export const toolResultChunk = (
+  id: string | undefined,
+  options: { readonly failed?: boolean; readonly tool?: string; readonly input?: JsonValue } = {}
+): LlmChunk =>
+  LlmChunk.make({
+    delta: "",
+    metadata: {
+      event: "tool_result",
+      ...(id === undefined || id.length === 0 ? {} : { tool_id: id }),
+      ...(options.failed === true ? { tool_failed: "true" } : {}),
+      ...(options.tool === undefined ? {} : { tool_name: options.tool }),
+      ...(options.input === undefined ? {} : { tool_input: jsonText(options.input) })
     }
   })
 

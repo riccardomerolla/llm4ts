@@ -27,6 +27,7 @@ import {
   parseJsonLine,
   sortedFlagArgs,
   toolEventChunk,
+  toolResultChunk,
   usageEventChunk
 } from "./CliSupport.ts"
 
@@ -86,12 +87,28 @@ export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> 
             }
             case "tool_use":
               return [
-                toolEventChunk(jsonStringField(block, "name") ?? "", jsonField(block, "input"))
+                toolEventChunk(
+                  jsonStringField(block, "name") ?? "",
+                  jsonField(block, "input"),
+                  jsonStringField(block, "id")
+                )
               ]
             default:
               return []
           }
         }
+      )
+    // The CLI hands a tool's result back as a user message: the tool's end.
+    case "user":
+      return jsonArray(jsonField(jsonField(json, "message"), "content")).flatMap(
+        (block): ReadonlyArray<LlmChunk> =>
+          jsonStringField(block, "type") === "tool_result"
+            ? [
+                toolResultChunk(jsonStringField(block, "tool_use_id"), {
+                  failed: jsonField(block, "is_error") === true
+                })
+              ]
+            : []
       )
     case "result": {
       const usage = jsonField(json, "usage")
