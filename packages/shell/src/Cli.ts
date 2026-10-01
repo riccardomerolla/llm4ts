@@ -30,6 +30,7 @@ import {
   type WatchOptions
 } from "@llm4ts/runner/Watch"
 import { makeProfileProgram, type ProfileOptions } from "@llm4ts/runner/Profile"
+import { idleAfterFrom } from "@llm4ts/runner/AgentTree"
 import { describeExclusion } from "@llm4ts/flow/Roster"
 import { builtinKitsDir, discoverKits, kitTierPaths, type DiscoveredKit } from "@llm4ts/runner/Kits"
 import {
@@ -543,7 +544,10 @@ const watchCommand = Command.make(
   (config) =>
     Effect.gen(function* () {
       const options = yield* watchOptionsFrom(config)
-      yield* makeWatchProgram(options, nodeWatchDependencies())
+      yield* makeWatchProgram(
+        { ...options, idleAfterMs: idleAfterFrom(process.env) },
+        nodeWatchDependencies()
+      )
     })
 ).pipe(
   Command.withDescription(

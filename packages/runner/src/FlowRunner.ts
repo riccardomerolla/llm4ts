@@ -59,6 +59,7 @@ import {
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
 import { timedSeat } from "@llm4ts/flow/Timing"
+import { idleAfterFrom } from "./AgentTree.ts"
 import { makeAgentTreeHost, nodeTreeKeys } from "./AgentTreeSurface.ts"
 import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog"
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
@@ -455,7 +456,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     laneEvents: FlowEventsShape = events
   ): FlowContextShape =>
     FlowContext.of({
-      // Every call is timed on the lane's events (ADR 0023), under its role.
+      // Every call is timed on the lane's events, under its role.
       reasoning: timedSeat(seats.reasoning, laneEvents, "reasoning"),
       coder: { ...seats.coder, ...timedSeat(seats.coder, laneEvents, "coder") },
       judgment: seats.judgment,
@@ -771,7 +772,8 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
             rows: () => process.stdout.rows,
             colour: true
           },
-          nodeTreeKeys("interrupt")
+          nodeTreeKeys("interrupt"),
+          idleAfterFrom(environment)
         )
       : undefined
   const surface = tree?.surface ?? classic

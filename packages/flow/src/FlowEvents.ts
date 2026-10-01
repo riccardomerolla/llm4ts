@@ -182,7 +182,7 @@ export class BlackboardRun extends Schema.TaggedClass<BlackboardRun>()("Blackboa
 }) {}
 
 /**
- * How long something took (ADR 0023), published when it ends: a model call,
+ * How long something took, published when it ends: a model call,
  * a coder's tool, a gate command, git or a merge, a wait, a process start.
  * `llm4ts profile` and the agent tree add these up; nothing else depends on
  * them, and none carries content — only names, numbers and an exit code.

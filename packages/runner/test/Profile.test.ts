@@ -147,7 +147,10 @@ describe("profileOf", () => {
       at(0, StageStarted.make({ stage: "story plan" })),
       at(0.2, StageCompleted.make({ stage: "story plan" })),
       at(0.5, StageStarted.make({ stage: "story done-before", lane: "done-before" })),
-      at(0.5, Info.make({ message: "story done-before: already merged; skipping", lane: "done-before" })),
+      at(
+        0.5,
+        Info.make({ message: "story done-before: already merged; skipping", lane: "done-before" })
+      ),
       at(0.5, StageCompleted.make({ stage: "story done-before", lane: "done-before" })),
       at(0, StageStarted.make({ stage: "story home", lane: "home" })),
       at(100, tokens("home", 1_000)),

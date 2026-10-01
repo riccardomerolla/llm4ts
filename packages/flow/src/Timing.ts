@@ -8,7 +8,7 @@ import type { LlmChunk } from "@llm4ts/core/Models"
 import { Timed, type FlowEventsShape } from "./FlowEvents.ts"
 
 /**
- * Where a run's time goes (ADR 0023). `timedSeat` decorates a seat so every
+ * Where a run's time goes. `timedSeat` decorates a seat so every
  * call publishes a `Timed{kind:"model"}` when it ends — its wall time, when
  * its first output came, and the API and tool time the backend reported, if
  * it did. The events carry the seat's role, never the prompt or the reply.

@@ -13,6 +13,7 @@ import {
   JudgmentObserved,
   StoryJudged,
   StageStarted,
+  Timed,
   TokensUsed,
   ToolUse,
   type FlowEvent
@@ -22,6 +23,7 @@ import { origins, truth, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import {
   emptyTree,
+  idleAfterFrom,
   initialView,
   onTreeKey,
   reduceTree,
@@ -201,7 +203,7 @@ describe("agent tree", () => {
       )
     ])
     const text = frame(state).join("\n")
-    assert.include(text, "│ bash pnpm test")
+    assert.include(text, "│ 2s · bash pnpm test")
     assert.include(text, "│ 3s · 1.1M tok · ~$4.50")
     assert.include(text, "tokens [1.1M]  cost [~$4.50]")
   })
@@ -448,5 +450,51 @@ describe("agent tree", () => {
       text,
       "│ 00:00:01  roster           codex out of the round for this run: not logged in"
     )
+  })
+
+  it("shows what a lane is doing and for how long, and marks it idle when nothing happens", () => {
+    const tick = (seconds: number): TreeInput => ({ _tag: "Tick", at: t0 + seconds * 1_000 })
+    const start = fold(
+      [
+        at(0, StageStarted.make({ stage: "story home", lane: "home", executor: "gemini" })),
+        at(10, ToolUse.make({ tool: "bash", args: "pnpm test", lane: "home" }))
+      ],
+      emptyTree({ idleAfterMs: 120_000 })
+    )
+    const running = frame(fold([tick(10 + 4 * 60 + 12)], start)).join("\n")
+    assert.include(running, "│ 4m12s · bash pnpm test")
+    assert.notInclude(running, "idle")
+
+    const after = fold(
+      [
+        at(300, Timed.make({ kind: "tool", label: "bash", ms: 290_000, lane: "home" })),
+        tick(300 + 6 * 60)
+      ],
+      start
+    )
+    const idle = frame(after).join("\n")
+    assert.include(idle, "│ ⏸ idle 6m00s")
+    assert.include(idle, "│ 6m00s · thinking")
+  })
+
+  it("adds up a lane's turns and gates, and splits the run's timed work", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "story home", lane: "home", executor: "gemini" })),
+      at(100, Timed.make({ kind: "model", label: "coder", ms: 90_000, lane: "home" })),
+      at(300, Timed.make({ kind: "model", label: "coder", ms: 110_000, lane: "home" })),
+      at(600, Timed.make({ kind: "gate", label: "pnpm test", ms: 300_000, lane: "home" })),
+      at(700, Timed.make({ kind: "wait", label: "merge lock", ms: 100_000, lane: "home" }))
+    ])
+    const text = frame(state).join("\n")
+    assert.include(text, "│ turns 2 · avg 1m40s · gates 5m00s")
+    assert.include(text, "time [model 33% · tools 0% · gates 50% · wait 17%]")
+  })
+
+  it("reads the idle threshold from LLM4TS_IDLE_AFTER", () => {
+    assert.strictEqual(idleAfterFrom({}), 120_000)
+    assert.strictEqual(idleAfterFrom({ LLM4TS_IDLE_AFTER: "5m" }), 300_000)
+    assert.strictEqual(idleAfterFrom({ LLM4TS_IDLE_AFTER: "90s" }), 90_000)
+    assert.strictEqual(idleAfterFrom({ LLM4TS_IDLE_AFTER: "1h" }), 3_600_000)
+    assert.strictEqual(idleAfterFrom({ LLM4TS_IDLE_AFTER: "soon" }), 120_000)
   })
 })

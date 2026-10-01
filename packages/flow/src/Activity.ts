@@ -135,7 +135,7 @@ const toolIdOf = (chunk: LlmChunk): string | undefined => {
 }
 
 /**
- * The `Timed{kind:"tool"}` a tool's end closes (ADR 0023): the open call with
+ * The `Timed{kind:"tool"}` a tool's end closes: the open call with
  * the same id, or the oldest open one when the harness sends no ids. A
  * harness that reports a tool only at its end (an older codex) gets its
  * `ToolUse` published then, untimed, as before.

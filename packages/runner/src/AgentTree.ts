@@ -20,6 +20,8 @@ import { formatCount } from "./Terminal.ts"
 export type TreeInput =
   | { readonly _tag: "Event"; readonly at: number; readonly event: FlowEvent }
   | { readonly _tag: "RunEnded"; readonly at: number; readonly outcome: string }
+  /** The clock moved: a live view's timers run between events. */
+  | { readonly _tag: "Tick"; readonly at: number }
 
 export type LaneStatus = "running" | "done" | "failed"
 
@@ -35,6 +37,24 @@ export interface TreeLane {
   readonly tools: ReadonlyArray<string>
   readonly tokens: number
   readonly costUsd: number
+  /** When the lane last published anything: a lane quiet for too long is idle. */
+  readonly lastEventAt: number
+  /** What the lane is doing now and since when: a tool, or thinking after one. */
+  readonly activity:
+    | { readonly text: string; readonly since: number; readonly tool: boolean }
+    | undefined
+  /** Its coder turns' durations, and its gates' total (`Timed`). */
+  readonly turns: ReadonlyArray<number>
+  readonly gatesMs: number
+}
+
+/** The run's timed work by kind, for the status line's split. */
+export interface TreeTimeSplit {
+  readonly model: number
+  readonly tools: number
+  readonly gates: number
+  readonly merge: number
+  readonly wait: number
 }
 
 export type LogSource = "lane" | "run" | "roster" | "judge"
@@ -112,6 +132,9 @@ export interface TreeState {
   readonly costUsd: number
   /** The run's outcome once its trace says it ended; a live run has none. */
   readonly ended: string | undefined
+  readonly time: TreeTimeSplit
+  /** A lane with no event for this long, and no tool running, is marked idle. */
+  readonly idleAfterMs: number
 }
 
 export interface TreeOptions {
@@ -119,6 +142,22 @@ export interface TreeOptions {
   /** What the run set out to do ("run plan", "round 2"), when the caller knows. */
   readonly action?: string
   readonly stories?: ReadonlyArray<TreeStory>
+  /** Default two minutes (`LLM4TS_IDLE_AFTER`). */
+  readonly idleAfterMs?: number
+}
+
+export const defaultIdleAfterMs = 120_000
+
+/** `LLM4TS_IDLE_AFTER`: `90s`, `5m`, `1h` (a bare number is seconds); two minutes otherwise. */
+export const idleAfterFrom = (
+  environment: Readonly<Record<string, string | undefined>>
+): number => {
+  const match = /^(\d+)\s*(s|m|h)?$/u.exec(environment.LLM4TS_IDLE_AFTER?.trim() ?? "")
+  if (match === null) {
+    return defaultIdleAfterMs
+  }
+  const unit = match[2] === "h" ? 3_600_000 : match[2] === "m" ? 60_000 : 1_000
+  return Number(match[1]) * unit
 }
 
 export const emptyTree = (options: TreeOptions = {}): TreeState => ({
@@ -138,7 +177,9 @@ export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   log: [],
   tokens: 0,
   costUsd: 0,
-  ended: undefined
+  ended: undefined,
+  time: { model: 0, tools: 0, gates: 0, merge: 0, wait: 0 },
+  idleAfterMs: options.idleAfterMs ?? defaultIdleAfterMs
 })
 
 const costOf = (model: string | undefined, usage: TokenUsage): number =>
@@ -224,9 +265,13 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
       ? state
       : { ...state, executors: [...state.executors, executor] }
   const current =
-    lane !== undefined && executor !== undefined && lane.executor !== executor
-      ? updateLane(named, lane.id, (open) => ({ ...open, executor }))
-      : named
+    lane === undefined
+      ? named
+      : updateLane(named, lane.id, (open) => ({
+          ...open,
+          lastEventAt: at,
+          ...(executor !== undefined && open.executor !== executor ? { executor } : {})
+        }))
   switch (event._tag) {
     case "StageStarted": {
       const story = storyStage.exec(event.stage)?.[1]
@@ -240,7 +285,11 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           lastTool: undefined,
           tools: [],
           tokens: 0,
-          costUsd: 0
+          costUsd: 0,
+          lastEventAt: at,
+          activity: undefined,
+          turns: [],
+          gatesMs: 0
         }
         return {
           ...current,
@@ -298,6 +347,31 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
             what: event.message.slice(prefix.length)
           })
         : current
+    }
+    case "Timed": {
+      const time = current.time
+      const split: TreeTimeSplit = {
+        model:
+          time.model +
+          (event.kind === "model" ? event.ms : 0) -
+          (event.kind === "tool" ? event.ms : 0),
+        tools: time.tools + (event.kind === "tool" ? event.ms : 0),
+        gates: time.gates + (event.kind === "gate" ? event.ms : 0),
+        merge: time.merge + (event.kind === "merge" || event.kind === "git" ? event.ms : 0),
+        wait: time.wait + (event.kind === "wait" ? event.ms : 0)
+      }
+      const counted = { ...current, time: split }
+      return lane === undefined
+        ? counted
+        : updateLane(counted, lane.id, (open) => ({
+            ...open,
+            ...(event.kind === "tool"
+              ? { activity: { text: "thinking", since: at, tool: false } }
+              : event.kind === "model" && event.label === "coder"
+                ? { activity: undefined, turns: [...open.turns, event.ms] }
+                : {}),
+            gatesMs: open.gatesMs + (event.kind === "gate" ? event.ms : 0)
+          }))
     }
     case "StoryJudged": {
       const verdict: TreeVerdict = {
@@ -377,6 +451,7 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         ? current
         : updateLane(current, lane.id, (open) => ({
             ...open,
+            activity: { text: `${event.tool} ${event.args}`, since: at, tool: true },
             lastTool: `${event.tool} ${event.args}`,
             tools: [...open.tools, `${event.tool} ${event.args}`].slice(-expandedTools)
           }))
@@ -412,6 +487,8 @@ export const reduceTree = (state: TreeState, input: TreeInput): TreeState => {
       return reduceEvent(timed, input.at, input.event)
     case "RunEnded":
       return { ...timed, ended: input.outcome }
+    case "Tick":
+      return timed
   }
 }
 
@@ -558,7 +635,7 @@ const logOf = (state: TreeState, count: number): Array<Line> => {
 const dollars = (usd: number): string => `~$${usd.toFixed(2)}`
 
 const elapsed = (from: number | undefined, to: number | undefined): string => {
-  const seconds = Math.max(0, Math.round(((to ?? 0) - (from ?? to ?? 0)) / 1_000))
+  const seconds = Math.max(0, Math.floor(((to ?? 0) - (from ?? to ?? 0)) / 1_000))
   return seconds < 60
     ? `${seconds}s`
     : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`
@@ -674,20 +751,45 @@ const laneBox = (
   lane: TreeLane,
   width: number,
   now: number | undefined,
-  selected: boolean
+  selected: boolean,
+  idleAfterMs: number
 ): Array<Line> =>
   box(width, "running", [
     [span(selected ? `▸ ${lane.id}` : lane.id, "bold")],
     [span(lane.executor ?? "(leasing)")],
     [span(lane.stages.at(-1) ?? "starting")],
-    [span(lane.lastTool ?? "", "dim")],
+    lane.activity === undefined
+      ? [span(lane.lastTool ?? "", "dim")]
+      : // The duration first: a long command is cut at the box edge, never the timer.
+        [span(`${elapsed(lane.activity.since, now)} · `), span(lane.activity.text, "dim")],
     [
       span(
         `${elapsed(lane.startedAt, now)} · ${formatCount(lane.tokens)} tok${lane.costUsd > 0 ? ` · ${dollars(lane.costUsd)}` : ""}`
       )
     ],
-    [span("◐ running", "running")]
+    ...(lane.turns.length === 0 && lane.gatesMs === 0
+      ? []
+      : [
+          [
+            span(
+              `turns ${lane.turns.length} · avg ${elapsedMs(
+                lane.turns.length === 0
+                  ? 0
+                  : lane.turns.reduce((total, turn) => total + turn, 0) / lane.turns.length
+              )} · gates ${elapsedMs(lane.gatesMs)}`
+            )
+          ]
+        ]),
+    isIdle(lane, now, idleAfterMs)
+      ? [span(`⏸ idle ${elapsed(lane.lastEventAt, now)}`, "judge")]
+      : [span("◐ running", "running")]
   ])
+
+/** No event for `idleAfterMs` and no tool running: possibly stuck. */
+const isIdle = (lane: TreeLane, now: number | undefined, idleAfterMs: number): boolean =>
+  now !== undefined && lane.activity?.tool !== true && now - lane.lastEventAt >= idleAfterMs
+
+const elapsedMs = (ms: number): string => elapsed(0, ms)
 
 type ChipStatus = "planned" | "running" | "waiting" | "done" | "failed"
 
@@ -869,7 +971,7 @@ const mainOf = (state: TreeState, width: number, view: TreeView): Array<Line> =>
         : shown.length === 0
           ? [centre([span("no stories in flight", "dim")], width)]
           : columnsOf(shown, width, (lane, each) =>
-              laneBox(lane, each, state.now, lane.id === view.selected)
+              laneBox(lane, each, state.now, lane.id === view.selected, state.idleAfterMs)
             )
   return [
     ...orchestrator.map((line) => centre(line, width)),
@@ -880,6 +982,29 @@ const mainOf = (state: TreeState, width: number, view: TreeView): Array<Line> =>
     ...lanes,
     [],
     ...wrapChips(chipsOf(state).map(chipOf), width)
+  ]
+}
+
+/** `time [model 62% · tools 5% · gates 24% · wait 9%]`, once anything was timed. */
+const timeSplitOf = (time: TreeTimeSplit): Array<Line> => {
+  const total = time.model + time.tools + time.gates + time.merge + time.wait
+  if (total <= 0) {
+    return []
+  }
+  const part = (name: string, ms: number) =>
+    `${name} ${Math.round((Math.max(0, ms) / total) * 100)}%`
+  return [
+    [
+      span(
+        `time [${[
+          part("model", time.model),
+          part("tools", time.tools),
+          part("gates", time.gates),
+          ...(time.merge > 0 ? [part("merge", time.merge)] : []),
+          part("wait", time.wait)
+        ].join(" · ")}]`
+      )
+    ]
   ]
 }
 
@@ -911,6 +1036,7 @@ const frameOf = (
         `stories [${count("done")}/${chips.length} done · ${count("running")} running · ${count("failed")} failed · ${count("waiting")} waiting]  roster [${busy}/${state.executors.length} busy]`
       )
     ],
+    ...timeSplitOf(state.time),
     [
       span(`tokens [${formatCount(state.tokens)}]  cost [${dollars(state.costUsd)}]  run [`),
       state.ended === undefined ? span("live", "running") : span(state.ended, "bold"),

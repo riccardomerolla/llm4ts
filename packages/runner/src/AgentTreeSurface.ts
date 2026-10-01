@@ -97,9 +97,10 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
   hub: FlowEventHub,
   classic: TerminalSurface,
   output: AgentTreeOutput,
-  keys: Stream.Stream<string>
+  keys: Stream.Stream<string>,
+  idleAfterMs?: number
 ): Effect.fn.Return<AgentTreeHost, never, Scope.Scope> {
-  const state = yield* Ref.make(emptyTree())
+  const state = yield* Ref.make(emptyTree(idleAfterMs === undefined ? {} : { idleAfterMs }))
   const view = yield* Ref.make<TreeView>(initialView)
   const active = yield* Ref.make(true)
   const consumed = yield* Ref.make(0)
@@ -128,6 +129,9 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
   const frame = Effect.map(render(undefined), (lines) => lines.join("\n"))
   const painter = yield* makeScreenPainter
   const repaint = Effect.gen(function* () {
+    // The clock moves between events: lane timers and the idle marker run.
+    const now = yield* Clock.currentTimeMillis
+    yield* Ref.update(state, (current) => reduceTree(current, { _tag: "Tick", at: now }))
     const rows = output.rows()
     const text = yield* painter.paint(yield* render(rows), `${output.columns()}x${rows}`)
     if (text.length > 0) {

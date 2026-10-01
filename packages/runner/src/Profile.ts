@@ -13,7 +13,7 @@ import {
 } from "./Watch.ts"
 
 /**
- * `llm4ts profile` (ADR 0023): where a run's time went. A pure fold over the
+ * `llm4ts profile`: where a run's time went. A pure fold over the
  * same inputs as the agent tree: per story, its wall time split into model,
  * the coder's tools, gates, merge and waiting, the rest left as unaccounted;
  * per role and executor the model calls, per command the gates; and the

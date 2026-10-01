@@ -276,7 +276,7 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
       )
     )
   )
-  // The command as configured and its exit code: never its output (ADR 0023).
+  // The command as configured and its exit code: never its output.
   yield* events.publish(
     Timed.make({
       kind: "gate",

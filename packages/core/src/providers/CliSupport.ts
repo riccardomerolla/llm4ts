@@ -80,7 +80,7 @@ export const toolEventChunk = (name: string, input: JsonValue | undefined, id?: 
   })
 
 /**
- * The end of a tool call (ADR 0023): `id` pairs it with its `toolEventChunk`;
+ * The end of a tool call: `id` pairs it with its `toolEventChunk`;
  * without one, the oldest open call is meant. `tool` and `input` are for a
  * harness that only reports a tool once it is done, so it still shows.
  */

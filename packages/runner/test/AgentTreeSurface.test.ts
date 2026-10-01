@@ -65,9 +65,15 @@ describe("agent tree host", () => {
         )
         yield* TestClock.adjust("150 millis")
         const first = yield* Ref.get(written)
-        // A second of ticks with nothing new sends nothing.
-        yield* TestClock.adjust("1 second")
+        // Ticks within the same second send nothing; the next second repaints
+        // only the rows whose timers moved.
+        yield* TestClock.adjust("500 millis")
         assert.strictEqual(yield* Ref.get(written), first)
+        yield* TestClock.adjust("1 second")
+        const timers = (yield* Ref.get(written)).slice(first.length)
+        assert.include(timers, "1s")
+        assert.notInclude(timers, "\u001b[2J")
+        assert.notInclude(timers, "LLM4TS AGENT TREE")
         yield* hub.publish(
           StageStarted.make({ stage: "story iban", lane: "iban", executor: "claude" })
         )

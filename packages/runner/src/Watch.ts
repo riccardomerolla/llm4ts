@@ -1,5 +1,6 @@
 import { readdirSync, existsSync, statSync } from "node:fs"
 import { join } from "node:path"
+import * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
@@ -42,6 +43,8 @@ export interface WatchOptions {
   readonly replay?: boolean
   /** Replay speed-up (default 10). */
   readonly speed?: number
+  /** A live lane with no event for this long is marked idle (`LLM4TS_IDLE_AFTER`). */
+  readonly idleAfterMs?: number
 }
 
 export interface WatchOutput {
@@ -149,12 +152,14 @@ const actionWords = (run: EpicRun | undefined): string | undefined => {
 /** The tree before any event: the epic's board, when the trace belongs to one. */
 const startingTree = (
   target: WatchTarget,
-  files: PlainFileStoreShape
+  files: PlainFileStoreShape,
+  idleAfterMs: number | undefined
 ): Effect.Effect<TreeState, FlowError> =>
   Effect.gen(function* () {
     const action = actionWords(target.run)
+    const idle = idleAfterMs === undefined ? {} : { idleAfterMs }
     if (target.epicDir === undefined) {
-      return emptyTree(action === undefined ? {} : { action })
+      return emptyTree({ ...idle, ...(action === undefined ? {} : { action }) })
     }
     const boardDir =
       target.run?.round === undefined
@@ -165,6 +170,7 @@ const startingTree = (
     return emptyTree({
       title: board === undefined ? `epic ${epicId}` : board.title.replace(/^Epic:\s*/u, "epic "),
       stories: (board?.items ?? []).map((item) => ({ id: item.id, status: item.status })),
+      ...idle,
       ...(action === undefined ? {} : { action })
     })
   })
@@ -200,7 +206,9 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
   const target = yield* resolveTraceTarget(options, dependencies)
   const { files, output } = dependencies
   const fold = (inputs: ReadonlyArray<TreeInput>): Effect.Effect<TreeState, FlowError> =>
-    Effect.map(startingTree(target, files), (start) => inputs.reduce(reduceTree, start))
+    Effect.map(startingTree(target, files, options.idleAfterMs), (start) =>
+      inputs.reduce(reduceTree, start)
+    )
 
   if (!output.interactive) {
     const state = yield* Effect.flatMap(readInputs(target, files), fold)
@@ -248,7 +256,13 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
         while (true) {
           const current = yield* Ref.get(inputs)
           const count = yield* Ref.get(shown)
-          const state = yield* fold(current.slice(0, count))
+          const folded = yield* fold(current.slice(0, count))
+          // Following a live run, the clock moves between events; a replay
+          // and a finished run keep the trace's own time.
+          const state =
+            options.replay !== true && folded.ended === undefined
+              ? reduceTree(folded, { _tag: "Tick", at: yield* Clock.currentTimeMillis })
+              : folded
           const text = yield* painter.paint(
             screenLines(state, yield* Ref.get(view), output),
             `${output.columns()}x${output.rows()}`

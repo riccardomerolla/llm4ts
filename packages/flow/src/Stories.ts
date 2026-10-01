@@ -484,7 +484,7 @@ export interface StoriesOptions {
   /** The target's gates, run in a worktree per task and on the epic checkout after each merge. */
   /**
    * The target's gates in a directory. `events` is the story's lane, so a
-   * gate's timing names its story (ADR 0023); a gate may ignore it.
+   * gate's timing names its story; a gate may ignore it.
    */
   readonly gates: (
     workDir: string,

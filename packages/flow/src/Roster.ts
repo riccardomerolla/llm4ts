@@ -712,7 +712,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
       const avoid = leaseOptions.avoid ?? []
       let announced = false
       const asked = yield* Clock.currentTimeMillis
-      // A lease that had to wait says how long, for the story it is for (ADR 0023).
+      // A lease that had to wait says how long, for the story it is for.
       const waited: Effect.Effect<void> = Effect.flatMap(Clock.currentTimeMillis, (now) =>
         announced
           ? events.publish(

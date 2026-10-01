@@ -19,7 +19,7 @@
                             │ payments                   │  │ overview                   │
                             │ pi-lmstudio                │  │ codex                      │
                             │ Payments fake routes       │  │ story overview: setup      │
-                            │ bash pnpm typecheck && pn… │  │ read src/features/conto/p… │
+                            │ 0s · bash pnpm typecheck … │  │ 10s · read src/features/c… │
                             │ 7m06s · 92.5k tok          │  │ 29s · 0 tok                │
                             │ ◐ running                  │  │ ◐ running                  │
                             └────────────────────────────┘  └────────────────────────────┘

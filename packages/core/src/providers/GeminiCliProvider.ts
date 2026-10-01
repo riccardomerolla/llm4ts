@@ -697,8 +697,7 @@ export const makeGeminiCliProvider = (
 
   // `gemini --version` is a second Node start-up; it ran before every turn
   // (llm4zio does the same). Once it has answered, it is not asked again for
-  // this provider; a failed check is retried on the next turn (ADR 0023,
-  // docs/parity.md).
+  // this provider; a failed check is retried on the next turn (docs/parity.md).
   let installed = false
   const checkInstalledOnce: Effect.Effect<void, LlmError> = Effect.suspend(() =>
     installed
@@ -811,7 +810,7 @@ export const makeGeminiCliProvider = (
                     return Stream.fromEffect(
                       Effect.map(Ref.get(metadata), (current) => {
                         const usage = geminiUsage(event.stats)
-                        // The CLI's own timing, for the seat timer (ADR 0023).
+                        // The CLI's own timing, for the seat timer.
                         const timing = {
                           ...(event.stats?.apiMs === undefined
                             ? {}
