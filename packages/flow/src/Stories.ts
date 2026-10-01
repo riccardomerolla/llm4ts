@@ -53,10 +53,10 @@ import {
   saveVersioned,
   type PlainFileStoreShape
 } from "./Persistence.ts"
-import { Plan } from "./Plan.ts"
+import { Plan, Task } from "./Plan.ts"
 import { stage } from "./PlanExecution.ts"
 import { planFrom } from "./Planner.ts"
-import { ReviewResult } from "./Review.ts"
+import { ReviewIssue, ReviewResult } from "./Review.ts"
 import type { Reviewer } from "./Reviewer.ts"
 import {
   dependentsOf,
@@ -494,9 +494,18 @@ export interface StoriesOptions {
   readonly judge?: (
     story: Story,
     diff: string,
-    seats: StorySeats
+    seats: StorySeats,
+    /**
+     * `diff`: the branch's changes against the epic. `code`: the branch has
+     * none, so this is the current code of the story's owned paths, to judge
+     * whether the story is already in place.
+     */
+    subject?: "diff" | "code"
   ) => Effect.Effect<ReviewResult, FlowError>
-  /** Judge attempts, each but the last followed by one coder feedback round. Default 2. */
+  /**
+   * Judge attempts, each but the last followed by a revision task on the
+   * story's plan (coder, review, gates, commit). Default 2: one revision.
+   */
   readonly judgeRounds?: number
   /** Extra system context per story (house rules, shared read-only excerpts). */
   readonly system?: (story: Story) => Effect.Effect<string, FlowError>
@@ -586,6 +595,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const judgeRounds = Math.max(1, options.judgeRounds ?? 2)
   const statePath = (story: Story): string => join(options.stateDir, `stories/${story.id}.json`)
   const planPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.plan.md`)
+  /** Git's empty tree: a diff against it is a path's whole current content. */
+  const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+  const revisionTitle = /^Revision \d+: /u
 
   /**
    * The epic checkout must hold nothing uncommitted: every merge and epic
@@ -782,6 +794,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   ): Effect.fn.Return<
     {
       readonly judge: string | undefined
+      /** Its branch had no changes and the judge found its code already on the epic. */
+      readonly inPlace: boolean
       readonly totals: TokenUsage | undefined
       readonly executor: string | undefined
     },
@@ -1009,17 +1023,62 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     yield* catchUp(story, git)
     yield* repairPerimeter
 
+    // A judge finding becomes a revision task on the story's own plan, run by
+    // the task loop like any other: coder, review, gates, commit.
+    const addRevision = (verdict: ReviewResult, empty: boolean): Effect.Effect<void, FlowError> =>
+      Effect.gen(function* () {
+        const store = makePlanStore(files)
+        const current = yield* store.load(planPath(story))
+        if (current === undefined) {
+          return
+        }
+        const number = current.tasks.filter((task) => revisionTitle.test(task.title)).length + 1
+        yield* store.save(
+          planPath(story),
+          Plan.make({
+            ...current,
+            tasks: [
+              ...current.tasks,
+              Task.make({
+                title: `Revision ${number}: close the judge's findings`,
+                description: [
+                  empty
+                    ? `The story "${story.title}" has no changes yet, and what it must provide is not all in place on the epic branch.`
+                    : `The story "${story.title}" was judged short of done.`,
+                  "Close these gaps without weakening any test and without leaving your owned paths:",
+                  issueLines(verdict)
+                ].join("\n")
+              })
+            ]
+          })
+        )
+      })
+
     let judgeNote: string | undefined
+    let inPlace = false
     if (options.judge !== undefined) {
       const judge = options.judge
       for (let round = 1; round <= judgeRounds; round += 1) {
         const diff = yield* git.diffVsBase(epicBranch)
-        if (diff.trim().length === 0) {
-          // Nothing to judge is a deterministic failure, not a model call:
-          // a model asked to score an empty diff scores the prompt instead.
-          return yield* failed(story, "the story branch has no changes against the epic branch")
-        }
-        const verdict = yield* judge(story, diff, watchedSeats)
+        // No changes is not a failure by itself: the story's code may already
+        // be on the epic (an earlier story or run put it there). Judge that
+        // code instead: the owned paths against the empty tree.
+        const empty = diff.trim().length === 0
+        const subject = empty ? yield* git.diffVsBaseScoped(emptyTree, story.owned, false) : diff
+        const verdict =
+          empty && subject.trim().length === 0
+            ? // Nothing to judge is decided here, not asked of a model.
+              ReviewResult.make({
+                issues: [
+                  ReviewIssue.make({
+                    severity: "Critical",
+                    title: `nothing exists yet under ${story.owned.join(", ")}`,
+                    description: "The story's owned paths are empty on the epic branch."
+                  })
+                ],
+                summary: `judge:${story.id}`
+              })
+            : yield* judge(story, subject, watchedSeats, empty ? "code" : "diff")
         yield* laneOf(story).publish(
           StoryJudged.make({
             lane: story.id,
@@ -1030,27 +1089,25 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           })
         )
         if (verdict.isClean) {
-          judgeNote = `judge cleared (round ${round})`
+          inPlace = empty
+          judgeNote = empty
+            ? `verified already in place (round ${round})`
+            : `judge cleared (round ${round})`
           break
         }
         if (round >= judgeRounds) {
+          const revisions = `${round - 1} revision${round === 2 ? "" : "s"}`
           return yield* failed(
             story,
-            `judge not cleared after ${judgeRounds} round(s):\n${issueLines(verdict)}`
+            empty
+              ? `the story's code is not in place after ${revisions}, and its branch has no changes:\n${issueLines(verdict)}`
+              : `judge not cleared after ${revisions}:\n${issueLines(verdict)}`
           )
         }
-        yield* guarded(
-          coderTurn(
-            [
-              `The story "${story.title}" scored below the bar. Close these gaps without`,
-              "weakening any test and without leaving your owned paths, then stop:",
-              issueLines(verdict)
-            ].join("\n")
-          ),
-          Effect.void
-        )
+        yield* addRevision(verdict, empty)
+        yield* guarded(implementTasks, implementTasks)
+        yield* catchUp(story, git)
         yield* repairPerimeter
-        yield* commitGreen("address judge feedback", "while addressing judge feedback")
       }
     }
 
@@ -1060,6 +1117,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     const history = roster === undefined ? [] : yield* roster.history
     return {
       judge: judgeNote,
+      inPlace,
       totals,
       executor: history.length === 0 ? undefined : history.join(" → ")
     }
@@ -1083,7 +1141,14 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       })
     }
     const result = yield* Effect.scoped(implementStory(story, state))
-    yield* integrate(story, state.branch)
+    if (result.inPlace) {
+      // Verified already on the epic: there is nothing to merge or re-gate.
+      yield* laneOf(story).publish(
+        Info.make({ message: `story ${story.id}: verified already in place; nothing to merge` })
+      )
+    } else {
+      yield* integrate(story, state.branch)
+    }
     const last = result.executor?.split(" → ").at(-1)
     yield* saveVersioned(
       files,

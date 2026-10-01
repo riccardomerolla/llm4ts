@@ -132,6 +132,8 @@ interface Harness {
   readonly epicStatus: (log: ReadonlyArray<string>) => string
   /** Whether story branches already contain the epic head (no catch-up merge). */
   readonly upToDate: boolean
+  /** A story branch's diff against the epic, given the log so far. */
+  readonly branchDiff: (story: Story, log: ReadonlyArray<string>) => string
 }
 
 const record = (harness: Harness, entry: string): Effect.Effect<void> =>
@@ -204,6 +206,10 @@ const worktreeGit = (harness: Harness, workDir: string, story: Story): GitToolSh
   commitAll: (message) =>
     record(harness, `commit:${workDir}:${message}`).pipe(Effect.as(Committed.make({}))),
   changedFilesVsBase: () => Effect.succeed(harness.changedFor(story)),
+  diffVsBase: () => Effect.map(Ref.get(harness.log), (log) => harness.branchDiff(story, log)),
+  // The owned paths' code against the empty tree: the story's code as it stands.
+  diffVsBaseScoped: (_base, paths) =>
+    Effect.succeed(`owned code of ${story.id}: ${paths.join(",")}`),
   isAncestor: () => Effect.succeed(harness.upToDate),
   merge: (branch, _message, options) =>
     record(
@@ -295,7 +301,8 @@ const makeHarness = (
       replyFor: overrides.replyFor ?? (() => "done"),
       latches: overrides.latches ?? new Map(),
       epicStatus: overrides.epicStatus ?? (() => ""),
-      upToDate: overrides.upToDate ?? false
+      upToDate: overrides.upToDate ?? false,
+      branchDiff: overrides.branchDiff ?? (() => "diff --git a/file b/file\n+story work")
     }
   })
 
@@ -589,7 +596,7 @@ describe("Stories executor", () => {
     })
   )
 
-  it.effect("judge feedback gets one fix round, then the story fails", () =>
+  it.effect("judge feedback gets one revision task, then the story fails", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness()
       const context = yield* makeContext(harness)
@@ -612,9 +619,12 @@ describe("Stories executor", () => {
       assert.strictEqual(a?.judge, "judge cleared (round 2)")
       const b = report.stories.find((outcome) => outcome.id === "b")
       assert.strictEqual(b?.status, "failed")
-      assert.include(b?.reason ?? "", "judge not cleared after 2 round(s)")
+      assert.include(b?.reason ?? "", "judge not cleared after 1 revision")
       const log = yield* Ref.get(harness.log)
-      assert.include(log, "commit:/repo/.llm4ts/worktrees/a:a: address judge feedback")
+      assert.include(
+        log,
+        "commit:/repo/.llm4ts/worktrees/a:a: Revision 1: close the judge's findings"
+      )
     })
   )
 
@@ -642,6 +652,109 @@ describe("Stories executor", () => {
       // Every gate run, in a worktree or on the epic after a merge, knows its story.
       assert.isAbove(lanes.length, 0)
       assert.notInclude(lanes, undefined)
+    })
+  )
+
+  it.effect("a story with no changes whose code is already in place is verified, not merged", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        branchDiff: (story) => (story.id === "a" ? "" : "diff --git a/f b/f\n+work")
+      })
+      const context = yield* makeContext(harness)
+      const asked: Array<string> = []
+      const options = yield* makeOptions(harness, diamond, context, {
+        concurrency: 1,
+        judge: (item, text, _seats, subject) =>
+          Effect.sync(() => {
+            asked.push(`${item.id}:${subject ?? "diff"}:${text}`)
+            return clean
+          })
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      const a = report.stories.find((outcome) => outcome.id === "a")
+      assert.strictEqual(a?.status, "done")
+      assert.strictEqual(a?.judge, "verified already in place (round 1)")
+      assert.include(asked, "a:code:owned code of a: src/features/a")
+      const log = yield* Ref.get(harness.log)
+      assert.notInclude(log, "merge:story/diamond/a")
+      assert.include(log, "merge:story/diamond/b")
+      // Its dependent ran.
+      assert.strictEqual(report.stories.find((outcome) => outcome.id === "c")?.status, "done")
+    })
+  )
+
+  it.effect("a story with no changes that is not in place gets a revision task, then passes", () =>
+    Effect.gen(function* () {
+      const revised = (log: ReadonlyArray<string>) =>
+        log.some((entry) => entry.includes("/a:a: Revision 1: close the judge's findings"))
+      const harness = yield* makeHarness({
+        branchDiff: (story, log) =>
+          story.id !== "a" || revised(log) ? "diff --git a/f b/f\n+work" : ""
+      })
+      const context = yield* makeContext(harness)
+      const options = yield* makeOptions(harness, diamond, context, {
+        concurrency: 1,
+        judge: (item, _text, _seats, subject) =>
+          Effect.succeed(item.id === "a" && subject === "code" ? red("route /a is missing") : clean)
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      const a = report.stories.find((outcome) => outcome.id === "a")
+      assert.strictEqual(a?.status, "done")
+      assert.strictEqual(a?.judge, "judge cleared (round 2)")
+      const log = yield* Ref.get(harness.log)
+      assert.isTrue(revised(log))
+      assert.include(log, "merge:story/diamond/a")
+    })
+  )
+
+  it.effect("a judge's findings on a story's changes become a revision task", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const verdicts = yield* Ref.make(0)
+      const options = yield* makeOptions(harness, diamond, context, {
+        concurrency: 1,
+        judge: (item) =>
+          item.id === "a"
+            ? Effect.map(
+                Ref.getAndUpdate(verdicts, (n) => n + 1),
+                (n) => (n === 0 ? red("missing test") : clean)
+              )
+            : Effect.succeed(clean)
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(
+        report.stories.find((outcome) => outcome.id === "a")?.judge,
+        "judge cleared (round 2)"
+      )
+      const log = yield* Ref.get(harness.log)
+      assert.include(
+        log,
+        "commit:/repo/.llm4ts/worktrees/a:a: Revision 1: close the judge's findings"
+      )
+      assert.notInclude(log, "commit:/repo/.llm4ts/worktrees/a:a: address judge feedback")
+      const plan =
+        (yield* memoryFilesOf(options))["/repo/.llm4ts/epics/diamond/stories/a.plan.md"] ?? ""
+      assert.include(plan, "[x] Revision 1: close the judge's findings")
+      assert.include(plan, "missing test")
+    })
+  )
+
+  it.effect("a story still short after its revision fails with the judge's findings", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        branchDiff: (story) => (story.id === "a" ? "" : "diff --git a/f b/f\n+work")
+      })
+      const context = yield* makeContext(harness)
+      const options = yield* makeOptions(harness, diamond, context, {
+        concurrency: 1,
+        judge: (item) => Effect.succeed(item.id === "a" ? red("route /a is missing") : clean)
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      const a = report.stories.find((outcome) => outcome.id === "a")
+      assert.strictEqual(a?.status, "failed")
+      assert.include(a?.reason ?? "", "not in place after 1 revision")
+      assert.include(a?.reason ?? "", "route /a is missing")
     })
   )
 
@@ -898,40 +1011,6 @@ describe("Stories executor", () => {
     assert.include(prompt, "boom")
     assert.include(prompt, "not commit")
   })
-
-  it.effect("a story whose branch has no changes fails before the judge is asked", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness()
-      const context = yield* makeContext(harness)
-      const asked = yield* Ref.make(0)
-      const options = yield* makeOptions(harness, diamond, context, {
-        concurrency: 1,
-        judge: () => Ref.update(asked, (n) => n + 1).pipe(Effect.as(clean)),
-        contextFor: (workDir) =>
-          Effect.gen(function* () {
-            const story = storyOf(diamond, workDir)
-            const seats: StorySeats = {
-              context: {
-                ...context,
-                coder: coder("done"),
-                git: {
-                  ...worktreeGit(harness, workDir, story),
-                  diffVsBase: () => Effect.succeed(story.id === "a" ? "" : "diff --git a/f b/f\n+x")
-                },
-                workDir
-              }
-            }
-            return seats
-          })
-      })
-      const report = yield* implementStoriesFlow(context, options)
-      const a = report.stories.find((outcome) => outcome.id === "a")
-      assert.strictEqual(a?.status, "failed")
-      assert.include(a?.reason ?? "", "no changes against the epic branch")
-      assert.strictEqual(report.stories.find((outcome) => outcome.id === "b")?.status, "done")
-      assert.strictEqual(yield* Ref.get(asked), 1)
-    })
-  )
 
   it.effect("a dirty epic checkout fails the run before any branch is touched", () =>
     Effect.gen(function* () {

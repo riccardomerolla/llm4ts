@@ -686,6 +686,12 @@ describe("the story judge", () => {
     assert.include(storyJudgeQuery(home, parsedFixture), "- accounts-contract: accountsDomain from")
     // Without a plan, the query is the story alone.
     assert.notInclude(storyJudgeQuery(list), "Already merged")
+    // A branch with no changes: the judge reads the code, asked whether it is all there.
+    assert.notInclude(query, "already in place")
+    assert.include(
+      storyJudgeQuery(list, parsedFixture, "code"),
+      "The story's branch has no changes. Below is the current code of its owned paths"
+    )
   })
 })
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.22.1
+
+- **A story whose branch has no changes is verified, not failed.** The
+  story judge reads the current code of the story's owned paths on the epic
+  branch and decides whether the story is already in place. If it is, the
+  story is done ("verified already in place"), with nothing to merge, and
+  its dependents go ahead. Before, it failed with "the story branch has no
+  changes against the epic branch", even when an earlier story or run had
+  already done the work.
+- **Judge findings become a revision task.** When the judge finds gaps (on a
+  story's changes or on its existing code), they are added to the story's
+  plan as `Revision n: close the judge's findings` and run by the task loop
+  like any other task: coder, review, gates, commit. Before, the coder got
+  one direct turn with no review. A story still short after its revisions
+  (`judgeRounds`, default 2: one revision) fails with the findings.
+- The story judge seam takes an optional fourth argument, `subject`
+  (`"diff"` or `"code"`); both built-in judges word their prompt for it.
+
 ## 2.22.0
 
 - **Where the time goes.** A run now records how long things take, and

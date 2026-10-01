@@ -1227,7 +1227,11 @@ const subBar = (scored: EvalResult, story: Story): ReviewResult =>
  * importing `paymentsDomain` from `payments.fake.ts`, exactly where the
  * payments contract story declared it.
  */
-export const storyJudgeQuery = (story: Story, plan?: StoryPlan): string => {
+export const storyJudgeQuery = (
+  story: Story,
+  plan?: StoryPlan,
+  subject: "diff" | "code" = "diff"
+): string => {
   const dependencies =
     plan === undefined
       ? []
@@ -1252,7 +1256,15 @@ export const storyJudgeQuery = (story: Story, plan?: StoryPlan): string => {
           ...dependencies,
           "Using these exactly as declared (the same module, the same export) is correct and is",
           "never a house-style or scope problem, even where the module is a fake transport."
-        ])
+        ]),
+    ...(subject === "code"
+      ? [
+          "",
+          "The story's branch has no changes. Below is the current code of its owned paths on",
+          "the epic branch, shown as additions: judge whether the story is already in place —",
+          "everything it provides exists and is tested — not the diff's size or novelty."
+        ]
+      : [])
   ].join("\n")
 }
 
@@ -1262,12 +1274,13 @@ export const judgeStory = (
   story: Story,
   diff: string,
   budget: number,
-  plan?: StoryPlan
+  plan?: StoryPlan,
+  subject: "diff" | "code" = "diff"
 ): Effect.Effect<StoryVerdict, FlowError> =>
   judge(reasoning, storyDimensions)
     .evaluate(
       Sample.make({
-        query: storyJudgeQuery(story, plan),
+        query: storyJudgeQuery(story, plan, subject),
         response: cap(diff, budget).text
       })
     )
@@ -1493,13 +1506,14 @@ export interface StoryJudgeContext {
 /** Today's story judge: the rubric judge over the four dimensions. */
 export const rubricStoryJudge =
   (context: StoryJudgeContext): StoryJudge =>
-  (story, diff, seats) =>
+  (story, diff, seats, subject) =>
     judgeStory(
       seats.context.roster?.forRole("judge") ?? context.reasoning,
       story,
       diff,
       context.budget,
-      context.plan
+      context.plan,
+      subject
     )
 
 export interface EpicStoriesOptions {

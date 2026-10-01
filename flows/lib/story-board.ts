@@ -244,11 +244,16 @@ export const boardStoryJudge = (
   Effect.map(
     makeStoryBoard(context.policy).pipe(Effect.mapError(runErrorToFlowError)),
     (board): StoryJudge =>
-      (story, diff, seats) =>
+      (story, diff, seats, subject) =>
         Effect.gen(function* () {
           const judgment = seats.context.judgment ?? context.judgment
           const brief = storyBriefOf(story, context.plan)
-          const capped = cap(diff, context.budget).text
+          // A branch with no changes is judged on its owned code, said so up front.
+          const capped = `${
+            subject === "code"
+              ? "The story's branch has no changes; this is the current code of its owned paths on the epic branch.\n"
+              : ""
+          }${cap(diff, context.budget).text}`
           const result = yield* runRuleset(board, [
             storyBrief.of(brief),
             storyDiff.of(capped),
@@ -322,7 +327,7 @@ const observe = (
  */
 export const boardJudgeFactory =
   (context: StoryJudgeContext): StoryJudge =>
-  (story, diff, seats) =>
+  (story, diff, seats, subject) =>
     Effect.flatMap(boardStoryJudge({ ...context, judgment: judgmentOf(seats.context) }), (judge) =>
-      judge(story, diff, seats)
+      judge(story, diff, seats, subject)
     )
