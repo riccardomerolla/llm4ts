@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.21.1
+
+- **No more flicker in the agent tree** (`--ui tree`, `llm4ts watch`),
+  notably under tmux and in git bash on Windows. A redraw no longer clears
+  the screen: after the first paint only the rows that changed are
+  rewritten, an unchanged frame sends nothing, and each paint is one
+  synchronized update (`ESC[?2026h … l`) for terminals that support it.
+  Auto-wrap is off while the tree has the screen, so a full-width last row
+  never scrolls. A resize or a prompt brings one full repaint.
+
 ## 2.21.0
 
 - **Effect 4.0.0 (stable).** Every `effect` and `@effect/*` pin moves from

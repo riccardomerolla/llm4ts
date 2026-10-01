@@ -38,9 +38,59 @@ export interface AgentTreeHost {
   readonly close: Effect.Effect<void>
 }
 
-const enterScreen = "\u001b[?1049h\u001b[?25l"
-const leaveScreen = "\u001b[?25h\u001b[?1049l"
-const home = "\u001b[H\u001b[2J"
+const beginUpdate = "\u001b[?2026h"
+const endUpdate = "\u001b[?2026l"
+const clearScreen = "\u001b[H\u001b[2J"
+const at = (row: number): string => `\u001b[${row};1H`
+
+/**
+ * What to send to turn the screen showing `previous` into `next`: the whole
+ * frame after a clear when there is no previous one (first paint, resize, a
+ * prompt in between), otherwise only the rows that changed — never a clear,
+ * which is what flickers under tmux and Windows terminals — and nothing at
+ * all when the frame is the same. Each paint is one synchronized update, which
+ * terminals that know it show at once and the rest ignore. Rows are drawn
+ * at full width, so an overwritten row leaves nothing behind.
+ */
+export const paintFrame = (
+  previous: ReadonlyArray<string> | undefined,
+  next: ReadonlyArray<string>
+): string => {
+  if (previous === undefined) {
+    return `${beginUpdate}${clearScreen}${next.map((line, row) => `${at(row + 1)}${line}`).join("")}${endUpdate}`
+  }
+  const changed = next.flatMap((line, row) =>
+    line === previous[row] ? [] : [`${at(row + 1)}${line}`]
+  )
+  const shorter = next.length < previous.length ? `${at(next.length + 1)}\u001b[J` : ""
+  return changed.length === 0 && shorter === ""
+    ? ""
+    : `${beginUpdate}${changed.join("")}${shorter}${endUpdate}`
+}
+
+/** A full-screen view's painter: remembers what is on screen, and at which size. */
+export interface ScreenPainter {
+  /** What to write to show `lines` at terminal size `size`; empty when nothing changed. */
+  readonly paint: (lines: ReadonlyArray<string>, size: string) => Effect.Effect<string>
+  /** The screen was cleared or covered: the next paint is a whole one. */
+  readonly reset: Effect.Effect<void>
+}
+
+export const makeScreenPainter: Effect.Effect<ScreenPainter> = Effect.map(
+  Ref.make<{ readonly lines: ReadonlyArray<string>; readonly size: string } | undefined>(undefined),
+  (shown) => ({
+    paint: (lines, size) =>
+      Ref.modify(shown, (previous) => [
+        paintFrame(previous?.size === size ? previous.lines : undefined, lines),
+        { lines, size }
+      ]),
+    reset: Ref.set(shown, undefined)
+  })
+)
+
+/** The alternate screen, cursor hidden, no auto-wrap: a full-width last row never scrolls. */
+export const enterScreen = "\u001b[?1049h\u001b[?25l\u001b[?7l"
+export const leaveScreen = "\u001b[?7h\u001b[?25h\u001b[?1049l"
 const redrawEvery = "100 millis"
 
 export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make")(function* (
@@ -65,19 +115,25 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
     Effect.forkScoped
   )
 
-  const render = (rows: number | undefined): Effect.Effect<string> =>
+  const render = (rows: number | undefined): Effect.Effect<ReadonlyArray<string>> =>
     Effect.gen(function* () {
-      const lines = renderTree(yield* Ref.get(state), {
+      return renderTree(yield* Ref.get(state), {
         width: Math.max(90, output.columns() ?? 90),
         colour: output.colour,
         view: yield* Ref.get(view),
         ...(rows === undefined ? {} : { height: rows })
       })
-      return lines.join("\n")
     })
   /** The full screen fits the terminal; the last frame left behind is whole. */
-  const frame = render(undefined)
-  const screen = Effect.suspend(() => render(output.rows()))
+  const frame = Effect.map(render(undefined), (lines) => lines.join("\n"))
+  const painter = yield* makeScreenPainter
+  const repaint = Effect.gen(function* () {
+    const rows = output.rows()
+    const text = yield* painter.paint(yield* render(rows), `${output.columns()}x${rows}`)
+    if (text.length > 0) {
+      yield* output.write(text)
+    }
+  })
 
   /** Runs `effect` only while the tree has the screen, under the drawing lock. */
   const whileShown = (effect: Effect.Effect<void>): Effect.Effect<void> =>
@@ -93,12 +149,9 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
 
   yield* output.write(enterScreen)
   yield* Effect.addFinalizer(() => leave(false))
-  yield* Effect.forever(
-    Effect.andThen(
-      Effect.sleep(redrawEvery),
-      whileShown(Effect.flatMap(screen, (text) => output.write(`${home}${text}`)))
-    )
-  ).pipe(Effect.forkScoped)
+  yield* Effect.forever(Effect.andThen(Effect.sleep(redrawEvery), whileShown(repaint))).pipe(
+    Effect.forkScoped
+  )
   yield* Stream.runForEach(keys, (key) =>
     Effect.gen(function* () {
       const next = onTreeKey(yield* Ref.get(view), key, yield* Ref.get(state))
@@ -123,7 +176,9 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
               lock.withPermit(Effect.andThen(Ref.set(active, false), output.write(leaveScreen))),
               () => classic.suspend(effect),
               () =>
-                lock.withPermit(Effect.andThen(Ref.set(active, true), output.write(enterScreen)))
+                lock.withPermit(
+                  Effect.all([Ref.set(active, true), painter.reset, output.write(enterScreen)])
+                )
             )
           : classic.suspend(effect)
       )

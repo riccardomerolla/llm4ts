@@ -106,14 +106,15 @@ describe("llm4ts watch", () => {
       assert.isTrue(text.endsWith("\u001b[?1049l"))
       // `e` switched to the executor columns before `q`.
       assert.include(text, "│ no lease")
-      // Every frame fits the terminal's 32 rows and keeps its status lines.
-      const frames = text.split("\u001b[H\u001b[2J").slice(1)
-      assert.isAbove(frames.length, 1)
-      for (const frame of frames) {
-        const lines = frame.replace("\u001b[?25h\u001b[?1049l", "").split("\n")
-        assert.isAtMost(lines.length, 32)
-        assert.include(lines.at(-1) ?? "", "run [completed]")
-      }
+      // One clear, then only changed rows, never below the terminal's 32 rows.
+      assert.strictEqual(text.split("\u001b[2J").length - 1, 1)
+      const rows = text
+        .split("\u001b[")
+        .flatMap((sequence) => /^(\d+);1H/u.exec(sequence)?.[1] ?? [])
+        .map(Number)
+      assert.isAbove(rows.length, 0)
+      assert.isAtMost(Math.max(...rows), 32)
+      assert.include(text, "run [completed]")
     })
   )
 })

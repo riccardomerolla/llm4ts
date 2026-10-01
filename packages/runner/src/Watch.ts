@@ -22,7 +22,7 @@ import {
   type TreeState,
   type TreeView
 } from "./AgentTree.ts"
-import { nodeTreeKeys } from "./AgentTreeSurface.ts"
+import { enterScreen, leaveScreen, makeScreenPainter, nodeTreeKeys } from "./AgentTreeSurface.ts"
 import { nodeListTraces, TraceDirectoryName } from "./Costs.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 
@@ -169,9 +169,6 @@ const readInputs = (
 ): Effect.Effect<ReadonlyArray<TreeInput>, FlowError> =>
   Effect.map(readTrace(files, target.tracePath), treeInputsOfTrace)
 
-const enterScreen = "\u001b[?1049h\u001b[?25l"
-const leaveScreen = "\u001b[?25h\u001b[?1049l"
-const home = "\u001b[H\u001b[2J"
 const pollInterval = Duration.millis(500)
 const replayGapCap = 2_000
 
@@ -184,8 +181,11 @@ const draw = (state: TreeState, view: TreeView, output: WatchOutput, height?: nu
   }).join("\n")
 
 /** A full-screen frame: no taller than the terminal. */
-const drawScreen = (state: TreeState, view: TreeView, output: WatchOutput): string =>
-  draw(state, view, output, output.rows())
+const screenLines = (
+  state: TreeState,
+  view: TreeView,
+  output: WatchOutput
+): ReadonlyArray<string> => draw(state, view, output, output.rows()).split("\n")
 
 export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function* (
   options: WatchOptions,
@@ -236,13 +236,20 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
           Effect.as(Effect.sleep(wait), false)
         )
 
+      const painter = yield* makeScreenPainter
       yield* output.write(enterScreen)
       yield* Effect.gen(function* () {
         while (true) {
           const current = yield* Ref.get(inputs)
           const count = yield* Ref.get(shown)
           const state = yield* fold(current.slice(0, count))
-          yield* output.write(`${home}${drawScreen(state, yield* Ref.get(view), output)}`)
+          const text = yield* painter.paint(
+            screenLines(state, yield* Ref.get(view), output),
+            `${output.columns()}x${output.rows()}`
+          )
+          if (text.length > 0) {
+            yield* output.write(text)
+          }
           const replaying = options.replay === true && count < current.length
           const gap = replaying
             ? Math.min(replayGapCap, (current[count]?.at ?? 0) - (current[count - 1]?.at ?? 0)) /

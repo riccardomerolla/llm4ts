@@ -86,6 +86,9 @@ roster, the judge seat and a session log.
    columns. Rendering stays hand-rolled ANSI; no TUI library. A full-screen
    frame fits the terminal's height: the session log shrinks to one line,
    then goes, before anything else is cut, and the status lines always stay.
+   A redraw never clears the screen: `paintFrame` rewrites only the rows
+   that changed, in one synchronized update (2.21.1, after flicker under
+   tmux and git bash on Windows).
 
 Stage nesting is derived per lane from `StageStarted`/`StageCompleted`
 pairs, as the classic surface does; events get no parent id. Cost is an
