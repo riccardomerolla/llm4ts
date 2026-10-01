@@ -9,6 +9,7 @@ import {
   Info,
   StageCompleted,
   StageStarted,
+  StoryJudged,
   Timed,
   TokensUsed,
   ToolUse,
@@ -140,6 +141,29 @@ describe("profileOf", () => {
     assert.include(text, "Where the time goes")
     assert.include(text, "home")
     assert.notInclude(text, "epic/x")
+  })
+
+  it("explains unaccounted time by its largest untimed gaps, and shows time timed outside any story", () => {
+    const report = profileOf([
+      at(0, StageStarted.make({ stage: "story home", lane: "home" })),
+      at(60, Timed.make({ kind: "model", label: "coder", ms: 60_000, lane: "home" })),
+      at(100, ToolUse.make({ tool: "bash", args: "pnpm test", lane: "home" })),
+      at(
+        400,
+        StoryJudged.make({ lane: "home", round: 1, cleared: true, issues: 0, dimensions: [] })
+      ),
+      at(420, StageCompleted.make({ stage: "story home", lane: "home" })),
+      at(430, Timed.make({ kind: "model", label: "reasoning", ms: 90_000 }))
+    ])
+    const [home] = report.stories
+    assert.deepStrictEqual(home?.gaps, [
+      { ms: 300_000, after: "a coder tool call", before: "a judge verdict" },
+      { ms: 40_000, after: "the end of a coder call", before: "a coder tool call" }
+    ])
+    assert.deepStrictEqual(report.outside, [{ label: "reasoning", count: 1, ms: 90_000 }])
+    const text = renderProfile(report)
+    assert.include(text, "home: 5m00s between a coder tool call and a judge verdict")
+    assert.include(text, "Timed outside any story")
   })
 
   it("estimates from an older trace that has no timings, and says so", () => {

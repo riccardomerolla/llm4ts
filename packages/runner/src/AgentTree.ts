@@ -1000,7 +1000,7 @@ const timeSplitOf = (time: TreeTimeSplit): Array<Line> => {
           part("model", time.model),
           part("tools", time.tools),
           part("gates", time.gates),
-          ...(time.merge > 0 ? [part("merge", time.merge)] : []),
+          ...(time.merge > 0 ? [part("git", time.merge)] : []),
           part("wait", time.wait)
         ].join(" · ")}]`
       )

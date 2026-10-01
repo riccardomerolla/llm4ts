@@ -3,7 +3,8 @@ import * as Schema from "effect/Schema"
 import { Capabilities, type Capability } from "@llm4ts/core/Capability"
 import type { ProcessExecutorShape, ProcessResult } from "@llm4ts/core/ProcessExecutor"
 import { MergeConflict, ProcessError, type FlowError } from "./FlowError.ts"
-import type { FlowEventsShape } from "./FlowEvents.ts"
+import { Timed, type FlowEventsShape } from "./FlowEvents.ts"
+import { timeEffect } from "./Timing.ts"
 import { guarded } from "./CapabilityGuard.ts"
 
 export class BranchCreated extends Schema.TaggedClass<BranchCreated>()("Created", {}) {}
@@ -230,7 +231,11 @@ export const makeGitTool = (
     capability: Capability,
     operation: string,
     effect: Effect.Effect<A, FlowError>
-  ): Effect.Effect<A, FlowError> => guarded(capability, operation, events, effect)
+  ): Effect.Effect<A, FlowError> =>
+    // Timed by the operation's name, never its arguments.
+    timeEffect(events, guarded(capability, operation, events, effect), (ms, failed) =>
+      Timed.make({ kind: "git", label: operation, ms, ...(failed ? { failed: true } : {}) })
+    )
 
   const write = <A>(
     operation: string,

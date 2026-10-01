@@ -51,6 +51,14 @@ export const TurnStats = Schema.Struct({
 })
 export type TurnStats = typeof TurnStats.Type
 
+/** A stretch of a story's time no `Timed` event covers, named by the events around it. */
+export const Gap = Schema.Struct({
+  ms: Ms,
+  after: Schema.String,
+  before: Schema.String
+})
+export type Gap = typeof Gap.Type
+
 export const StoryProfile = Schema.Struct({
   id: Schema.String,
   executor: Schema.optionalKey(Schema.String),
@@ -59,7 +67,9 @@ export const StoryProfile = Schema.Struct({
   /** From the plan being ready to this story starting: dependencies and free coder slots. */
   queuedMs: Schema.optionalKey(Ms),
   time: ProfileTime,
-  turns: TurnStats
+  turns: TurnStats,
+  /** Its largest untimed stretches, 30 seconds or more: where "unaccounted" sits. */
+  gaps: Schema.Array(Gap)
 })
 export type StoryProfile = typeof StoryProfile.Type
 
@@ -103,6 +113,8 @@ export const ProfileReport = Schema.Struct({
   gates: Schema.Array(GateRow),
   tools: Schema.Array(CountRow),
   waits: Schema.Array(CountRow),
+  /** Timed on the run's events, in no story: the run's own planning, or a seat no story owns. */
+  outside: Schema.Array(CountRow),
   findings: Schema.Array(Finding)
 })
 export type ProfileReport = typeof ProfileReport.Type
@@ -128,6 +140,8 @@ interface Lane {
   /** The last turn boundary: any lane event but a tool call inside a turn. */
   last: number
   skipped: boolean
+  /** Every event on the lane, described without its content, for the gaps. */
+  readonly moments: Array<{ readonly at: number; readonly what: string }>
 }
 
 interface Lease {
@@ -166,6 +180,89 @@ const groupBy = <A>(items: ReadonlyArray<A>, key: (item: A) => string): Map<stri
 const laneOf = (event: FlowEvent): string | undefined =>
   "lane" in event && typeof event.lane === "string" ? event.lane : undefined
 
+/** An event as the gaps name it: its kind, never its content. */
+const describe = (event: FlowEvent): string => {
+  switch (event._tag) {
+    case "StageStarted":
+      return "a stage start"
+    case "StageCompleted":
+      return "a stage end"
+    case "StageFailed":
+      return "a stage failure"
+    case "ToolUse":
+      return "a coder tool call"
+    case "TokensUsed":
+      return "a token report"
+    case "Info":
+      return "a log note"
+    case "ReviewFindings":
+      return "a review round"
+    case "StoryJudged":
+      return "a judge verdict"
+    case "AssistantMessage":
+      return "an assistant message"
+    case "CapabilityUsed":
+    case "CapabilityDenied":
+    case "CapabilityUnenforceable":
+      return "a capability check"
+    case "ExecutorLeased":
+    case "ExecutorReleased":
+    case "ExecutorExcluded":
+    case "ExecutorResumed":
+    case "ExecutorHandedOver":
+      return "a roster change"
+    case "Timed":
+      switch (event.kind) {
+        case "model":
+          return `the end of a ${event.label} call`
+        case "tool":
+          return `the end of tool ${event.label}`
+        case "gate":
+          return `the end of gate ${event.label}`
+        case "wait":
+          return `the end of a wait for the ${event.label}`
+        default:
+          return `the end of ${event.label}`
+      }
+    default:
+      return "an event"
+  }
+}
+
+const gapThresholdMs = 30_000
+
+/** The parts of each step between two lane events that no timed interval covers, largest first. */
+const gapsOf = (lane: Lane): ReadonlyArray<Gap> => {
+  const covered = lane.timed
+    .map((item) => [item.at - item.event.ms, item.at] as const)
+    .sort((left, right) => left[0] - right[0])
+  const uncovered = (from: number, to: number): number => {
+    let free = 0
+    let cursor = from
+    for (const [start, end] of covered) {
+      if (end <= cursor || start >= to) {
+        continue
+      }
+      free += Math.max(0, start - cursor)
+      cursor = Math.max(cursor, end)
+    }
+    return free + Math.max(0, to - cursor)
+  }
+  const moments = [...lane.moments].sort((left, right) => left.at - right.at)
+  return moments
+    .slice(1)
+    .flatMap((next, index) => {
+      const previous = moments[index]
+      if (previous === undefined) {
+        return []
+      }
+      const ms = uncovered(previous.at, next.at)
+      return ms >= gapThresholdMs ? [{ ms, after: previous.what, before: next.what }] : []
+    })
+    .sort((left, right) => right.ms - left.ms)
+    .slice(0, 3)
+}
+
 /** The roster role a seat label stands for, to find its lease. */
 const leaseRole = (label: string): string => (label === "reasoning" ? "reviewer" : label)
 
@@ -200,7 +297,8 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
             prompts: [],
             estimatedCalls: [],
             last: at,
-            skipped: false
+            skipped: false,
+            moments: [{ at, what: describe(event) }]
           })
           continue
         }
@@ -241,6 +339,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
         break
     }
     if (lane !== undefined) {
+      lane.moments.push({ at, what: describe(event) })
       lane.executor = lane.executor ?? ("executor" in event ? event.executor : undefined)
       if (!withinTurn.has(event._tag)) {
         lane.last = at
@@ -325,6 +424,16 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
     }))
   const tools = counted("tool")
   const waits = counted("wait")
+  const outside = [
+    ...groupBy(
+      allTimed.filter((item) => item.event.lane === undefined),
+      (item) => item.event.label
+    ).entries()
+  ].map(([label, items]) => ({
+    label,
+    count: items.length,
+    ms: sum(items.map((item) => item.event.ms))
+  }))
   const merges = [...counted("merge"), ...counted("git")]
 
   const totals = stories.reduce<ProfileTime>(
@@ -350,6 +459,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
     gates,
     tools,
     waits,
+    outside,
     findings: findingsOf({ stories, models, gates, tools, waits, merges, storyTime, estimated })
   }
 }
@@ -376,6 +486,7 @@ const storyProfile = (
   const lastPrompt = lane.prompts.at(-1)
   const maxPrompt = lane.prompts.length === 0 ? undefined : Math.max(...lane.prompts)
   return {
+    gaps: estimated ? [] : gapsOf(lane),
     id: lane.id,
     ...(lane.executor === undefined ? {} : { executor: lane.executor }),
     status: lane.status,
@@ -519,7 +630,7 @@ export const renderProfile = (report: ProfileReport): string => {
     [report.estimated ? "model + tools + gates (estimated)" : "model", report.totals.model],
     ["coder tools", report.totals.tools],
     ["gates", report.totals.gates],
-    ["merge", report.totals.merge],
+    ["git + merge", report.totals.merge],
     ["waiting", report.totals.waiting],
     ["unaccounted", report.totals.unaccounted]
   ]
@@ -551,7 +662,7 @@ export const renderProfile = (report: ProfileReport): string => {
         "model",
         "tools",
         "gates",
-        "merge",
+        "git+merge",
         "wait",
         "other",
         "turns",
@@ -581,6 +692,27 @@ export const renderProfile = (report: ProfileReport): string => {
     ...(report.skipped.length === 0
       ? []
       : [`  skipped (merged on an earlier run): ${report.skipped.join(", ")}`]),
+    ...(report.stories.every((story) => story.gaps.length === 0)
+      ? []
+      : [
+          "",
+          "Unaccounted, largest gaps (no timing covers them)",
+          ...report.stories.flatMap((story) =>
+            story.gaps.map(
+              (gap) => `  ${story.id}: ${duration(gap.ms)} between ${gap.after} and ${gap.before}`
+            )
+          )
+        ]),
+    ...(report.outside.length === 0
+      ? []
+      : [
+          "",
+          "Timed outside any story (the run's own planning, or a seat no story owns)",
+          ...table(
+            ["label", "count", "total"],
+            report.outside.map((row) => [row.label, String(row.count), duration(row.ms)])
+          )
+        ]),
     ...(report.models.length === 0
       ? []
       : [

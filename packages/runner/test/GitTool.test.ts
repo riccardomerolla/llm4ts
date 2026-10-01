@@ -48,6 +48,12 @@ describe("GitTool", () => {
           "one\n"
         )
         assert.strictEqual(yield* git.status, "")
+        // Every operation is timed by its name, never its arguments.
+        const timed = (yield* events.recorded).flatMap((event) =>
+          event._tag === "Timed" ? [`${event.kind}:${event.label}`] : []
+        )
+        assert.includeMembers(timed, ["git:git commitAll", "git:git checkout -b", "git:git status"])
+        assert.notInclude(timed.join(" "), "value.txt")
       })
     )
   )
