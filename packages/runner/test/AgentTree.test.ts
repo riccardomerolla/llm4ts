@@ -515,7 +515,11 @@ describe("agent tree", () => {
     assert.isTrue(onStory.tail)
     assert.deepStrictEqual(tailTargetOf(onStory), { lane: "iban" })
     assert.deepStrictEqual(
-      [press(onStory, "r").tailRole, press(onStory, "r", "r").tailRole, press(onStory, "r", "r", "r", "r").tailRole],
+      [
+        press(onStory, "r").tailRole,
+        press(onStory, "r", "r").tailRole,
+        press(onStory, "r", "r", "r", "r").tailRole
+      ],
       ["coder", "reviewer", undefined]
     )
     assert.isFalse(press(onStory, "escape").tail)
@@ -534,5 +538,18 @@ describe("agent tree", () => {
     assert.notInclude(text, "◐ running")
     const none = renderTree(state, { width: 90, colour: false, view: onStory }).join("\n")
     assert.include(none, "no transcript for this run")
+  })
+
+  it("scrolls the tail back with page up, and back to the end with page down", () => {
+    const state = fold([at(0, StageStarted.make({ stage: "story home", lane: "home" }))])
+    const step = (view: TreeView, key: string): TreeView => {
+      const next = onTreeKey(view, key, state)
+      return next === "quit" ? view : next
+    }
+    const open = step(step(initialView, "1"), "t")
+    assert.strictEqual(open.tailBack, 0)
+    assert.strictEqual(step(step(open, "pageup"), "pageup").tailBack, 20)
+    assert.strictEqual(step(step(step(open, "pageup"), "pagedown"), "pagedown").tailBack, 0)
+    assert.strictEqual(step(step(open, "pageup"), "escape").tailBack, 0)
   })
 })

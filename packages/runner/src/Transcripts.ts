@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { summariseToolArgs } from "@llm4ts/flow/Activity"
 import { TranscriptEntry, type TranscriptSink } from "@llm4ts/flow/Transcript"
-import { duration } from "./Profile.ts"
+import { duration } from "./AgentTree.ts"
 
 /**
  * Transcripts on disk (`llm4ts run --transcript`): one JSON line per entry,
@@ -54,6 +54,8 @@ export interface TranscriptView {
   readonly executor?: string
   /** Keep the last lines only. */
   readonly last?: number
+  /** Where the clock in the headers starts; the first entry's time by default. */
+  readonly since?: number
 }
 
 const clockOf = (ms: number): string => {
@@ -102,7 +104,7 @@ export const renderTranscript = (
   view: TranscriptView
 ): ReadonlyArray<string> => {
   const { width } = view
-  const start = entries[0]?.at ?? 0
+  const start = view.since ?? entries[0]?.at ?? 0
   const wanted = new Set(
     entries.flatMap((entry) =>
       entry._tag === "Call" &&
@@ -120,8 +122,11 @@ export const renderTranscript = (
     }
     reply = undefined
   }
+  // Only a filter needs the calls' headers; without one every entry shows,
+  // even one passed alone (the tail prints entries as they arrive).
+  const filtering = view.role !== undefined || view.executor !== undefined
   for (const entry of entries) {
-    if (!wanted.has(entry.call)) {
+    if (filtering && !wanted.has(entry.call)) {
       continue
     }
     if (entry._tag !== "Reply") {
@@ -226,22 +231,29 @@ export const loadTranscript = (
     return "lane" in target ? all : [...all].sort((left, right) => left.at - right.at)
   })
 
-/** The last `rows` lines of a tail, or `undefined` when the run has no transcript. */
+/**
+ * `rows` lines of a tail, ending `back` lines before its end (scrolled), or
+ * `undefined` when the run has no transcript.
+ */
 export const tailLinesOf = (
   entries: ReadonlyArray<TranscriptEntry> | undefined,
   target: TailTarget,
   role: string | undefined,
   width: number,
-  rows: number
-): ReadonlyArray<string> | undefined =>
-  entries === undefined
-    ? undefined
-    : renderTranscript(entries, {
-        width,
-        last: rows,
-        ...(role === undefined ? {} : { role }),
-        ...("executor" in target ? { executor: target.executor } : {})
-      })
+  rows: number,
+  back = 0
+): ReadonlyArray<string> | undefined => {
+  if (entries === undefined) {
+    return undefined
+  }
+  const lines = renderTranscript(entries, {
+    width,
+    ...(role === undefined ? {} : { role }),
+    ...("executor" in target ? { executor: target.executor } : {})
+  })
+  const end = Math.max(Math.min(rows, lines.length), lines.length - back)
+  return lines.slice(Math.max(0, end - rows), end)
+}
 
 export const nodeTranscriptFiles: TranscriptFiles = {
   read: (path) =>

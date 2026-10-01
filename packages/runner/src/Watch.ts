@@ -18,12 +18,22 @@ import {
   onTreeKey,
   reduceTree,
   renderTree,
+  tailTargetOf,
   treeInputsOfTrace,
   type TreeInput,
   type TreeState,
   type TreeView
 } from "./AgentTree.ts"
 import { enterScreen, leaveScreen, makeScreenPainter, nodeTreeKeys } from "./AgentTreeSurface.ts"
+import {
+  loadTranscript,
+  nodeTranscriptFiles,
+  renderTranscript,
+  tailLinesOf,
+  transcriptFileOf,
+  type TailTarget,
+  type TranscriptFiles
+} from "./Transcripts.ts"
 import { nodeListTraces, TraceDirectoryName } from "./Costs.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 
@@ -45,6 +55,8 @@ export interface WatchOptions {
   readonly speed?: number
   /** A live lane with no event for this long is marked idle (`LLM4TS_IDLE_AFTER`). */
   readonly idleAfterMs?: number
+  /** Print this story's or executor's transcript as it grows, instead of the tree. */
+  readonly tail?: string
 }
 
 export interface WatchOutput {
@@ -64,6 +76,8 @@ export interface WatchDependencies {
   readonly output: WatchOutput
   /** Key names as `onTreeKey` reads them: "up", "enter", "q", … */
   readonly keys: Stream.Stream<string>
+  /** A run's transcript files (`--transcript`); the disk by default. */
+  readonly transcripts?: TranscriptFiles
 }
 
 export class WatchTargetMissing extends Schema.TaggedError<WatchTargetMissing>()(
@@ -184,20 +198,42 @@ const readInputs = (
 const pollInterval = Duration.millis(500)
 const replayGapCap = 2_000
 
-const draw = (state: TreeState, view: TreeView, output: WatchOutput, height?: number): string =>
+const draw = (
+  state: TreeState,
+  view: TreeView,
+  output: WatchOutput,
+  height?: number,
+  tail?: ReadonlyArray<string>
+): string =>
   renderTree(state, {
     width: Math.max(90, output.columns() ?? 90),
     colour: output.colour,
     view,
-    ...(height === undefined ? {} : { height })
+    ...(height === undefined ? {} : { height }),
+    ...(tail === undefined ? {} : { tail })
   }).join("\n")
 
 /** A full-screen frame: no taller than the terminal. */
 const screenLines = (
   state: TreeState,
   view: TreeView,
-  output: WatchOutput
-): ReadonlyArray<string> => draw(state, view, output, output.rows()).split("\n")
+  output: WatchOutput,
+  tail?: ReadonlyArray<string>
+): ReadonlyArray<string> => draw(state, view, output, output.rows(), tail).split("\n")
+
+/** Rows the tail pane shows. */
+const tailRows = 16
+
+/** Where a trace's run kept its transcript: `.llm4ts/transcripts/<run-id>/`. */
+const transcriptDirOf = (
+  repo: string,
+  target: WatchTarget,
+  files: PlainFileStoreShape
+): Effect.Effect<string | undefined, FlowError> =>
+  Effect.map(readTrace(files, target.tracePath), (lines) => {
+    const runId = lines[0]?.runId
+    return runId === undefined ? undefined : join(repo, TraceDirectoryName, "transcripts", runId)
+  })
 
 export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function* (
   options: WatchOptions,
@@ -209,6 +245,39 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
     Effect.map(startingTree(target, files, options.idleAfterMs), (start) =>
       inputs.reduce(reduceTree, start)
     )
+
+  const transcripts = dependencies.transcripts ?? nodeTranscriptFiles
+  const transcriptDir = yield* transcriptDirOf(options.repo, target, files)
+
+  if (options.tail !== undefined) {
+    if (transcriptDir === undefined || transcripts.list(transcriptDir).length === 0) {
+      return yield* WatchTargetMissing.make({
+        message: "no transcript for this run — start it with llm4ts run … --transcript"
+      })
+    }
+    return yield* followTail(options.tail, transcriptDir, transcripts, output, () =>
+      Effect.map(readInputs(target, files), (inputs) =>
+        inputs.some((input) => input._tag === "RunEnded")
+      )
+    )
+  }
+
+  /** The open tail's lines, for the view's selection. */
+  const tailFor = (view: TreeView): Effect.Effect<ReadonlyArray<string> | undefined> => {
+    const selected = tailTargetOf(view)
+    return !view.tail || selected === undefined || transcriptDir === undefined
+      ? Effect.succeed(undefined)
+      : Effect.map(loadTranscript(transcripts, transcriptDir, selected), (entries) =>
+          tailLinesOf(
+            entries,
+            selected,
+            view.tailRole,
+            Math.max(90, output.columns() ?? 90) - 32,
+            tailRows,
+            view.tailBack
+          )
+        )
+  }
 
   if (!output.interactive) {
     const state = yield* Effect.flatMap(readInputs(target, files), fold)
@@ -264,7 +333,7 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
               ? reduceTree(folded, { _tag: "Tick", at: yield* Clock.currentTimeMillis })
               : folded
           const text = yield* painter.paint(
-            screenLines(state, yield* Ref.get(view), output),
+            screenLines(state, yield* Ref.get(view), output, yield* tailFor(yield* Ref.get(view))),
             `${output.columns()}x${output.rows()}`
           )
           if (text.length > 0) {
@@ -322,3 +391,55 @@ export const nodeWatchDependencies = (
     keys: nodeTreeKeys("detach")
   }
 }
+
+// ── tail ────────────────────────────────────────────────────────────────────
+
+/**
+ * `llm4ts watch --tail <story|executor>`: the transcript printed as it grows,
+ * like `tail -f` — a call's reply streams in as written — until the run ends.
+ * A name with its own file is a story; any other is an executor.
+ */
+const followTail = (
+  name: string,
+  directory: string,
+  transcripts: TranscriptFiles,
+  output: WatchOutput,
+  ended: () => Effect.Effect<boolean, FlowError>
+): Effect.Effect<void, FlowError> =>
+  Effect.gen(function* () {
+    const target: TailTarget = transcripts.list(directory).includes(transcriptFileOf(name))
+      ? { lane: name }
+      : { executor: name }
+    const width = Math.max(60, output.columns() ?? 100)
+    let shown = 0
+    let start: number | undefined
+    const wanted = new Set<string>()
+    let replying: string | undefined
+    while (true) {
+      const done = yield* ended()
+      const entries = (yield* loadTranscript(transcripts, directory, target)) ?? []
+      for (const entry of entries.slice(shown)) {
+        start = start ?? entry.at
+        if (entry._tag === "Call" && ("lane" in target || entry.executor === target.executor)) {
+          wanted.add(entry.call)
+        }
+        if (!wanted.has(entry.call)) {
+          continue
+        }
+        if (entry._tag === "Reply") {
+          // A reply streams: its text as it arrived, on one growing paragraph.
+          yield* output.write(`${replying === entry.call ? "" : "◀ "}${entry.text}`)
+          replying = entry.call
+          continue
+        }
+        const lines = renderTranscript([entry], { width, since: start })
+        yield* output.write(`${replying === undefined ? "" : "\n"}${lines.join("\n")}\n`)
+        replying = undefined
+      }
+      shown = entries.length
+      if (done) {
+        return
+      }
+      yield* Effect.sleep(pollInterval)
+    }
+  })

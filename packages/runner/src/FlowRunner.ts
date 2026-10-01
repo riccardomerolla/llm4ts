@@ -60,7 +60,7 @@ import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts
 import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
 import { timedJudgment, timedSeat, withTimedRole } from "@llm4ts/flow/Timing"
 import { transcriptSeat, type TranscriptSink } from "@llm4ts/flow/Transcript"
-import { nodeTranscriptSink, transcriptsWanted } from "./Transcripts.ts"
+import { nodeTranscriptFiles, nodeTranscriptSink, transcriptsWanted } from "./Transcripts.ts"
 import { idleAfterFrom } from "./AgentTree.ts"
 import { makeAgentTreeHost, nodeTreeKeys } from "./AgentTreeSurface.ts"
 import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog"
@@ -825,7 +825,13 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
             colour: true
           },
           nodeTreeKeys("interrupt"),
-          idleAfterFrom(environment)
+          idleAfterFrom(environment),
+          transcriptsWanted(environment)
+            ? {
+                directory: join(options.workDir, ".llm4ts", "transcripts", bundle.runId),
+                files: nodeTranscriptFiles
+              }
+            : undefined
         )
       : undefined
   const surface = tree?.surface ?? classic

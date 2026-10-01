@@ -12,8 +12,10 @@ import {
   onTreeKey,
   reduceTree,
   renderTree,
+  tailTargetOf,
   type TreeView
 } from "./AgentTree.ts"
+import { loadTranscript, tailLinesOf, type TranscriptFiles } from "./Transcripts.ts"
 import type { TerminalSurface } from "./Terminal.ts"
 
 /**
@@ -92,13 +94,16 @@ export const makeScreenPainter: Effect.Effect<ScreenPainter> = Effect.map(
 export const enterScreen = "\u001b[?1049h\u001b[?25l\u001b[?7l"
 export const leaveScreen = "\u001b[?7h\u001b[?25h\u001b[?1049l"
 const redrawEvery = "100 millis"
+const tailRows = 16
 
 export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make")(function* (
   hub: FlowEventHub,
   classic: TerminalSurface,
   output: AgentTreeOutput,
   keys: Stream.Stream<string>,
-  idleAfterMs?: number
+  idleAfterMs?: number,
+  /** The run's transcript (`--transcript`), for the tail pane. */
+  transcripts?: { readonly directory: string; readonly files: TranscriptFiles }
 ): Effect.fn.Return<AgentTreeHost, never, Scope.Scope> {
   const state = yield* Ref.make(emptyTree(idleAfterMs === undefined ? {} : { idleAfterMs }))
   const view = yield* Ref.make<TreeView>(initialView)
@@ -118,11 +123,26 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
 
   const render = (rows: number | undefined): Effect.Effect<ReadonlyArray<string>> =>
     Effect.gen(function* () {
+      const current = yield* Ref.get(view)
+      const width = Math.max(90, output.columns() ?? 90)
+      const target = tailTargetOf(current)
+      const tail =
+        !current.tail || target === undefined || transcripts === undefined
+          ? undefined
+          : tailLinesOf(
+              yield* loadTranscript(transcripts.files, transcripts.directory, target),
+              target,
+              current.tailRole,
+              width - 32,
+              tailRows,
+              current.tailBack
+            )
       return renderTree(yield* Ref.get(state), {
-        width: Math.max(90, output.columns() ?? 90),
+        width,
         colour: output.colour,
-        view: yield* Ref.get(view),
-        ...(rows === undefined ? {} : { height: rows })
+        view: current,
+        ...(rows === undefined ? {} : { height: rows }),
+        ...(tail === undefined ? {} : { tail })
       })
     })
   /** The full screen fits the terminal; the last frame left behind is whole. */
@@ -201,6 +221,8 @@ const keyNames: Readonly<Record<string, string>> = {
   "\u001b[B": "down",
   "\u001b[C": "right",
   "\u001b[D": "left",
+  "\u001b[5~": "pageup",
+  "\u001b[6~": "pagedown",
   "\r": "enter",
   "\n": "enter",
   "\u001b": "escape"

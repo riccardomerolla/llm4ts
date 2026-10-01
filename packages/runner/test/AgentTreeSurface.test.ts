@@ -4,7 +4,7 @@ import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 import { StageStarted, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
-import { makeAgentTreeHost, paintFrame } from "@llm4ts/runner/AgentTreeSurface"
+import { keyNamesOf, makeAgentTreeHost, paintFrame } from "@llm4ts/runner/AgentTreeSurface"
 import { plainTerminalPalette, type TerminalSurface } from "@llm4ts/runner/Terminal"
 
 const setup = (keys: Stream.Stream<string>) =>
@@ -27,12 +27,38 @@ const setup = (keys: Stream.Stream<string>) =>
         rows: () => 40,
         colour: false
       },
-      keys
+      keys,
+      undefined,
+      {
+        directory: "/repo/.llm4ts/transcripts/run-1",
+        files: {
+          read: (path) =>
+            Effect.succeed(
+              path.endsWith("/home.jsonl")
+                ? `${JSON.stringify({ _tag: "Call", at: 0, call: "c1", role: "coder", input: "Build home" })}\n${JSON.stringify({ _tag: "Reply", at: 1, call: "c1", text: "On it" })}\n`
+                : undefined
+            ),
+          list: (directory) => (directory.endsWith("run-1") ? ["home.jsonl"] : [])
+        }
+      }
     )
     return { hub, host, classicLines, written }
   })
 
 describe("agent tree host", () => {
+  it.effect("tails the selected story's transcript in the live view", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { hub, written } = yield* setup(Stream.fromIterable(["1", "t"]))
+        yield* hub.publish(StageStarted.make({ stage: "story home", lane: "home" }))
+        yield* TestClock.adjust("300 millis")
+        const text = yield* Ref.get(written)
+        assert.include(text, "tail · home · all")
+        assert.include(text, "◀ On it")
+      })
+    )
+  )
+
   it.effect(
     "draws while the run goes on, then leaves its last frame and lets the summary through",
     () =>
@@ -178,3 +204,11 @@ const visibleRows = (screen: Map<number, string>): ReadonlyArray<string> =>
     .filter(([, line]) => line.length > 0)
     .sort(([left], [right]) => left - right)
     .map(([, line]) => line)
+
+describe("keyNamesOf", () => {
+  it("names the page keys", () => {
+    assert.deepStrictEqual(keyNamesOf("\u001b[5~"), ["pageup"])
+    assert.deepStrictEqual(keyNamesOf("\u001b[6~"), ["pagedown"])
+    assert.deepStrictEqual(keyNamesOf("t"), ["t"])
+  })
+})

@@ -671,6 +671,8 @@ export interface TreeView {
   readonly tail: boolean
   /** Only this role's calls in the tail; all when undefined (`r` cycles). */
   readonly tailRole: string | undefined
+  /** How many lines the tail is scrolled back from its end (page up/down). */
+  readonly tailBack: number
 }
 
 export const initialView: TreeView = {
@@ -679,13 +681,15 @@ export const initialView: TreeView = {
   expanded: false,
   fullLog: false,
   tail: false,
-  tailRole: undefined
+  tailRole: undefined,
+  tailBack: 0
 }
 
 const runningLanes = (state: TreeState): ReadonlyArray<TreeLane> =>
   state.lanes.filter((lane) => lane.status === "running")
 
 const tailRoles: ReadonlyArray<string | undefined> = [undefined, "coder", "reviewer", "judge"]
+const tailPage = 10
 
 /** Whose transcript the tail shows: the selected story, or the selected executor. */
 export const tailTargetOf = (
@@ -725,7 +729,13 @@ export const onTreeKey = (view: TreeView, key: string, state: TreeState): TreeVi
         ? view
         : { ...view, expanded: !view.expanded }
     case "t":
-      return view.selected === undefined ? view : { ...view, tail: !view.tail, expanded: false }
+      return view.selected === undefined
+        ? view
+        : { ...view, tail: !view.tail, expanded: false, tailBack: 0 }
+    case "pageup":
+      return view.tail ? { ...view, tailBack: view.tailBack + tailPage } : view
+    case "pagedown":
+      return view.tail ? { ...view, tailBack: Math.max(0, view.tailBack - tailPage) } : view
     case "r":
       return view.tail
         ? {
@@ -734,7 +744,7 @@ export const onTreeKey = (view: TreeView, key: string, state: TreeState): TreeVi
           }
         : view
     case "escape":
-      return { ...view, expanded: false, tail: false }
+      return { ...view, expanded: false, tail: false, tailBack: 0 }
     case "e":
       return {
         ...view,
@@ -1158,3 +1168,16 @@ const fitToRows = (
   rows === undefined || rows < 4 || lines.length <= rows
     ? lines
     : [...lines.slice(0, rows - 2), ...lines.slice(-2)]
+
+/** `20s`, `4m00s`, `1h02m`. */
+export const duration = (ms: number): string => {
+  const seconds = Math.round(ms / 1_000)
+  if (seconds < 60) {
+    return `${seconds}s`
+  }
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`
+  }
+  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`
+}

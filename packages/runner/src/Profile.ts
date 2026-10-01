@@ -3,7 +3,9 @@ import * as Schema from "effect/Schema"
 import type { FlowError } from "@llm4ts/flow/FlowError"
 import type { FlowEvent, Timed } from "@llm4ts/flow/FlowEvents"
 import { readTrace } from "@llm4ts/flow/Replay"
-import { treeInputsOfTrace, type TreeInput } from "./AgentTree.ts"
+import { duration, treeInputsOfTrace, type TreeInput } from "./AgentTree.ts"
+
+export { duration }
 import { formatCount } from "./Terminal.ts"
 import {
   resolveTraceTarget,
@@ -607,19 +609,6 @@ const storyProfile = (
 }
 
 // ── words ───────────────────────────────────────────────────────────────────
-
-/** `20s`, `4m00s`, `1h02m`. */
-export const duration = (ms: number): string => {
-  const seconds = Math.round(ms / 1_000)
-  if (seconds < 60) {
-    return `${seconds}s`
-  }
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) {
-    return `${minutes}m${String(seconds % 60).padStart(2, "0")}s`
-  }
-  return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`
-}
 
 const stepsText = (steps: number): string =>
   `${Number.isInteger(steps) ? steps : steps.toFixed(1)} step${steps === 1 ? "" : "s"}`

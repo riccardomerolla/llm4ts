@@ -6,6 +6,8 @@ import * as Stream from "effect/Stream"
 import { appendEpicRun, EpicRun } from "@llm4ts/flow/EpicRuns"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { makeWatchProgram, type WatchDependencies } from "@llm4ts/runner/Watch"
+import { TranscriptEntry } from "@llm4ts/flow/Transcript"
+import * as Schema from "effect/Schema"
 
 const fixture = (name: string): string =>
   readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")
@@ -20,7 +22,32 @@ const ended = `${fixture("agent-tree.trace.jsonl")}${JSON.stringify({
   fields: { outcome: "completed" }
 })}\n`
 
-const setup = (keys: ReadonlyArray<string> = [], interactive = false) =>
+const transcriptLine = Schema.encodeSync(Schema.fromJsonString(TranscriptEntry))
+const paymentsTranscript: ReadonlyArray<TranscriptEntry> = [
+  {
+    _tag: "Call",
+    at: 1,
+    call: "c1",
+    role: "coder",
+    executor: "pi-lmstudio",
+    input: "Add the fake routes"
+  },
+  { _tag: "Reply", at: 2, call: "c1", text: "Writing " },
+  { _tag: "Reply", at: 3, call: "c1", text: "payments.fake.ts" },
+  { _tag: "Tool", at: 4, call: "c1", tool: "bash", args: '{"command":"pnpm test"}' },
+  { _tag: "ToolResult", at: 9, call: "c1", output: "3 passed" },
+  { _tag: "End", at: 10, call: "c1", ms: 9 }
+]
+
+const setup = (
+  keys: ReadonlyArray<string> = [],
+  interactive = false,
+  transcript: Readonly<Record<string, string>> = {
+    "/repo/.llm4ts/transcripts/run-fixture/payments.jsonl": `${paymentsTranscript
+      .map((entry) => transcriptLine(entry))
+      .join("\n")}\n`
+  }
+) =>
   Effect.gen(function* () {
     const memory = yield* makeMemoryPlainFileStore({
       "/repo/.llm4ts/trace-1790000000000.jsonl": ended,
@@ -52,7 +79,14 @@ const setup = (keys: ReadonlyArray<string> = [], interactive = false) =>
         interactive,
         colour: false
       },
-      keys: Stream.fromIterable(keys)
+      keys: Stream.fromIterable(keys),
+      transcripts: {
+        read: (path) => Effect.succeed(transcript[path]),
+        list: (directory) =>
+          Object.keys(transcript)
+            .filter((path) => path.startsWith(`${directory}/`))
+            .map((path) => path.slice(directory.length + 1))
+      }
     }
     return { files: memory.store satisfies PlainFileStoreShape, written, dependencies }
   })
@@ -115,6 +149,61 @@ describe("llm4ts watch", () => {
       assert.isAbove(rows.length, 0)
       assert.isAtMost(Math.max(...rows), 32)
       assert.include(text, "run [completed]")
+    })
+  )
+
+  it.effect("tails a story's transcript, as it was said, and stops when the run has ended", () =>
+    Effect.gen(function* () {
+      const { written, dependencies } = yield* setup()
+      yield* makeWatchProgram(
+        { repo: "/repo", trace: "/repo/.llm4ts/trace-1790000000000.jsonl", tail: "payments" },
+        dependencies
+      )
+      const text = yield* Ref.get(written)
+      assert.include(text, "coder · pi-lmstudio")
+      assert.include(text, "▶ Add the fake routes")
+      assert.include(text, "◀ Writing payments.fake.ts")
+      assert.include(text, "⚙ bash pnpm test")
+      assert.include(text, "↳ ok: 3 passed")
+    })
+  )
+
+  it.effect("tails an executor across stories, and says when the run kept no transcript", () =>
+    Effect.gen(function* () {
+      const byExecutor = yield* setup()
+      yield* makeWatchProgram(
+        { repo: "/repo", trace: "/repo/.llm4ts/trace-1790000000000.jsonl", tail: "pi-lmstudio" },
+        byExecutor.dependencies
+      )
+      assert.include(yield* Ref.get(byExecutor.written), "◀ Writing payments.fake.ts")
+      const other = yield* setup()
+      yield* makeWatchProgram(
+        { repo: "/repo", trace: "/repo/.llm4ts/trace-1790000000000.jsonl", tail: "claude" },
+        other.dependencies
+      )
+      assert.notInclude(yield* Ref.get(other.written), "Writing")
+
+      const none = yield* setup([], false, {})
+      const error = yield* Effect.flip(
+        makeWatchProgram(
+          { repo: "/repo", trace: "/repo/.llm4ts/trace-1790000000000.jsonl", tail: "payments" },
+          none.dependencies
+        )
+      )
+      assert.include(error.message, "no transcript for this run")
+    })
+  )
+
+  it.effect("opens the selected story's tail in the tree with t", () =>
+    Effect.gen(function* () {
+      const { written, dependencies } = yield* setup(["1", "t", "q"], true)
+      yield* makeWatchProgram(
+        { repo: "/repo", trace: "/repo/.llm4ts/trace-1790000000000.jsonl" },
+        dependencies
+      )
+      const text = yield* Ref.get(written)
+      assert.include(text, "tail · payments · all")
+      assert.include(text, "◀ Writing payments.fake.ts")
     })
   )
 })
