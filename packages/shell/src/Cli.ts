@@ -497,6 +497,7 @@ export interface WatchFlags {
   readonly epic: Option.Option<string>
   readonly replay: boolean
   readonly speed: Option.Option<number>
+  readonly tail: Option.Option<string>
 }
 
 /** Turns the `watch` flags into program options; every rejection is a usage error. */
@@ -522,7 +523,8 @@ export const watchOptionsFrom = (
       ...(Option.isSome(flags.trace) ? { trace: resolve(cwd, flags.trace.value) } : {}),
       ...(Option.isSome(flags.epic) ? { epic: flags.epic.value } : {}),
       ...(flags.replay ? { replay: true } : {}),
-      ...(speed === undefined ? {} : { speed })
+      ...(speed === undefined ? {} : { speed }),
+      ...(Option.isSome(flags.tail) ? { tail: flags.tail.value } : {})
     }
   })
 
@@ -548,6 +550,12 @@ const watchCommand = Command.make(
     speed: Flag.Int("speed").pipe(
       Flag.optional,
       Flag.withDescription("Replay speed-up (default 10)")
+    ),
+    tail: Flag.String("tail").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Print a story's or an executor's transcript as it grows, like tail -f (needs a run started with --transcript)"
+      )
     )
   },
   (config) =>

@@ -92,6 +92,7 @@ still lists them until the repository ignores them:
 ```gitignore
 .llm4ts/trace-*.jsonl
 .llm4ts/costs.jsonl
+.llm4ts/transcripts/
 ```
 
 (Not the whole directory: forked packs live under `.llm4ts/kits/` and are
@@ -196,6 +197,34 @@ story's current activity and how long it has run, `turns · avg · gates`,
 an **idle** marker on a story with no event and no tool running for
 `LLM4TS_IDLE_AFTER` (default `2m`), and the run's split above the status
 line: `time [model 62% · tools 5% · gates 24% · wait 9%]`.
+
+## Tailing what a seat says: `--transcript`
+
+To see what a story's coder, reviewer or judge is told and answers, start the
+run with a transcript:
+
+```bash
+llm4ts run epic-stories --transcript --ui tree …
+```
+
+Every seat call is then recorded under `.llm4ts/transcripts/<run-id>/`, one
+file per story: the input (a chat's system prompt and messages on its first
+call, then only what is new), the reply as it streams, each tool call with its
+result. Secrets are redacted, long parts capped, and the files are readable
+only by their owner. The trace and `llm4ts profile` stay content-free: a
+transcript is never part of them. Landing the epic deletes its earlier runs'
+transcripts.
+
+In the tree (live, or in `llm4ts watch`), select a story (or, in the executors
+view, an executor) and press `t`: the boxes give way to its transcript,
+following the end. `r` cycles the role shown (all, coder, reviewer, judge),
+`PgUp`/`PgDn` scroll, `esc` closes it. From another terminal,
+
+```bash
+llm4ts watch --epic <id> --tail <story-or-executor>
+```
+
+prints it as it grows, like `tail -f`, until the run ends.
 
 ## Exit codes and resuming
 

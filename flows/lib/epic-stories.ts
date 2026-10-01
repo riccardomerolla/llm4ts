@@ -1,7 +1,7 @@
 // Shared core of the epic-stories flow (ADR 0013): the operator flags, the
 // story-plan generator prompt and schema, the story judge, the gate runner,
 // and seat selection. The executor itself is `@llm4ts/flow/Stories`.
-import { readdir } from "node:fs/promises"
+import { readdir, rm, stat } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -46,7 +46,7 @@ import {
   type NotPlanned,
   type RoundProgress
 } from "@llm4ts/flow/RefineRound"
-import { EpicRun, appendEpicRun } from "@llm4ts/flow/EpicRuns"
+import { EpicRun, appendEpicRun, readEpicRuns } from "@llm4ts/flow/EpicRuns"
 import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { BlockedVerdict, StoryState, StoryStateVersion, StoryVerdict } from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
@@ -1504,6 +1504,27 @@ export interface StoryJudgeContext {
 }
 
 /**
+ * Deletes the transcripts (`--transcript`) of these runs; returns how many
+ * there were. A landed epic keeps no copy of its customer code in them.
+ */
+export const removeTranscripts = (
+  workDir: string,
+  runIds: ReadonlyArray<string>
+): Effect.Effect<number> =>
+  Effect.reduce(
+    runIds,
+    () => 0,
+    (removed, runId) => {
+      const directory = join(workDir, ".llm4ts", "transcripts", runId)
+      return Effect.tryPromise(() => stat(directory)).pipe(
+        Effect.andThen(Effect.tryPromise(() => rm(directory, { recursive: true, force: true }))),
+        Effect.as(removed + 1),
+        Effect.orElseSucceed(() => removed)
+      )
+    }
+  )
+
+/**
  * LLM4TS_STORY_CONTEXT_CHARS: how much of the code a story starts from its
  * coder sees up front (0 leaves it out); the executor's default otherwise.
  */
@@ -1856,6 +1877,16 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                 "\n"
               )
             })
+            // The epic's earlier runs' transcripts go with it; this run's may still be read.
+            const earlier = (yield* readEpicRuns(files, stateDir))
+              .map((run) => run.runId)
+              .filter((runId) => runId !== context.trace?.runId)
+            const removed = yield* removeTranscripts(input.workDir, earlier)
+            if (removed > 0) {
+              yield* events.publish(
+                Info.make({ message: `epic ${plan.epicId}: removed ${removed} run transcript(s)` })
+              )
+            }
             yield* events.publish(
               Info.make({
                 message: `epic ${plan.epicId}: landed on ${landed.target}${landed.conflicts.length === 0 ? "" : ` (${landed.conflicts.length} conflicted file(s) resolved in ${landed.rounds} round(s))`}`

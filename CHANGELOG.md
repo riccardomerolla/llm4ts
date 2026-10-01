@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.24.0
+
+- **Transcripts: what each seat is told and answers.** `llm4ts run …
+--transcript` (`LLM4TS_TRANSCRIPT=on`) records every seat call under
+  `.llm4ts/transcripts/<run-id>/`, one file per story: the input (a chat's
+  system prompt and messages on its first call, then only what is new), the
+  reply as it streams, each tool call and its result. Secrets are redacted,
+  parts capped, files owner-only. Off by default; never in the trace, so the
+  trace and `llm4ts profile` stay content-free. `--land` deletes the epic's
+  earlier runs' transcripts.
+- **Tail them while they happen.** In the agent tree (`--ui tree` and
+  `llm4ts watch`), select a story or an executor and press `t`: its transcript
+  replaces the boxes and follows the end; `r` filters by role, `PgUp`/`PgDn`
+  scroll, `esc` closes. `llm4ts watch --tail <story|executor>` prints it like
+  `tail -f`.
+- The claude, codex and pi parsers carry each tool's output on its end chunk
+  (for transcripts only).
+
 ## 2.23.0
 
 Fewer, cheaper coder steps in `epic-stories`, and a profile that shows them.

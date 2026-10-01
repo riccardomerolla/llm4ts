@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -58,6 +58,7 @@ import {
   gatesIn,
   judgeStory,
   localCoderServer,
+  removeTranscripts,
   rubricStoryJudge,
   storyContextChars,
   parseEpicArgs,
@@ -695,6 +696,24 @@ describe("the story judge", () => {
       "The story's branch has no changes. Below is the current code of its owned paths"
     )
   })
+})
+
+describe("removeTranscripts", () => {
+  it.effect("deletes the named runs' transcripts and keeps the others", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "llm4ts-transcripts-")))
+      const dir = (run: string) => join(root, ".llm4ts", "transcripts", run)
+      for (const run of ["run-1", "run-2", "run-3"]) {
+        yield* Effect.promise(() => mkdir(dir(run), { recursive: true }))
+        yield* Effect.promise(() => writeFile(join(dir(run), "home.jsonl"), "{}\n"))
+      }
+      const removed = yield* removeTranscripts(root, ["run-1", "run-2", "missing"])
+      assert.strictEqual(removed, 2)
+      const left = yield* Effect.promise(() => readdir(join(root, ".llm4ts", "transcripts")))
+      assert.deepStrictEqual(left, ["run-3"])
+      yield* Effect.promise(() => rm(root, { recursive: true, force: true }))
+    })
+  )
 })
 
 describe("storyContextChars", () => {

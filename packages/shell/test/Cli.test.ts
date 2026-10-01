@@ -232,7 +232,8 @@ describe("watchOptionsFrom", () => {
     repo: Option.none(),
     epic: Option.none(),
     replay: false,
-    speed: Option.none()
+    speed: Option.none(),
+    tail: Option.none()
   }
 
   it.effect("resolves the repository and the trace against the current directory", () =>
@@ -259,6 +260,10 @@ describe("watchOptionsFrom", () => {
       assert.deepStrictEqual(
         yield* watchOptionsFrom({ ...none, epic: Option.some("conto") }, "/work"),
         { repo: "/work", epic: "conto" }
+      )
+      assert.deepStrictEqual(
+        yield* watchOptionsFrom({ ...none, tail: Option.some("home") }, "/work"),
+        { repo: "/work", tail: "home" }
       )
     })
   )
