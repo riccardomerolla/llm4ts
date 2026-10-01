@@ -35,6 +35,7 @@
     "./NodeWorkspace": "./dist/NodeWorkspace.js",
     "./NodeRuntime": "./dist/NodeRuntime.js",
     "./Packs": "./dist/Packs.js",
+    "./Profile": "./dist/Profile.js",
     "./PiModels": "./dist/PiModels.js",
     "./ReviewFingerprint": "./dist/ReviewFingerprint.js",
     "./Terminal": "./dist/Terminal.js",

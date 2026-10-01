@@ -422,8 +422,19 @@ const stamped = (
             ...(event.model === undefined ? {} : { model: event.model }),
             ...tags
           })
+    // The lane's executor is its coder's: it names a coder call or tool, not
+    // a reviewer's or judge's call made on another executor.
     case "Timed":
-      return event.lane !== undefined ? event : Timed.make({ ...event, ...tags })
+      return event.lane !== undefined
+        ? event
+        : Timed.make({
+            ...event,
+            lane,
+            ...(executor !== undefined &&
+            ((event.kind === "model" && event.label === "coder") || event.kind === "tool")
+              ? { executor }
+              : {})
+          })
     default:
       return event
   }

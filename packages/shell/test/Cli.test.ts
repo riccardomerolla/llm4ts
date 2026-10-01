@@ -8,6 +8,7 @@ import type { FileSystem } from "effect/FileSystem"
 import * as Option from "effect/Option"
 import {
   costsOptionsFrom,
+  profileOptionsFrom,
   renderFlowList,
   renderKitList,
   resolveFlow,
@@ -275,6 +276,27 @@ describe("watchOptionsFrom", () => {
       assert.match(both.message, /either a trace or --epic/)
       assert.strictEqual(slow._tag, "ShellUsage")
       assert.match(slow.message, /--speed/)
+    })
+  )
+})
+
+describe("profileOptionsFrom", () => {
+  const none = { trace: Option.none(), repo: Option.none(), epic: Option.none(), json: false }
+
+  it.effect("resolves the repository and the trace, and keeps --json", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* profileOptionsFrom(none, "/work"), { repo: "/work" })
+      assert.deepStrictEqual(
+        yield* profileOptionsFrom(
+          { ...none, trace: Option.some("t.jsonl"), repo: Option.some("../portal"), json: true },
+          "/work/llm4ts"
+        ),
+        { repo: "/work/portal", trace: "/work/llm4ts/t.jsonl", json: true }
+      )
+      const both = yield* Effect.flip(
+        profileOptionsFrom({ ...none, trace: Option.some("t"), epic: Option.some("e") }, "/w")
+      )
+      assert.match(both.message, /either a trace or --epic/)
     })
   )
 })

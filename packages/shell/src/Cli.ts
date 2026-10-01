@@ -23,7 +23,13 @@ import {
   rosterReport
 } from "@llm4ts/runner/ExecutorRoster"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
-import { makeWatchProgram, nodeWatchDependencies, type WatchOptions } from "@llm4ts/runner/Watch"
+import {
+  makeWatchProgram,
+  nodeTraceSources,
+  nodeWatchDependencies,
+  type WatchOptions
+} from "@llm4ts/runner/Watch"
+import { makeProfileProgram, type ProfileOptions } from "@llm4ts/runner/Profile"
 import { describeExclusion } from "@llm4ts/flow/Roster"
 import { builtinKitsDir, discoverKits, kitTierPaths, type DiscoveredKit } from "@llm4ts/runner/Kits"
 import {
@@ -545,6 +551,66 @@ const watchCommand = Command.make(
   )
 )
 
+export interface ProfileFlags {
+  readonly trace: Option.Option<string>
+  readonly repo: Option.Option<string>
+  readonly epic: Option.Option<string>
+  readonly json: boolean
+}
+
+/** Turns the `profile` flags into program options; every rejection is a usage error. */
+export const profileOptionsFrom = (
+  flags: ProfileFlags,
+  cwd: string = process.cwd()
+): Effect.Effect<ProfileOptions, ShellUsageError> =>
+  Effect.gen(function* () {
+    if (Option.isSome(flags.trace) && Option.isSome(flags.epic)) {
+      return yield* new ShellUsageError({
+        message: "profile takes either a trace or --epic, not both"
+      })
+    }
+    return {
+      repo: resolve(
+        cwd,
+        Option.getOrElse(flags.repo, () => ".")
+      ),
+      ...(Option.isSome(flags.trace) ? { trace: resolve(cwd, flags.trace.value) } : {}),
+      ...(Option.isSome(flags.epic) ? { epic: flags.epic.value } : {}),
+      ...(flags.json ? { json: true } : {})
+    }
+  })
+
+const profileCommand = Command.make(
+  "profile",
+  {
+    trace: Argument.String("trace").pipe(
+      Argument.optional,
+      Argument.withDescription("A trace file (default: the newest in the repository's .llm4ts/)")
+    ),
+    repo: Flag.String("repo").pipe(
+      Flag.optional,
+      Flag.withDescription("Repository whose .llm4ts/ to read (defaults to the current directory)")
+    ),
+    epic: Flag.String("epic").pipe(
+      Flag.optional,
+      Flag.withDescription("Profile this epic's latest run (epics/<id>/runs.jsonl)")
+    ),
+    json: Flag.Boolean("json").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Emit the report as JSON, to compare runs")
+    )
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const options = yield* profileOptionsFrom(config)
+      yield* Console.log(yield* makeProfileProgram(options, nodeTraceSources))
+    })
+).pipe(
+  Command.withDescription(
+    "Where a run's time went: model, tools, gates, merges and waits per story, the biggest sinks first (content-free)"
+  )
+)
+
 const rosterSource = (repo: Option.Option<string>) => ({
   files: nodePlainFileStore,
   environment: process.env,
@@ -631,6 +697,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     refineCommand,
     costsCommand,
     watchCommand,
+    profileCommand,
     rosterCommand,
     doctorCommand
   ])

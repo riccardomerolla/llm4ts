@@ -68,7 +68,13 @@ export class WatchTargetMissing extends Schema.TaggedError<WatchTargetMissing>()
   { message: Schema.String }
 ) {}
 
-interface WatchTarget {
+/** Where a run's trace and its epic are read from. */
+export type TraceSources = Pick<WatchDependencies, "files" | "listTraces" | "listEpics">
+
+/** A trace to read: given, an epic's latest run, or the newest in the repository. */
+export type TraceChoice = Pick<WatchOptions, "repo" | "trace" | "epic">
+
+export interface WatchTarget {
   readonly tracePath: string
   readonly epicDir: string | undefined
   readonly run: EpicRun | undefined
@@ -80,7 +86,7 @@ const epicsDirOf = (repo: string): string => join(repo, TraceDirectoryName, "epi
 const epicOfTrace = (
   tracePath: string,
   repo: string,
-  dependencies: WatchDependencies
+  dependencies: TraceSources
 ): Effect.Effect<{ readonly dir: string; readonly run: EpicRun } | undefined, FlowError> =>
   Effect.gen(function* () {
     const epicsDir = epicsDirOf(repo)
@@ -96,9 +102,9 @@ const epicOfTrace = (
     return undefined
   })
 
-const resolveTarget = (
-  options: WatchOptions,
-  dependencies: WatchDependencies
+export const resolveTraceTarget = (
+  options: TraceChoice,
+  dependencies: TraceSources
 ): Effect.Effect<WatchTarget, FlowError | WatchTargetMissing> =>
   Effect.gen(function* () {
     if (options.epic !== undefined) {
@@ -191,7 +197,7 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
   options: WatchOptions,
   dependencies: WatchDependencies
 ): Effect.fn.Return<void, FlowError | WatchTargetMissing> {
-  const target = yield* resolveTarget(options, dependencies)
+  const target = yield* resolveTraceTarget(options, dependencies)
   const { files, output } = dependencies
   const fold = (inputs: ReadonlyArray<TreeInput>): Effect.Effect<TreeState, FlowError> =>
     Effect.map(startingTree(target, files), (start) => inputs.reduce(reduceTree, start))
@@ -277,6 +283,12 @@ const nodeListEpics = (directory: string): ReadonlyArray<string> =>
   existsSync(directory)
     ? readdirSync(directory).filter((name) => statSync(join(directory, name)).isDirectory())
     : []
+
+export const nodeTraceSources: TraceSources = {
+  files: nodePlainFileStore,
+  listTraces: nodeListTraces,
+  listEpics: nodeListEpics
+}
 
 export const nodeWatchDependencies = (
   environment: Readonly<Record<string, string | undefined>> = process.env
