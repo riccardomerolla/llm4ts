@@ -663,33 +663,53 @@ export type TreeMode = "lanes" | "executors"
 /** What the reader chose to look at; the run's state is separate. */
 export interface TreeView {
   readonly mode: TreeMode
-  /** The selected lane's story id. */
+  /** The selected lane's story id, or in the executors view the executor. */
   readonly selected: string | undefined
   readonly expanded: boolean
   readonly fullLog: boolean
+  /** The transcript tail of the selection is open (`t`). */
+  readonly tail: boolean
+  /** Only this role's calls in the tail; all when undefined (`r` cycles). */
+  readonly tailRole: string | undefined
 }
 
 export const initialView: TreeView = {
   mode: "lanes",
   selected: undefined,
   expanded: false,
-  fullLog: false
+  fullLog: false,
+  tail: false,
+  tailRole: undefined
 }
 
 const runningLanes = (state: TreeState): ReadonlyArray<TreeLane> =>
   state.lanes.filter((lane) => lane.status === "running")
 
+const tailRoles: ReadonlyArray<string | undefined> = [undefined, "coder", "reviewer", "judge"]
+
+/** Whose transcript the tail shows: the selected story, or the selected executor. */
+export const tailTargetOf = (
+  view: TreeView
+): { readonly lane: string } | { readonly executor: string } | undefined =>
+  view.selected === undefined
+    ? undefined
+    : view.mode === "lanes"
+      ? { lane: view.selected }
+      : { executor: view.selected }
+
 /**
- * The view after a key: arrows or 1–9 select a running lane, enter expands
- * it, escape collapses, `e` switches lanes and executors, `l` the full log,
- * `q` quits. Keys it does not know return the same view.
+ * The view after a key: arrows or 1–9 select a running lane (an executor in
+ * the executors view), enter expands it, `t` tails its transcript, `r`
+ * cycles the tail's role, escape closes, `e` switches lanes and executors,
+ * `l` the full log, `q` quits. Keys it does not know return the same view.
  */
 export const onTreeKey = (view: TreeView, key: string, state: TreeState): TreeView | "quit" => {
-  const running = runningLanes(state)
-  const index = running.findIndex((lane) => lane.id === view.selected)
+  const choices =
+    view.mode === "lanes" ? runningLanes(state).map((lane) => lane.id) : state.executors
+  const index = choices.findIndex((id) => id === view.selected)
   const select = (next: number): TreeView => {
-    const lane = running[Math.max(0, Math.min(running.length - 1, next))]
-    return lane === undefined ? view : { ...view, selected: lane.id }
+    const id = choices[Math.max(0, Math.min(choices.length - 1, next))]
+    return id === undefined ? view : { ...view, selected: id }
   }
   switch (key) {
     case "q":
@@ -701,11 +721,28 @@ export const onTreeKey = (view: TreeView, key: string, state: TreeState): TreeVi
     case "left":
       return select(index < 0 ? 0 : index - 1)
     case "enter":
-      return view.selected === undefined ? view : { ...view, expanded: !view.expanded }
+      return view.selected === undefined || view.mode !== "lanes"
+        ? view
+        : { ...view, expanded: !view.expanded }
+    case "t":
+      return view.selected === undefined ? view : { ...view, tail: !view.tail, expanded: false }
+    case "r":
+      return view.tail
+        ? {
+            ...view,
+            tailRole: tailRoles[(tailRoles.indexOf(view.tailRole) + 1) % tailRoles.length]
+          }
+        : view
     case "escape":
-      return { ...view, expanded: false }
+      return { ...view, expanded: false, tail: false }
     case "e":
-      return { ...view, mode: view.mode === "lanes" ? "executors" : "lanes" }
+      return {
+        ...view,
+        mode: view.mode === "lanes" ? "executors" : "lanes",
+        selected: undefined,
+        expanded: false,
+        tail: false
+      }
     case "l":
       return { ...view, fullLog: !view.fullLog }
     default:
@@ -719,6 +756,8 @@ export interface TreeRenderOptions {
   readonly view: TreeView
   /** The terminal's rows; the frame fits them (see `renderTree`). */
   readonly height?: number
+  /** The open tail's lines, read by the host; absent when the run has no transcript. */
+  readonly tail?: ReadonlyArray<string>
 }
 
 const railWidth = 26
@@ -854,11 +893,16 @@ const heldBy = (state: TreeState, executor: string): ReadonlyArray<string> => {
         .map((lane) => `coder · ${lane.id}`)
 }
 
-const executorBox = (state: TreeState, executor: string, width: number): Array<Line> => {
+const executorBox = (
+  state: TreeState,
+  executor: string,
+  width: number,
+  selected: boolean
+): Array<Line> => {
   const held = heldBy(state, executor)
   const out = state.exclusions.find((exclusion) => exclusion.executor === executor)
   return box(width, "running", [
-    [span(executor, "bold")],
+    [span(selected ? `▸ ${executor}` : executor, "bold")],
     ...(held.length === 0
       ? [[span("no lease", "dim")]]
       : held.slice(0, 3).map((lease): Line => [span(lease)])),
@@ -942,7 +986,36 @@ const judgmentOf = (state: TreeState, width: number): Array<Line> => {
   )
 }
 
-const mainOf = (state: TreeState, width: number, view: TreeView): Array<Line> => {
+/** The transcript tail of the selection, in place of the boxes. */
+const tailOf = (
+  view: TreeView,
+  tail: ReadonlyArray<string> | undefined,
+  width: number
+): Array<Line> =>
+  box(
+    width,
+    "running",
+    tail === undefined || tail.length === 0
+      ? [
+          [
+            span(
+              tail === undefined
+                ? "no transcript for this run — start it with llm4ts run … --transcript"
+                : "nothing said yet",
+              "dim"
+            )
+          ]
+        ]
+      : tail.map((line): Line => [span(line)]),
+    `tail · ${view.selected ?? ""} · ${view.tailRole ?? "all"}`
+  )
+
+const mainOf = (
+  state: TreeState,
+  width: number,
+  view: TreeView,
+  tail: ReadonlyArray<string> | undefined
+): Array<Line> => {
   const running = state.lanes.filter((lane) => lane.status === "running")
   const orchestratorWidth = Math.min(46, width)
   const stage = state.stages.at(-1) ?? (running.length > 0 ? "implement stories" : "idle")
@@ -962,17 +1035,21 @@ const mainOf = (state: TreeState, width: number, view: TreeView): Array<Line> =>
   const shown = running.slice(0, maxLaneBoxes)
   const executors = state.executors.slice(0, maxLaneBoxes + 1)
   const lanes =
-    view.expanded && selected !== undefined
-      ? expandedLane(selected, width, state.now)
-      : view.mode === "executors"
-        ? executors.length === 0
-          ? [centre([span("no executors yet", "dim")], width)]
-          : columnsOf(executors, width, (executor, each) => executorBox(state, executor, each))
-        : shown.length === 0
-          ? [centre([span("no stories in flight", "dim")], width)]
-          : columnsOf(shown, width, (lane, each) =>
-              laneBox(lane, each, state.now, lane.id === view.selected, state.idleAfterMs)
-            )
+    view.tail && view.selected !== undefined
+      ? tailOf(view, tail, width)
+      : view.expanded && selected !== undefined
+        ? expandedLane(selected, width, state.now)
+        : view.mode === "executors"
+          ? executors.length === 0
+            ? [centre([span("no executors yet", "dim")], width)]
+            : columnsOf(executors, width, (executor, each) =>
+                executorBox(state, executor, each, executor === view.selected)
+              )
+          : shown.length === 0
+            ? [centre([span("no stories in flight", "dim")], width)]
+            : columnsOf(shown, width, (lane, each) =>
+                laneBox(lane, each, state.now, lane.id === view.selected, state.idleAfterMs)
+              )
   return [
     ...orchestrator.map((line) => centre(line, width)),
     centre([span("•", "orchestrator")], width),
@@ -1027,7 +1104,10 @@ const frameOf = (
     ),
     [span("═".repeat(width), "dim")],
     [],
-    ...beside([railOf(state), mainOf(state, mainWidth, options.view)], [railWidth, mainWidth]),
+    ...beside(
+      [railOf(state), mainOf(state, mainWidth, options.view, options.tail)],
+      [railWidth, mainWidth]
+    ),
     ...(logCount === "none"
       ? []
       : [[], ...box(width, "log", logOf(state, logCount), "session log")]),

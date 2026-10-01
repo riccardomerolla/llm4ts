@@ -26,6 +26,7 @@ import {
   idleAfterFrom,
   initialView,
   onTreeKey,
+  tailTargetOf,
   reduceTree,
   renderTree,
   treeInputsOfTrace,
@@ -496,5 +497,42 @@ describe("agent tree", () => {
     assert.strictEqual(idleAfterFrom({ LLM4TS_IDLE_AFTER: "90s" }), 90_000)
     assert.strictEqual(idleAfterFrom({ LLM4TS_IDLE_AFTER: "1h" }), 3_600_000)
     assert.strictEqual(idleAfterFrom({ LLM4TS_IDLE_AFTER: "soon" }), 120_000)
+  })
+
+  it("opens a tail on the selected story or executor, filters it by role, and closes it", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "story home", lane: "home", executor: "gemini" })),
+      at(1, StageStarted.make({ stage: "story iban", lane: "iban", executor: "claude" }))
+    ])
+    const press = (view: TreeView, ...keys: ReadonlyArray<string>): TreeView =>
+      keys.reduce<TreeView>((current, key) => {
+        const next = onTreeKey(current, key, state)
+        return next === "quit" ? current : next
+      }, view)
+    // Nothing selected: nothing to tail.
+    assert.isFalse(press(initialView, "t").tail)
+    const onStory = press(initialView, "2", "t")
+    assert.isTrue(onStory.tail)
+    assert.deepStrictEqual(tailTargetOf(onStory), { lane: "iban" })
+    assert.deepStrictEqual(
+      [press(onStory, "r").tailRole, press(onStory, "r", "r").tailRole, press(onStory, "r", "r", "r", "r").tailRole],
+      ["coder", "reviewer", undefined]
+    )
+    assert.isFalse(press(onStory, "escape").tail)
+    // In the executors view the arrows pick an executor.
+    const onExecutor = press(initialView, "e", "down", "down", "t")
+    assert.deepStrictEqual(tailTargetOf(onExecutor), { executor: "claude" })
+
+    const text = renderTree(state, {
+      width: 90,
+      colour: false,
+      view: onStory,
+      tail: ["── 00:00:00 coder · claude ──", "◀ working on it"]
+    }).join("\n")
+    assert.include(text, "┌─ tail · iban · all")
+    assert.include(text, "│ ◀ working on it")
+    assert.notInclude(text, "◐ running")
+    const none = renderTree(state, { width: 90, colour: false, view: onStory }).join("\n")
+    assert.include(none, "no transcript for this run")
   })
 })
