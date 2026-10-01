@@ -42,6 +42,7 @@ export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean =>
     case "UsageProgress":
     case "ExecutorReleased":
     case "StoryJudged":
+    case "Timed":
       return false
     case "StageStarted":
     case "StageCompleted":
@@ -242,6 +243,7 @@ export const terminalLine = (
     case "BlackboardRun":
     case "UsageProgress":
     case "StoryJudged":
+    case "Timed":
       return ""
     case "StageStarted":
       return palette.stageStart(safe(event.stage))

@@ -181,6 +181,32 @@ export class BlackboardRun extends Schema.TaggedClass<BlackboardRun>()("Blackboa
   result: RunResult
 }) {}
 
+/**
+ * How long something took (ADR 0023), published when it ends: a model call,
+ * a coder's tool, a gate command, git or a merge, a wait, a process start.
+ * `llm4ts profile` and the agent tree add these up; nothing else depends on
+ * them, and none carries content — only names, numbers and an exit code.
+ */
+export const TimedKind = Schema.Literals(["model", "tool", "gate", "git", "merge", "wait", "spawn"])
+export type TimedKind = typeof TimedKind.Type
+
+export class Timed extends Schema.TaggedClass<Timed>()("Timed", {
+  kind: TimedKind,
+  /** What was timed: the seat's role, the tool, the gate command as configured, the wait. */
+  label: Schema.String,
+  ms: Schema.Number,
+  /** A model call: when its first output came. */
+  firstMs: Schema.optionalKey(Schema.Number),
+  /** As the backend itself reported them (Gemini's stats): model API time and tool time. */
+  apiMs: Schema.optionalKey(Schema.Number),
+  toolMs: Schema.optionalKey(Schema.Number),
+  exitCode: Schema.optionalKey(Schema.Int),
+  /** It ended in a failure (the time was still spent). */
+  failed: Schema.optionalKey(Schema.Boolean),
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
 /** One rubric dimension of a story verdict: its score out of `max`. */
 export const JudgedDimension = Schema.Struct({
   id: Schema.String,
@@ -303,7 +329,8 @@ export const FlowEvent = Schema.Union([
   ExecutorExcluded,
   ExecutorResumed,
   ExecutorHandedOver,
-  StoryJudged
+  StoryJudged,
+  Timed
 ])
 export type FlowEvent = typeof FlowEvent.Type
 
@@ -395,6 +422,8 @@ const stamped = (
             ...(event.model === undefined ? {} : { model: event.model }),
             ...tags
           })
+    case "Timed":
+      return event.lane !== undefined ? event : Timed.make({ ...event, ...tags })
     default:
       return event
   }

@@ -375,6 +375,54 @@ describe("runner cost ledger", () => {
     )
   )
 
+  it.live("times every seat call into the trace under its role", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+        const dependencies = {
+          registry: makeConnectorRegistry([
+            {
+              connectorId: ConnectorIds.Mock,
+              kind: "Api",
+              create: (_configuration) => Effect.succeed(mock)
+            }
+          ]),
+          process: process.executor,
+          files: files(state)
+        }
+        const options = {
+          workDir: "/repo",
+          workspace: "/repo",
+          userPrompt: "do it",
+          coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+          surface: {
+            palette: plainTerminalPalette,
+            log: (_line: string) => Effect.void,
+            setStatus: (_label: string | undefined) => Effect.void,
+            suspend: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+          },
+          tracePath: "trace.jsonl",
+          runId: "run-1"
+        }
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) => collect(context.coder.executeStream("hello")),
+          dependencies
+        )
+        const timed = ((yield* Ref.get(state))["trace.jsonl"] ?? "")
+          .trim()
+          .split("\n")
+          .filter((line) => line.includes('"kind":"Timed"'))
+        assert.strictEqual(timed.length, 1)
+        assert.include(timed[0] ?? "", '\\"label\\":\\"coder\\"')
+      })
+    )
+  )
+
   it.effect("tells the flow its trace, and ends the trace with how the run ended", () =>
     Effect.gen(function* () {
       const endOf = (body: Effect.Effect<string, FlowError>) =>
