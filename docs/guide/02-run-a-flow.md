@@ -163,6 +163,38 @@ trace in the repository. A live trace is followed as it grows; a finished
 one shows its last frame; `--replay [--speed n]` plays it back on its own
 timestamps. Piped, `watch` prints one frame and exits.
 
+## Where the time goes: `llm4ts profile`
+
+When stories take long, `llm4ts profile` says where the time went:
+
+```bash
+llm4ts profile --epic <id>      # an epic's latest run
+llm4ts profile <trace.jsonl>    # a given trace; bare: the newest one
+llm4ts profile --epic <id> --json > run.json   # to compare runs
+```
+
+Per story, its wall time is split into **model** (the seats' calls, less
+the coder's own tool time), **coder tools**, **gates** (per command, with
+re-runs and failures), **merge**, **waiting** (the merge lock, a free
+executor) and what is left **unaccounted**. It also lists model calls by
+role and executor (with time to first output, and the API and tool time the
+Gemini CLI reports), the coder's turns and how much their prompts grew, and
+the time each story queued before starting. It opens with the three biggest
+sinks in plain words, for example ``gate `pnpm test`: 14 runs, 22m10s (31%
+of story time), 3 failed``.
+
+The report holds no prompts, replies, arguments or output: only story ids,
+roles, executors, tool names, gate commands as configured, counts and
+durations, so it can be shared from a customer's server. A trace written
+before 2.22 has no timings; its report is estimated from the gaps between
+events and says so.
+
+During a run, the agent tree (`--ui tree`) shows the same numbers live: each
+story's current activity and how long it has run, `turns · avg · gates`,
+an **idle** marker on a story with no event and no tool running for
+`LLM4TS_IDLE_AFTER` (default `2m`), and the run's split above the status
+line: `time [model 62% · tools 5% · gates 24% · wait 9%]`.
+
 ## Exit codes and resuming
 
 | Code | Meaning                                                      |

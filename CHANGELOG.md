@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.22.0
+
+- **Where the time goes.** A run now records how long things take, and
+  `llm4ts profile [trace | --epic id] [--json]` reports it.
+  - A `Timed` flow event (`model`, `tool`, `gate`, `git`, `merge`, `wait`)
+    is published when the timed thing ends. Every seat call is timed under
+    its role with its time to first output; the coder's tools from start to
+    end (the claude, codex, pi and gemini parsers now mark a tool's end);
+    each gate command with its story and exit code; merges, the merge lock
+    and roster waits. The Gemini CLI's own API and tool time is kept.
+  - The report splits each story into model, coder tools, gates, merge,
+    waiting and unaccounted time, with model calls by role and executor,
+    gates by command, turns and prompt growth, queueing before start, and
+    the three biggest sinks first. It is content-free. Older traces are
+    estimated from gaps and say so.
+  - The agent tree shows each story's current activity and its duration,
+    marks a story idle after `LLM4TS_IDLE_AFTER` (default 2m) without events,
+    adds `turns · avg · gates` per story and the run's time split.
+- **Gemini CLI:** `gemini --version` runs once per provider instead of
+  before every turn (a second Node start-up per turn; docs/parity.md).
+- `StoriesOptions.gates` and `setup` take the story's lane events as an
+  optional second argument, so a gate's timing names its story.
+
 ## 2.21.1
 
 - **No more flicker in the agent tree** (`--ui tree`, `llm4ts watch`),

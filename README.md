@@ -58,6 +58,9 @@ character-count estimates stay in separate columns.
 the stories in flight on their executors, the judge's verdicts, the session
 log. `llm4ts watch` draws the same tree from any trace, live or afterwards,
 and replays it. More: [chapter 2](docs/guide/02-run-a-flow.md#watching-a-run-the-agent-tree).
+`llm4ts profile --epic <id>` says where a run's time went — model, tools,
+gates, merges, waiting — with the biggest sinks first, and nothing of the
+code or prompts in it, so it can come back from a customer's server.
 
 ## Write a flow
 

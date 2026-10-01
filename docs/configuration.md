@@ -42,7 +42,9 @@ selects `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, or
 
 `LLM4TS_VERBOSITY` accepts `quiet`, `normal`, `verbose`, or `debug`.
 `LLM4TS_UI=tree` (what `llm4ts run --ui tree` sets) draws the full-screen
-agent tree instead of the classic view (ADR 0022).
+agent tree instead of the classic view (ADR 0022). `LLM4TS_IDLE_AFTER`
+(`90s`, `5m`, `1h`; default `2m`) is how long a story may go without an
+event, and without a tool running, before the tree marks it idle.
 
 With a Google Cloud project and a **Vertex AI service-account key** as the
 only model access, see `vertex-service-account.md`: which harnesses accept
