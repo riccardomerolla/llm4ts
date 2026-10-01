@@ -69,7 +69,13 @@ export const StoryProfile = Schema.Struct({
   time: ProfileTime,
   turns: TurnStats,
   /** Its largest untimed stretches, 30 seconds or more: where "unaccounted" sits. */
-  gaps: Schema.Array(Gap)
+  gaps: Schema.Array(Gap),
+  /**
+   * A coder turn the trace shows working (tool calls after its last finished
+   * call) but not ended: a run still going. Counted as model time so far.
+   */
+  openTurnMs: Ms,
+  openTurnTools: Schema.Int
 })
 export type StoryProfile = typeof StoryProfile.Type
 
@@ -142,6 +148,9 @@ interface Lane {
   skipped: boolean
   /** Every event on the lane, described without its content, for the gaps. */
   readonly moments: Array<{ readonly at: number; readonly what: string }>
+  /** Since when a coder turn has been working without ending, and its tool calls. */
+  openSince: number | undefined
+  openTools: number
 }
 
 interface Lease {
@@ -233,9 +242,13 @@ const gapThresholdMs = 30_000
 
 /** The parts of each step between two lane events that no timed interval covers, largest first. */
 const gapsOf = (lane: Lane): ReadonlyArray<Gap> => {
-  const covered = lane.timed
-    .map((item) => [item.at - item.event.ms, item.at] as const)
-    .sort((left, right) => left[0] - right[0])
+  const covered = [
+    ...lane.timed.map((item) => [item.at - item.event.ms, item.at] as const),
+    // A turn still open is model time, not a gap.
+    ...(lane.openSince === undefined || lane.end !== undefined
+      ? []
+      : [[lane.openSince, Number.POSITIVE_INFINITY] as const])
+  ].sort((left, right) => left[0] - right[0])
   const uncovered = (from: number, to: number): number => {
     let free = 0
     let cursor = from
@@ -298,7 +311,9 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
             estimatedCalls: [],
             last: at,
             skipped: false,
-            moments: [{ at, what: describe(event) }]
+            moments: [{ at, what: describe(event) }],
+            openSince: undefined,
+            openTools: 0
           })
           continue
         }
@@ -317,8 +332,20 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
       case "Timed": {
         allTimed.push({ at, event })
         lane?.timed.push({ at, event })
+        if (lane !== undefined && event.kind === "model" && event.label === "coder") {
+          lane.openSince = undefined
+          lane.openTools = 0
+        }
         break
       }
+      case "ToolUse":
+        if (lane !== undefined) {
+          // A tool call opens a turn until a coder call ends: it began at
+          // the last turn boundary.
+          lane.openSince = lane.openSince ?? lane.last
+          lane.openTools += 1
+        }
+        break
       case "TokensUsed":
         if (lane !== undefined) {
           if (event.agent === "coder") {
@@ -477,7 +504,11 @@ const storyProfile = (
     .filter((item) => item.event.kind === "model" && item.event.label === "coder")
     .map((item) => item.event.ms)
   const tools = of("tool")
-  const model = estimated ? sum(lane.estimatedCalls) : Math.max(0, of("model") - tools)
+  // Only a story still running has a turn in progress; in a finished one an
+  // unclosed turn is a timing that never came, left to the gaps.
+  const open = !estimated && lane.end === undefined && lane.openSince !== undefined
+  const openTurnMs = open && lane.openSince !== undefined ? lastAt - lane.openSince : 0
+  const model = estimated ? sum(lane.estimatedCalls) : Math.max(0, of("model") + openTurnMs - tools)
   const gates = of("gate")
   const merge = of("merge") + of("git")
   const waiting = of("wait")
@@ -487,6 +518,8 @@ const storyProfile = (
   const maxPrompt = lane.prompts.length === 0 ? undefined : Math.max(...lane.prompts)
   return {
     gaps: estimated ? [] : gapsOf(lane),
+    openTurnMs,
+    openTurnTools: open ? lane.openTools : 0,
     id: lane.id,
     ...(lane.executor === undefined ? {} : { executor: lane.executor }),
     status: lane.status,
@@ -581,6 +614,14 @@ const findingsOf = (facts: {
       text: `${row.label}: ${row.count}×, ${ofStories(row.ms)}`
     }))
   ]
+  for (const story of facts.stories) {
+    if (story.openTurnMs >= 1_000) {
+      candidates.push({
+        ms: story.openTurnMs,
+        text: `${story.id}: a coder turn still running for ${duration(story.openTurnMs)} (${plural(story.openTurnTools, "tool call")} so far)`
+      })
+    }
+  }
   const queued = sum(facts.stories.map((story) => story.queuedMs ?? 0))
   if (queued >= 1_000) {
     candidates.push({

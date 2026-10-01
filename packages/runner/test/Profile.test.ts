@@ -166,6 +166,34 @@ describe("profileOf", () => {
     assert.include(text, "Timed outside any story")
   })
 
+  it("counts a coder turn still running as model time, less its tools so far", () => {
+    const report = profileOf([
+      at(0, StageStarted.make({ stage: "story home", lane: "home" })),
+      at(60, ToolUse.make({ tool: "run_shell_command", args: "pnpm test", lane: "home" })),
+      at(70, Timed.make({ kind: "tool", label: "run_shell_command", ms: 10_000, lane: "home" })),
+      at(120, ToolUse.make({ tool: "read_file", args: "a.ts", lane: "home" })),
+      at(130, Timed.make({ kind: "tool", label: "read_file", ms: 10_000, lane: "home" })),
+      // The trace ends mid-turn: the run is still going.
+      at(
+        900,
+        TokensUsed.make({
+          agent: "reviewer",
+          usage: TokenUsage.make({ prompt: 1, completion: 1, total: 2 })
+        })
+      )
+    ])
+    const [home] = report.stories
+    assert.strictEqual(home?.openTurnMs, 900_000)
+    assert.deepStrictEqual(
+      [home?.time.model, home?.time.tools, home?.time.unaccounted],
+      [880_000, 20_000, 0]
+    )
+    assert.include(
+      report.findings.map((finding) => finding.text).join("\n"),
+      "home: a coder turn still running for 15m00s (2 tool calls so far)"
+    )
+  })
+
   it("estimates from an older trace that has no timings, and says so", () => {
     const report = profileOf([
       at(0, StageStarted.make({ stage: "story plan" })),

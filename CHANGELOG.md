@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.22.2
+
+- **Less "unaccounted" in `llm4ts profile`.** Time that was measured but
+  could not be placed in a story, and work nothing timed:
+  - The story judge and the BLOCKED_ON verifier run on the story's own seat,
+    so their calls count for the story, under their own roles (`judge`,
+    `verifier`). Before, without a roster, they ran on the run's reasoning
+    seat and their time landed outside every story.
+  - Git operations are timed by name (`git commitAll`, `git merge`, …),
+    shown as "git + merge".
+  - Typed-judgment calls are timed as `judgment`.
+- **A coder turn still running counts as model time.** Profiling a live run,
+  a turn whose tool calls are recorded but which has not ended (one long
+  Gemini turn) was all "unaccounted"; it now shows as model time in progress,
+  less its tools, with a finding: "a coder turn still running for 15m00s
+  (42 tool calls so far)".
+- **The report explains what is left:** per story, the largest stretches no
+  timing covers, named by the kinds of events around them ("3m40s between a
+  review round and a judge verdict"), and the time timed outside any story.
+  Still content-free.
+
 ## 2.22.1
 
 - **A story whose branch has no changes is verified, not failed.** The
