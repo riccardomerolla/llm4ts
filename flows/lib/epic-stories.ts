@@ -30,6 +30,7 @@ import {
   type FlowError
 } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import { nodePreflight } from "@llm4ts/flow/NodePreflight"
 import { statusPaths } from "@llm4ts/flow/GitTool"
 import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
 import {
@@ -1865,6 +1866,18 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                   : `gates: ${commands.map((command) => command.join(" ")).join(" · ")}`
             })
           )
+          // The Node the gates would run on is the one on PATH, not the one
+          // the application pins; a mismatch is a red first story that says
+          // nothing about Node. Ask now, and name both.
+          if (commands.length > 0) {
+            yield* nodePreflight(
+              nodeProcessExecutor,
+              files,
+              events,
+              join(input.workDir, appDir),
+              process.env
+            )
+          }
           if (flags.land !== undefined) {
             const landed = yield* landEpic(context, {
               plan,

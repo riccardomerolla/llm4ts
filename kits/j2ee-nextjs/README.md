@@ -28,3 +28,15 @@ LLM4TS_LEGACY_REPO=/path/to/legacy-estate llm4ts run convert-page --pack j2ee-ne
 
 The convert flows default to `j2ee-nextjs-spa`; `kits/test/packs.test.ts`
 shows what the flows require of a manifest.
+
+## Node for the gates
+
+The Next.js scaffold pins Node 22 (`.nvmrc`, `package.json` `engines`). The
+pack's gates run on the `node` on the PATH of the shell that launches
+`llm4ts`, so `convert-*`, `modernize-implement` and `epic-stories` check it
+against the target's pin before the first gate and stop, naming both, when
+they disagree; `llm4ts doctor` reports the same under `gates:`. Switch Node
+(`nvm use` / `fnm use`), or uncomment `use-node-version` in the target's
+`.npmrc` so pnpm runs the pinned Node itself, or give the pack gates a
+version-manager wrapper (`fnm exec --using=.nvmrc pnpm lint`). Set
+`LLM4TS_NODE_CHECK=off` to run anyway.

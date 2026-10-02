@@ -18,10 +18,10 @@ node kits/j2ee-nextjs/fixtures/demo-bank/preflight.mjs
 ```
 
 Preflight seeds both fixtures into a temp dir, runs their smoke checks, and
-verifies git, pnpm, the `claude` CLI, and that the installed `llm4ts` ships
-the `j2ee-nextjs` kit with its `j2ee-nextjs-spa` pack (`@llm4ts/shell`
-0.18.0 or newer). Fix anything red before continuing. Then materialize the
-demo estate (pick a short path you can type on stage):
+verifies git, Node 22 on PATH, pnpm, the `claude` CLI, and that the installed
+`llm4ts` ships the `j2ee-nextjs` kit with its `j2ee-nextjs-spa` pack
+(`@llm4ts/shell` 0.18.0 or newer). Fix anything red before continuing. Then
+materialize the demo estate (pick a short path you can type on stage):
 
 ```bash
 node kits/j2ee-nextjs/fixtures/demo-bank/reset-demo.mjs ~/demo
@@ -31,6 +31,17 @@ This creates `~/demo/legacy-j2ee` and `~/demo/nextjs` as fresh git repos and
 warms the target's node_modules from the pnpm store (documented offline
 strategy: the lockfile is committed; run it once on hotel wifi, never on
 stage). Finally: `cd ~/demo/nextjs && pnpm test` must be green.
+
+**Node for the gates.** The target pins Node 22 (`.nvmrc`, `package.json`
+`engines`). Gates run on the `node` found on the PATH of the shell that
+launches `llm4ts`, so every gated flow checks that node against the pin
+before its first gate and stops with both versions named when they
+disagree (`llm4ts doctor` shows the same line under `gates:`). On a machine
+whose Node you cannot switch (`nvm use 22` / `fnm use 22`), uncomment
+`use-node-version` in the target's `.npmrc` so pnpm fetches and runs that
+Node itself (one download, then offline), or wrap the pack's gate commands
+in a version manager (`fnm exec --using=.nvmrc pnpm lint` works as a gate
+line, since gates are plain argv). `LLM4TS_NODE_CHECK=off` skips the check.
 
 Timing bounds for the day (set in the environment you run flows from):
 

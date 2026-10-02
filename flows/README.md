@@ -213,6 +213,13 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   app's `package.json` defines that script, and the run lists them); `LLM4TS_WORKTREE_SETUP` (default `pnpm install --offline`)
   prepares each story worktree, which starts as a fresh checkout without
   dependencies.
+- Gates run on the `node` on the PATH that launched `llm4ts`, not on the one
+  the app pins (`.nvmrc`, `.node-version`, `package.json` `engines.node`):
+  the run checks that node against the pin before its first gate and stops,
+  naming both, when they disagree (`llm4ts doctor` shows the same line
+  under `gates:`). pnpm's `use-node-version` in the app's `.npmrc` passes
+  outright, since pnpm then runs that Node itself. `LLM4TS_NODE_CHECK=off`
+  skips the check.
 - Setup and gates run in the application folder: `LLM4TS_APP_DIR`
   (e.g. `frontend`) when set; otherwise the repository root when it has a
   `package.json`, else its one first-level subfolder that has one (a Next.js

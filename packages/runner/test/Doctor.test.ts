@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import type { NodePreflightReport } from "@llm4ts/flow/NodePreflight"
 import { InvalidRequestError } from "@llm4ts/core/Errors"
 import { ConnectorIds, HealthStatus } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
@@ -11,6 +12,19 @@ import {
   piModelRefs,
   piModelsConfig
 } from "@llm4ts/runner/Doctor"
+
+// Doctor's gate check is a process spawn; tests hand it an answer.
+const noNode: Effect.Effect<NodePreflightReport> = Effect.succeed({
+  _tag: "NoPin",
+  summary: "node: /repo pins no version (.nvmrc, .node-version, package.json engines.node)"
+})
+const mismatch: Effect.Effect<NodePreflightReport> = Effect.succeed({
+  _tag: "Mismatch",
+  node: "v24.12.0",
+  unmet: [],
+  summary:
+    "node: the gates would run on Node v24.12.0 (the node on PATH), but /repo pins 20 (.nvmrc)"
+})
 
 const noModelsJson = (): string | undefined => undefined
 
@@ -36,10 +50,15 @@ const fakeRegistry: ConnectorRegistryShape = {
 describe("doctor", () => {
   it.effect("reports connector health, credentials, and the selected coder", () =>
     Effect.gen(function* () {
-      const report = yield* makeDoctorProgram(fakeRegistry, {
-        ANTHROPIC_API_KEY: "set-in-test",
-        LLM4TS_CODER: "codex"
-      })
+      const report = yield* makeDoctorProgram(
+        fakeRegistry,
+        {
+          ANTHROPIC_API_KEY: "set-in-test",
+          LLM4TS_CODER: "codex"
+        },
+        undefined,
+        noNode
+      )
       assert.include(report, "connectors:")
       assert.include(report, "✔ mock")
       assert.include(report, "✖ claude-cli")
@@ -51,21 +70,26 @@ describe("doctor", () => {
 
   it.effect("labels the default coder when no environment override exists", () =>
     Effect.gen(function* () {
-      const report = yield* makeDoctorProgram(fakeRegistry, {})
+      const report = yield* makeDoctorProgram(fakeRegistry, {}, undefined, noNode)
       assert.include(report, "coder: claude (default)")
     })
   )
 
   it.effect("stays quiet about gemini when it is neither selected nor installed", () =>
     Effect.gen(function* () {
-      const report = yield* makeDoctorProgram(fakeRegistry, { LLM4TS_CODER: "codex" })
+      const report = yield* makeDoctorProgram(
+        fakeRegistry,
+        { LLM4TS_CODER: "codex" },
+        undefined,
+        noNode
+      )
       assert.notInclude(report, "prerequisites:")
     })
   )
 
   it.effect("stays quiet about the pi-gemini bridge when it wasn't asked for", () =>
     Effect.gen(function* () {
-      const report = yield* makeDoctorProgram(fakeRegistry, {}, noModelsJson)
+      const report = yield* makeDoctorProgram(fakeRegistry, {}, noModelsJson, noNode)
       assert.notInclude(report, "pi-gemini-bridge")
     })
   )
@@ -75,7 +99,8 @@ describe("doctor", () => {
       const report = yield* makeDoctorProgram(
         fakeRegistry,
         { LLM4TS_GEMINI_BRIDGE: "1" },
-        noModelsJson
+        noModelsJson,
+        noNode
       )
       assert.include(report, "? pi-gemini-bridge: ~/.pi/agent/models.json not found")
       assert.include(report, "http://127.0.0.1:8731")
@@ -85,8 +110,12 @@ describe("doctor", () => {
 
   it.effect("flags a models.json that doesn't point at the bridge port", () =>
     Effect.gen(function* () {
-      const report = yield* makeDoctorProgram(fakeRegistry, { LLM4TS_GEMINI_BRIDGE: "1" }, () =>
-        JSON.stringify({ providers: { anthropic: { baseUrl: "https://api.anthropic.com" } } })
+      const report = yield* makeDoctorProgram(
+        fakeRegistry,
+        { LLM4TS_GEMINI_BRIDGE: "1" },
+        () =>
+          JSON.stringify({ providers: { anthropic: { baseUrl: "https://api.anthropic.com" } } }),
+        noNode
       )
       assert.include(report, "? pi-gemini-bridge: no provider in ~/.pi/agent/models.json")
     })
@@ -107,7 +136,8 @@ describe("doctor", () => {
                 models: [{ id: "gemini-2.5-pro" }]
               }
             }
-          })
+          }),
+        noNode
       )
       assert.include(
         report,
@@ -120,7 +150,12 @@ describe("doctor", () => {
 
   it.effect("flags a selected gemini with no project or key in the environment", () =>
     Effect.gen(function* () {
-      const report = yield* makeDoctorProgram(fakeRegistry, { LLM4TS_CODER: "gemini" })
+      const report = yield* makeDoctorProgram(
+        fakeRegistry,
+        { LLM4TS_CODER: "gemini" },
+        undefined,
+        noNode
+      )
       assert.include(report, "prerequisites:")
       assert.include(report, "gemini: no project or API key in the environment")
       // The report must name the failure the user would otherwise have to
@@ -132,10 +167,15 @@ describe("doctor", () => {
 
   it.effect("reports gemini as satisfied when a project is configured", () =>
     Effect.gen(function* () {
-      const report = yield* makeDoctorProgram(fakeRegistry, {
-        LLM4TS_CODER: "gemini",
-        GOOGLE_CLOUD_PROJECT: "meridian-modernization"
-      })
+      const report = yield* makeDoctorProgram(
+        fakeRegistry,
+        {
+          LLM4TS_CODER: "gemini",
+          GOOGLE_CLOUD_PROJECT: "meridian-modernization"
+        },
+        undefined,
+        noNode
+      )
       assert.include(report, "✔ gemini: GOOGLE_CLOUD_PROJECT=meridian-modernization")
       assert.notInclude(report, "No project found")
     })
@@ -154,7 +194,12 @@ describe("doctor", () => {
           ])
         )
       }
-      const report = yield* makeDoctorProgram(withGemini, { LLM4TS_CODER: "claude" })
+      const report = yield* makeDoctorProgram(
+        withGemini,
+        { LLM4TS_CODER: "claude" },
+        undefined,
+        noNode
+      )
       assert.include(report, "gemini: no project or API key in the environment")
     })
   )
@@ -375,4 +420,16 @@ describe("geminiBridgePrerequisites schema and auth reporting", () => {
     assert.isFalse(result?.satisfied)
     assert.include(result?.summary ?? "", "configures no apiKey")
   })
+})
+
+describe("doctor gates section", () => {
+  it.effect("reports the Node the gates would run on against the application's pin", () =>
+    Effect.gen(function* () {
+      const fine = yield* makeDoctorProgram(fakeRegistry, {}, noModelsJson, noNode)
+      assert.include(fine, "gates:")
+      assert.include(fine, "✔ node: /repo pins no version")
+      const bad = yield* makeDoctorProgram(fakeRegistry, {}, noModelsJson, mismatch)
+      assert.include(bad, "✖ node: the gates would run on Node v24.12.0")
+    })
+  )
 })

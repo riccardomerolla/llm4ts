@@ -34,6 +34,7 @@ import type { Domains } from "@llm4ts/flow/Domains"
 import { navigationOrder, parseDomains, type DomainFeature } from "@llm4ts/flow/Domains"
 import { type FlowError } from "@llm4ts/flow/FlowError"
 import { FlowEvents } from "@llm4ts/flow/FlowEvents"
+import { nodePreflight } from "@llm4ts/flow/NodePreflight"
 import type { Pack } from "@llm4ts/flow/Pack"
 import {
   openApiFor,
@@ -775,6 +776,14 @@ export const setupConversion = Effect.fn("convert.setup")(function* (
     workspaceLimitsFromEnv(environment, legacySourceWorkspaceLimits)
   )
   const target = yield* makeNodeWorkspace(input.workDir)
+  // The pack's gates run on the node on PATH: check it against the target's pin first.
+  yield* nodePreflight(
+    nodeProcessExecutor,
+    nodePlainFileStore,
+    context.events,
+    input.workDir,
+    environment
+  )
   const opened = yield* stage(
     context.events,
     "pack",

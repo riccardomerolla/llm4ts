@@ -2,7 +2,10 @@ import * as Effect from "effect/Effect"
 import type { HealthStatus } from "@llm4ts/core/Models"
 import { ConnectorIds } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
+import { nodePreflightReport, type NodePreflightReport } from "@llm4ts/flow/NodePreflight"
 import { nodeFlowRunnerDependencies } from "./FlowRunner.ts"
+import { nodePlainFileStore } from "./NodePlainFileStore.ts"
+import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
 import {
   defaultReadPiModelsJson as readPiModels,
   geminiBridgePort as bridgePort,
@@ -209,9 +212,17 @@ export const geminiBridgePrerequisites = (
 export const makeDoctorProgram = (
   registry: ConnectorRegistryShape = nodeFlowRunnerDependencies().registry,
   environment: Readonly<Record<string, string | undefined>> = process.env,
-  readPiModelsJson: () => string | undefined = readPiModels
+  readPiModelsJson: () => string | undefined = readPiModels,
+  // The Node the gates would run on against the application's pin, for the
+  // directory doctor runs in (the same check every gated flow makes first).
+  nodeCheck: Effect.Effect<NodePreflightReport> = nodePreflightReport(
+    nodeProcessExecutor,
+    nodePlainFileStore,
+    process.cwd(),
+    environment
+  )
 ): Effect.Effect<string> =>
-  Effect.map(registry.healthCheckAll, (statuses) => {
+  Effect.map(Effect.all([registry.healthCheckAll, nodeCheck]), ([statuses, node]) => {
     const lines: Array<string> = []
     lines.push("llm4ts doctor")
     lines.push("")
@@ -226,6 +237,15 @@ export const makeDoctorProgram = (
       const value = environment[key]
       lines.push(`  ${value === undefined || value.length === 0 ? "✖" : "✔"} ${key}`)
     }
+    lines.push("")
+    lines.push("gates:")
+    lines.push(
+      ...wrap(
+        `${node._tag === "Mismatch" || node._tag === "NoNode" ? "✖" : "✔"} ${node.summary}`,
+        78,
+        "  "
+      )
+    )
 
     // Connector prerequisites the environment must carry BEFORE a run: shown
     // when the connector is selected or the machine has its CLI, because that

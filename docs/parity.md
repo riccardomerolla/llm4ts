@@ -543,3 +543,10 @@ reference release.
   hopes. Gemini also now receives a seat's `envVars` and applies a
   `turnLimit` through a settings file, both of which llm4ts previously
   dropped on the way to the process.
+- Node preflight for gates (2026-10-02): before the first gate, `epic-stories`,
+  the kit `convert-*` flows and `modernize-implement` compare the `node` on
+  the PATH they inherited with the application's pin (`.nvmrc`,
+  `.node-version`, `package.json` `engines.node`; pnpm's `use-node-version`
+  passes) and abort naming both; `llm4ts doctor` reports the same under
+  `gates:`. `LLM4TS_NODE_CHECK=off` skips it. llm4zio runs its gates on
+  whatever node it finds and lets the first red gate explain. Additive.

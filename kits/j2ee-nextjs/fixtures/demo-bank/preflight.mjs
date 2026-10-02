@@ -23,7 +23,12 @@ const tool = (label, command, args) =>
   check(label, () => execFileSync(command, args, { stdio: "pipe" }))
 
 tool("git available", "git", ["--version"])
-tool("node >= 20", "node", ["--version"])
+check("node >= 22 (the fixtures pin it in .nvmrc and engines)", () => {
+  const version = execFileSync("node", ["--version"], { encoding: "utf8" }).trim()
+  if (Number(version.replace(/^v/, "").split(".")[0]) < 22) {
+    throw new Error(`${version} on PATH; the gates need Node 22 (nvm use 22 / fnm use 22)`)
+  }
+})
 tool("pnpm available", "pnpm", ["--version"])
 tool("claude CLI available (the coder seat)", "claude", ["--version"])
 check("llm4ts CLI available", () => execFileSync("llm4ts", ["--version"], { stdio: "pipe" }))

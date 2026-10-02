@@ -55,6 +55,7 @@ import { judgeAllPrograms } from "@llm4ts/flow/ProgramJudge"
 import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
 import { ApprovedMarker, DraftApprovalMarker, requireApproval } from "@llm4ts/flow/Approval"
 import { loadPatternCards, taggedPatternIds } from "@llm4ts/flow/Patterns"
+import { nodePreflight } from "@llm4ts/flow/NodePreflight"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import { checkWall, wallBreachMessage } from "@llm4ts/flow/Wall"
 import { parseDecisions } from "@llm4ts/flow/Decisions"
@@ -314,6 +315,8 @@ const program = Effect.gen(function* () {
           })
         }
 
+        // The pack's gates run on the node on PATH: check it against the target's pin first.
+        yield* nodePreflight(nodeProcessExecutor, files, context.events, input.workDir, process.env)
         const gate = (name: string): Effect.Effect<ReviewResult, FlowError> | undefined => {
           const command = pack.gate(name)
           return command === undefined
