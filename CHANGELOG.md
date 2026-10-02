@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.25.0
+
+Two findings from a live `epic-stories` run with the Gemini CLI on a
+J2EE-to-Next.js conversion.
+
+- **Judge seats read, never act.** The story judge was reading the llm4ts
+  source: without a roster it was the reasoner seat itself, running Gemini
+  with `-y`. The runner now derives the judgment seat from a CLI reasoner
+  with its tools taken away (`readOnly`) and exposes it as `context.judge`;
+  the story rubric judge and derived judgments use it. A roster's judge
+  role was already read-only. An API reasoner has no tools to take, so such
+  a run resolves nothing extra.
+- **Gemini read-only is enforced, from 0.37.0.** Gemini CLI's plan mode has
+  been a policy-engine deny of every non-read-only tool since 0.26.0 and
+  left `experimental.plan` in 0.37.0; its file tools refuse paths outside
+  the workspace. The connector grades `readOnlyEnforcement: "enforced"` and
+  refuses a read-only seat on an older CLI before its first turn, naming
+  the version (ADR 0010 amendment). `examples/gemini-read-only-smoke.ts`
+  checks the boundary live.
+- **Gemini gets the seat's env and turn limit.** A roster `env` and a
+  `turnLimit` were dropped on the way to the gemini process; the turn limit
+  now reaches it as `model.maxSessionTurns` through a settings file that
+  lives as long as the turn.
+- **Node preflight for gates.** Gates run on the `node` on the PATH that
+  launched `llm4ts`, not the one the application pins, and a mismatch was a
+  red first story that said nothing about Node. `epic-stories`, the
+  `convert-*` flows and `modernize-implement` now compare that node with
+  `.nvmrc`, `.node-version` and `package.json` `engines.node` before the
+  first gate and stop naming both versions and the pinning file; pnpm's
+  `use-node-version` in `.npmrc` passes outright. `llm4ts doctor` reports
+  the same under `gates:`. `LLM4TS_NODE_CHECK=off` skips it.
+- The `j2ee-nextjs` Next.js scaffold and demo fixture pin Node 22 and carry
+  a commented `use-node-version` in `.npmrc`; the demo preflight checks for
+  Node 22; the RUNBOOK and kit README explain wrapping pack gates in a
+  version manager (`fnm exec --using=.nvmrc pnpm lint`).
+- **Breaking for implementers of `GeminiCliExecutorShape`:**
+  `checkGeminiInstalled` answers the CLI's version text, and
+  `makeNodeGeminiCliExecutor` takes a `TemporaryFilesShape`. Hand-built
+  `FlowContextShape` values may add the optional `judge` seat.
+
 ## 2.24.0
 
 - **Transcripts: what each seat is told and answers.** `llm4ts run …
