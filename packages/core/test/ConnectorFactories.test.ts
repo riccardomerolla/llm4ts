@@ -10,7 +10,7 @@ import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactori
 import type { GeminiCliExecutorShape } from "@llm4ts/core/providers/GeminiCliProvider"
 
 const geminiCli: GeminiCliExecutorShape = {
-  checkGeminiInstalled: Effect.void,
+  checkGeminiInstalled: Effect.succeed("0.47.0"),
   runGeminiProcess: () => Effect.succeed('{"response":"ok"}'),
   runGeminiProcessStream: () => Stream.empty
 }
@@ -124,7 +124,8 @@ describe("ConnectorFactories", () => {
       // is a real removal; gemini/antigravity lean on unverified plan modes;
       // copilot ignores the flag; API providers execute no tools at all.
       assert.strictEqual(claude.capabilities.readOnlyEnforcement, "enforced")
-      assert.strictEqual(gemini.capabilities.readOnlyEnforcement, "advisory")
+      // Plan mode is a policy-engine deny from gemini 0.37.0; older CLIs refuse the seat.
+      assert.strictEqual(gemini.capabilities.readOnlyEnforcement, "enforced")
       assert.strictEqual(antigravity.capabilities.readOnlyEnforcement, "advisory")
       assert.strictEqual(copilot.capabilities.readOnlyEnforcement, "ignored")
       assert.strictEqual(mock.capabilities.readOnlyEnforcement, "enforced")

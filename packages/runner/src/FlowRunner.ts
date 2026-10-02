@@ -95,7 +95,7 @@ import { nodeGeminiCliExecutor } from "./NodeGeminiCliExecutor.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
 import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
-import { prepareConnector } from "./Connectors.ts"
+import { asReadOnly, prepareConnector } from "./Connectors.ts"
 import {
   consumeTerminalEvents,
   formatDurationMs,
@@ -448,6 +448,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       readonly coder: LlmServiceShape & { readonly capabilities: ConnectorCapabilities }
       readonly reasoning: LlmServiceShape
       readonly reviewers: ReadonlyArray<LlmServiceShape>
+      readonly judge: LlmServiceShape
       readonly judgment: JudgmentShape
     },
     FlowError,
@@ -461,14 +462,18 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
       resolveSeat(prepareConnector(bridged(configuration), workDir, environment))
     )
-    // The judgment seat defaults to the reasoning seat's service itself, so
-    // an unconfigured run resolves nothing extra.
+    // The judgment seat is the reasoner with its tools taken away: a judge
+    // reads, it does not act. Over an API reasoner (no tools to take) it is
+    // the reasoning seat's service itself, so such a run resolves nothing extra.
+    const judgmentConfig =
+      options.judgment ??
+      (reasoning instanceof CliConnectorConfig ? asReadOnly(reasoning) : undefined)
     const judgmentSeat =
-      options.judgment === undefined
+      judgmentConfig === undefined
         ? reasoningService
-        : yield* resolveSeat(prepareConnector(bridged(options.judgment), workDir, environment))
-    const judgment = yield* judgmentFor(judgmentSeat, options.judgment ?? reasoning, environment)
-    return { coder, reasoning: reasoningService, reviewers, judgment }
+        : yield* resolveSeat(prepareConnector(bridged(judgmentConfig), workDir, environment))
+    const judgment = yield* judgmentFor(judgmentSeat, judgmentConfig ?? reasoning, environment)
+    return { coder, reasoning: reasoningService, reviewers, judge: judgmentSeat, judgment }
   })
   const contextAt = (
     workDir: string,
@@ -476,6 +481,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       readonly coder: LlmServiceShape & { readonly capabilities: ConnectorCapabilities }
       readonly reasoning: LlmServiceShape
       readonly reviewers: ReadonlyArray<LlmServiceShape>
+      readonly judge: LlmServiceShape
       readonly judgment: JudgmentShape
     },
     rebind: boolean,
@@ -490,6 +496,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         ...recorded(timedSeat(seats.coder, laneEvents, "coder"), lane, "coder")
       },
       judgment: timedJudgment(seats.judgment, laneEvents),
+      judge: recorded(timedSeat(seats.judge, laneEvents, "judgment"), lane, "judgment"),
       git: makeGitTool(dependencies.process, workDir, laneEvents),
       hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
       events: laneEvents,
@@ -708,6 +715,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             held.executor
           ),
           judgment,
+          judge: judgmentSeat,
           git: makeGitTool(dependencies.process, workDir, laneEvents),
           hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
           events: laneEvents,

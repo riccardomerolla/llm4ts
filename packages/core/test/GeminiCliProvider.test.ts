@@ -21,6 +21,8 @@ import {
   geminiLoopDiagnostic,
   geminiProcessEnv,
   geminiQuotaDiagnostic,
+  geminiReadOnlyFloor,
+  geminiReadOnlyProblem,
   geminiSandboxEnvValue,
   geminiTurnLimitSettingsJson,
   isKnownGeminiStderrNoise,
@@ -45,6 +47,7 @@ const executor = (
   options: {
     readonly installed?: boolean
     readonly complete?: string
+    readonly version?: string
   } = {}
 ): GeminiCliExecutorShape => ({
   checkGeminiInstalled:
@@ -54,7 +57,7 @@ const executor = (
             message: "gemini-cli not installed"
           })
         )
-      : Effect.void,
+      : Effect.succeed(options.version ?? "0.47.0"),
   runGeminiProcess: (_prompt, _config, _context) =>
     Effect.succeed(options.complete ?? '{"response":"complete"}'),
   runGeminiProcessStream: (_prompt, _config, _context) => Stream.fromIterable(events)
@@ -95,6 +98,76 @@ describe("Gemini CLI configuration", () => {
     })
     assert.strictEqual(geminiTurnLimitSettingsJson(48), '{"model":{"maxSessionTurns":48}}')
   })
+
+  it("carries the seat's own environment into the process, under llm4ts's own keys", () => {
+    const context = geminiCliExecutionContextFrom(
+      CliConnectorConfig.make({
+        connectorId: ConnectorIds.GeminiCli,
+        workingDir: "/repo",
+        envVars: { GEMINI_API_KEY: "k", GEMINI_CLI_TRUST_WORKSPACE: "false" }
+      })
+    )
+    assert.deepStrictEqual(context.envVars, {
+      GEMINI_API_KEY: "k",
+      GEMINI_CLI_TRUST_WORKSPACE: "false"
+    })
+    assert.deepStrictEqual(geminiProcessEnv(context), {
+      GEMINI_API_KEY: "k",
+      GEMINI_CLI_TRUST_WORKSPACE: "true"
+    })
+  })
+
+  it("grades a read-only seat enforced only from the first CLI whose plan mode is a policy", () => {
+    assert.strictEqual(geminiReadOnlyFloor, "0.37.0")
+    assert.isUndefined(geminiReadOnlyProblem("0.47.0"))
+    assert.isUndefined(geminiReadOnlyProblem("0.37.0\n"))
+    assert.isUndefined(geminiReadOnlyProblem("0.48.0-nightly.20260401.abc"))
+    assert.include(geminiReadOnlyProblem("0.36.2") ?? "", "0.36.2")
+    assert.include(geminiReadOnlyProblem("0.36.2") ?? "", "0.37.0")
+    assert.include(geminiReadOnlyProblem("gemini version unknown") ?? "", "could not read")
+  })
+
+  it("exposes read-only as an enforced capability", () => {
+    const provider = makeGeminiCliProvider(config, executor([]))
+    assert.strictEqual(provider.capabilities.readOnlyEnforcement, "enforced")
+  })
+
+  it.effect("refuses a read-only seat on a CLI older than the floor, before any turn", () =>
+    Effect.gen(function* () {
+      let turns = 0
+      const old: GeminiCliExecutorShape = {
+        ...executor([GeminiCliMessage.make({ role: "assistant", content: "ok", delta: true })], {
+          version: "0.36.2"
+        }),
+        runGeminiProcessStream: (_prompt, _config, _context) =>
+          Stream.fromEffect(
+            Effect.sync(() => {
+              turns += 1
+              return GeminiCliMessage.make({ role: "assistant", content: "ok", delta: true })
+            })
+          )
+      }
+      const readOnly = makeGeminiCliProvider(
+        config,
+        old,
+        GeminiCliExecutionContext.make({ cwd: "/repo", readOnly: true })
+      )
+      const error = yield* Effect.flip(collect(readOnly.executeStream("judge this")))
+      assert.strictEqual(error._tag, "InvalidRequestError")
+      assert.include(error.message, "0.36.2")
+      assert.strictEqual(turns, 0)
+
+      // The same old CLI still serves a seat that asked for nothing.
+      const writing = makeGeminiCliProvider(
+        config,
+        old,
+        GeminiCliExecutionContext.make({ cwd: "/repo" })
+      )
+      const reply = yield* collect(writing.executeStream("code this"))
+      assert.strictEqual(reply.content, "ok")
+      assert.strictEqual(turns, 1)
+    })
+  )
 })
 
 describe("Gemini CLI session stats", () => {
@@ -147,6 +220,7 @@ describe("Gemini CLI session stats", () => {
         ...executor([GeminiCliMessage.make({ role: "assistant", content: "ok", delta: true })]),
         checkGeminiInstalled: Effect.sync(() => {
           checks += 1
+          return "0.47.0"
         })
       }
       const provider = makeGeminiCliProvider(config, counting)

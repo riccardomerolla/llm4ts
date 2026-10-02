@@ -15,6 +15,7 @@ import {
 } from "../Errors.ts"
 import type { StructuredResult } from "../LlmService.ts"
 import {
+  ConnectorCapabilities,
   ConnectorIds,
   HealthStatus,
   LlmChunk,
@@ -120,7 +121,11 @@ export class GeminiCliExecutionContext extends Schema.Class<GeminiCliExecutionCo
   ),
   sandbox: Schema.optionalKey(GeminiSandbox),
   turnLimit: Schema.optionalKey(Schema.Int),
-  readOnly: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false)))
+  readOnly: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  /** The seat's own environment (a roster `env`), under llm4ts's own keys. */
+  envVars: Schema.Record(Schema.String, Schema.String).pipe(
+    Schema.withConstructorDefault(Effect.succeed<Readonly<Record<string, string>>>({}))
+  )
 }) {}
 
 export const geminiCliExecutionContextFrom = (
@@ -130,6 +135,7 @@ export const geminiCliExecutionContextFrom = (
     ...(config.workingDir === undefined ? {} : { cwd: config.workingDir }),
     ...(config.turnLimit === undefined ? {} : { turnLimit: config.turnLimit }),
     readOnly: config.readOnly,
+    envVars: config.envVars,
     ...(config.sandbox === undefined
       ? {}
       : {
@@ -138,7 +144,8 @@ export const geminiCliExecutionContextFrom = (
   })
 
 export interface GeminiCliExecutorShape {
-  readonly checkGeminiInstalled: Effect.Effect<void, LlmError>
+  /** Fails when the CLI is missing; answers its version text (`gemini --version`). */
+  readonly checkGeminiInstalled: Effect.Effect<string, LlmError>
   readonly runGeminiProcess: (
     prompt: string,
     config: LlmConfig,
@@ -205,6 +212,7 @@ export const geminiProcessEnv = (
 ): Readonly<Record<string, string>> => {
   const sandbox = context.sandbox === undefined ? undefined : geminiSandboxEnvValue(context.sandbox)
   return {
+    ...context.envVars,
     GEMINI_CLI_TRUST_WORKSPACE: "true",
     ...(sandbox === undefined ? {} : { GEMINI_SANDBOX: sandbox }),
     ...(turnLimitSettingsPath === undefined
@@ -213,6 +221,51 @@ export const geminiProcessEnv = (
           GEMINI_CLI_SYSTEM_DEFAULTS_PATH: turnLimitSettingsPath
         })
   }
+}
+
+/**
+ * The first Gemini CLI whose `--approval-mode plan` is a policy, not a mood:
+ * from 0.26.0 its policy engine denies every tool but the read-only set in
+ * plan mode (and `ask_user` headless), but the mode sat behind
+ * `experimental.plan` until 0.37.0 promoted it. Below this a read-only seat
+ * is a request the harness may not honor, so llm4ts refuses it (ADR 0010).
+ */
+export const geminiReadOnlyFloor = "0.37.0"
+
+const versionTriple = (text: string): ReadonlyArray<number> | undefined => {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(text)
+  return match === null ? undefined : match.slice(1, 4).map(Number)
+}
+
+/** The `x.y.z` in a `gemini --version` answer, if it holds one. */
+export const geminiVersionOf = (text: string): string | undefined => versionTriple(text)?.join(".")
+
+const atLeast = (version: ReadonlyArray<number>, floor: ReadonlyArray<number>): boolean => {
+  for (let index = 0; index < floor.length; index += 1) {
+    const have = version[index] ?? 0
+    const want = floor[index] ?? 0
+    if (have !== want) {
+      return have > want
+    }
+  }
+  return true
+}
+
+/** Why this CLI cannot hold a read-only seat, or nothing when it can. */
+export const geminiReadOnlyProblem = (versionText: string): string | undefined => {
+  const version = versionTriple(versionText)
+  const floor = versionTriple(geminiReadOnlyFloor) ?? []
+  if (version === undefined) {
+    return (
+      `could not read the Gemini CLI version from '${versionText.trim()}'; a read-only seat ` +
+      `needs gemini >= ${geminiReadOnlyFloor}, whose plan mode is enforced by its policy engine`
+    )
+  }
+  return atLeast(version, floor)
+    ? undefined
+    : `Gemini CLI ${version.join(".")} cannot enforce a read-only seat: plan mode is a policy ` +
+        `only from ${geminiReadOnlyFloor}; upgrade gemini, or give the judge and reviewer ` +
+        "seats to another harness"
 }
 
 export const geminiQuotaDiagnostic = (stderr: ReadonlyArray<string>): string | undefined =>
@@ -698,15 +751,20 @@ export const makeGeminiCliProvider = (
   // `gemini --version` is a second Node start-up; it ran before every turn
   // (llm4zio does the same). Once it has answered, it is not asked again for
   // this provider; a failed check is retried on the next turn (docs/parity.md).
+  // A read-only seat is only taken on a CLI whose plan mode is a policy
+  // (`geminiReadOnlyFloor`): the version answer decides before the first turn.
   let installed = false
   const checkInstalledOnce: Effect.Effect<void, LlmError> = Effect.suspend(() =>
     installed
       ? Effect.void
-      : Effect.tap(executor.checkGeminiInstalled, () =>
-          Effect.sync(() => {
-            installed = true
-          })
-        )
+      : Effect.flatMap(executor.checkGeminiInstalled, (version) => {
+          const problem = executionContext.readOnly ? geminiReadOnlyProblem(version) : undefined
+          return problem === undefined
+            ? Effect.sync(() => {
+                installed = true
+              })
+            : Effect.fail(InvalidRequestError.make({ message: problem }))
+        })
   )
 
   const executeStream = (prompt: string): Stream.Stream<LlmChunk, LlmError> =>
@@ -867,7 +925,14 @@ export const makeGeminiCliProvider = (
     complete,
     completeStream: executeStream,
     healthCheck,
-    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy")
+    isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy"),
+    // Plan mode is a policy-engine deny of every non-read-only tool from
+    // `geminiReadOnlyFloor`, and `checkInstalledOnce` refuses a read-only
+    // seat on anything older, so the grade holds for every seat that runs.
+    capabilities: ConnectorCapabilities.make({
+      interactiveSessions: true,
+      readOnlyEnforcement: "enforced"
+    })
   })
 
   const executeStructuredWithUsage = <A, E, RD, RE>(

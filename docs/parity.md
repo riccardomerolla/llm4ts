@@ -533,3 +533,13 @@ reference release.
   claude, codex, pi and gemini parsers, the Gemini CLI's own API and tool
   time on its final usage chunk, and `llm4ts profile`. Additive; llm4zio
   records no durations.
+- Read-only judgment seat and Gemini's enforced grade (ADR 0010 amendment,
+  2026-10-02): llm4zio's judge is whatever seat judges; llm4ts derives the
+  judgment seat from a CLI reasoner with `readOnly`, exposes it as
+  `context.judge`, and routes the story rubric judge and derived judgments
+  through it. The Gemini CLI connector grades read-only `enforced` from
+  gemini 0.37.0 (plan mode is a policy-engine deny) and refuses a read-only
+  seat on an older CLI before its first turn; llm4zio passes the flag and
+  hopes. Gemini also now receives a seat's `envVars` and applies a
+  `turnLimit` through a settings file, both of which llm4ts previously
+  dropped on the way to the process.

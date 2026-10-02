@@ -25,6 +25,13 @@ export interface FlowContextShape {
   readonly hosting: GitHubToolShape
   readonly events: FlowEventsShape
   readonly reviewers: ReadonlyArray<LlmServiceShape>
+  /**
+   * The judgment seat as a chat service, for the rubric judges that predate
+   * ADR 0017: the reasoner with its tools taken away wherever the harness
+   * can (a roster's judge role, or `readOnly` over a CLI reasoner). Absent
+   * on a context built by hand; judges then fall back to `reasoning`.
+   */
+  readonly judge?: LlmServiceShape
   readonly coderCapabilities: ConnectorCapabilities
   readonly userPrompt: string
   readonly workDir: string

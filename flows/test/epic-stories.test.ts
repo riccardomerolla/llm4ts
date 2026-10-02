@@ -878,6 +878,50 @@ describe("epic-stories demo plan", () => {
 })
 
 describe("story judge factories", () => {
+  it.effect("rubricStoryJudge asks the context's judge seat, not the writing reasoner", () =>
+    Effect.gen(function* () {
+      const story = parsedFixture.stories[0]
+      if (story === undefined) {
+        return yield* FlowAborted.make({ message: "fixture has no stories" })
+      }
+      const events = yield* makeFlowEventHub()
+      const memory = yield* makeMemoryPlainFileStore()
+      const scores = (score: number) => ({
+        scores: [
+          { name: "provides", score, reasoning: "" },
+          { name: "scope", score, reasoning: "" },
+          { name: "house-style", score, reasoning: "" },
+          { name: "tests", score, reasoning: "" }
+        ]
+      })
+      const judgeSeat = structured(scores(2))
+      const reasoning = structured(scores(0))
+      const judge = rubricStoryJudge({
+        plan: parsedFixture,
+        budget: 1000,
+        reasoning,
+        events,
+        files: memory.store,
+        houseRules: "rules"
+      })
+      const context: FlowContextShape = {
+        reasoning,
+        judge: judgeSeat,
+        coder: replying("done"),
+        git: gitOver(yield* Ref.make<ReadonlyArray<string>>([]), ""),
+        hosting,
+        events,
+        reviewers: [reasoning],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: parsedFixture.epic,
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+      const verdict = yield* judge(story, "diff", { context })
+      assert.isTrue(verdict.isClean)
+    })
+  )
+
   it.effect("rubricStoryJudge judges with today's rubric judge and clears a clean review", () =>
     Effect.gen(function* () {
       const story = parsedFixture.stories[0]

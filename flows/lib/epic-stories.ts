@@ -1545,7 +1545,8 @@ export const rubricStoryJudge =
   (story, diff, seats, subject) =>
     judgeStory(
       // The story's own seat, not the run's: its time counts for the story.
-      seats.context.roster?.forRole("judge") ?? seats.context.reasoning,
+      // And the judge seat, never the writing reasoner: a judge reads.
+      seats.context.roster?.forRole("judge") ?? seats.context.judge ?? seats.context.reasoning,
       story,
       diff,
       context.budget,

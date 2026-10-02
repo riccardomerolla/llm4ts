@@ -678,7 +678,7 @@ describe("gemini ACP bridge wiring (ADR 0016)", () => {
           recordingDependencies(seen, state, stdin, () => piModelsJson)
         )
         // No model injected, and nothing spawned.
-        assert.deepStrictEqual(yield* Ref.get(seen), [undefined, undefined])
+        assert.deepStrictEqual(yield* Ref.get(seen), [undefined, undefined, undefined])
       })
     )
   )
@@ -699,8 +699,9 @@ describe("gemini ACP bridge wiring (ADR 0016)", () => {
           },
           recordingDependencies(seen, state, stdin, () => piModelsJson)
         )
-        // Coder and the reasoning seat that defaults to it.
+        // Coder, the reasoning seat that defaults to it, and its read-only judge.
         assert.deepStrictEqual(yield* Ref.get(seen), [
+          "gemini-bridge/gemini-2.5-pro",
           "gemini-bridge/gemini-2.5-pro",
           "gemini-bridge/gemini-2.5-pro"
         ])
@@ -727,7 +728,11 @@ describe("gemini ACP bridge wiring (ADR 0016)", () => {
           },
           recordingDependencies(seen, state, stdin, () => piModelsJson)
         )
-        assert.deepStrictEqual(yield* Ref.get(seen), ["chosen/by-hand", "chosen/by-hand"])
+        assert.deepStrictEqual(yield* Ref.get(seen), [
+          "chosen/by-hand",
+          "chosen/by-hand",
+          "chosen/by-hand"
+        ])
       })
     )
   )
@@ -807,6 +812,47 @@ describe("judgment seat", () => {
         assert.strictEqual(bundle.context.judgment?.identity, "llm:mock:coder")
       })
     )
+  )
+
+  it.effect(
+    "derives a read-only judgment seat from a CLI reasoner and exposes it as the judge",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const process = yield* makeFakeProcessExecutor()
+          const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+          const resolved = yield* Ref.make<ReadonlyArray<string>>([])
+          const registry = makeConnectorRegistry([
+            {
+              connectorId: ConnectorIds.Pi,
+              kind: "Cli" as const,
+              create: (configuration) =>
+                Ref.update(resolved, (all) => [
+                  ...all,
+                  `${configuration.model ?? "default"}:${
+                    configuration instanceof CliConnectorConfig && configuration.readOnly
+                      ? "ro"
+                      : "rw"
+                  }`
+                ]).pipe(Effect.as(mock))
+            }
+          ])
+          const reasoning = CliConnectorConfig.make({ connectorId: ConnectorIds.Pi, model: "big" })
+          const bundle = yield* makeFlowRunnerContext(
+            {
+              ...baseOptions,
+              coder: CliConnectorConfig.make({ connectorId: ConnectorIds.Pi, model: "small" }),
+              reasoning
+            },
+            { registry, process: process.executor, files: files(state) }
+          )
+          // The judgment seat is the reasoner with its tools taken away, never
+          // the writing reasoner itself: a judge reads, it does not act.
+          assert.deepStrictEqual(yield* Ref.get(resolved), ["small:rw", "big:rw", "big:ro"])
+          assert.isDefined(bundle.context.judge)
+          assert.strictEqual(bundle.context.judgment?.identity, "llm:pi:big")
+        })
+      )
   )
 
   it.effect("resolves an explicit judgment seat and meters its usage as agent 'judgment'", () =>

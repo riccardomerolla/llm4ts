@@ -108,9 +108,9 @@ export const decide = (
   return certainty >= bands.act ? "act" : certainty < bands.hold ? "hold" : "caution"
 }
 
-/** The context's judgment service, or one derived from its reasoning seat. */
+/** The context's judgment service, or one derived from its judge (else reasoning) seat. */
 export const judgmentOf = (context: FlowContextShape): JudgmentShape =>
-  context.judgment ?? makeLlmJudgment(context.reasoning)
+  context.judgment ?? makeLlmJudgment(context.judge ?? context.reasoning)
 
 const backendFailure = (error: JudgmentBackendError): FlowError =>
   FlowLlmError.from(ProviderError.make({ message: error.message, cause: error }))

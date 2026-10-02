@@ -59,3 +59,29 @@ verified on 2.1.223 that the two flags compose).
 
 Pinned llm4zio v4.3.0 still maps claude read-only via denylists. This is a
 deliberate behavior divergence, recorded here and in `docs/parity.md`.
+
+## Amendment (2026-10-02): Gemini is enforced from 0.37.0
+
+A live `epic-stories` run showed a Gemini judge reading the llm4ts source
+through `run_shell_command`. The hole was not plan mode: without a roster
+the story judge was the reasoner seat itself, which runs `-y`. Two changes:
+
+1. **The judgment seat is read-only by construction.** The runner derives
+   it from a CLI reasoner as `asReadOnly(reasoning)` (an API reasoner has
+   no tools to take, so it stays the reasoning service), and exposes it as
+   `context.judge` for the rubric judges that predate ADR 0017. A roster's
+   judge role was already read-only.
+2. **Gemini's grade is `enforced`, behind a version floor.** Gemini CLI
+   0.26.0 made `--approval-mode plan` a policy: `policies/plan.toml` denies
+   every tool in plan mode at default-tier priority 40 and allows the
+   read-only set at 50, `non-interactive.toml` denies `ask_user` headless,
+   and the file tools refuse paths outside the workspace directories. The
+   mode left `experimental.plan` in 0.37.0. The Gemini connector's one-time
+   install check reads `gemini --version` and refuses a read-only seat on
+   anything older (`InvalidRequestError`, before any turn), so the grade
+   holds for every read-only seat that actually runs. Evidence: the bundled
+   policy files of 0.47.0 and the plan.toml history (PRs #16849, #24282).
+
+Admin-tier policies (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` plus a `policies/`
+directory) would outrank a user's own allow rules; not needed yet, noted for
+whoever meets a machine with such rules.
