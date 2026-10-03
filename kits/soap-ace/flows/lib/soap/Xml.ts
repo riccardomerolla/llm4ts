@@ -55,6 +55,12 @@ export interface XmlElement {
   /** Prefix → namespace bindings in scope at this element (`""` = default). */
   readonly scope: ReadonlyMap<string, string>
   readonly line: number
+  /**
+   * Where the element sits in the parsed text, start of `<` to end of its
+   * end tag: `text.slice(start, end)` is the element exactly as written,
+   * which is what a signed token needs. Absent on elements built in code.
+   */
+  readonly span?: { readonly start: number; readonly end: number }
 }
 
 export type XmlNode = XmlElement | XmlText
@@ -359,7 +365,8 @@ class Parser {
         attributes,
         children: [],
         scope,
-        line
+        line,
+        span: { start, end: this.position }
       }
     }
     if (this.text[this.position] !== ">") this.fail("syntax", `malformed start tag <${qname}>`)
@@ -399,7 +406,8 @@ class Parser {
           attributes,
           children,
           scope,
-          line
+          line,
+          span: { start, end: this.position }
         }
       }
       if (this.text.startsWith("<![CDATA[", this.position)) {

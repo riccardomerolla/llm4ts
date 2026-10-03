@@ -59,6 +59,21 @@ and set `LLM4TS_SOAP_SERVICE`.
 }
 ```
 
+Per environment, `auth.test.json` / `auth.uat.json` next to it, picked by
+`LLM4TS_SOAP_ENV` or `-- --env`. In a locked-down network run, in order:
+
+```bash
+llm4ts run soap-sample --repo . "check"          # the profile as decisions, no network
+llm4ts run soap-sample --repo . "trust call"     # pin the ESB's chain after reading its fingerprint
+llm4ts run soap-sample --repo . "trust sts"      # and the STS's, when the profile names one
+llm4ts run soap-sample --repo . "sts init"       # the WS-Trust template; edit it if the STS differs
+```
+
+Proxies are explicit per side in the profile (`proxy`), never read from
+the environment; CA PEMs add to the system roots; the SAML token the STS
+issues is carried byte for byte and never persisted (README, "Environments,
+proxies, trust and STS tokens").
+
 ## 3. Samples
 
 ```bash

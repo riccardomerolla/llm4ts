@@ -61,7 +61,11 @@ const program = Effect.gen(function* () {
         const profile =
           service === undefined || service === ""
             ? undefined
-            : yield* loadAuthProfile(workspace, service)
+            : yield* loadAuthProfile(
+                workspace,
+                service,
+                process.env.LLM4TS_SOAP_ENV?.trim() || undefined
+              )
         if (isUrl(location) && profile === undefined) {
           yield* say(
             "fetching without credentials (set LLM4TS_SOAP_SERVICE and write its auth.json for an authenticated WSDL)"

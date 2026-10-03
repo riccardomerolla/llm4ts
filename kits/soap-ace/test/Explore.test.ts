@@ -63,6 +63,7 @@ const recording = (catalog: WsdlCatalog) => {
   const sent: Array<string> = []
   const stub = makeDirectoryStubTransport(demoResponses, catalog)
   const transport: SoapTransportShape = {
+    peerChain: stub.peerChain,
     send: (request) => {
       if (request.body !== undefined) sent.push(Redacted.value(request.body))
       return Effect.map(stub.send(request), (response) => ({

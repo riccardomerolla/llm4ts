@@ -1,5 +1,44 @@
 # Changelog
 
+## 2.28.0
+
+The soap-ace flows in a locked-down bank network (ADR 0024).
+
+- **One profile per environment.** `auth.<env>.json` beside `auth.json` under
+  `.llm4ts/soap/<service>/`, selected by `LLM4TS_SOAP_ENV` or `-- --env`; a
+  named environment without a file is an error. Every soap flow prints the
+  file it loaded.
+- **Explicit proxies, per side.** `proxy: { url, noProxy, auth }` or
+  `"none"` on `fetch`, `call` and `sts`; the transport tunnels with HTTP
+  CONNECT and never reads the proxy environment variables (`check` lists
+  them as set-and-ignored). A refused tunnel is a `proxy` transport error.
+- **CA material adds to the system roots.** `tls.ca` (PEM file) and
+  `tls.caDir` (directory) are appended to Node's roots, `tls.trust:
+"ca-only"` keeps only them, `tls.servername` names the host; pinned
+  material is trusted as captured. Verification is never switched off.
+- **`soap-sample "trust call|fetch|sts"`** reads the chain the endpoint
+  presents without sending anything, prints subject, issuer, validity and
+  SHA-256 per certificate and whether the system already trusts it, asks
+  (`-- --yes` headless), and on yes writes `trust/<host>.pem` and sets the
+  side's `tls.ca`. A changed certificate is shown as a replacement.
+- **SAML tokens from an STS.** With an `sts` section every call first
+  obtains a bearer token: `"sts init"` writes `sts.request.xml`, a WS-Trust
+  1.3 Issue template the kit fills (`{{username}}`, `{{password}}`,
+  `{{created}}`, `{{expires}}`, `{{nonce}}`, `{{appliesTo}}`); the first
+  element named `sts.token.element` (default `Assertion`) is carried as
+  the raw bytes of the response, so a signature survives, inside
+  `wsse:Security` after the `wsu:Timestamp` and the UsernameToken. Held in
+  memory for the run, renewed before `NotOnOrAfter`, never persisted.
+- **`soap-sample "check"`** prints the selected profile as decisions, with
+  no network.
+- New skill `skills/configuring-soap-flows`: the order of operations in a
+  locked-down environment, the profile shape, and what each error asks for.
+- For kit authors: `SoapTransportShape` gains `peerChain`;
+  `SoapHttpRequest` gains `proxy`; `ResolvedSide` gains `proxy`;
+  `securityHeader` replaces `usernameTokenHeader` (kept as a wrapper);
+  `CallOptions.token` takes a `TokenSource`; parsed XML elements carry a
+  `span`.
+
 ## 2.27.0
 
 - **`epic-retro`: a run's failures become proposed fixes behind an

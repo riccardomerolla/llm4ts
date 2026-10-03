@@ -19,8 +19,8 @@ import {
   readEnvelope,
   safeHeaders,
   soapHeaders,
-  stripSecurity,
-  usernameTokenHeader
+  securityHeader,
+  stripSecurity
 } from "./Envelope.ts"
 import { instanceFromXml, instanceToXml, type Issue, validateInstance } from "./Instance.ts"
 import { kindsFromCatalog, maskDocument, MaskingReport, mergeReports } from "./Masking.ts"
@@ -37,6 +37,7 @@ import {
   samplePaths,
   writeExchange
 } from "./Samples.ts"
+import type { StsFailure, TokenSource } from "./Sts.ts"
 import { displayUrl, type SoapTransportShape, type TransportError } from "./Transport.ts"
 import { parseXml, parseXmlBytes, renderXml, type XmlElement, type XmlError } from "./Xml.ts"
 import type { YamlError } from "./Yaml.ts"
@@ -70,6 +71,7 @@ export class CallSetupError extends Schema.TaggedError<CallSetupError>()("CallSe
 }
 
 export type CallError =
+  | StsFailure
   | RequestInvalid
   | CallSetupError
   | CallRefused
@@ -98,6 +100,11 @@ export interface CallOptions {
    * body, whose live values are never written). It is validated the same way.
    */
   readonly request?: RequestFile
+  /**
+   * The run's SAML bearer token (`makeTokenSource`), when the profile names
+   * an STS: fetched or renewed as needed and carried in the Security header.
+   */
+  readonly token?: TokenSource
   readonly now?: () => Date
   readonly random?: (size: number) => Uint8Array
 }
@@ -186,13 +193,23 @@ export const callOperation = (options: CallOptions): Effect.Effect<CallResult, C
     }
 
     const side = yield* resolveSide(options.secrets, profile.call)
-    const token = yield* resolveUsernameToken(options.secrets, profile.wsSecurity)
+    const usernameToken = yield* resolveUsernameToken(options.secrets, profile.wsSecurity)
     const now = options.now ?? (() => new Date())
     const random = options.random ?? ((size: number) => new Uint8Array(randomBytes(size)))
-    const header =
-      token === undefined
-        ? undefined
-        : usernameTokenHeader(token, { nonce: random(16), created: now().toISOString() })
+    if (profile.sts !== undefined && options.token === undefined) {
+      return yield* new CallSetupError({
+        operation: operation.name,
+        detail: "the profile names an STS but the call has no token source"
+      })
+    }
+    const saml = options.token === undefined ? undefined : yield* options.token.current
+    const created = now().toISOString()
+    const header = securityHeader({
+      ...(usernameToken === undefined ? {} : { usernameToken }),
+      ...(saml === undefined ? {} : { token: saml.token }),
+      ...(profile.sts?.timestamp === false || saml === undefined ? {} : { timestamp: { created } }),
+      material: { nonce: random(16), created }
+    })
     const bodyXml = instanceToXml(catalog, input, request.body)
     const envelope = buildEnvelope(operation.soapVersion, bodyXml, header)
     const headers = soapHeaders(operation.soapVersion, operation.soapAction)
@@ -204,6 +221,7 @@ export const callOperation = (options: CallOptions): Effect.Effect<CallResult, C
       secretHeaders: side.headers,
       body: envelope,
       ...(side.tls === undefined ? {} : { tls: side.tls }),
+      ...(side.proxy === undefined ? {} : { proxy: side.proxy }),
       timeout: Duration.seconds(profile.timeoutSeconds ?? 60)
     })
 

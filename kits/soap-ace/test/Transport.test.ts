@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs"
+import * as http from "node:http"
 import * as https from "node:https"
+import * as net from "node:net"
 import type { AddressInfo } from "node:net"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -177,7 +179,8 @@ describe("transport document loader", () => {
       )
       const loader = makeTransportDocumentLoader(fake.transport, {
         headers: [["authorization", Redacted.make("Bearer t")]],
-        tls: undefined
+        tls: undefined,
+        proxy: undefined
       })
       const bytes = yield* loader.load("https://esb.example/ws/Conti?wsdl")
       assert.strictEqual(new TextDecoder().decode(bytes), "<definitions/>")
@@ -187,5 +190,195 @@ describe("transport document loader", () => {
       assert.strictEqual(requests[0]?.method, "GET")
       assert.strictEqual(requests[0]?.secretHeaders[0]?.[0], "authorization")
     })
+  )
+})
+
+// A server the system roots do not know (signed by the test CA), no client
+// certificate asked: the self-signed-chain case `trust` exists for.
+const withPlainServer = <A, E>(use: (url: string) => Effect.Effect<A, E>) =>
+  Effect.acquireUseRelease(
+    Effect.promise(
+      () =>
+        new Promise<https.Server>((resolve) => {
+          const server = https.createServer(
+            { key: file("server.key"), cert: file("server.pem") },
+            (_request, response) => {
+              response.writeHead(200, { "content-type": "text/xml" })
+              response.end("<pong/>")
+            }
+          )
+          server.listen(0, "127.0.0.1", () => resolve(server))
+        })
+    ),
+    (server) => use(`https://localhost:${portOf(server.address())}/soap`),
+    (server) =>
+      Effect.promise(
+        () =>
+          new Promise<void>((resolve) => {
+            server.closeAllConnections()
+            server.close(() => resolve())
+          })
+      )
+  )
+
+interface ProxyLog {
+  readonly tunnels: Array<string>
+  readonly authorizations: Array<string | undefined>
+  /** The tunnelled sockets, detached from the server: closed by hand on release. */
+  readonly sockets: Set<{ destroy: () => void }>
+}
+
+// An HTTP CONNECT proxy on the loopback: records every tunnel it opens and
+// its proxy-authorization header; `requireAuth` answers 407 without one.
+const withProxy = <A, E>(
+  use: (proxyUrl: string, log: ProxyLog) => Effect.Effect<A, E>,
+  requireAuth = false
+) =>
+  Effect.acquireUseRelease(
+    Effect.promise(
+      () =>
+        new Promise<{ server: http.Server; log: ProxyLog }>((resolve) => {
+          const log: ProxyLog = { tunnels: [], authorizations: [], sockets: new Set() }
+          const server = http.createServer((_request, response) => {
+            response.writeHead(400)
+            response.end()
+          })
+          server.on("connect", (request, clientSocket, head) => {
+            log.tunnels.push(request.url ?? "")
+            log.authorizations.push(request.headers["proxy-authorization"])
+            if (requireAuth && request.headers["proxy-authorization"] === undefined) {
+              clientSocket.end("HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+              return
+            }
+            const [host, port] = (request.url ?? "").split(":")
+            log.sockets.add(clientSocket)
+            const upstream = net.connect(Number(port), host, () => {
+              log.sockets.add(upstream)
+              clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n")
+              upstream.write(head)
+              upstream.pipe(clientSocket)
+              clientSocket.pipe(upstream)
+            })
+            upstream.on("error", () => clientSocket.destroy())
+            clientSocket.on("error", () => upstream.destroy())
+          })
+          server.listen(0, "127.0.0.1", () => resolve({ server, log }))
+        })
+    ),
+    ({ server, log }) => use(`http://127.0.0.1:${portOf(server.address())}`, log),
+    ({ server, log }) =>
+      Effect.promise(
+        () =>
+          new Promise<void>((resolve) => {
+            for (const socket of log.sockets) socket.destroy()
+            server.closeAllConnections()
+            server.close(() => resolve())
+          })
+      )
+  )
+
+describe("trust and proxies", () => {
+  it.live(
+    "a chain the system does not know fails with the trust hint, and passes once its CA is added",
+    () =>
+      withPlainServer((url) =>
+        Effect.gen(function* () {
+          const error = yield* Effect.flip(post(url, undefined))
+          assert.strictEqual(error.reason, "tls")
+          assert.include(error.detail, "trust <side>")
+          const added = yield* post(url, { ca: secret("ca.pem") })
+          assert.strictEqual(added.status, 200)
+          const only = yield* post(url, { ca: secret("ca.pem"), trust: "ca-only" })
+          assert.strictEqual(only.status, 200)
+        })
+      )
+  )
+
+  it.live(
+    "peerChain reads the presented chain without a request and says the system does not trust it",
+    () =>
+      withPlainServer((url) =>
+        Effect.gen(function* () {
+          const chain = yield* makeNodeSoapTransport().peerChain(url, {
+            timeout: Duration.seconds(5)
+          })
+          assert.strictEqual(chain.host, "localhost")
+          assert.isFalse(chain.trustedBySystem)
+          assert.isDefined(chain.authorizationError)
+          const [leaf] = chain.certificates
+          assert.include(leaf?.subject ?? "", "localhost")
+          assert.match(leaf?.fingerprint256 ?? "", /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/)
+          assert.isTrue((leaf?.pem ?? "").startsWith("-----BEGIN CERTIFICATE-----"))
+          // The captured PEM is enough to verify the next call.
+          const pinned = yield* post(url, {
+            ca: Redacted.make(
+              new TextEncoder().encode(chain.certificates.map((c) => c.pem).join(""))
+            )
+          })
+          assert.strictEqual(pinned.status, 200)
+        })
+      )
+  )
+
+  it.live(
+    "tunnels through an explicit CONNECT proxy, bypasses it for no-proxy hosts, and types a refusal",
+    () =>
+      withPlainServer((url) =>
+        withProxy((proxyUrl, log) =>
+          Effect.gen(function* () {
+            const via = yield* makeNodeSoapTransport().send({
+              method: "POST",
+              url,
+              headers: { "content-type": "text/xml" },
+              secretHeaders: [],
+              body: Redacted.make("<ping/>"),
+              tls: { ca: secret("ca.pem") },
+              proxy: { url: proxyUrl, noProxy: [], authorization: Redacted.make("Basic cHg6cHc=") },
+              timeout: Duration.seconds(5)
+            })
+            assert.strictEqual(via.status, 200)
+            assert.strictEqual(log.tunnels.length, 1)
+            assert.match(log.tunnels[0] ?? "", /^localhost:\d+$/)
+            assert.strictEqual(log.authorizations[0], "Basic cHg6cHc=")
+
+            const direct = yield* makeNodeSoapTransport().send({
+              method: "POST",
+              url,
+              headers: { "content-type": "text/xml" },
+              secretHeaders: [],
+              body: Redacted.make("<ping/>"),
+              tls: { ca: secret("ca.pem") },
+              proxy: { url: proxyUrl, noProxy: ["localhost"] },
+              timeout: Duration.seconds(5)
+            })
+            assert.strictEqual(direct.status, 200)
+            assert.strictEqual(log.tunnels.length, 1)
+          })
+        )
+      )
+  )
+
+  it.live("a proxy that refuses the tunnel is a typed proxy failure without the credentials", () =>
+    withPlainServer((url) =>
+      withProxy(
+        (proxyUrl) =>
+          Effect.gen(function* () {
+            const error = yield* Effect.flip(
+              makeNodeSoapTransport().send({
+                method: "GET",
+                url,
+                headers: {},
+                secretHeaders: [],
+                tls: { ca: secret("ca.pem") },
+                proxy: { url: proxyUrl, noProxy: [] },
+                timeout: Duration.seconds(5)
+              })
+            )
+            assert.strictEqual(error.reason, "proxy")
+            assert.include(error.detail, "407")
+          }),
+        true
+      )
+    )
   )
 })

@@ -20,7 +20,12 @@ import {
 import { proposeScenarios } from "../flows/lib/soap/Scenarios.ts"
 import { importSoapUiProject } from "../flows/lib/soap/SoapUiImport.ts"
 import { makeDirectoryStubTransport } from "../flows/lib/soap/Stub.ts"
-import { makeFakeSoapTransport } from "../flows/lib/soap/Transport.ts"
+import {
+  makeTokenSource,
+  renderDefaultStsTemplate,
+  stsTemplatePath
+} from "../flows/lib/soap/Sts.ts"
+import { makeFakeSoapTransport, xmlResponse } from "../flows/lib/soap/Transport.ts"
 import { demoCatalog, demoResponses, demoSoapUi, fixedKey, replyingService } from "./support.ts"
 
 const service = "DemoBankService"
@@ -83,6 +88,90 @@ const writeRequest = (
   )
 
 const noMutation = () => Effect.succeed(false)
+
+describe("callOperation with an STS token", () => {
+  it.effect("fetches the token first and carries it, bytes intact, after the UsernameToken", () =>
+    Effect.gen(function* () {
+      const catalog = yield* demoCatalog
+      const workspace = yield* makeMemoryWorkspace()
+      const profile = yield* decodeAuthProfile(
+        JSON.stringify({
+          environment: "test",
+          wsSecurity: { user: "ws-user", password: "env:WS_PASS", passwordType: "text" },
+          sts: {
+            endpoint: "https://sts.bank.local/trust",
+            auth: { user: "svc", password: "env:SVC_PASS" }
+          }
+        })
+      )
+      const assertion =
+        '<saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" ID="_1">\n  <saml2:Issuer>sts</saml2:Issuer>\n</saml2:Assertion>'
+      const stub = makeDirectoryStubTransport(demoResponses, catalog)
+      const fake = yield* makeFakeSoapTransport((request) =>
+        request.url.startsWith("https://sts.")
+          ? Effect.succeed(
+              xmlResponse(
+                `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><t:RequestSecurityTokenResponse xmlns:t="urn:t">${assertion}</t:RequestSecurityTokenResponse></s:Body></s:Envelope>`
+              )
+            )
+          : stub.send(request)
+      )
+      yield* workspace.write(stsTemplatePath(service, profile.sts!), renderDefaultStsTemplate())
+      yield* writeRequest(workspace, catalog, "cercaConti", "happy-path", { codiceFiscale: cf })
+      const token = yield* makeTokenSource({
+        workspace,
+        service,
+        config: profile.sts!,
+        secrets,
+        transport: fake.transport,
+        now: () => new Date("2026-09-25T10:00:00Z")
+      })
+      const result = yield* callOperation({
+        workspace,
+        catalog,
+        service,
+        operation: "cercaConti",
+        name: "happy-path",
+        profile,
+        operations: yield* operationsFile,
+        secrets,
+        transport: fake.transport,
+        token,
+        allowMutating: undefined,
+        confirm: noMutation,
+        random: (size) => new Uint8Array(size).fill(1),
+        now: () => new Date("2026-09-25T10:00:00Z")
+      })
+      const requests = yield* fake.requests
+      assert.strictEqual(requests.length, 2)
+      assert.strictEqual(requests[0]?.url, "https://sts.bank.local/trust")
+      const wire = Redacted.value(requests[1]?.body ?? Redacted.make(""))
+      assert.include(wire, assertion)
+      assert.isTrue(wire.indexOf("<wsu:Timestamp") < wire.indexOf("<wsse:UsernameToken"))
+      assert.isTrue(wire.indexOf("<wsse:UsernameToken") < wire.indexOf("<saml2:Assertion"))
+      assert.notInclude(result.exchange.request?.envelope ?? "", "saml2:Assertion")
+      assert.notInclude(result.exchange.request?.envelope ?? "", "wsse:Security")
+      assert.strictEqual(yield* token.fetches, 1)
+      // A call on a profile naming an STS without a token source is refused.
+      const refused = yield* Effect.flip(
+        callOperation({
+          workspace,
+          catalog,
+          service,
+          operation: "cercaConti",
+          name: "happy-path",
+          profile,
+          operations: yield* operationsFile,
+          secrets,
+          transport: fake.transport,
+          allowMutating: undefined,
+          confirm: noMutation
+        })
+      )
+      assert.strictEqual(refused._tag, "CallSetupError")
+    })
+  )
+})
 
 describe("callOperation", () => {
   it.effect("sends an authenticated, WS-Security-signed call and records a masked exchange", () =>

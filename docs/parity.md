@@ -563,3 +563,9 @@ reference release.
   code, one read-only seat proposing per-story fixes that the next run
   applies behind `- [x] Approved`, and a Markdown note of advice for llm4ts.
   llm4zio has no post-run analysis; its restarts re-ask everything. Additive.
+- soap-ace environments, proxies, trust and STS tokens (ADR 0024,
+  2026-10-03): per-environment `auth.<env>.json`, explicit CONNECT proxies
+  per side, CA material added to the system roots with a `trust` command
+  that pins a presented chain behind its fingerprint, and a WS-Trust STS
+  call from a user-owned template whose SAML assertion is carried as raw
+  bytes in every call's Security header. llm4zio has no SOAP kit. Additive.

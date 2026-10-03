@@ -59,27 +59,73 @@ export const passwordDigest = (material: TokenMaterial, password: string): strin
     .update(password, "utf8")
     .digest("base64")
 
-export const usernameTokenHeader = (
-  token: ResolvedUsernameToken,
-  material: TokenMaterial
-): Redacted.Redacted<string> => {
+const usernameTokenElement = (token: ResolvedUsernameToken, material: TokenMaterial): string => {
   const password = Redacted.value(token.password)
   const passwordValue =
     token.passwordType === "digest" ? passwordDigest(material, password) : password
   const type = token.passwordType === "digest" ? "PasswordDigest" : "PasswordText"
+  return [
+    '<wsse:UsernameToken wsu:Id="UsernameToken-1">',
+    `<wsse:Username>${escapeText(token.user)}</wsse:Username>`,
+    `<wsse:Password Type="${TokenProfile}#${type}">${escapeText(passwordValue)}</wsse:Password>`,
+    `<wsse:Nonce EncodingType="${Base64Binary}">${Buffer.from(material.nonce).toString("base64")}</wsse:Nonce>`,
+    `<wsu:Created>${material.created}</wsu:Created>`,
+    "</wsse:UsernameToken>"
+  ].join("")
+}
+
+export interface SecurityHeaderParts {
+  readonly usernameToken?: ResolvedUsernameToken
+  /** `wsu:Timestamp` Created/Expires; `expires` defaults to five minutes after `created`. */
+  readonly timestamp?: { readonly created: string; readonly expires?: string }
+  /** A token element carried exactly as received (a signed SAML assertion). */
+  readonly token?: Redacted.Redacted<string>
+  readonly material: TokenMaterial
+}
+
+const fiveMinutesAfter = (created: string): string =>
+  new Date(new Date(created).getTime() + 5 * 60_000).toISOString()
+
+/**
+ * The WS-Security header, in the order ESBs expect: Timestamp, then the
+ * UsernameToken, then the bearer token. Empty parts are left out; no parts
+ * at all gives no header.
+ */
+export const securityHeader = (
+  parts: SecurityHeaderParts
+): Redacted.Redacted<string> | undefined => {
+  const inner: Array<string> = []
+  if (parts.timestamp !== undefined) {
+    inner.push(
+      '<wsu:Timestamp wsu:Id="TS-1">',
+      `<wsu:Created>${parts.timestamp.created}</wsu:Created>`,
+      `<wsu:Expires>${parts.timestamp.expires ?? fiveMinutesAfter(parts.timestamp.created)}</wsu:Expires>`,
+      "</wsu:Timestamp>"
+    )
+  }
+  if (parts.usernameToken !== undefined) {
+    inner.push(usernameTokenElement(parts.usernameToken, parts.material))
+  }
+  if (parts.token !== undefined) {
+    inner.push(Redacted.value(parts.token))
+  }
+  if (inner.length === 0) {
+    return undefined
+  }
   return Redacted.make(
     [
       `<wsse:Security xmlns:wsse="${WsseNamespace}" xmlns:wsu="${WsuNamespace}" soapenv:mustUnderstand="1">`,
-      '<wsse:UsernameToken wsu:Id="UsernameToken-1">',
-      `<wsse:Username>${escapeText(token.user)}</wsse:Username>`,
-      `<wsse:Password Type="${TokenProfile}#${type}">${escapeText(passwordValue)}</wsse:Password>`,
-      `<wsse:Nonce EncodingType="${Base64Binary}">${Buffer.from(material.nonce).toString("base64")}</wsse:Nonce>`,
-      `<wsu:Created>${material.created}</wsu:Created>`,
-      "</wsse:UsernameToken>",
+      ...inner,
       "</wsse:Security>"
     ].join("")
   )
 }
+
+export const usernameTokenHeader = (
+  token: ResolvedUsernameToken,
+  material: TokenMaterial
+): Redacted.Redacted<string> =>
+  securityHeader({ usernameToken: token, material }) ?? Redacted.make("")
 
 /**
  * Wrap a body element (serialized XML, carrying its own namespace

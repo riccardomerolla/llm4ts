@@ -11,14 +11,20 @@
 //   llm4ts run soap-sample --repo . "call cercaMovimenti/happy-path"
 //   llm4ts run soap-sample --repo . "call cercaMovimenti"     every request of the operation
 //   llm4ts run soap-sample --repo . -- --allow-mutating revocaBonifico "call revocaBonifico/gia-eseguito"
+//   llm4ts run soap-sample --repo . "check"                   the selected profile as decisions, no network
+//   llm4ts run soap-sample --repo . "trust call"              capture and pin the chain the endpoint presents
+//   llm4ts run soap-sample --repo . "sts init"                write the STS request template
+//   llm4ts run soap-sample --repo . -- --env uat "call all"   with auth.uat.json (or LLM4TS_SOAP_ENV)
 //
 // Requests live in .llm4ts/soap/<service>/samples/<operation>/<name>.request.yaml
 // (or .request.xml). A call validates the request (an invalid one is never
 // sent), checks the confirmed class in operations.md and the environment's
 // mutating policy, sends it with auth.json's call side (Basic/Bearer, mTLS,
-// WS-Security), and records a masked, auth-stripped exchange beside it.
-// Flags: --allow-mutating <operation> (exactly one), --keep-raw (unmasked
-// response under the gitignored raw/). LLM4TS_SOAP_SERVICE picks the service
+// WS-Security, an STS token), and records a masked, auth-stripped exchange
+// beside it. Flags: --allow-mutating <operation> (exactly one), --keep-raw
+// (unmasked response under the gitignored raw/), --env <name> (the
+// environment's auth.<name>.json), --yes (pin a chain without asking).
+// LLM4TS_SOAP_SERVICE picks the service
 // when several were discovered; LLM4TS_SOAP_STUB=<dir> answers calls from
 // <dir>/<operation>.xml instead of the network (rehearsals); LLM4TS_REASONER
 // picks the seat that proposes scenarios (default claude).
@@ -46,6 +52,7 @@ import {
   loadAuthProfile,
   loadCatalog,
   loadOperationsFile,
+  profilePath,
   readIfPresent
 } from "./lib/soap/Discover.ts"
 import {
@@ -59,43 +66,63 @@ import {
   seedsForService
 } from "./lib/soap/Samples.ts"
 import { proposeScenarios } from "./lib/soap/Scenarios.ts"
+import { checkReport, initStsTemplate, trustSide } from "./lib/soap/Setup.ts"
+import { makeTokenSource } from "./lib/soap/Sts.ts"
 import { importSoapUiProject } from "./lib/soap/SoapUiImport.ts"
 import { makeDirectoryStubTransport } from "./lib/soap/Stub.ts"
 import { makeNodeSoapTransport } from "./lib/soap/Transport.ts"
 
 const usage = [
-  'usage: soap-sample [--allow-mutating <operation>] [--keep-raw] "<command>"',
+  'usage: soap-sample [--allow-mutating <operation>] [--keep-raw] [--env <name>] [--yes] "<command>"',
   "  list | init <operation> [name] | propose <operation> | import <soapui.xml>",
-  "  call <operation>[/<name>] | call all"
+  "  call <operation>[/<name>] | call all",
+  "  check | trust call|fetch|sts | sts init"
 ].join("\n")
 
 interface SampleFlags {
   readonly allowMutating: string | undefined
   readonly keepRaw: boolean
+  readonly env: string | undefined
+  readonly yes: boolean
   readonly rest: ReadonlyArray<string>
 }
 
-const parseSampleFlags = (argv: ReadonlyArray<string>): Effect.Effect<SampleFlags, ScriptUsage> =>
+export const parseSampleFlags = (
+  argv: ReadonlyArray<string>
+): Effect.Effect<SampleFlags, ScriptUsage> =>
   Effect.gen(function* () {
     let allowMutating: string | undefined
     let keepRaw = false
+    let env: string | undefined
+    let yes = false
     const rest: Array<string> = []
+    const valued = (name: string, index: number): string | undefined => {
+      const argument = argv[index] ?? ""
+      return argument.includes("=") ? argument.slice(name.length + 1) : argv[index + 1]
+    }
     for (let index = 0; index < argv.length; index++) {
       const argument = argv[index] ?? ""
       if (argument === "--keep-raw") keepRaw = true
+      else if (argument === "--yes") yes = true
       else if (argument === "--allow-mutating" || argument.startsWith("--allow-mutating=")) {
-        const value = argument.includes("=")
-          ? argument.slice("--allow-mutating=".length)
-          : argv[++index]
+        const value = valued("--allow-mutating", index)
+        if (!argument.includes("=")) index++
         if (value === undefined || value.trim() === "") {
           return yield* ScriptUsage.make({
             message: `--allow-mutating needs an operation name\n${usage}`
           })
         }
         allowMutating = value.trim()
+      } else if (argument === "--env" || argument.startsWith("--env=")) {
+        const value = valued("--env", index)
+        if (!argument.includes("=")) index++
+        if (value === undefined || value.trim() === "" || value.startsWith("--")) {
+          return yield* ScriptUsage.make({ message: `--env needs an environment name\n${usage}` })
+        }
+        env = value.trim()
       } else rest.push(argument)
     }
-    return { allowMutating, keepRaw, rest }
+    return { allowMutating, keepRaw, env, yes, rest }
   })
 
 /** The service directory: LLM4TS_SOAP_SERVICE, or the only one discovered. */
@@ -125,6 +152,7 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("list", flags.rest)
   const [command = "list", ...args] = input.prompt.trim().split(/\s+/)
   const environment = process.env
+  const env = flags.env ?? (environment.LLM4TS_SOAP_ENV?.trim() || undefined)
   const reasoner =
     command === "propose"
       ? coderFor((environment.LLM4TS_REASONER ?? "claude").trim() || "claude")
@@ -254,9 +282,116 @@ const program = Effect.gen(function* () {
             )
             return
           }
+          case "check": {
+            const profile = yield* loadAuthProfile(workspace, service, env).pipe(
+              Effect.catch((error) =>
+                error._tag === "AuthProfileError"
+                  ? say(error.message).pipe(Effect.as(undefined))
+                  : Effect.fail(error)
+              )
+            )
+            for (const line of yield* checkReport({
+              workspace,
+              service,
+              env,
+              profile,
+              environment
+            })) {
+              yield* say(line)
+            }
+            return
+          }
+          case "trust": {
+            const side = args[0]
+            if (side !== "call" && side !== "fetch" && side !== "sts") {
+              return yield* FlowAborted.make({
+                message: `trust needs a side: call, fetch or sts\n${usage}`
+              })
+            }
+            const profile = yield* loadAuthProfile(workspace, service, env)
+            if (profile === undefined) {
+              return yield* FlowAborted.make({
+                message: `no profile at ${profilePath(service, env)}; write it first`
+              })
+            }
+            const stub = environment.LLM4TS_SOAP_STUB?.trim()
+            if (stub !== undefined && stub !== "") {
+              return yield* FlowAborted.make({
+                message: "trust reads a real server; unset LLM4TS_SOAP_STUB"
+              })
+            }
+            const fallback = catalog.endpoints[0]?.address
+            const outcome = yield* trustSide({
+              workspace,
+              service,
+              env,
+              profile,
+              side,
+              ...(fallback === undefined ? {} : { fallbackEndpoint: fallback }),
+              secrets: nodeSecretSource(environment),
+              transport: makeNodeSoapTransport(),
+              confirm: (lines) =>
+                Effect.gen(function* () {
+                  for (const line of lines) yield* say(line)
+                  if (flags.yes) return true
+                  if (process.stdin.isTTY !== true) {
+                    yield* say("not a terminal: pass --yes to pin this chain")
+                    return false
+                  }
+                  return yield* terminalInteraction.ask("trust this chain? [y/N] ").pipe(
+                    Effect.map((answer) => /^(y|yes|s|si|sì)$/i.test(answer.trim())),
+                    Effect.orElseSucceed(() => false)
+                  )
+                })
+            })
+            switch (outcome._tag) {
+              case "AlreadyTrusted":
+                for (const line of outcome.lines) yield* say(line)
+                yield* say("already trusted by the system roots; nothing to pin")
+                return
+              case "Declined":
+                yield* say("not pinned")
+                return
+              case "Pinned":
+                yield* say(
+                  `pinned ${outcome.pem}${outcome.replaced ? " (replaced)" : ""}; ${outcome.profile} now sets ${side}.tls.ca to it`
+                )
+                return
+            }
+            return
+          }
+          case "sts": {
+            if (args[0] !== "init") {
+              return yield* FlowAborted.make({ message: `sts takes "init"\n${usage}` })
+            }
+            const profile = yield* loadAuthProfile(workspace, service, env)
+            if (profile === undefined) {
+              return yield* FlowAborted.make({
+                message: `no profile at ${profilePath(service, env)}; write it with an "sts" section first`
+              })
+            }
+            const result = yield* initStsTemplate(workspace, service, profile)
+            yield* say(
+              result.written
+                ? `wrote ${result.path}; edit it if the STS differs from WS-Trust 1.3, then: soap-sample "call …"`
+                : `${result.path} exists; edit it, or delete it and run sts init again`
+            )
+            return
+          }
           case "call": {
             const target = args[0] ?? ""
-            const profile = yield* loadAuthProfile(workspace, service)
+            const profile = yield* loadAuthProfile(workspace, service, env)
+            if (profile !== undefined) yield* say(`profile: ${profilePath(service, env)}`)
+            const tokenSource =
+              profile?.sts === undefined
+                ? undefined
+                : yield* makeTokenSource({
+                    workspace,
+                    service,
+                    config: profile.sts,
+                    secrets: nodeSecretSource(environment),
+                    transport: makeNodeSoapTransport()
+                  })
             const stub = environment.LLM4TS_SOAP_STUB?.trim()
             const transport =
               stub === undefined || stub === ""
@@ -298,6 +433,7 @@ const program = Effect.gen(function* () {
                 operations,
                 secrets: nodeSecretSource(environment),
                 transport,
+                ...(tokenSource === undefined ? {} : { token: tokenSource }),
                 allowMutating: flags.allowMutating,
                 confirm,
                 keepRaw: flags.keepRaw
@@ -315,6 +451,10 @@ const program = Effect.gen(function* () {
               yield* say(
                 `${operation}/${name}: ${status}, ${exchange.response?.elapsedMs ?? 0} ms, ${exchange.responseIssues.length} schema findings, ${exchange.masking.entries.reduce((sum, entry) => sum + entry.count, 0)} values masked → ${outcome.success.path}`
               )
+            }
+            if (tokenSource !== undefined) {
+              const fetches = yield* tokenSource.fetches
+              if (fetches > 0) yield* say(`sts: ${fetches} token call(s) this run`)
             }
             if (failures > 0)
               return yield* FlowAborted.make({

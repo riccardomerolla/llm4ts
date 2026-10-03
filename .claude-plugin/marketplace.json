@@ -24,6 +24,11 @@
       "name": "authoring-llm4ts-packs",
       "source": "./skills/authoring-llm4ts-packs",
       "description": "Write a modernization pack for llm4ts's modernize-* flows and check it against an estate without an LLM."
+    },
+    {
+      "name": "configuring-soap-flows",
+      "source": "./skills/configuring-soap-flows",
+      "description": "Configure and run llm4ts's soap-ace flows against a real ESB: environments, proxies, trusted chains, WS-Security and SAML tokens from an STS."
     }
   ]
 }

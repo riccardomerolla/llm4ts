@@ -4,6 +4,7 @@ import type { WorkspaceError, WorkspaceShape } from "@llm4ts/flow/Workspace"
 import { type OperationAnalysis, schemaPaths, writeAnalyses } from "./Analysis.ts"
 import type { AuthProfile, Environment, SecretSource } from "./Auth.ts"
 import { callOperation, RequestInvalid } from "./Call.ts"
+import type { TokenSource } from "./Sts.ts"
 import { elementByName, type Operation, type WsdlCatalog } from "./Catalog.ts"
 import {
   heuristicClass,
@@ -245,6 +246,8 @@ export interface ExploreOptions {
   readonly judged: ReadonlyMap<string, JudgedClass | undefined> | undefined
   readonly secrets: SecretSource
   readonly transport: SoapTransportShape
+  /** The run's SAML token source when the profile names an STS. */
+  readonly token?: TokenSource
   /** Call probed operations again even when an exchange exists. */
   readonly refresh: boolean
   readonly now?: () => Date
@@ -398,6 +401,7 @@ export const exploreService = (
         operations: probeFile,
         secrets: options.secrets,
         transport: options.transport,
+        ...(options.token === undefined ? {} : { token: options.token }),
         allowMutating: undefined,
         confirm: () => Effect.succeed(false),
         ...(body === undefined

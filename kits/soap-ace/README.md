@@ -116,6 +116,10 @@ llm4ts run soap-sample --repo . "propose cercaMovimenti"                 # scena
 llm4ts run soap-sample --repo . "call cercaMovimenti"                    # every request of the operation
 llm4ts run soap-sample --repo . -- --allow-mutating revocaBonifico "call revocaBonifico/gia-eseguito"
 llm4ts run soap-sample --repo . list
+llm4ts run soap-sample --repo . "check"                                  # the selected profile as decisions, no network
+llm4ts run soap-sample --repo . "trust call"                             # capture and pin the chain the endpoint presents
+llm4ts run soap-sample --repo . "sts init"                               # write the STS request template
+llm4ts run soap-sample --repo . -- --env uat "call all"                  # with auth.uat.json (or LLM4TS_SOAP_ENV=uat)
 ```
 
 A request is a YAML projection of the XSD, one file per scenario under
@@ -311,6 +315,70 @@ read, and errors name the reference, never its value.
 
 Persisted exchanges drop `wsse:Security` headers and credential-bearing HTTP
 headers (`authorization`, cookies, anything named like a token or secret).
+
+## Environments, proxies, trust and STS tokens
+
+Locked-down environments differ in where the proxy is, whose CA signed the
+ESB, and which STS issues the token (ADR 0024). One file per environment
+holds all of it: `auth.<env>.json` beside `auth.json`, selected by
+`LLM4TS_SOAP_ENV=uat` or `-- --env uat`; a named environment without a
+file is an error. Every flow prints the file it loaded.
+
+```json
+{
+  "environment": "uat",
+  "endpoint": "https://esb-uat.bank.internal/soap/DemoBank",
+  "call": {
+    "proxy": "none",
+    "tls": { "ca": "file:.llm4ts/soap/DemoBank/trust/esb-uat.bank.internal.pem" }
+  },
+  "fetch": {
+    "proxy": { "url": "http://proxy.bank.internal:3128", "noProxy": ["*.bank.internal"] }
+  },
+  "sts": {
+    "endpoint": "https://sts-uat.bank.internal/trust/13/usernamemixed",
+    "auth": { "user": "env:STS_USER", "password": "env:STS_PASSWORD" },
+    "appliesTo": "https://esb-uat.bank.internal/soap/DemoBank",
+    "token": { "element": "Assertion" },
+    "renewBeforeSeconds": 60,
+    "timestamp": true
+  }
+}
+```
+
+- **Proxies** are explicit per side (`fetch`, `call`, `sts`): `{ "url",
+"noProxy": ["host", "*.suffix"], "auth": {basic, references} }` or
+  `"none"` (the default). The transport opens an HTTP CONNECT tunnel; the
+  proxy environment variables are never read, and `check` lists them as
+  set-and-ignored. A refused tunnel is a `proxy` transport error.
+- **CA material** adds to Node's system roots: `tls.ca` (a PEM file) and
+  `tls.caDir` (a directory of `.pem`/`.crt`). `tls.trust: "ca-only"` trusts
+  only the profile's. `tls.servername` names the host behind a front door.
+  Verification is never switched off.
+- **`trust call|fetch|sts`** connects to that side's endpoint without
+  verifying, sends nothing, prints every certificate of the chain (subject,
+  issuer, validity, SHA-256 fingerprint) and whether the system already
+  trusts it, asks `trust this chain? [y/N]` (`-- --yes` headless), and on
+  yes writes `trust/<host>.pem` (gitignored) and sets that side's `tls.ca`
+  in the selected profile. A changed certificate is shown as a replacement
+  and asked again. A `tls` error that says "capture it with trust" is this
+  case.
+- **STS**: with an `sts` section every `call` first obtains a SAML bearer
+  token. `sts init` writes `sts.request.xml`, a WS-Trust 1.3 Issue envelope
+  with `{{username}}`, `{{password}}`, `{{created}}`, `{{expires}}`,
+  `{{nonce}}`, `{{appliesTo}}`; edit it when the STS differs, the kit only
+  fills the placeholders. The first element named `token.element` (default
+  `Assertion`, any namespace) is taken from the response as its raw bytes,
+  so a signed assertion survives, and sent inside `wsse:Security` after the
+  `wsu:Timestamp` (`timestamp: true`) and the UsernameToken when
+  `wsSecurity` is also set. The token lives in memory for the run and is
+  renewed `renewBeforeSeconds` before its `NotOnOrAfter`; it is never
+  written anywhere. `StsError` names the fault, the status or the element
+  it looked for.
+- **`check`** prints the selected file, each side's endpoint, proxy decision
+  and CA sources, the STS and its template's placeholders, the pinned
+  chains, and the ignored proxy variables. It makes no connection: run it
+  first, then `trust`, then `sts init`, then `call`.
 
 ## Masking
 

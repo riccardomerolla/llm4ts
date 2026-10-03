@@ -13,7 +13,8 @@ import {
   WsdlCatalog
 } from "./Catalog.ts"
 import type { OperationsFileError } from "./Classification.ts"
-import { type AuthProfile, type AuthProfileError, decodeAuthProfile } from "./Auth.ts"
+import { AuthProfileError, decodeAuthProfile, profileFileName } from "./Auth.ts"
+import type { AuthProfile } from "./Auth.ts"
 import {
   type ClassProposal,
   classifyOperations,
@@ -49,10 +50,16 @@ export const servicePaths = (service: string) => {
     summary: `${directory}/catalog.md`,
     operations: `${directory}/operations.md`,
     auth: `${directory}/auth.json`,
+    /** Captured server chains, one PEM per host (`trust`). */
+    trustDir: `${directory}/trust`,
     masking: `${directory}/masking.json`,
     gitignore: `${directory}/.gitignore`
   }
 }
+
+/** The profile file an environment selects: `auth.json`, or `auth.<env>.json`. */
+export const profilePath = (service: string, env: string | undefined): string =>
+  `${serviceDirectory(service)}/${profileFileName(env)}`
 
 /** A directory-safe service name: explicit, else the WSDL's service, else the file name. */
 export const serviceName = (
@@ -69,15 +76,38 @@ export const serviceName = (
 }
 
 /** What never leaves the machine: credentials references, raw captures, the masking key. */
-export const serviceGitignore = ["auth.json", "raw/", ".masking-key", ""].join("\n")
+export const serviceGitignore = [
+  "auth.json",
+  "auth.*.json",
+  "trust/",
+  "raw/",
+  ".masking-key",
+  ""
+].join("\n")
 
+/**
+ * The profile of the selected environment (`LLM4TS_SOAP_ENV` / `--env`):
+ * `auth.<env>.json` when one is named, which must then exist; else `auth.json`.
+ */
 export const loadAuthProfile = (
   workspace: WorkspaceShape,
-  service: string
+  service: string,
+  env?: string
 ): Effect.Effect<AuthProfile | undefined, WorkspaceError | AuthProfileError> =>
-  Effect.flatMap(readIfPresent(workspace, servicePaths(service).auth), (text) =>
-    text === undefined ? Effect.succeed(undefined) : decodeAuthProfile(text)
-  )
+  Effect.gen(function* () {
+    const path = profilePath(service, env)
+    const text = yield* readIfPresent(workspace, path)
+    if (text === undefined) {
+      if (env !== undefined && env.trim() !== "") {
+        return yield* new AuthProfileError({
+          subject: path,
+          detail: `no profile for environment '${env.trim()}'; write it, or unset LLM4TS_SOAP_ENV`
+        })
+      }
+      return undefined
+    }
+    return yield* decodeAuthProfile(text, path.split("/").at(-1) ?? "auth.json")
+  })
 
 export const readIfPresent = (
   workspace: WorkspaceShape,

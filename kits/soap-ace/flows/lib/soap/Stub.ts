@@ -45,5 +45,13 @@ export const makeDirectoryStubTransport = (
       ),
       Effect.orElseSucceed(() => stubFault(`stub: no ${operation.name}.xml`))
     )
-  }
+  },
+  // A stub answers from files: no server, so no chain to show.
+  peerChain: (url) =>
+    Effect.succeed({
+      host: new URL(url).hostname,
+      certificates: [],
+      trustedBySystem: true,
+      authorizationError: undefined
+    })
 })

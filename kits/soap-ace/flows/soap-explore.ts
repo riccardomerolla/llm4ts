@@ -50,6 +50,7 @@ import { heuristicClass, judgeClass, type JudgedClass } from "./lib/soap/Classif
 import {
   discoverService,
   loadAuthProfile,
+  profilePath,
   loadCatalog,
   loadOperationsFile
 } from "./lib/soap/Discover.ts"
@@ -60,6 +61,7 @@ import {
   renderExploreReport,
   writeEvidence
 } from "./lib/soap/Explore.ts"
+import { makeTokenSource } from "./lib/soap/Sts.ts"
 import { makeDirectoryStubTransport } from "./lib/soap/Stub.ts"
 import { makeNodeSoapTransport, makeTransportDocumentLoader } from "./lib/soap/Transport.ts"
 import { DocumentLoader } from "./lib/soap/Wsdl.ts"
@@ -128,7 +130,13 @@ const program = Effect.gen(function* () {
         let judged: Map<string, JudgedClass | undefined> | undefined
         if (location !== undefined) {
           const fetchProfile =
-            requested === undefined ? undefined : yield* loadAuthProfile(workspace, requested)
+            requested === undefined
+              ? undefined
+              : yield* loadAuthProfile(
+                  workspace,
+                  requested,
+                  environment.LLM4TS_SOAP_ENV?.trim() || undefined
+                )
           const fetchSide = yield* resolveSide(nodeSecretSource(environment), fetchProfile?.fetch)
           const discovered = yield* discoverService({
             workspace,
@@ -170,7 +178,9 @@ const program = Effect.gen(function* () {
           yield* say(`continuing ${service}: ${catalog.operations.length} operations`)
         }
 
-        const profile = yield* loadAuthProfile(workspace, service)
+        const env = environment.LLM4TS_SOAP_ENV?.trim() || undefined
+        const profile = yield* loadAuthProfile(workspace, service, env)
+        if (profile !== undefined) yield* say(`profile: ${profilePath(service, env)}`)
         const operations = yield* loadOperationsFile(workspace, service)
         // Provisional probing asks the judgment only where the listed class
         // and the heuristic already say read.
@@ -207,6 +217,17 @@ const program = Effect.gen(function* () {
           judged,
           secrets: nodeSecretSource(environment),
           transport,
+          ...(profile?.sts === undefined
+            ? {}
+            : {
+                token: yield* makeTokenSource({
+                  workspace,
+                  service,
+                  config: profile.sts,
+                  secrets: nodeSecretSource(environment),
+                  transport
+                })
+              }),
           refresh: flags.refresh,
           progress: (line) => say(`  ${line}`)
         })

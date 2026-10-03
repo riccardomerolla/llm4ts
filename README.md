@@ -158,12 +158,14 @@ never appear in argv, logs, traces, or error messages. Effect programs use
 
 ## Your coding agent can use llm4ts too
 
-Three skills teach Claude Code, Pi, OpenCode, and Codex to work with
+Four skills teach Claude Code, Pi, OpenCode, and Codex to work with
 llm4ts: [using-llm4ts](skills/using-llm4ts/README.md) hands a task to
 `llm4ts run`, [authoring-llm4ts-flows](skills/authoring-llm4ts-flows/README.md)
-writes and forks flows, and
+writes and forks flows,
 [authoring-llm4ts-packs](skills/authoring-llm4ts-packs/README.md) writes
-packs and checks them. Install from this repository's plugin marketplace or
+packs and checks them, and
+[configuring-soap-flows](skills/configuring-soap-flows/README.md) gets the
+soap-ace flows through a bank's proxies, private CAs and STS tokens. Install from this repository's plugin marketplace or
 by copying a skill directory.
 
 ## Packages
