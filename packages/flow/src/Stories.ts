@@ -58,6 +58,7 @@ import { Plan, Task } from "./Plan.ts"
 import { stage } from "./PlanExecution.ts"
 import { planFrom } from "./Planner.ts"
 import { ReviewIssue, ReviewResult } from "./Review.ts"
+import { cachedValue, fingerprintOf } from "./ReviewCache.ts"
 import type { Reviewer } from "./Reviewer.ts"
 import {
   dependentsOf,
@@ -84,6 +85,9 @@ const join = (root: string, path: string): string =>
 export class StoryVerdict extends ReviewResult.extend<StoryVerdict>("StoryVerdict")({
   dimensions: Schema.Array(JudgedDimension)
 }) {}
+
+/** What a judge answers: a scored verdict, or a plain review result. */
+const Verdict = Schema.Union([StoryVerdict, ReviewResult])
 
 export interface StorySeats {
   readonly context: FlowContextShape
@@ -668,6 +672,37 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const judgeRounds = Math.max(1, options.judgeRounds ?? 2)
   const statePath = (story: Story): string => join(options.stateDir, `stories/${story.id}.json`)
   const planPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.plan.md`)
+  /** The judge's last verdict beside a fingerprint of what it judged. */
+  const judgePath = (story: Story): string =>
+    join(options.stateDir, `stories/${story.id}.judge.json`)
+  /** One file per review lens, beside a fingerprint of the task and diff. */
+  const reviewCacheDir = (story: Story): string =>
+    join(options.stateDir, `stories/${story.id}.review`)
+  /** What reviewers and the judge found, round by round, for people to read. */
+  const findingsPath = (story: Story): string =>
+    join(options.stateDir, `stories/${story.id}.findings.md`)
+  const findingLines = (result: ReviewResult): ReadonlyArray<string> =>
+    result.issues.map((issue) => {
+      const where =
+        issue.file === undefined
+          ? ""
+          : ` (${issue.file}${issue.line === undefined ? "" : `:${issue.line}`})`
+      const detail = issue.description.trim().length === 0 ? "" : `: ${issue.description.trim()}`
+      return `- [${issue.severity}] ${issue.title}${where}${detail}`
+    })
+  const appendFindings = (
+    story: Story,
+    heading: string,
+    result: ReviewResult
+  ): Effect.Effect<void, FlowError> =>
+    files.append(
+      findingsPath(story),
+      [
+        `## ${heading}`,
+        ...(result.issues.length === 0 ? ["- no issues"] : findingLines(result)),
+        ""
+      ].join("\n") + "\n"
+    )
   /** Git's empty tree: a diff against it is a path's whole current content. */
   const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
   const revisionTitle = /^Revision \d+: /u
@@ -1099,6 +1134,18 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       // satisfied — without saying the exact sentinel — must not sink the
       // story: the option exists for pipelines shaped like this one.
       noopTaskPolicy: "complete",
+      // A lens's answer is kept beside the task and diff it answered, so a
+      // rerun over the same change asks nothing; every round is written to
+      // the story's findings log for people to read.
+      reviewCache: { files, dir: reviewCacheDir(story) },
+      onReview: (task, round, result, settled) =>
+        appendFindings(
+          story,
+          `review "${task.title}" round ${round} — ${
+            result.isClean ? "clean" : `${result.issues.length} issue(s)`
+          }${settled ? "" : ", fixing"}`,
+          result
+        ),
       ...(options.reviewers === undefined ? {} : { reviewers: options.reviewers }),
       ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds })
     })
@@ -1151,23 +1198,62 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         // code instead: the owned paths against the empty tree.
         const empty = diff.trim().length === 0
         const subject = empty ? yield* git.diffVsBaseScoped(emptyTree, story.owned, false) : diff
-        const verdict =
+        // The verdict is kept beside a fingerprint of what was judged: a
+        // rerun that finds the same diff gets the same answer without a
+        // model call, and the last verdict is on disk to read. Only the
+        // first round reuses it; a later round follows a revision and asks.
+        const judged =
           empty && subject.trim().length === 0
             ? // Nothing to judge is decided here, not asked of a model.
-              ReviewResult.make({
-                issues: [
-                  ReviewIssue.make({
-                    severity: "Critical",
-                    title: `nothing exists yet under ${story.owned.join(", ")}`,
-                    description: "The story's owned paths are empty on the epic branch."
-                  })
-                ],
-                summary: `judge:${story.id}`
-              })
-            : yield* withTimedRole(
-                "judge",
-                judge(story, subject, watchedSeats, empty ? "code" : "diff")
+              {
+                value: ReviewResult.make({
+                  issues: [
+                    ReviewIssue.make({
+                      severity: "Critical",
+                      title: `nothing exists yet under ${story.owned.join(", ")}`,
+                      description: "The story's owned paths are empty on the epic branch."
+                    })
+                  ],
+                  summary: `judge:${story.id}`
+                }),
+                reused: false
+              }
+            : yield* cachedValue(
+                files,
+                judgePath(story),
+                Verdict,
+                fingerprintOf([
+                  empty ? "code" : "diff",
+                  subject,
+                  story.id,
+                  story.title,
+                  story.description,
+                  story.provides.join("\n")
+                ]),
+                withTimedRole(
+                  "judge",
+                  judge(story, subject, watchedSeats, empty ? "code" : "diff")
+                ),
+                { reuse: round === 1 }
               )
+        const verdict = judged.value
+        if (judged.reused) {
+          yield* laneOf(story).publish(
+            Info.make({
+              lane: story.id,
+              message: `judge round ${round}: reused the verdict for an unchanged ${empty ? "code" : "diff"}`
+            })
+          )
+        }
+        yield* appendFindings(
+          story,
+          `judge round ${round} — ${verdict.isClean ? "cleared" : "not cleared"}${
+            verdict instanceof StoryVerdict
+              ? ` (${verdict.dimensions.map((d) => `${d.id} ${d.score}/${d.max}`).join(", ")})`
+              : ""
+          }${judged.reused ? ", reused" : ""}`,
+          verdict
+        )
         yield* laneOf(story).publish(
           StoryJudged.make({
             lane: story.id,

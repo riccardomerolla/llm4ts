@@ -8,6 +8,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import { makeChat } from "@llm4ts/flow/Chat"
 import { ProcessError } from "@llm4ts/flow/FlowError"
+import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import { makeCollectingFlowEvents, ReviewFinding } from "@llm4ts/flow/FlowEvents"
 import { Reviewer } from "@llm4ts/flow/Pack"
 import {
@@ -365,6 +366,35 @@ describe("reviewAndFixLoop", () => {
       assert.isTrue(result.isClean)
       assert.strictEqual(yield* Ref.get(calls), 2)
       assert.strictEqual(yield* Ref.get(asks), 1)
+    })
+  )
+
+  it.effect("reuses a lens's answer for an unchanged diff, and reports each round", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      const values = yield* Ref.make<ReadonlyArray<unknown>>([{ issues: [], summary: "clean" }])
+      const calls = yield* Ref.make(0)
+      const rounds = yield* Ref.make<ReadonlyArray<string>>([])
+      const events = yield* makeCollectingFlowEvents
+      const coder = yield* makeChat(coderService(yield* Ref.make(0)))
+      const once = reviewAndFixLoop({
+        reviewers: [lens()],
+        reviewerService: reviewerService(values, calls),
+        coder,
+        taskTitle: "task",
+        currentDiff: Effect.succeed("diff"),
+        events,
+        cache: { files: memory.store, dir: "/state/stories/a.review" },
+        onRound: (round, result, settled) =>
+          Ref.update(rounds, (all) => [...all, `${round}:${result.isClean}:${settled}`])
+      })
+      yield* once
+      // A rerun on the same diff asks nothing: the lens's answer is on disk.
+      yield* once
+      assert.strictEqual(yield* Ref.get(calls), 1)
+      assert.deepStrictEqual(yield* Ref.get(rounds), ["1:true:true", "1:true:true"])
+      const stored = yield* memory.store.read("/state/stories/a.review/correctness.json")
+      assert.include(stored ?? "", '"fingerprint"')
     })
   )
 

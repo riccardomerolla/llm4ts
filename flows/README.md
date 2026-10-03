@@ -195,6 +195,15 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   the story worktrees and fully merged story branches are removed
   (`--keep-worktrees` keeps them). The epic's record stays: plan, board,
   report, story states, traces.
+- What the reviewers and the judge found is written per story under
+  `.llm4ts/epics/<epic-id>/stories/`: `<id>.findings.md` lists every review
+  round of every task and every judge round with its scores and issues, for
+  people to read; `<id>.judge.json` holds the judge's last verdict beside a
+  fingerprint of what it judged, and `<id>.review/<lens>.json` each lens's
+  last answer beside the task and diff. A rerun that finds the same diff
+  reuses those answers instead of asking the model again (the judge on its
+  first round; a round after a revision always asks). Findings that were not
+  cleared are also the `Revision n` tasks on `<id>.plan.md`.
 - Each epic lives in its own folder under `.llm4ts/epics/`, named after its
   text. `--list` shows them (stories merged, landed or not), and
   `--epic <id>` works on one by id without retyping its text. With neither

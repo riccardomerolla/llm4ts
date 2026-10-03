@@ -99,6 +99,39 @@ describe("Gemini CLI configuration", () => {
     assert.strictEqual(geminiTurnLimitSettingsJson(48), '{"model":{"maxSessionTurns":48}}')
   })
 
+  it("maps read-only to headless default mode, and to plan mode only under a sandbox", () => {
+    // Headless default mode: Gemini's own write policy denies the shell and
+    // every write tool when non-interactive, and the model keeps its agent
+    // prompt. Plan mode swaps that prompt for a planning workflow (explore,
+    // consult, save a plan), which is wrong for a judge answering JSON.
+    const plain = buildGeminiArgs(
+      config,
+      GeminiCliExecutionContext.make({ cwd: "/repo", readOnly: true }),
+      "stream-json"
+    )
+    assert.deepStrictEqual(plain.slice(0, 4), [
+      "-m",
+      "gemini-2.5-flash",
+      "--approval-mode",
+      "default"
+    ])
+    assert.isFalse(plain.includes("-y"))
+    assert.isFalse(plain.includes("plan"))
+    // A sandbox pre-approves cat/ls/grep in default mode, so plan mode stays.
+    const sandboxed = buildGeminiArgs(
+      config,
+      GeminiCliExecutionContext.make({ cwd: "/repo", readOnly: true, sandbox: "Docker" }),
+      "stream-json"
+    )
+    assert.deepStrictEqual(sandboxed.slice(2, 4), ["--approval-mode", "plan"])
+    const writing = buildGeminiArgs(
+      config,
+      GeminiCliExecutionContext.make({ cwd: "/repo" }),
+      "stream-json"
+    )
+    assert.deepStrictEqual(writing.slice(2, 3), ["-y"])
+  })
+
   it("carries the seat's own environment into the process, under llm4ts's own keys", () => {
     const context = geminiCliExecutionContextFrom(
       CliConnectorConfig.make({

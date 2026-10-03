@@ -550,3 +550,11 @@ reference release.
   passes) and abort naming both; `llm4ts doctor` reports the same under
   `gates:`. `LLM4TS_NODE_CHECK=off` skips it. llm4zio runs its gates on
   whatever node it finds and lets the first red gate explain. Additive.
+- Review and judge findings persisted per story (2026-10-03): llm4ts writes
+  `stories/<id>.findings.md` (every review and judge round), `<id>.judge.json`
+  (the last verdict beside a fingerprint of what was judged) and
+  `<id>.review/<lens>.json` (each lens's last answer beside the task and
+  diff); a rerun over an unchanged diff reuses them instead of asking again.
+  llm4zio keeps findings in memory for the run and re-asks on every restart.
+  Gemini read-only seats run headless in `--approval-mode default` rather
+  than plan mode (ADR 0010 amendment of 2026-10-03). Additive.

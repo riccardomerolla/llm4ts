@@ -188,10 +188,18 @@ export const buildGeminiArgs = (
     "--include-directories",
     path
   ])
+  // Read-only is headless default mode: Gemini's own write policy denies
+  // the shell and every write tool when non-interactive, and unmatched tools
+  // too, while the model keeps its agent prompt. Plan mode would also deny
+  // them, but swaps the prompt for a planning workflow (explore the codebase,
+  // consult the user, save a plan), which a judge answering JSON cannot
+  // follow. Under a sandbox, default mode pre-approves cat/ls/grep in the
+  // shell, so plan mode stays there.
+  const readOnlyMode = context.sandbox === undefined ? "default" : "plan"
   return [
     "-m",
     config.model,
-    ...(context.readOnly ? ["--approval-mode", "plan"] : ["-y"]),
+    ...(context.readOnly ? ["--approval-mode", readOnlyMode] : ["-y"]),
     "--output-format",
     outputFormat,
     ...directories,
@@ -224,11 +232,12 @@ export const geminiProcessEnv = (
 }
 
 /**
- * The first Gemini CLI whose `--approval-mode plan` is a policy, not a mood:
- * from 0.26.0 its policy engine denies every tool but the read-only set in
- * plan mode (and `ask_user` headless), but the mode sat behind
- * `experimental.plan` until 0.37.0 promoted it. Below this a read-only seat
- * is a request the harness may not honor, so llm4ts refuses it (ADR 0010).
+ * The first Gemini CLI whose headless modes are policies, not moods: its
+ * policy engine denies the shell and every write tool when non-interactive
+ * in default mode, and every tool but the read-only set in plan mode (which
+ * sat behind `experimental.plan` until 0.37.0 promoted it). Below this a
+ * read-only seat is a request the harness may not honor, so llm4ts refuses
+ * it (ADR 0010).
  */
 export const geminiReadOnlyFloor = "0.37.0"
 
@@ -926,9 +935,10 @@ export const makeGeminiCliProvider = (
     completeStream: executeStream,
     healthCheck,
     isAvailable: Effect.map(healthCheck, (status) => status.availability === "Healthy"),
-    // Plan mode is a policy-engine deny of every non-read-only tool from
-    // `geminiReadOnlyFloor`, and `checkInstalledOnce` refuses a read-only
-    // seat on anything older, so the grade holds for every seat that runs.
+    // Headless default and plan modes are policy-engine denies of every
+    // non-read-only tool from `geminiReadOnlyFloor`, and `checkInstalledOnce`
+    // refuses a read-only seat on anything older, so the grade holds for
+    // every seat that runs.
     capabilities: ConnectorCapabilities.make({
       interactiveSessions: true,
       readOnlyEnforcement: "enforced"

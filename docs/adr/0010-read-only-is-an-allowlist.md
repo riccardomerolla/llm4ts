@@ -85,3 +85,20 @@ the story judge was the reasoner seat itself, which runs `-y`. Two changes:
 Admin-tier policies (`GEMINI_CLI_SYSTEM_SETTINGS_PATH` plus a `policies/`
 directory) would outrank a user's own allow rules; not needed yet, noted for
 whoever meets a machine with such rules.
+
+### Amendment (2026-10-03): headless default mode, not plan mode
+
+Plan mode turned out to do more than remove tools: Gemini CLI (checked on
+0.47.0 and 0.62.0) replaces the system prompt with a planning workflow —
+explore the codebase with search and read tools, consult the user, save a
+plan as Markdown. A judge asked for JSON over a diff in its prompt explored
+the worktree instead and often ended its turn without an answer. Read-only
+Gemini seats now run headless in `--approval-mode default`: `write.toml`
+denies `run_shell_command`, `write_file`, `replace`, `activate_skill` and
+`web_fetch` outright when non-interactive, the policy engine's default for
+unmatched tools is deny when non-interactive, and the file tools refuse
+paths outside the workspace. Same enforcement tier as plan mode, with the
+model's ordinary agent prompt. Plan mode stays only under a sandbox, whose
+default-mode profile pre-approves `cat`, `ls` and `grep` in the shell. The
+reviewer and judge prompts also say that the diff in the message is the
+whole subject and nothing is to be explored.

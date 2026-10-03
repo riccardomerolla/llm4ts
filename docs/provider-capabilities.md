@@ -44,14 +44,18 @@ connector's `readOnly` mapping restricts its harness (ADR 0010):
   the harness's advertised surface. Claude gets a `--tools Read,Grep,Glob,Skill`
   allowlist (plan mode removes no tools, and a denylist misses `Bash` and MCP
   tools by construction); Codex runs under an OS-level `read-only` sandbox; Pi's
-  `--tools read` is its documented tool-name allowlist. Gemini's
-  `--approval-mode plan` is a policy-engine rule from 0.26.0 (a default-tier
-  catch-all deny of every tool but the read-only set, `ask_user` denied
-  headless, file tools refusing paths outside the workspace), promoted out of
-  `experimental.plan` in 0.37.0: llm4ts takes a read-only Gemini seat only on
-  0.37.0 or newer and refuses it, typed, before the first turn on anything
-  older (`geminiReadOnlyFloor`). API providers execute no tools at all, so
-  read-only holds vacuously.
+  `--tools read` is its documented tool-name allowlist. Gemini read-only runs
+  headless in `--approval-mode default`: Gemini's own write policy denies the
+  shell, `write_file`, `replace`, `activate_skill` and `web_fetch` when
+  non-interactive, unmatched tools default to deny, and the file tools refuse
+  paths outside the workspace, while the model keeps its agent prompt. (Plan
+  mode denies the same tools but replaces the prompt with a planning
+  workflow — explore the codebase, consult the user, save a plan — which a
+  judge answering JSON cannot follow; it is used only under a sandbox, where
+  default mode pre-approves `cat`/`ls`/`grep`.) llm4ts takes a read-only
+  Gemini seat only on `geminiReadOnlyFloor` or newer and refuses it, typed,
+  before the first turn on anything older. API providers execute no tools at
+  all, so read-only holds vacuously.
 - **advisory** — an approval/permission MODE the harness may not treat as a
   capability gate (Grok `--permission-mode plan`, OpenCode `--agent plan`,
   Antigravity `mode: plan`). Upgrading a connector to enforced requires

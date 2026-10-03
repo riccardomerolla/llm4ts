@@ -1265,7 +1265,10 @@ export const storyJudgeQuery = (
           "the epic branch, shown as additions: judge whether the story is already in place —",
           "everything it provides exists and is tested — not the diff's size or novelty."
         ]
-      : [])
+      : []),
+    "",
+    "The response holds the complete subject. Judge what it shows; do not explore the",
+    "repository, read other files, or run anything."
   ].join("\n")
 }
 

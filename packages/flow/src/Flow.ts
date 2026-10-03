@@ -18,7 +18,12 @@ import type { PlanStoreShape } from "./Persistence.ts"
 import { implementTaskLoop, stage } from "./PlanExecution.ts"
 import { truth } from "@llm4ts/core/judgment/Schemas"
 import { certaintyOf, decide, judgmentOf, type JudgmentMode } from "./Judgment.ts"
-import { minimalReviewers, reviewAndFixLoop, type ReviewResult } from "./Review.ts"
+import {
+  minimalReviewers,
+  reviewAndFixLoop,
+  type ReviewResult,
+  type ReviewCacheLocation
+} from "./Review.ts"
 import type { Reviewer } from "./Reviewer.ts"
 
 export { publishUsage, structuredAndPublish } from "./Usage.ts"
@@ -65,6 +70,15 @@ export interface ImplementPlanOptions {
   readonly maxRounds?: number
   readonly lint?: Effect.Effect<ReviewResult, FlowError>
   readonly format?: Effect.Effect<void, FlowError>
+  /** Where each review lens's answer is kept, so a rerun over the same diff asks nothing. */
+  readonly reviewCache?: ReviewCacheLocation
+  /** Told after every review round of every task, settled or not. */
+  readonly onReview?: (
+    task: Task,
+    round: number,
+    result: ReviewResult,
+    settled: boolean
+  ) => Effect.Effect<void, FlowError>
   /**
    * What to do when a task produces no file changes and the coder does not
    * confirm TASK_ALREADY_SATISFIED. "fail" (default) aborts the flow —
@@ -235,7 +249,16 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           events: context.events,
           ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
           ...(options.lint === undefined ? {} : { lint: options.lint }),
-          ...(options.format === undefined ? {} : { format: options.format })
+          ...(options.format === undefined ? {} : { format: options.format }),
+          ...(options.reviewCache === undefined ? {} : { cache: options.reviewCache }),
+          ...(options.onReview === undefined
+            ? {}
+            : {
+                onRound: (round: number, result: ReviewResult, settled: boolean) =>
+                  options.onReview === undefined
+                    ? Effect.void
+                    : options.onReview(task, round, result, settled)
+              })
         })
         if (options.lint !== undefined) {
           const gate = yield* options.lint

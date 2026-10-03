@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -9,6 +10,8 @@ import { Capabilities } from "@llm4ts/core/Capability"
 import { guarded } from "./CapabilityGuard.ts"
 import type { Chat } from "./Chat.ts"
 import { FlowLlmError, ProcessError, describeFlowError, type FlowError } from "./FlowError.ts"
+import type { PlainFileStoreShape } from "./Persistence.ts"
+import { cachedReview, fingerprintOf } from "./ReviewCache.ts"
 import {
   Info,
   JudgmentObserved,
@@ -217,12 +220,21 @@ export const llmDriven = (picker: LlmServiceShape): ReviewerSelector => ({
   }
 })
 
+/** A lens name as a file name. */
+const fileSlug = (name: string): string =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "lens"
+
 export const reviewPrompt = (task: string, diff: string): string =>
   [
     `Review the change below for task "${task}". Report problems as JSON:`,
     '{"issues":[{"severity":"Critical|Warning|Info","title":"...",',
     '"description":"..."}],"summary":"..."}.',
     'An empty "issues" array means the change is acceptable. Respond with JSON only.',
+    "The diff below is the whole subject: judge what it shows. Do not explore the",
+    "repository, read other files, or run anything; answer from the diff.",
     "",
     "Diff:",
     diff
@@ -320,6 +332,23 @@ export interface ReviewAndFixOptions {
    * act mode skips lenses. Omit to disable the judgment entirely.
    */
   readonly prescreen?: ReviewPrescreen
+  /**
+   * Where each lens's answer is kept beside a fingerprint of the lens, the
+   * task and the diff: a rerun over an unchanged diff reuses it instead of
+   * asking again. One file per lens under `dir`.
+   */
+  readonly cache?: ReviewCacheLocation
+  /** Told after every round's findings are published, settled or not. */
+  readonly onRound?: (
+    round: number,
+    result: ReviewResult,
+    settled: boolean
+  ) => Effect.Effect<void, FlowError>
+}
+
+export interface ReviewCacheLocation {
+  readonly files: PlainFileStoreShape
+  readonly dir: string
 }
 
 export interface ReviewPrescreen {
@@ -476,10 +505,17 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
           ? { reviewers: selected, observations: [] }
           : yield* prescreenReviewers(options.prescreen, options.events, diff, selected)
       const chosen = screened.reviewers
-      const run = (lens: Reviewer) =>
-        reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff).pipe(
-          Effect.map((result) => ({ lens, result }))
-        )
+      const cache = options.cache
+      const review = (lens: Reviewer): Effect.Effect<ReviewResult, FlowError> =>
+        cache === undefined
+          ? reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
+          : cachedReview(
+              cache.files,
+              join(cache.dir, `${fileSlug(lens.name)}.json`),
+              fingerprintOf([lens.name, lens.systemPrompt, options.taskTitle, diff]),
+              reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
+            )
+      const run = (lens: Reviewer) => Effect.map(review(lens), (result) => ({ lens, result }))
       const parallelism = options.parallelism ?? 0
       const results =
         parallelism > 0
@@ -537,6 +573,9 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
           )
         })
       )
+      if (options.onRound !== undefined) {
+        yield* options.onRound(round, result, settled)
+      }
       if (settled) {
         return result
       }

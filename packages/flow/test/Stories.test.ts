@@ -350,6 +350,12 @@ const story = (id: string, dependsOn: ReadonlyArray<string> = []): Story =>
     provides: [`route /${id}`]
   })
 
+const single = StoryPlan.make({
+  epicId: "single",
+  epic: "One story.",
+  stories: [story("a")]
+})
+
 // a and b independent, c needs a, d needs b and c (the fan-in).
 const diamond = StoryPlan.make({
   epicId: "diamond",
@@ -642,6 +648,38 @@ describe("Stories executor", () => {
         "commit:/repo/.llm4ts/worktrees/a:a: Revision 1: close the judge's findings"
       )
     })
+  )
+
+  it.effect(
+    "a rerun reuses the judge's verdict on an unchanged diff and keeps a findings log",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const context = yield* makeContext(harness)
+        const verdicts = yield* Ref.make(0)
+        const options = yield* makeOptions(harness, single, context, {
+          judge: () => Ref.update(verdicts, (n) => n + 1).pipe(Effect.as(red("never good enough")))
+        })
+        const first = yield* implementStoriesFlow(context, options)
+        assert.strictEqual(first.stories[0]?.status, "failed")
+        // Round 1 red, a revision, round 2 red: two verdicts, both persisted.
+        assert.strictEqual(yield* Ref.get(verdicts), 2)
+        const findings = yield* options.files.read(
+          "/repo/.llm4ts/epics/single/stories/a.findings.md"
+        )
+        assert.include(findings ?? "", "judge round 1")
+        assert.include(findings ?? "", "never good enough")
+        assert.include(findings ?? "", "review")
+
+        // The rerun's first round finds the same diff: the stored verdict
+        // answers without a model call. The round after its revision asks.
+        const second = yield* implementStoriesFlow(context, options)
+        assert.strictEqual(second.stories[0]?.status, "failed")
+        assert.strictEqual(yield* Ref.get(verdicts), 3)
+        const log = yield* options.files.read("/repo/.llm4ts/epics/single/stories/a.findings.md")
+        assert.include(log ?? "", "judge round 1 — not cleared")
+        assert.include(log ?? "", "reused")
+      })
   )
 
   it.effect("times every merge and its wait for the merge lock on the story's lane", () =>
