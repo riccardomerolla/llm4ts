@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.27.0
+
+- **`epic-retro`: a run's failures become proposed fixes behind an
+  approval** (ADR 0023). After a red `epic-stories` run, which now prints
+  the command, `llm4ts run epic-retro --repo <target> -- --epic <id>`
+  digests what the run left behind — the trace, its transcripts when it
+  was started with `--transcript`, the board, the report, and each story's
+  plan, findings and judge verdict — into `retro/<runId>.digest.md`
+  (written first; `LLM4TS_RETRO_CHARS`, default 60 000), and asks the
+  read-only judge seat for one typed proposal: per failed or waiting story
+  a diagnosis and exactly one fix — tasks appended to its plan, an edit to
+  its entry in `plan.md` (which restarts it from a fresh worktree), a
+  refine round, or nothing — plus run advice and, only where llm4ts itself
+  misbehaved, advice for the library in `retro/<runId>-library.md`. Code
+  validates the proposal (unknown stories, paths outside the repository,
+  tasks for a story that never planned, edits that change nothing are
+  dropped and listed) and writes `retro/<runId>.md`, ending in
+  `- [ ] Approved`.
+- **Tick it and rerun.** Before any story runs, `epic-stories` applies the
+  approved, unapplied retros from their JSON: tasks as `Retro <runId>:
+  <title>` on the story's plan, story edits saved to `plan.md` so the
+  executor restarts that story; the report gets `- [x] Applied <date>` and
+  the run says what changed. Unapproved reports are ignored; one whose
+  proposal no longer fits the plan is skipped with a note. `--plan-only`,
+  refine planning and `--land` apply nothing.
+- For flow authors: `@llm4ts/flow/Retro` (digest, proposal schema,
+  validation, report, apply) and `flows/lib/epic-retro.ts`. Additive.
+
 ## 2.26.0
 
 Follow-up to 2.25.0 from the same live `epic-stories` run with the Gemini
