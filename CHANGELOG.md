@@ -1,5 +1,35 @@
 # Changelog
 
+## 2.26.0
+
+Follow-up to 2.25.0 from the same live `epic-stories` run with the Gemini
+CLI: judge and review seats failed, and every restart started over.
+
+- **Gemini judges answer instead of planning.** Gemini's plan mode replaces
+  the system prompt with a planning workflow (explore the codebase, consult
+  the user, save a plan), so a read-only judge asked for JSON over a diff
+  explored the worktree and often ended without an answer. Read-only Gemini
+  seats now run headless in `--approval-mode default`: Gemini's own write
+  policy denies the shell and every write tool when non-interactive, and the
+  model keeps its agent prompt. Plan mode stays only under a sandbox (ADR
+  0010 amendment). Checked on Gemini CLI 0.47.0 and 0.62.0.
+- **Reviewers and the judge are told the diff is the whole subject**, with
+  nothing to explore or run.
+- **Findings survive a rerun.** Per story under
+  `.llm4ts/epics/<epic>/stories/`: `<id>.findings.md` lists every review
+  round of every task and every judge round with scores and issues, for
+  people to read; `<id>.judge.json` keeps the judge's last verdict beside a
+  fingerprint of what it judged, and a rerun's first judge round reuses it
+  on an unchanged diff instead of asking again (the round after a revision
+  always asks, and says `reused` on the events when it did not); each review
+  lens's answer is kept the same way under `<id>.review/`, so a rerun over
+  the same change asks nothing. Uncleared findings remain the `Revision n`
+  tasks on the story plan.
+- For flow authors: `reviewAndFixLoop` takes `cache` and `onRound`,
+  `implementPlanFlow` takes `reviewCache` and `onReview`, and
+  `@llm4ts/flow/ReviewCache` exports `fingerprintOf` and the generic
+  `cachedValue`. All additive.
+
 ## 2.25.0
 
 Two findings from a live `epic-stories` run with the Gemini CLI on a

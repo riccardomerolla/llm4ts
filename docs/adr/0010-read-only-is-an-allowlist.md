@@ -101,4 +101,7 @@ paths outside the workspace. Same enforcement tier as plan mode, with the
 model's ordinary agent prompt. Plan mode stays only under a sandbox, whose
 default-mode profile pre-approves `cat`, `ls` and `grep` in the shell. The
 reviewer and judge prompts also say that the diff in the message is the
-whole subject and nothing is to be explored.
+whole subject and nothing is to be explored. The headless denial rule in
+`write.toml` and the engine's non-interactive deny default both arrived
+with gemini-cli #23668, first released in 0.37.0, so `geminiReadOnlyFloor`
+is unchanged.
