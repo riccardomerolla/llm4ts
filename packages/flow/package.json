@@ -67,6 +67,7 @@
     "./Provenance": "./dist/Provenance.js",
     "./RefineRound": "./dist/RefineRound.js",
     "./Replay": "./dist/Replay.js",
+    "./Retro": "./dist/Retro.js",
     "./Review": "./dist/Review.js",
     "./ReviewCache": "./dist/ReviewCache.js",
     "./Reviewer": "./dist/Reviewer.js",

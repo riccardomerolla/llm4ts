@@ -558,3 +558,8 @@ reference release.
   llm4zio keeps findings in memory for the run and re-asks on every restart.
   Gemini read-only seats run headless in `--approval-mode default` rather
   than plan mode (ADR 0010 amendment of 2026-10-03). Additive.
+- `epic-retro` (ADR 0023, 2026-10-03): a failed epic-stories run's trace,
+  transcripts, board, report, story plans, findings and verdicts digested by
+  code, one read-only seat proposing per-story fixes that the next run
+  applies behind `- [x] Approved`, and a Markdown note of advice for llm4ts.
+  llm4zio has no post-run analysis; its restarts re-ask everything. Additive.

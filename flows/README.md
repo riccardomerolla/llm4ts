@@ -12,6 +12,7 @@ one-line description. These scripts double as the built-in flows of the
 | `implement.ts`              | Persistent plan, branch, task review/fix, and commits                                                                             | selected CLI + Git         |
 | `epic-design.ts`            | Legacy extract pack + target repo → an approved epic brief for `epic-stories`                                                     | reasoner CLI               |
 | `epic-stories.ts`           | Epic → story DAG → parallel coders in worktrees → epic branch                                                                     | reasoner CLI + pi + Git    |
+| `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                    | reasoner CLI               |
 | `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                               | selected CLI + GitHub      |
 | `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                            | selected CLI + Maven       |
 | `local.ts`                  | LM Studio reasoning followed by a local pi coding agent                                                                           | LM Studio + pi             |
@@ -268,6 +269,38 @@ pnpm --filter @llm4ts/flows epic-stories -- \
 - Output: the epic branch `epic/<epic-id>` left in place, story branches
   `story/<epic-id>/<story-id>`, the board and `report.md` under
   `.llm4ts/epics/<epic-id>/`. Every usage figure is an estimate.
+
+### After a red run: `epic-retro`
+
+When a run ends with failed or waiting stories it prints the one command
+that reads what it left behind:
+
+```sh
+llm4ts run epic-retro --repo ~/work/portal -- --epic <id>   # the epic's latest run; --run <runId> picks another
+```
+
+Code digests the run's trace, its transcripts when it was started with
+`--transcript`, the board, the report and each story's plan, findings and
+judge verdict into `.llm4ts/epics/<epic-id>/retro/<runId>.digest.md`
+(written first, capped by `LLM4TS_RETRO_CHARS`, default 60 000). One
+read-only seat (the judge seat, `LLM4TS_REASONER`) turns the digest into a
+proposal: per failed story a diagnosis and exactly one fix — tasks appended
+to its plan, an edit to its entry in `plan.md` (which restarts it from a
+fresh worktree), a refine round, or nothing — plus run advice (a seat on an
+old CLI, Node mismatch, transcripts off) and, only where llm4ts itself
+misbehaved, advice for the library in `retro/<runId>-library.md`. Code
+validates the proposal (unknown stories, paths outside the repository, tasks
+for a story that never planned, edits that change nothing are dropped and
+listed) and writes `retro/<runId>.md`, which ends in `- [ ] Approved`.
+
+Tick it and rerun `epic-stories --epic <id>`: before any story runs, the
+approved fixes are applied — tasks as `Retro <runId>: <title>` on the
+story's plan, story edits saved to `plan.md` so the executor restarts that
+story — the report gets `- [x] Applied <date>`, and the run says what
+changed. Unapproved reports are ignored; a report whose proposal no longer
+fits the plan is skipped with a note, never a failure. A `refine` item is
+printed with the feedback to give `--refine`. Nothing a retro writes is
+committed to the target (ADR 0023).
 
 ### Refining a finished epic
 

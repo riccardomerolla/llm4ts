@@ -117,7 +117,7 @@ structured fake seat.
 
 ## Docs and release
 
-ADR 0022, `flows/README.md` section, parity note, CHANGELOG; released as
+ADR 0023, `flows/README.md` section, parity note, CHANGELOG; released as
 2.27.0.
 
 ## Not in scope

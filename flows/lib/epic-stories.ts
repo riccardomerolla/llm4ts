@@ -31,6 +31,7 @@ import {
 } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { nodePreflight } from "@llm4ts/flow/NodePreflight"
+import { applyApprovedRetros } from "@llm4ts/flow/Retro"
 import { statusPaths } from "@llm4ts/flow/GitTool"
 import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
 import {
@@ -49,7 +50,13 @@ import {
 } from "@llm4ts/flow/RefineRound"
 import { EpicRun, appendEpicRun, readEpicRuns } from "@llm4ts/flow/EpicRuns"
 import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { BlockedVerdict, StoryState, StoryStateVersion, StoryVerdict } from "@llm4ts/flow/Stories"
+import {
+  BlockedVerdict,
+  StoryState,
+  StoryStateVersion,
+  StoryVerdict,
+  type EpicReport
+} from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import {
@@ -1606,7 +1613,7 @@ const withExtraFlags = (
     ? config
     : CliConnectorConfig.make({ ...config, flags: { ...config.flags, ...flags } })
 
-const defaultEpic =
+export const defaultEpic =
   "Add the retail customer's current account (Conto) with balance and movements, and wire " +
   "transfers (Bonifico) with beneficiary, review, SCA confirmation, and history."
 
@@ -1774,14 +1781,34 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             return
           }
           const epicBranch = `epic/${plan.epicId}`
+          // An approved retro of an earlier run (epic-retro) is applied before
+          // any story runs: tasks onto story plans, story edits onto the plan.
+          const retroState =
+            action._tag === "RunRound"
+              ? (rounds.find((round) => round.round === action.round)?.stateDir ?? stateDir)
+              : stateDir
+          const retroPlan =
+            action._tag === "RunRound"
+              ? rounds.find((round) => round.round === action.round)?.plan
+              : action._tag === "RunPlan"
+                ? plan
+                : undefined
+          const applied =
+            retroPlan === undefined
+              ? undefined
+              : yield* applyApprovedRetros(files, retroState, retroPlan, events, Date.now())
           // The unit the executor works on: the epic's plan, or one refine round.
           // Same branch, seats, gates and judge; its own plan and state folder.
-          let unit = { plan, stateDir, label: `Epic: ${plan.epicId}` }
+          let unit = {
+            plan: action._tag === "RunPlan" && applied !== undefined ? applied.plan : plan,
+            stateDir,
+            label: `Epic: ${plan.epicId}`
+          }
           if (action._tag === "RunRound") {
             const open = rounds.find((round) => round.round === action.round)
             if (open?.plan !== undefined) {
               unit = {
-                plan: open.plan,
+                plan: applied?.plan ?? open.plan,
                 stateDir: open.stateDir,
                 label: `Epic: ${plan.epicId} · round ${open.round}`
               }
@@ -2017,6 +2044,31 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               message: `${unit.label.replace("Epic: ", "epic ")}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("waiting")} waiting — report at ${join(unit.stateDir, "report.md")} (usage figures estimated)`
             })
           )
+          const hint = retroHint(report, input.workDir, epicId)
+          if (hint !== undefined) {
+            yield* events.publish(Info.make({ message: hint }))
+          }
         })
     )
   })
+
+/**
+ * The one command away from a red run: what to type to have the run's trace
+ * and transcripts read and fixes proposed. `undefined` when every story is done.
+ */
+export const retroHint = (
+  report: EpicReport,
+  workDir: string,
+  epicDir: string
+): string | undefined => {
+  const failed = report.count("failed")
+  const waiting = report.count("waiting")
+  if (failed === 0 && waiting === 0) {
+    return undefined
+  }
+  const what = [
+    ...(failed === 0 ? [] : [`${failed} failed`]),
+    ...(waiting === 0 ? [] : [`${waiting} waiting`])
+  ].join(", ")
+  return `${what}: llm4ts run epic-retro --repo ${workDir} -- --epic ${epicDir} reads this run's trace and transcripts and proposes fixes for the next run`
+}
