@@ -8,6 +8,7 @@ import {
   makeStoryPlanStore,
   parseStoryPlan,
   pathWithin,
+  pruneReadFirst,
   readyStories,
   renderStoryPlan,
   storyHash,
@@ -166,4 +167,91 @@ describe("StoryPlan", () => {
       assert.strictEqual(error._tag, "PlanParse")
     })
   )
+})
+
+describe("readFirst and acceptance", () => {
+  it("default to empty and leave an older story's hash unchanged", () => {
+    const plain = story("accounts-page", ["src/features/accounts"])
+    const withDefaults = Story.make({ ...plain, readFirst: [], acceptance: [] })
+    assert.deepStrictEqual(plain.readFirst, [])
+    assert.deepStrictEqual(plain.acceptance, [])
+    assert.strictEqual(storyHash(withDefaults), storyHash(plain))
+    const anchored = Story.make({ ...plain, readFirst: ["src/features/exemplar"] })
+    const specified = Story.make({ ...plain, acceptance: ["/accounts lists the accounts"] })
+    assert.notStrictEqual(storyHash(anchored), storyHash(plain))
+    assert.notStrictEqual(storyHash(specified), storyHash(plain))
+  })
+
+  it.effect("parse a plan block written without the new keys, and render them when present", () =>
+    Effect.gen(function* () {
+      const older = [
+        "# Epic: old",
+        "",
+        "```json storyplan",
+        JSON.stringify({
+          epicId: "old",
+          epic: "Old epic.",
+          stories: [
+            {
+              id: "a",
+              title: "A",
+              description: "Do a.",
+              dependsOn: [],
+              owned: ["src/a"],
+              sharedReadOnly: [],
+              provides: []
+            }
+          ]
+        }),
+        "```"
+      ].join("\n")
+      const parsed = yield* parseStoryPlan(older)
+      assert.deepStrictEqual(parsed.stories[0]?.readFirst, [])
+      assert.deepStrictEqual(parsed.stories[0]?.acceptance, [])
+
+      const plan = StoryPlan.make({
+        epicId: "new",
+        epic: "New epic.",
+        stories: [
+          Story.make({
+            ...story("a", ["src/a"]),
+            readFirst: ["src/features/exemplar", "src/contracts/accounts.ts"],
+            acceptance: ["GET /a answers 200", "a test beside the feature covers the list"]
+          })
+        ]
+      })
+      const rendered = yield* renderStoryPlan(plan)
+      assert.include(rendered, "Done when:")
+      assert.include(rendered, "1. GET /a answers 200")
+      assert.include(rendered, "- read first: src/features/exemplar, src/contracts/accounts.ts")
+      const reparsed = yield* parseStoryPlan(rendered)
+      assert.deepStrictEqual(reparsed.stories[0]?.acceptance, plan.stories[0]?.acceptance)
+    })
+  )
+
+  it("pruneReadFirst keeps anchors some tracked file lies under and drops the rest", () => {
+    const plan = StoryPlan.make({
+      epicId: "p",
+      epic: "P.",
+      stories: [
+        Story.make({
+          ...story("a", ["src/a"]),
+          readFirst: ["src/features/exemplar", "src/contracts/accounts.ts", "src/nowhere"]
+        }),
+        Story.make({ ...story("b", ["src/b"]), readFirst: ["docs/missing.md"] })
+      ]
+    })
+    const known = new Set(["src/features/exemplar/page.tsx", "src/contracts/accounts.ts"])
+    const { plan: pruned, dropped } = pruneReadFirst(plan, known)
+    assert.deepStrictEqual(pruned.stories[0]?.readFirst, [
+      "src/features/exemplar",
+      "src/contracts/accounts.ts"
+    ])
+    assert.deepStrictEqual(pruned.stories[1]?.readFirst, [])
+    assert.deepStrictEqual(dropped, [
+      { story: "a", path: "src/nowhere" },
+      { story: "b", path: "docs/missing.md" }
+    ])
+    assert.strictEqual(pruneReadFirst(plan, known).plan.epicId, "p")
+  })
 })

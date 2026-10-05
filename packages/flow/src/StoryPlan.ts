@@ -30,6 +30,20 @@ export class Story extends Schema.Class<Story>("Story")({
   provides: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed([])),
     Schema.withDecodingDefaultKey(Effect.succeed([]))
+  ),
+  /**
+   * Paths the planner says to read before touching anything: the exemplar
+   * feature to imitate, the contract this story extends, the kit component to
+   * reuse. Pruned to paths that exist; their contents open the starting code.
+   */
+  readFirst: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(Effect.succeed([])),
+    Schema.withDecodingDefaultKey(Effect.succeed([]))
+  ),
+  /** Observable outcomes that make the story done; the coder plans against them, the judge scores against them. */
+  acceptance: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(Effect.succeed([])),
+    Schema.withDecodingDefaultKey(Effect.succeed([]))
   )
 }) {}
 
@@ -118,6 +132,34 @@ export const storyPlanViolations = (plan: StoryPlan): ReadonlyArray<string> => {
     violations.push(`dependency cycle: ${cycle.join(" -> ")}`)
   }
   return violations
+}
+
+/**
+ * The plan with every `readFirst` anchor that no tracked file lies under
+ * removed, and the list of what was dropped. A planner names paths from a
+ * layout digest and sometimes guesses; a guess must not reach a coder as
+ * something to read.
+ */
+export const pruneReadFirst = (
+  plan: StoryPlan,
+  known: ReadonlySet<string>
+): {
+  readonly plan: StoryPlan
+  readonly dropped: ReadonlyArray<{ readonly story: string; readonly path: string }>
+} => {
+  const files = [...known].map(normalizePath)
+  const dropped: Array<{ readonly story: string; readonly path: string }> = []
+  const stories = plan.stories.map((story) => {
+    const kept = story.readFirst.filter((anchor) => {
+      const exists = files.some((file) => pathWithin(file, anchor))
+      if (!exists) {
+        dropped.push({ story: story.id, path: anchor })
+      }
+      return exists
+    })
+    return kept.length === story.readFirst.length ? story : new Story({ ...story, readFirst: kept })
+  })
+  return { plan: dropped.length === 0 ? plan : new StoryPlan({ ...plan, stories }), dropped }
 }
 
 const cycles = (plan: StoryPlan): ReadonlyArray<ReadonlyArray<string>> => {
@@ -289,7 +331,11 @@ export const pathsNamedIn = (plan: StoryPlan, text: string): ReadonlyArray<strin
   return [...new Set(found)]
 }
 
-/** Stable over the story entry's content — a changed entry means a fresh branch. */
+/**
+ * Stable over the story entry's content — a changed entry means a fresh
+ * branch. The 2.29 fields enter only when set, so a plan written earlier
+ * keeps every hash and an upgrade restarts no story.
+ */
 export const storyHash = (story: Story): string =>
   stableHash(
     JSON.stringify({
@@ -299,7 +345,11 @@ export const storyHash = (story: Story): string =>
       dependsOn: [...story.dependsOn],
       owned: [...story.owned].map(normalizePath),
       sharedReadOnly: [...story.sharedReadOnly].map(normalizePath),
-      provides: [...story.provides]
+      provides: [...story.provides],
+      ...(story.readFirst.length === 0
+        ? {}
+        : { readFirst: [...story.readFirst].map(normalizePath) }),
+      ...(story.acceptance.length === 0 ? {} : { acceptance: [...story.acceptance] })
     })
   )
 
@@ -367,9 +417,18 @@ export const renderStoryPlan = Effect.fn("@llm4ts/flow/StoryPlan.render")(functi
       "",
       story.description.trim(),
       "",
+      ...(story.acceptance.length === 0
+        ? []
+        : [
+            "Done when:",
+            "",
+            ...story.acceptance.map((criterion, index) => `${index + 1}. ${criterion}`),
+            ""
+          ]),
       `- depends on: ${list(story.dependsOn)}`,
       `- owned: ${list(story.owned)}`,
       `- shared read-only: ${list(story.sharedReadOnly)}`,
+      `- read first: ${list(story.readFirst)}`,
       `- provides: ${list(story.provides)}`,
       ""
     )
