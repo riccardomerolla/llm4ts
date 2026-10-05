@@ -28,6 +28,8 @@ import {
   setupRecoveryPrompt,
   perimeterRules,
   renderEpicReport,
+  storyPrompt,
+  storyTaskPlanInstructions,
   type StoriesOptions,
   type StorySeats
 } from "@llm4ts/flow/Stories"
@@ -713,20 +715,29 @@ describe("Stories executor", () => {
     Effect.gen(function* () {
       const harness = yield* makeHarness()
       const context = yield* makeContext(harness)
+      const anchored = StoryPlan.make({
+        ...diamond,
+        stories: diamond.stories.map((item) =>
+          item.id === "a" ? Story.make({ ...item, readFirst: ["src/features/exemplar"] }) : item
+        )
+      })
       const memory = yield* makeMemoryPlainFileStore({
         "/repo/.llm4ts/worktrees/a/src/kit/Button.tsx": "export const Button = () => null",
-        "/repo/.llm4ts/worktrees/a/src/features/a/index.ts": "export const a = 1"
+        "/repo/.llm4ts/worktrees/a/src/features/a/index.ts": "export const a = 1",
+        "/repo/.llm4ts/worktrees/a/src/features/exemplar/page.tsx":
+          "export const Exemplar = () => null"
       })
       const systems: Array<string> = []
       const listed: Readonly<Record<string, ReadonlyArray<string>>> = {
         "src/kit": ["src/kit/Button.tsx"],
-        "src/features/a": ["src/features/a/index.ts"]
+        "src/features/a": ["src/features/a/index.ts"],
+        "src/features/exemplar": ["src/features/exemplar/page.tsx"]
       }
-      const options = yield* makeOptions(harness, diamond, context, {
+      const options = yield* makeOptions(harness, anchored, context, {
         concurrency: 1,
         files: memory.store,
         contextFor: (workDir) => {
-          const story = storyOf(diamond, workDir)
+          const story = storyOf(anchored, workDir)
           return Effect.succeed({
             context: {
               ...context,
@@ -757,6 +768,65 @@ describe("Stories executor", () => {
       assert.include(all, "### src/kit/Button.tsx")
       assert.include(all, "export const Button = () => null")
       assert.include(all, "### src/features/a/index.ts")
+      assert.include(all, "Read first — what the planner says to imitate or build on:")
+      assert.include(all, "### src/features/exemplar/page.tsx")
+      assert.isBelow(
+        all.indexOf("### src/features/exemplar/page.tsx"),
+        all.indexOf("### src/kit/Button.tsx")
+      )
+    })
+  )
+
+  it.effect("a task's Findings are kept beside the story and shown to the next task", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const memory = yield* makeMemoryPlainFileStore()
+      const prompts: Array<string> = []
+      const options = yield* makeOptions(harness, single, context, {
+        concurrency: 1,
+        files: memory.store,
+        planTasks: () =>
+          Effect.succeed(
+            Plan.make({
+              epicId: "a",
+              tasks: [
+                Task.make({ title: "first", description: "do the first thing" }),
+                Task.make({ title: "second", description: "do the second thing" })
+              ]
+            })
+          ),
+        contextFor: (workDir) => {
+          const story = storyOf(single, workDir)
+          return Effect.succeed({
+            context: {
+              ...context,
+              coder: {
+                ...coder("done"),
+                executeStreamWithHistory: (messages) => {
+                  const user = messages.filter((message) => message.role === "User").at(-1)
+                  if (user !== undefined) prompts.push(user.content)
+                  return Stream.make(
+                    LlmChunk.make({
+                      delta: "did it\n\n## Findings\n- tests live in src/features/a",
+                      finishReason: "stop"
+                    })
+                  )
+                }
+              },
+              git: worktreeGit(harness, workDir, story),
+              workDir
+            }
+          })
+        }
+      })
+      yield* implementStoriesFlow(context, options)
+      const notes = yield* memory.store.read("/repo/.llm4ts/epics/single/stories/a.notes.md")
+      assert.include(notes ?? "", "### first")
+      assert.include(notes ?? "", "- tests live in src/features/a")
+      const second = prompts.find((prompt) => prompt.includes("do the second thing"))
+      assert.isDefined(second)
+      assert.isTrue(second.startsWith("What earlier tasks of this story learned"))
     })
   )
 
@@ -1510,4 +1580,26 @@ describe("Stories executor", () => {
       assert.deepStrictEqual(yield* Ref.get(harness.log), [])
     })
   )
+})
+
+describe("story prompts carry the acceptance criteria", () => {
+  const specified = Story.make({
+    ...story("a"),
+    acceptance: ["GET /a answers 200", "a test beside the feature covers the list"]
+  })
+
+  it("storyPrompt ends with a numbered Done when list", () => {
+    const prompt = storyPrompt(specified)
+    assert.include(prompt, "Done when (each must hold, observably):")
+    assert.include(prompt, "1. GET /a answers 200")
+    assert.include(prompt, "2. a test beside the feature covers the list")
+    assert.notInclude(storyPrompt(story("b")), "Done when")
+  })
+
+  it("storyTaskPlanInstructions ask every task to name the criteria it satisfies", () => {
+    const instructions = storyTaskPlanInstructions(specified)
+    assert.include(instructions, "1. GET /a answers 200")
+    assert.include(instructions, "Satisfies: <n>")
+    assert.notInclude(storyTaskPlanInstructions(story("b")), "Satisfies:")
+  })
 })

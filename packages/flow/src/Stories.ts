@@ -314,10 +314,11 @@ const defaultContextChars = 40_000
 const fileChars = 8_000
 
 /**
- * The code a story starts from, for its coder's system prompt: the shared
- * read-only files it builds on, then the files it owns, each capped, until
- * `budget` runs out; the rest by path only. Reading them up front saves the
- * `ls`/`find`/`cat` round trips the coder would otherwise spend on them.
+ * The code a story starts from, for its coder's system prompt: the planner's
+ * read-first anchors, then the shared read-only files it builds on, then the
+ * files it owns, each capped, until `budget` runs out; the rest by path only.
+ * Reading them up front saves the `ls`/`find`/`cat` round trips the coder
+ * would otherwise spend on them.
  */
 export const startingCodeOf = (
   story: Story,
@@ -330,17 +331,22 @@ export const startingCodeOf = (
     if (budget <= 0) {
       return undefined
     }
+    const anchors = yield* git.listFiles(story.readFirst)
     const shared = yield* git.listFiles(story.sharedReadOnly)
     const owned = yield* git.listFiles(story.owned)
-    if (shared.length + owned.length === 0) {
+    if (anchors.length + shared.length + owned.length === 0) {
       return undefined
     }
     let left = budget
     const leftOut: Array<string> = []
+    const shown = new Set<string>()
     const section = (title: string, paths: ReadonlyArray<string>) =>
       Effect.gen(function* () {
         const parts: Array<string> = []
         for (const path of paths) {
+          if (shown.has(path)) {
+            continue
+          }
           const text = yield* Effect.orElseSucceed(
             files.read(join(worktree, path)),
             () => undefined
@@ -349,23 +355,35 @@ export const startingCodeOf = (
             leftOut.push(path)
             continue
           }
-          const shown = cap(text, Math.min(fileChars, left)).text
-          left -= shown.length
-          parts.push(`### ${path}\n\`\`\`\n${shown}\n\`\`\``)
+          shown.add(path)
+          const piece = cap(text, Math.min(fileChars, left)).text
+          left -= piece.length
+          parts.push(`### ${path}\n\`\`\`\n${piece}\n\`\`\``)
         }
         return parts.length === 0 ? [] : [title, ...parts]
       })
     return [
       "## The code you start from",
       "Read this before exploring: it is the current content of the files below.",
+      ...(yield* section("Read first — what the planner says to imitate or build on:", anchors)),
       ...(yield* section("Shared, read-only — use these as they are:", shared)),
       ...(yield* section("Yours — the story's owned files so far:", owned)),
       ...(leftOut.length === 0 ? [] : [`Not shown (over the budget): ${leftOut.join(", ")}`])
     ].join("\n\n")
   })
 
+const numbered = (items: ReadonlyArray<string>): ReadonlyArray<string> =>
+  items.map((item, index) => `${index + 1}. ${item}`)
+
 export const storyPrompt = (story: Story): string =>
-  [`Story: ${story.title}`, "", story.description.trim()].join("\n")
+  [
+    `Story: ${story.title}`,
+    "",
+    story.description.trim(),
+    ...(story.acceptance.length === 0
+      ? []
+      : ["", "Done when (each must hold, observably):", ...numbered(story.acceptance)])
+  ].join("\n")
 
 export const storyTaskPlanInstructions = (story: Story): string =>
   [
@@ -373,6 +391,14 @@ export const storyTaskPlanInstructions = (story: Story): string =>
     "into an ordered list of small, independently verifiable tasks, each described by its",
     "observable outcome. Every task must stay inside the story's owned paths:",
     bullets(story.owned),
+    ...(story.acceptance.length === 0
+      ? []
+      : [
+          "The story is done when every one of these holds:",
+          ...numbered(story.acceptance),
+          "End every task's description with `Satisfies: <n>` naming the criteria it serves, and",
+          "make sure every criterion is served by at least one task."
+        ]),
     "Never plan a task that creates or changes anything outside them — registering or wiring",
     "the story in elsewhere (the app's composition point, a shared kit file) is another story's job.",
     `Use exactly this epicId: "${story.id}".`,
@@ -681,6 +707,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   /** What reviewers and the judge found, round by round, for people to read. */
   const findingsPath = (story: Story): string =>
     join(options.stateDir, `stories/${story.id}.findings.md`)
+  /** What the coder's tasks learned, carried into the next task of the same story. */
+  const notesPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.notes.md`)
   const findingLines = (result: ReviewResult): ReadonlyArray<string> =>
     result.issues.map((issue) => {
       const where =
@@ -1127,6 +1155,10 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       ),
       system: taskSystem,
       chatPerTask: true,
+      carry: {
+        read: files.read(notesPath(story)),
+        write: (notes) => files.writeAtomic(notesPath(story), notes)
+      },
       checkoutBranch: false,
       lint: gates,
       // A story's final state is judged and gated downstream (judge round,
