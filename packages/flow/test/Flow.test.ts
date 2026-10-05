@@ -574,6 +574,63 @@ describe("Flow", () => {
       })
   )
 
+  it.effect("carry: a task's Findings section is saved and opens the next task's prompt", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const snapshots = yield* Ref.make<ReadonlyArray<ReadonlyArray<Message>>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      const plan = Plan.make({
+        epicId: "epic-carry",
+        tasks: [
+          Task.make({ title: "first task", description: "do the first thing" }),
+          Task.make({ title: "second task", description: "do the second thing" })
+        ]
+      })
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: messageSnapshotCoderService(
+          snapshots,
+          "did it\n\n## Findings\n- tests live in src/x\n- use kit Table"
+        ),
+        git: makeFakeGit(gitLog),
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement the plan",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+
+      yield* implementPlanFlow(context, {
+        store,
+        planPath: ".llm4ts/plan-carry.md",
+        plan: Effect.succeed(plan),
+        chatPerTask: true,
+        carry: {
+          read: memory.store.read(".llm4ts/notes.md"),
+          write: (notes) => memory.store.writeAtomic(".llm4ts/notes.md", notes)
+        }
+      })
+
+      const seen = yield* Ref.get(snapshots)
+      const userPrompt = (index: number) =>
+        seen[index]?.filter((message) => message.role === "User").at(-1)?.content ?? ""
+      // The first task is asked for findings and gets none to start from.
+      assert.isTrue(userPrompt(0).startsWith("do the first thing"))
+      assert.include(userPrompt(0), "## Findings")
+      // The second starts from what the first learned.
+      assert.isTrue(userPrompt(1).startsWith("What earlier tasks of this story learned"))
+      assert.include(userPrompt(1), "- tests live in src/x")
+      assert.include(userPrompt(1), "do the second thing")
+      const notes = yield* memory.store.read(".llm4ts/notes.md")
+      assert.include(notes ?? "", "### first task")
+      assert.include(notes ?? "", "### second task")
+    })
+  )
+
   it.effect(
     "chatPerTask true: a task skipped for producing no changes still marks progress complete for the next task's fresh Chat",
     () =>

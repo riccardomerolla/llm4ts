@@ -24,6 +24,7 @@
     "./Blackboard": "./dist/Blackboard.js",
     "./BoardSync": "./dist/BoardSync.js",
     "./CapabilityGuard": "./dist/CapabilityGuard.js",
+    "./CarriedNotes": "./dist/CarriedNotes.js",
     "./Chat": "./dist/Chat.js",
     "./Classified": "./dist/Classified.js",
     "./Context": "./dist/Context.js",

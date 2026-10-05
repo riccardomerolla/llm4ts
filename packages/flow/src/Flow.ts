@@ -2,6 +2,13 @@ import * as Effect from "effect/Effect"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { collect } from "@llm4ts/core/Streaming"
 import { withToolActivity } from "./Activity.ts"
+import {
+  appendNote,
+  findingsIn,
+  findingsRequest,
+  withNotes,
+  type CarriedNotes
+} from "./CarriedNotes.ts"
 import { makeChat, type Chat } from "./Chat.ts"
 import type { FlowContextShape } from "./FlowContext.ts"
 import { FlowAborted, FlowLlmError, type FlowError } from "./FlowError.ts"
@@ -97,6 +104,13 @@ export interface ImplementPlanOptions {
    * or failure. The legacy "judgment" string remains an alias for { mode: "act" }.
    */
   readonly satisfiedProbe?: "literal" | "judgment" | { readonly mode?: JudgmentMode }
+  /**
+   * Notes carried from one task to the next (meant for `chatPerTask`, where
+   * every task starts cold): the accumulated notes open each task's prompt,
+   * the task is asked to end with a Findings section, and what it reports is
+   * appended. Omit to carry nothing.
+   */
+  readonly carry?: CarriedNotes
 }
 
 /** The judgment form of the empty-diff probe: one Truth question over the coder's reply. */
@@ -193,7 +207,18 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
         // the top of this function: a task prompt only needs that task's own
         // details. `planSoFar`, threaded through by implementTaskLoop, is the
         // single source of truth for completion progress instead.
-        yield* coder.ask(plan.taskPrompt(task))
+        const notes = options.carry === undefined ? undefined : yield* options.carry.read
+        const reply = yield* coder.ask(
+          options.carry === undefined
+            ? plan.taskPrompt(task)
+            : `${withNotes(plan.taskPrompt(task), notes)}\n${findingsRequest}`
+        )
+        if (options.carry !== undefined) {
+          const found = findingsIn(reply)
+          if (found !== undefined) {
+            yield* options.carry.write(appendNote(notes, task.title, found))
+          }
+        }
         const produced = yield* context.git.diffAll
         if (produced.trim().length === 0) {
           // An empty diff is ambiguous: the task may be genuinely satisfied
