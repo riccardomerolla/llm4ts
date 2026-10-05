@@ -57,6 +57,7 @@
     "./JudgmentLog": "./dist/JudgmentLog.js",
     "./Perimeter": "./dist/Perimeter.js",
     "./NodePreflight": "./dist/NodePreflight.js",
+    "./Orientation": "./dist/Orientation.js",
     "./Persistence": "./dist/Persistence.js",
     "./Plan": "./dist/Plan.js",
     "./PlanExecution": "./dist/PlanExecution.js",
