@@ -21,6 +21,7 @@ import {
   boardJudgeFactory,
   boardStoryJudge,
   makeStoryBoard,
+  stateOf,
   storyBriefOf
 } from "../lib/story-board.ts"
 import { idleContext, replying } from "./support.ts"
@@ -89,6 +90,13 @@ describe("the story board ruleset", () => {
   it("the brief carries the dependencies' declared interface", () => {
     const brief = storyBriefOf(story, plan)
     assert.deepStrictEqual(brief.dependencies, [{ id: "kit", provides: ["Money type"] }])
+  })
+
+  it("the brief carries the acceptance criteria and the state shows them", () => {
+    const brief = storyBriefOf(Story.make({ ...story, acceptance: ["the list renders"] }), plan)
+    assert.deepStrictEqual(brief.acceptance, ["the list renders"])
+    assert.include(stateOf(brief, "+ diff", "rules"), "Done when")
+    assert.include(stateOf(brief, "+ diff", "rules"), "1. the list renders")
   })
 
   it.effect("four top scores merge; the run and every answer are published", () =>

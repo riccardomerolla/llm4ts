@@ -32,7 +32,7 @@ import {
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { nodePreflight } from "@llm4ts/flow/NodePreflight"
 import { applyApprovedRetros } from "@llm4ts/flow/Retro"
-import { statusPaths } from "@llm4ts/flow/GitTool"
+import { statusPaths, type GitToolShape } from "@llm4ts/flow/GitTool"
 import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
 import {
   RefineProposal,
@@ -65,8 +65,10 @@ import {
   makeStoryPlanStore,
   parseStoryPlan,
   pathsNamedIn,
+  pruneReadFirst,
   type Story
 } from "@llm4ts/flow/StoryPlan"
+import { defaultOrientationChars, orientationChars, orientationOf } from "@llm4ts/flow/Orientation"
 import * as Clock from "effect/Clock"
 import * as Console from "effect/Console"
 import { CliConnectorConfig, type ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
@@ -891,9 +893,21 @@ export const storyPlanJsonSchema: JsonSchema = {
           dependsOn: { type: "array", items: { type: "string" } },
           owned: { type: "array", items: { type: "string" } },
           sharedReadOnly: { type: "array", items: { type: "string" } },
+          readFirst: { type: "array", items: { type: "string" } },
+          acceptance: { type: "array", items: { type: "string" } },
           provides: { type: "array", items: { type: "string" } }
         },
-        required: ["id", "title", "description", "dependsOn", "owned", "sharedReadOnly", "provides"]
+        required: [
+          "id",
+          "title",
+          "description",
+          "dependsOn",
+          "owned",
+          "sharedReadOnly",
+          "readFirst",
+          "acceptance",
+          "provides"
+        ]
       }
     }
   },
@@ -901,7 +915,12 @@ export const storyPlanJsonSchema: JsonSchema = {
 }
 
 /** The generator's hard constraints — the perimeter rules the executor will enforce. */
-export const storyPlanInstructions = (epicId: string, guidance: string): string =>
+export const storyPlanInstructions = (
+  epicId: string,
+  guidance: string,
+  /** The repository digest (`orientationOf`): the paths the planner may name. */
+  orientation?: string
+): string =>
   [
     "You are the orchestrator of a parallel implementation. Split the epic below into stories",
     "that independent coding agents will implement AT THE SAME TIME, each in its own git worktree,",
@@ -910,8 +929,16 @@ export const storyPlanInstructions = (epicId: string, guidance: string): string 
     "Rules (violations are rejected mechanically):",
     "- Every story has a kebab-case id, a title, a description precise enough to implement alone,",
     "  `dependsOn` (ids it must wait for), `owned` (repo-relative path prefixes it may create or",
-    "  change), `sharedReadOnly` (prefixes it may read but never change), and `provides` (routes,",
-    "  exports, contracts other stories may rely on).",
+    "  change), `sharedReadOnly` (prefixes it may read but never change), `readFirst`, `acceptance`,",
+    "  and `provides` (routes, exports, contracts other stories may rely on).",
+    "- `readFirst`: one to four EXISTING repo-relative paths (files or folders) the coder must read",
+    "  before touching anything — the exemplar feature to imitate, the contract the story extends,",
+    "  the kit component to reuse. Name them from the repository layout below; a path that does",
+    "  not exist there is dropped.",
+    "- `acceptance`: two to six observable outcomes that make the story done, each checkable from",
+    "  the diff by a reviewer who will not run the app (a route that answers, a screen that shows",
+    "  X, a test file beside the feature that covers Y). The coder plans its tasks against them",
+    "  and the judge scores against them.",
     "- `owned` sets are pairwise DISJOINT: no path prefix appears under two stories.",
     "- Shared surfaces (the kit, the theme, house rules) are never edited by a feature story. A new",
     "  shared component is its own story, and every story using it depends on it.",
@@ -926,11 +953,18 @@ export const storyPlanInstructions = (epicId: string, guidance: string): string 
     "",
     "Respond only with JSON:",
     '{"epicId":"...","epic":"...","stories":[{"id":"...","title":"...","description":"...",',
-    '"dependsOn":[],"owned":[],"sharedReadOnly":[],"provides":[]}]}',
+    '"dependsOn":[],"owned":[],"sharedReadOnly":[],"readFirst":[],"acceptance":[],"provides":[]}]}',
     "",
     "Target repository guidance (house rules and layout — the vocabulary to use):",
-    guidance
+    guidance,
+    ...orientationBlock(orientation)
   ].join("\n")
+
+/** The repository digest as every planner prompt ends: nothing when there is none. */
+const orientationBlock = (orientation: string | undefined): ReadonlyArray<string> =>
+  orientation === undefined
+    ? []
+    : ["", "Repository layout (tracked files per folder, scripts, where tests live):", orientation]
 
 export const generateStoryPlan = (
   reasoning: LlmServiceShape,
@@ -939,12 +973,14 @@ export const generateStoryPlan = (
   epicId: string,
   guidance: string,
   /** An approved epic brief (`epic-design`): what the planner reads in place of the sentence. */
-  brief?: string
+  brief?: string,
+  /** The repository digest (`orientationFor`), so stories can name real paths. */
+  orientation?: string
 ): Effect.Effect<StoryPlan, FlowLlmError> =>
   structuredAndPublish(
     reasoning,
     events,
-    `${storyPlanInstructions(epicId, guidance)}\n\nEpic:\n${brief ?? epic}`,
+    `${storyPlanInstructions(epicId, guidance, orientation)}\n\nEpic:\n${brief ?? epic}`,
     StoryPlan,
     storyPlanJsonSchema
   ).pipe(
@@ -964,6 +1000,8 @@ export interface RefinePlanInputs {
   readonly brief?: string
   /** The previous round's not-planned list. */
   readonly openItems?: string
+  /** The repository digest (`orientationFor`), so stories can name real paths. */
+  readonly orientation?: string
 }
 
 /** The round planner's constraints: the story planner's, for feedback on finished work. */
@@ -987,6 +1025,8 @@ export const refinePlanInstructions = (inputs: RefinePlanInputs): string =>
     "  into ONE story.",
     "- `dependsOn` names stories of THIS round only, and only when one needs the other's result.",
     "- `provides` says what the person who gave the feedback will see changed.",
+    "- `readFirst` names one to four existing paths the coder reads before changing anything;",
+    "  `acceptance` lists two to six observable outcomes a reviewer can check from the diff.",
     "- Tests that cover the changed behaviour are updated in the same story, and the test files",
     "  are in its `owned`.",
     "- Shared surfaces (the kit, the theme, house rules) are owned only by a story the feedback",
@@ -997,7 +1037,8 @@ export const refinePlanInstructions = (inputs: RefinePlanInputs): string =>
     "",
     "Respond only with JSON:",
     '{"stories":[{"id":"...","title":"...","description":"...","dependsOn":[],"owned":[],',
-    '"sharedReadOnly":[],"provides":[]}],"notPlanned":[{"item":"...","reason":"..."}]}',
+    '"sharedReadOnly":[],"readFirst":[],"acceptance":[],"provides":[]}],',
+    '"notPlanned":[{"item":"...","reason":"..."}]}',
     "",
     "Earlier stories (merged: what was built, and where):",
     ...(inputs.earlier.length === 0
@@ -1016,7 +1057,8 @@ export const refinePlanInstructions = (inputs: RefinePlanInputs): string =>
         ]),
     "",
     "Target repository guidance (house rules and layout — the vocabulary to use):",
-    inputs.guidance
+    inputs.guidance,
+    ...orientationBlock(inputs.orientation)
   ].join("\n")
 
 export const generateRefineProposal = (
@@ -1045,6 +1087,7 @@ export interface PlanRoundDeps {
   /** The epic's plan and every earlier round's. */
   readonly plans: ReadonlyArray<StoryPlan>
   readonly brief?: string
+  readonly orientation?: string
 }
 
 const bulletLines = (markdown: string): string =>
@@ -1080,6 +1123,7 @@ export const planRound = Effect.fn("flows/epic-stories.planRound")(function* (
     earlier,
     feedback: deps.feedback,
     ...(deps.brief === undefined ? {} : { brief: deps.brief }),
+    ...(deps.orientation === undefined ? {} : { orientation: deps.orientation }),
     ...(open.length === 0 ? {} : { openItems: open })
   })
   if (proposal.stories.length === 0) {
@@ -1191,7 +1235,7 @@ export const storyDimensions: ReadonlyArray<Dimension> = [
   Dimension.make({
     name: "provides",
     rubric:
-      "Everything the story promised to provide (routes, exports, contracts) exists in the diff and is complete enough for a dependent story to use. 2 = all present and complete; 1 = present but partial; 0 = missing."
+      "Everything the story promised to provide (routes, exports, contracts) exists in the diff and is complete enough for a dependent story to use, and every acceptance criterion listed under 'Done when' is observably met. 2 = all present, complete, every criterion met; 1 = present but partial, or a criterion unmet; 0 = missing."
   }),
   Dimension.make({
     name: "scope",
@@ -1252,6 +1296,13 @@ export const storyJudgeQuery = (
   return [
     `Story: ${story.title}`,
     story.description,
+    ...(story.acceptance.length === 0
+      ? []
+      : [
+          "",
+          "Done when (the story's acceptance criteria — `provides` is scored against them too):",
+          ...story.acceptance.map((criterion, index) => `${index + 1}. ${criterion}`)
+        ]),
     "",
     `Provides: ${story.provides.join(", ") || "(none)"}`,
     `Owned paths: ${story.owned.join(", ")}`,
@@ -1550,6 +1601,63 @@ export const storyContextChars = (
     : { contextChars: value }
 }
 
+/**
+ * The repository as the planner and every coder see it before they look: a
+ * digest of the epic checkout's tracked files (`orientationOf`), no model
+ * call, within LLM4TS_ORIENTATION_CHARS.
+ */
+export const orientationFor = (
+  git: GitToolShape,
+  files: PlainFileStoreShape,
+  workDir: string,
+  appDir: string,
+  environment: Readonly<Record<string, string | undefined>>
+): Effect.Effect<string | undefined, FlowError> =>
+  Effect.gen(function* () {
+    const chars = orientationChars(environment).orientationChars ?? defaultOrientationChars
+    if (chars <= 0) {
+      return undefined
+    }
+    const tracked = yield* git.listFiles(["."])
+    const manifest =
+      appDir === "." ? join(workDir, "package.json") : join(workDir, appDir, "package.json")
+    const packageJson = yield* Effect.orElseSucceed(files.read(manifest), () => undefined)
+    return orientationOf({
+      files: tracked,
+      ...(packageJson === undefined ? {} : { packageJson }),
+      appDir,
+      budget: chars
+    })
+  })
+
+/**
+ * The plan with every `readFirst` anchor that is not in the checkout removed
+ * (`pruneReadFirst` over `git ls-files`), the drops named in an Info note.
+ */
+export const pruneUnknownAnchors = (
+  plan: StoryPlan,
+  git: GitToolShape,
+  events: FlowEventsShape
+): Effect.Effect<StoryPlan, FlowError> =>
+  Effect.gen(function* () {
+    const wanted = [...new Set(plan.stories.flatMap((story) => story.readFirst))]
+    if (wanted.length === 0) {
+      return plan
+    }
+    const known = new Set(yield* git.listFiles(wanted))
+    const { plan: pruned, dropped } = pruneReadFirst(plan, known)
+    if (dropped.length > 0) {
+      yield* events.publish(
+        Info.make({
+          message: `story plan: dropped ${dropped.length} readFirst path(s) that are not in the repository: ${dropped
+            .map((drop) => `${drop.story}: ${drop.path}`)
+            .join(", ")}`
+        })
+      )
+    }
+    return pruned
+  })
+
 /** Today's story judge: the rubric judge over the four dimensions. */
 export const rubricStoryJudge =
   (context: StoryJudgeContext): StoryJudge =>
@@ -1742,6 +1850,17 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             (text) => cap(text ?? "(no CONTRIBUTING.md in the target repository)", 24_000).text
           )
 
+          const appDir = yield* appDirFor(input.workDir, process.env)
+          // Computed once per run from the epic checkout: what the planner and
+          // every coder read before they look.
+          const orientation = yield* orientationFor(
+            context.git,
+            files,
+            input.workDir,
+            appDir,
+            process.env
+          )
+
           // An approved epic brief in the epic's folder is what the planner reads.
 
           const brief = yield* plannerInput(files, stateDir, planPath)
@@ -1767,7 +1886,10 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                   input.prompt,
                   epicId,
                   guidance,
-                  brief
+                  brief,
+                  orientation
+                ).pipe(
+                  Effect.flatMap((generated) => pruneUnknownAnchors(generated, context.git, events))
                 )
               )
               .pipe(Effect.flatMap(validateStoryPlan))
@@ -1844,7 +1966,8 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                   plan,
                   ...rounds.flatMap((round) => (round.plan === undefined ? [] : [round.plan]))
                 ],
-                ...(roundBrief === undefined ? {} : { brief: roundBrief })
+                ...(roundBrief === undefined ? {} : { brief: roundBrief }),
+                ...(orientation === undefined ? {} : { orientation })
               })
             )
             for (const left of planned.notPlanned) {
@@ -1876,7 +1999,6 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             }
           }
           // Setup and gates run where the application is, in every checkout.
-          const appDir = yield* appDirFor(input.workDir, process.env)
           if (appDir !== ".") {
             yield* events.publish(
               Info.make({
@@ -2032,7 +2154,8 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                     guidance,
                     "",
                     `Imitate the exemplar feature before inventing anything. Story id: ${story.id}.`,
-                    ...appDirNote
+                    ...appDirNote,
+                    ...(orientation === undefined ? [] : ["", orientation])
                   ].join("\n")
                 ),
               concurrency,

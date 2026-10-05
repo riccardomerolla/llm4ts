@@ -21,7 +21,7 @@ import { makeRoster } from "@llm4ts/flow/Roster"
 import { loadRosterDocument } from "@llm4ts/runner/ExecutorRoster"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
-import { makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
+import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { makeMemoryPlainFileStore, saveVersioned } from "@llm4ts/flow/Persistence"
@@ -35,11 +35,11 @@ import {
 } from "@llm4ts/flow/Stories"
 import { nodePlainFileStore } from "@llm4ts/runner"
 import {
+  Story,
+  StoryPlan,
   parseStoryPlan,
   storyPlanViolations,
-  topologicalWaves,
-  type Story,
-  type StoryPlan
+  topologicalWaves
 } from "@llm4ts/flow/StoryPlan"
 import {
   appDirFor,
@@ -58,6 +58,8 @@ import {
   gatesIn,
   judgeStory,
   localCoderServer,
+  orientationFor,
+  pruneUnknownAnchors,
   removeTranscripts,
   rubricStoryJudge,
   storyContextChars,
@@ -268,6 +270,16 @@ describe("epic-stories flags and seats", () => {
     ])
     assert.include(storyPlanInstructions("conto-bonifico", "rules"), 'epicId: "conto-bonifico"')
     assert.include(storyPlanInstructions("conto-bonifico", "rules"), "pairwise DISJOINT")
+    const instructions = storyPlanInstructions(
+      "conto-bonifico",
+      "rules",
+      "## Repository orientation\nsrc/ (3 files)"
+    )
+    assert.include(instructions, "`readFirst`")
+    assert.include(instructions, "`acceptance`")
+    assert.include(instructions, '"readFirst":[],"acceptance":[]')
+    assert.include(instructions, "## Repository orientation\nsrc/ (3 files)")
+    assert.notInclude(storyPlanInstructions("conto-bonifico", "rules"), "Repository layout")
   })
 
   it.effect("default gates are the ones the app's package.json defines", () =>
@@ -962,4 +974,82 @@ describe("story judge factories", () => {
       assert.isTrue(verdict.isClean)
     })
   )
+})
+
+describe("pruneUnknownAnchors", () => {
+  const plan = StoryPlan.make({
+    epicId: "p",
+    epic: "P.",
+    stories: [
+      Story.make({
+        id: "a",
+        title: "A",
+        description: "Do a.",
+        owned: ["src/a"],
+        readFirst: ["src/features/exemplar", "src/ghost.ts"],
+        acceptance: ["GET /a answers 200"]
+      })
+    ]
+  })
+  const gitListing = (known: ReadonlyArray<string>) =>
+    Effect.map(
+      Ref.make<ReadonlyArray<string>>([]),
+      (log): GitToolShape => ({
+        ...gitOver(log, ""),
+        listFiles: (paths) =>
+          Effect.succeed(known.filter((file) => paths.some((prefix) => file.startsWith(prefix))))
+      })
+    )
+
+  it.effect("drops anchors no tracked file lies under and says so", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const git = yield* gitListing(["src/features/exemplar/page.tsx"])
+      const pruned = yield* pruneUnknownAnchors(plan, git, events)
+      assert.deepStrictEqual(pruned.stories[0]?.readFirst, ["src/features/exemplar"])
+      const notes = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Info" ? [event.message] : []
+      )
+      assert.include(notes.join("\n"), "a: src/ghost.ts")
+    })
+  )
+})
+
+describe("orientationFor", () => {
+  it.effect(
+    "digests the tracked files and the app's package.json, within LLM4TS_ORIENTATION_CHARS",
+    () =>
+      Effect.gen(function* () {
+        const memory = yield* makeMemoryPlainFileStore({
+          "/repo/frontend/package.json": JSON.stringify({ scripts: { test: "vitest run" } })
+        })
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const git: GitToolShape = {
+          ...gitOver(log, ""),
+          listFiles: () => Effect.succeed(["frontend/package.json", "frontend/src/App.tsx"])
+        }
+        const text = yield* orientationFor(git, memory.store, "/repo", "frontend", {})
+        assert.include(text ?? "", "frontend/src/ (1 file)")
+        assert.include(text ?? "", "Scripts (package.json): test: vitest run")
+        const off = yield* orientationFor(git, memory.store, "/repo", "frontend", {
+          LLM4TS_ORIENTATION_CHARS: "0"
+        })
+        assert.isUndefined(off)
+      })
+  )
+})
+
+describe("storyJudgeQuery with acceptance criteria", () => {
+  it("lists the acceptance criteria the judge scores against", () => {
+    const specified = Story.make({
+      id: "a",
+      title: "A",
+      description: "Do a.",
+      owned: ["src/a"],
+      acceptance: ["GET /a answers 200"]
+    })
+    const query = storyJudgeQuery(specified)
+    assert.include(query, "Done when (the story's acceptance criteria")
+    assert.include(query, "1. GET /a answers 200")
+  })
 })

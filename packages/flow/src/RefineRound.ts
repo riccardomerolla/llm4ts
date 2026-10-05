@@ -38,9 +38,21 @@ export const refineProposalJsonSchema: JsonSchema = {
           dependsOn: strings,
           owned: strings,
           sharedReadOnly: strings,
+          readFirst: strings,
+          acceptance: strings,
           provides: strings
         },
-        required: ["id", "title", "description", "dependsOn", "owned", "sharedReadOnly", "provides"]
+        required: [
+          "id",
+          "title",
+          "description",
+          "dependsOn",
+          "owned",
+          "sharedReadOnly",
+          "readFirst",
+          "acceptance",
+          "provides"
+        ]
       }
     },
     notPlanned: {

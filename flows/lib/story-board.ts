@@ -38,6 +38,7 @@ export class StoryBrief extends Schema.Class<StoryBrief>("StoryBrief")({
   id: Schema.String,
   title: Schema.String,
   description: Schema.String,
+  acceptance: Schema.Array(Schema.String),
   provides: Schema.Array(Schema.String),
   owned: Schema.Array(Schema.String),
   sharedReadOnly: Schema.Array(Schema.String),
@@ -51,6 +52,7 @@ export const storyBriefOf = (story: Story, plan?: StoryPlan): StoryBrief =>
     id: story.id,
     title: story.title,
     description: story.description,
+    acceptance: story.acceptance,
     provides: story.provides,
     owned: story.owned,
     sharedReadOnly: story.sharedReadOnly,
@@ -98,6 +100,13 @@ export const stateOf = (brief: StoryBrief, diff: string, rules: string): string 
   [
     `Story: ${brief.title}`,
     brief.description,
+    ...(brief.acceptance.length === 0
+      ? []
+      : [
+          "",
+          "Done when (the story's acceptance criteria — `provides` is scored against them too):",
+          ...brief.acceptance.map((criterion, index) => `${index + 1}. ${criterion}`)
+        ]),
     "",
     `Provides: ${brief.provides.join(", ") || "(none)"}`,
     `Owned paths: ${brief.owned.join(", ")}`,
