@@ -160,6 +160,40 @@ history. The story worktrees and merged story branches are gone
 the repository, and `--epic <id>` picks one without its text. The next
 epic's first run takes its text, like Act 1.
 
+## Measuring a code graph (ADR 0025)
+
+Before any of this lands in llm4ts, measure whether a code graph served to
+the seats changes the run. CodeGraph (codegraph-ai) is an MCP server the
+CLIs detect from their own configuration: register `codegraph-server
+--mcp` under `mcpServers` in `~/.claude.json` for the orchestrator, and in
+the coder CLI's own MCP configuration for pi. Its index is per workspace
+(`--workspace <path>`), and every story runs in a worktree beside the
+repository, so the repository's index is absent there: point
+`LLM4TS_WORKTREE_SETUP` at a script that runs `pnpm install --offline` and
+then builds the worktree's index (the variable takes one command, no
+shell), and keep an eye on what that costs at `--concurrency 3`.
+
+Run the epic four times on a fresh seed each, same text, same models:
+
+| Run | Plan                              | Graph attached to |
+| --- | --------------------------------- | ----------------- |
+| A   | generated (Act 1)                 | nobody            |
+| B   | generated (Act 1)                 | both seats        |
+| C   | fixture copied over the generated | nobody            |
+| D   | fixture copied over the generated | both seats        |
+
+A against B measures the planner: diff each `plan.md` against
+`flows/fixtures/epic-stories/conto-bonifico.md` (ownership, dependencies,
+shared read-only sets) and count the violations validation printed. C
+against D measures the coders alone, on an identical plan. For every run
+record from the board and `report.md`: stories done, failed and waiting,
+`BLOCKED_ON` stops, perimeter violations, merge conflicts, the estimated
+tokens and cost per story (estimates, as always), and wall-clock per wave.
+
+Read it as follows. Cheaper coders and the same plans: install the graph
+in the target repositories, nothing to build. Better plans in B than in A:
+the plan checks of ADR 0025 are worth specifying. Neither: drop it.
+
 ## Crash recovery (demonstrate it if you get the chance)
 
 Interrupt the run during wave 2 and rerun the same command. Merged stories
