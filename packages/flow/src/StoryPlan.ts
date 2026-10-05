@@ -135,10 +135,27 @@ export const storyPlanViolations = (plan: StoryPlan): ReadonlyArray<string> => {
 }
 
 /**
+ * An anchor the repository can answer: relative, inside the checkout, and
+ * narrower than the whole tree. `../x`, `/abs/x`, `.`, `` and `a/../b` are
+ * not — `git ls-files` is fatal on the first two, and the last ones would
+ * name every file.
+ */
+export const isSafeAnchor = (anchor: string): boolean => {
+  const path = normalizePath(anchor)
+  return (
+    path.length > 0 &&
+    !path.startsWith("/") &&
+    !/^[A-Za-z]:/u.test(path) &&
+    path !== "." &&
+    !path.split("/").includes("..")
+  )
+}
+
+/**
  * The plan with every `readFirst` anchor that no tracked file lies under
- * removed, and the list of what was dropped. A planner names paths from a
- * layout digest and sometimes guesses; a guess must not reach a coder as
- * something to read.
+ * removed — unsafe anchors (`isSafeAnchor`) first, without a lookup — and
+ * the list of what was dropped. A planner names paths from a layout digest
+ * and sometimes guesses; a guess must not reach a coder as something to read.
  */
 export const pruneReadFirst = (
   plan: StoryPlan,
@@ -151,7 +168,7 @@ export const pruneReadFirst = (
   const dropped: Array<{ readonly story: string; readonly path: string }> = []
   const stories = plan.stories.map((story) => {
     const kept = story.readFirst.filter((anchor) => {
-      const exists = files.some((file) => pathWithin(file, anchor))
+      const exists = isSafeAnchor(anchor) && files.some((file) => pathWithin(file, anchor))
       if (!exists) {
         dropped.push({ story: story.id, path: anchor })
       }

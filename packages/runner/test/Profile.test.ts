@@ -306,7 +306,7 @@ describe("makeProfileProgram", () => {
  */
 const wandering: ReadonlyArray<TreeInput> = [
   at(0, StageStarted.make({ stage: "story list", lane: "list", executor: "gemini" })),
-  at(1, StageStarted.make({ stage: "Add the list page", lane: "list" })),
+  at(0, StageStarted.make({ stage: "Add the list page", lane: "list" })),
   ...Array.from({ length: 16 }, (_, index) =>
     at(
       10 + index * 30,
@@ -369,5 +369,25 @@ describe("coder work per story", () => {
         .join("\n"),
       "found its way"
     )
+  })
+
+  it("measures the first edit from the first task, and does not call a story that read its context wandering", () => {
+    const settled: ReadonlyArray<TreeInput> = [
+      at(0, StageStarted.make({ stage: "story calm", lane: "calm", executor: "gemini" })),
+      at(1, StageStarted.make({ stage: "story calm: setup", lane: "calm" })),
+      at(5 * minute, StageStarted.make({ stage: "Add the page", lane: "calm" })),
+      at(
+        7 * minute,
+        Timed.make({ kind: "tool", label: "write_file", category: "edit", ms: 300, lane: "calm" })
+      ),
+      at(7 * minute + 30, Timed.make({ kind: "model", label: "coder", ms: 150_000, lane: "calm" })),
+      at(8 * minute, StageCompleted.make({ stage: "story calm", lane: "calm" }))
+    ]
+    const report = profileOf(settled)
+    const [calm] = report.stories
+    assert.strictEqual(calm?.tasks, 1)
+    assert.strictEqual(calm?.firstEditMs, 2 * minute * 1_000)
+    assert.strictEqual(calm?.exploreBeforeEdit, 0)
+    assert.notInclude(report.findings.map((finding) => finding.text).join("\n"), "found its way")
   })
 })

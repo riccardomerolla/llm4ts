@@ -324,6 +324,50 @@ describe("refine rounds: planning", () => {
     })
   )
 
+  it.effect("a round's readFirst anchors are pruned to paths in the repository", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      const files = memory.store
+      yield* makeStoryPlanStore(files).save(`${stateDir}/plan.md`, epicPlan)
+      const seat = yield* scripted([
+        {
+          ...proposalReply,
+          stories: proposalReply.stories.map((entry) => ({
+            ...entry,
+            readFirst: ["src/conto/Saldo.tsx", "src/ghost.ts", "../outside"]
+          }))
+        }
+      ])
+      const events = yield* makeCollectingFlowEvents
+      const asked: Array<ReadonlyArray<string>> = []
+      const planned = yield* planRound({
+        files,
+        reasoning: seat.service,
+        events,
+        stateDir,
+        epicId: "bank",
+        round: 1,
+        feedback: "Move the balance card above the list.",
+        guidance: "house rules",
+        plans: [epicPlan],
+        git: {
+          listFiles: (paths) => {
+            asked.push(paths)
+            return Effect.succeed(["src/conto/Saldo.tsx"])
+          }
+        }
+      })
+      assert.deepStrictEqual(planned.plan?.stories[0]?.readFirst, ["src/conto/Saldo.tsx"])
+      // The unsafe anchor never reached git.
+      assert.deepStrictEqual(asked, [["src/conto/Saldo.tsx", "src/ghost.ts"]])
+      const notes = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Info" ? [event.message] : []
+      )
+      assert.include(notes.join("\n"), "src/ghost.ts")
+      assert.include(notes.join("\n"), "../outside")
+    })
+  )
+
   it.effect("the next round's planner reads what the previous round left unplanned", () =>
     Effect.gen(function* () {
       const memory = yield* makeMemoryPlainFileStore()

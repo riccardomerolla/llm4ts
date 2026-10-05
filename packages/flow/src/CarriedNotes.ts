@@ -19,7 +19,7 @@ export const findingsRequest = [
 ].join("\n")
 
 const sectionChars = 1_500
-const headingPattern = /^#{1,3}[ \t]*findings[ \t]*$/gimu
+const headingPattern = /^#{1,3}[ \t]*findings[ \t]*:?[ \t]*$/gimu
 const blockedLine = /^BLOCKED_ON:.*$/u
 
 /**
@@ -43,7 +43,10 @@ export const findingsIn = (reply: string): string | undefined => {
   while (lines.length > 0 && (lines.at(-1) ?? "").trim().length === 0) {
     lines.pop()
   }
-  if (lines.length > 0 && blockedLine.test((lines.at(-1) ?? "").trim())) {
+  if (
+    lines.length > 0 &&
+    blockedLine.test((lines.at(-1) ?? "").trim().replace(/^[`*_\s]+|[`*_\s]+$/gu, ""))
+  ) {
     lines.pop()
   }
   const text = lines.join("\n").trim()

@@ -65,6 +65,7 @@ import {
   dependenciesOf,
   makeStoryPlanStore,
   parseStoryPlan,
+  isSafeAnchor,
   pathsNamedIn,
   pruneReadFirst,
   type Story
@@ -1089,6 +1090,8 @@ export interface PlanRoundDeps {
   readonly plans: ReadonlyArray<StoryPlan>
   readonly brief?: string
   readonly orientation?: string
+  /** The epic checkout, to prune `readFirst` anchors to paths that exist. */
+  readonly git?: Pick<GitToolShape, "listFiles">
 }
 
 const bulletLines = (markdown: string): string =>
@@ -1130,14 +1133,17 @@ export const planRound = Effect.fn("flows/epic-stories.planRound")(function* (
   if (proposal.stories.length === 0) {
     return { plan: undefined, notPlanned: proposal.notPlanned }
   }
+  const assembled = assembleRound({
+    epicId: deps.epicId,
+    round: deps.round,
+    feedback: deps.feedback,
+    proposal,
+    earlier: earlier.map((story) => story.id)
+  })
   const plan = yield* validateStoryPlan(
-    assembleRound({
-      epicId: deps.epicId,
-      round: deps.round,
-      feedback: deps.feedback,
-      proposal,
-      earlier: earlier.map((story) => story.id)
-    })
+    deps.git === undefined
+      ? assembled
+      : yield* pruneUnknownAnchors(assembled, deps.git, deps.events)
   )
   const dir = roundDir(deps.stateDir, deps.round)
   yield* deps.files.writeAtomic(join(dir, "feedback.md"), `${deps.feedback}\n`)
@@ -1691,15 +1697,15 @@ export const orientationFor = (
  */
 export const pruneUnknownAnchors = (
   plan: StoryPlan,
-  git: GitToolShape,
+  git: Pick<GitToolShape, "listFiles">,
   events: FlowEventsShape
 ): Effect.Effect<StoryPlan, FlowError> =>
   Effect.gen(function* () {
-    const wanted = [...new Set(plan.stories.flatMap((story) => story.readFirst))]
-    if (wanted.length === 0) {
-      return plan
-    }
-    const known = new Set(yield* git.listFiles(wanted))
+    // Only anchors git can answer are looked up; `git ls-files -- ../x` is fatal.
+    const wanted = [
+      ...new Set(plan.stories.flatMap((story) => story.readFirst.filter(isSafeAnchor)))
+    ]
+    const known = new Set(wanted.length === 0 ? [] : yield* git.listFiles(wanted))
     const { plan: pruned, dropped } = pruneReadFirst(plan, known)
     if (dropped.length > 0) {
       yield* events.publish(
@@ -2022,7 +2028,8 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                   ...rounds.flatMap((round) => (round.plan === undefined ? [] : [round.plan]))
                 ],
                 ...(roundBrief === undefined ? {} : { brief: roundBrief }),
-                ...(orientation === undefined ? {} : { orientation })
+                ...(orientation === undefined ? {} : { orientation }),
+                git: context.git
               })
             )
             for (const left of planned.notPlanned) {

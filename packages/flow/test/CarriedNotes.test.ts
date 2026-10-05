@@ -21,6 +21,7 @@ describe("findingsIn", () => {
       "- tests live beside the feature (page.test.tsx)\n- the kit Table takes `rows` and `columns`"
     )
     assert.strictEqual(findingsIn("### findings\nonly this"), "only this")
+    assert.strictEqual(findingsIn("## Findings:\n- with a colon"), "- with a colon")
   })
 
   it("is undefined without a heading or with an empty section, and keeps BLOCKED_ON out of it", () => {

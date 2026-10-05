@@ -22,8 +22,9 @@ where to go (ADR 0025).
   next task's prompt, so a six-task story explores once, not six times
   (`implementPlanFlow({ carry })`).
 - **`llm4ts profile` shows coder work per story**: tool calls by kind, the
-  tasks the coder gave itself, and the explore calls and time before its
-  first edit — "16 explore calls and 8m00s before the coder's first edit".
+  tasks the coder gave itself, and the explore calls and time from its first
+  task to its first edit — "16 explore calls and 8m00s before the coder's
+  first edit".
 - **Transcripts are on by default for epic-stories** (`LLM4TS_TRANSCRIPT=off`
   turns them off); `--land` compacts them to their shape instead of deleting
   them, so a slow story stays explainable without keeping customer code.

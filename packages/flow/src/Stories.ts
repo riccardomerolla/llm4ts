@@ -340,7 +340,10 @@ export const startingCodeOf = (
     let left = budget
     const leftOut: Array<string> = []
     const shown = new Set<string>()
-    const section = (title: string, paths: ReadonlyArray<string>) =>
+    // `limit`: how far this section may draw the budget down. The anchors
+    // stop at half, so a broad anchor (a whole feature folder) cannot starve
+    // the story's own files; the later sections may use everything left.
+    const section = (title: string, paths: ReadonlyArray<string>, limit = 0) =>
       Effect.gen(function* () {
         const parts: Array<string> = []
         for (const path of paths) {
@@ -351,12 +354,12 @@ export const startingCodeOf = (
             files.read(join(worktree, path)),
             () => undefined
           )
-          if (text === undefined || left <= 0) {
+          if (text === undefined || left <= limit) {
             leftOut.push(path)
             continue
           }
           shown.add(path)
-          const piece = cap(text, Math.min(fileChars, left)).text
+          const piece = cap(text, Math.min(fileChars, left - limit)).text
           left -= piece.length
           parts.push(`### ${path}\n\`\`\`\n${piece}\n\`\`\``)
         }
@@ -365,7 +368,11 @@ export const startingCodeOf = (
     return [
       "## The code you start from",
       "Read this before exploring: it is the current content of the files below.",
-      ...(yield* section("Read first — what the planner says to imitate or build on:", anchors)),
+      ...(yield* section(
+        "Read first — what the planner says to imitate or build on:",
+        anchors,
+        Math.floor(budget / 2)
+      )),
       ...(yield* section("Shared, read-only — use these as they are:", shared)),
       ...(yield* section("Yours — the story's owned files so far:", owned)),
       ...(leftOut.length === 0 ? [] : [`Not shown (over the budget): ${leftOut.join(", ")}`])
@@ -852,7 +859,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       }
       // The task checkpoint belongs to the old branch: left in place, the
       // fresh branch would inherit "every task complete" and skip the coder.
+      // The notes its tasks carried describe the old definition: gone too.
       yield* files.remove(planPath(story))
+      yield* files.remove(notesPath(story))
       stored = undefined
     }
     if (stored !== undefined && stored.status === "merged") {

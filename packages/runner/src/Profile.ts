@@ -94,7 +94,7 @@ export const StoryProfile = Schema.Struct({
   toolCalls: ToolCalls,
   /** Task stages the coder ran on this lane: the tasks it gave itself, plus any revision. */
   tasks: Schema.Int,
-  /** From the story's start to the coder's first edit; absent when it never edited. */
+  /** From the coder's first task (after setup and planning) to its first edit; absent when it never edited. */
   firstEditMs: Schema.optionalKey(Ms),
   /** Explore calls (ls, find, grep, read) made before that first edit. */
   exploreBeforeEdit: Schema.Int
@@ -176,6 +176,8 @@ interface Lane {
   openSince: number | undefined
   openTools: number
   tasks: number
+  /** When the coder's first task began: setup and task planning come before it. */
+  firstTask: number | undefined
   toolCalls: { explore: number; edit: number; test: number; other: number }
   firstEdit: number | undefined
   exploreBeforeEdit: number
@@ -343,6 +345,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
             openSince: undefined,
             openTools: 0,
             tasks: 0,
+            firstTask: undefined,
             toolCalls: { explore: 0, edit: 0, test: 0, other: 0 },
             firstEdit: undefined,
             exploreBeforeEdit: 0
@@ -355,6 +358,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
           !event.stage.startsWith(`story ${lane.id}:`)
         ) {
           lane.tasks += 1
+          lane.firstTask = lane.firstTask ?? at
         }
         break
       }
@@ -378,7 +382,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
               : "other"
           lane.toolCalls[kind] += 1
           if (kind === "edit" && lane.firstEdit === undefined) {
-            lane.firstEdit = at - lane.start
+            lane.firstEdit = at - (lane.firstTask ?? lane.start)
             lane.exploreBeforeEdit = lane.toolCalls.explore
           }
         }
@@ -733,7 +737,8 @@ const findingsOf = (facts: {
     const wandered =
       story.firstEditMs !== undefined &&
       story.wallMs >= 60_000 &&
-      (story.exploreBeforeEdit >= 15 || story.firstEditMs >= story.wallMs / 4)
+      (story.exploreBeforeEdit >= 15 ||
+        (story.exploreBeforeEdit >= 5 && story.firstEditMs >= story.wallMs / 4))
     if (wandered && story.firstEditMs !== undefined) {
       candidates.push({
         ms: story.firstEditMs,

@@ -28,6 +28,7 @@ import {
   setupRecoveryPrompt,
   perimeterRules,
   renderEpicReport,
+  startingCodeOf,
   storyPrompt,
   storyTaskPlanInstructions,
   type StoriesOptions,
@@ -1108,6 +1109,10 @@ describe("Stories executor", () => {
         `${options.stateDir}/stories/c.plan.md`,
         "# Plan: c\n\n## [x] c task\nstale"
       )
+      yield* options.files.writeAtomic(
+        `${options.stateDir}/stories/c.notes.md`,
+        "### old task\n- stale note from the old definition"
+      )
 
       const report = yield* implementStoriesFlow(context, options)
       assert.strictEqual(report.count("done"), 4)
@@ -1123,6 +1128,8 @@ describe("Stories executor", () => {
       const checkpoint = filesAfter[`${options.stateDir}/stories/c.plan.md`] ?? ""
       assert.notInclude(checkpoint, "stale")
       assert.include(checkpoint, "[x] c task")
+      // Notes carried between the old definition's tasks go with it too.
+      assert.notInclude(filesAfter[`${options.stateDir}/stories/c.notes.md`] ?? "", "stale note")
       assert.include(log, "branch-delete:story/diamond/c")
       assert.include(log, "worktree-new:story/diamond/c@epic/diamond->/repo/.llm4ts/worktrees/c")
       assert.strictEqual(report.stories[0]?.judge, "merged on a previous run")
@@ -1602,4 +1609,39 @@ describe("story prompts carry the acceptance criteria", () => {
     assert.include(instructions, "Satisfies: <n>")
     assert.notInclude(storyTaskPlanInstructions(story("b")), "Satisfies:")
   })
+})
+
+describe("startingCodeOf", () => {
+  it.effect("a broad anchor cannot starve the story's own files of the budget", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const anchored = Story.make({ ...story("a"), readFirst: ["src/exemplar"] })
+      const exemplar = Array.from({ length: 10 }, (_, index) => `src/exemplar/part${index}.ts`)
+      const memory = yield* makeMemoryPlainFileStore({
+        ...Object.fromEntries(
+          exemplar.map((path) => [`/repo/.llm4ts/worktrees/a/${path}`, "x".repeat(8_000)])
+        ),
+        "/repo/.llm4ts/worktrees/a/src/features/a/index.ts": "export const a = 1"
+      })
+      const listed: Readonly<Record<string, ReadonlyArray<string>>> = {
+        "src/exemplar": exemplar,
+        "src/features/a": ["src/features/a/index.ts"]
+      }
+      const git = {
+        ...worktreeGit(harness, "/repo/.llm4ts/worktrees/a", anchored),
+        listFiles: (paths: ReadonlyArray<string>) =>
+          Effect.succeed(paths.flatMap((path) => listed[path] ?? []))
+      }
+      const text = yield* startingCodeOf(
+        anchored,
+        git,
+        memory.store,
+        "/repo/.llm4ts/worktrees/a",
+        40_000
+      )
+      assert.include(text ?? "", "### src/exemplar/part0.ts")
+      assert.include(text ?? "", "### src/features/a/index.ts")
+      assert.include(text ?? "", "export const a = 1")
+    })
+  )
 })

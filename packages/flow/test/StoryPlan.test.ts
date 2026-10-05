@@ -254,4 +254,23 @@ describe("readFirst and acceptance", () => {
     ])
     assert.strictEqual(pruneReadFirst(plan, known).plan.epicId, "p")
   })
+
+  it("pruneReadFirst drops anchors that leave the repository or name all of it, before any lookup", () => {
+    const plan = StoryPlan.make({
+      epicId: "p",
+      epic: "P.",
+      stories: [
+        Story.make({
+          ...story("a", ["src/a"]),
+          readFirst: ["../shared/kit", "/abs/src/x.ts", ".", "", "src/ok/../ok", "src/ok"]
+        })
+      ]
+    })
+    const { plan: pruned, dropped } = pruneReadFirst(plan, new Set(["src/ok/a.ts"]))
+    assert.deepStrictEqual(pruned.stories[0]?.readFirst, ["src/ok"])
+    assert.deepStrictEqual(
+      dropped.map((drop) => drop.path),
+      ["../shared/kit", "/abs/src/x.ts", ".", "", "src/ok/../ok"]
+    )
+  })
 })
