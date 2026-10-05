@@ -1,7 +1,7 @@
 // Shared core of the epic-stories flow (ADR 0013): the operator flags, the
 // story-plan generator prompt and schema, the story judge, the gate runner,
 // and seat selection. The executor itself is `@llm4ts/flow/Stories`.
-import { readdir, rm, stat } from "node:fs/promises"
+import { readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { isAbsolute, join, normalize } from "node:path"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -33,6 +33,7 @@ import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { nodePreflight } from "@llm4ts/flow/NodePreflight"
 import { applyApprovedRetros } from "@llm4ts/flow/Retro"
 import { statusPaths, type GitToolShape } from "@llm4ts/flow/GitTool"
+import { TranscriptEntry } from "@llm4ts/flow/Transcript"
 import { EpicLanded, EpicLandedVersion, landedPath } from "@llm4ts/flow/Landing"
 import {
   RefineProposal,
@@ -1566,23 +1567,77 @@ export interface StoryJudgeContext {
 }
 
 /**
- * Deletes the transcripts (`--transcript`) of these runs; returns how many
- * there were. A landed epic keeps no copy of its customer code in them.
+ * Transcripts are on by default for epic-stories: a slow story is only
+ * explainable from them. `LLM4TS_TRANSCRIPT=off` (or `0`, `false`, `no`)
+ * turns them off; an explicit value is never overridden.
  */
-export const removeTranscripts = (
+export const storiesEnvironment = (
+  environment: Readonly<Record<string, string | undefined>>
+): Readonly<Record<string, string | undefined>> =>
+  environment.LLM4TS_TRANSCRIPT === undefined
+    ? { ...environment, LLM4TS_TRANSCRIPT: "on" }
+    : environment
+
+const decodeTranscriptLine = Schema.decodeUnknownOption(Schema.fromJsonString(TranscriptEntry))
+const encodeTranscriptLine = Schema.encodeSync(Schema.fromJsonString(TranscriptEntry))
+
+/** The entry with its content removed; `undefined` for a reply, which is only content. */
+const compactedEntry = (entry: TranscriptEntry): TranscriptEntry | undefined => {
+  switch (entry._tag) {
+    case "Call": {
+      const { system: _system, ...rest } = entry
+      return { ...rest, input: "" }
+    }
+    case "Tool":
+      return { ...entry, args: "" }
+    case "ToolResult":
+      return { ...entry, output: "" }
+    case "Reply":
+      return undefined
+    case "End":
+      return entry
+  }
+}
+
+/**
+ * Rewrites the transcripts of these runs keeping their shape — calls, roles,
+ * executors, tool names, timings — and dropping every input, reply, tool
+ * argument and output, so a landed epic keeps no copy of its customer code
+ * yet `llm4ts profile` and a retro can still see how each story went.
+ * Returns how many runs had transcripts.
+ */
+export const compactTranscripts = (
   workDir: string,
   runIds: ReadonlyArray<string>
 ): Effect.Effect<number> =>
   Effect.reduce(
     runIds,
     () => 0,
-    (removed, runId) => {
+    (compacted, runId) => {
       const directory = join(workDir, ".llm4ts", "transcripts", runId)
-      return Effect.tryPromise(() => stat(directory)).pipe(
-        Effect.andThen(Effect.tryPromise(() => rm(directory, { recursive: true, force: true }))),
-        Effect.as(removed + 1),
-        Effect.orElseSucceed(() => removed)
-      )
+      return Effect.gen(function* () {
+        yield* Effect.tryPromise(() => stat(directory))
+        const names = yield* Effect.tryPromise(() => readdir(directory))
+        for (const name of names.filter((candidate) => candidate.endsWith(".jsonl"))) {
+          const path = join(directory, name)
+          const text = yield* Effect.tryPromise(() => readFile(path, "utf8"))
+          const lines = text
+            .split("\n")
+            .filter((line) => line.trim().length > 0)
+            .flatMap((line) => {
+              const decoded = decodeTranscriptLine(line)
+              if (decoded._tag === "None") {
+                return []
+              }
+              const kept = compactedEntry(decoded.value)
+              return kept === undefined ? [] : [encodeTranscriptLine(kept)]
+            })
+          yield* Effect.tryPromise(() =>
+            writeFile(path, lines.length === 0 ? "" : `${lines.join("\n")}\n`, { mode: 0o600 })
+          )
+        }
+        return compacted + 1
+      }).pipe(Effect.orElseSucceed(() => compacted))
     }
   )
 
@@ -1824,7 +1879,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
         coder,
         reasoning,
         reviewers: [asReadOnly(reasoning)],
-        environment: process.env,
+        environment: storiesEnvironment(process.env),
         ...runnerOptions
       },
       (context) =>
@@ -2047,10 +2102,12 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             const earlier = (yield* readEpicRuns(files, stateDir))
               .map((run) => run.runId)
               .filter((runId) => runId !== context.trace?.runId)
-            const removed = yield* removeTranscripts(input.workDir, earlier)
-            if (removed > 0) {
+            const compacted = yield* compactTranscripts(input.workDir, earlier)
+            if (compacted > 0) {
               yield* events.publish(
-                Info.make({ message: `epic ${plan.epicId}: removed ${removed} run transcript(s)` })
+                Info.make({
+                  message: `epic ${plan.epicId}: compacted ${compacted} run transcript(s) (shape kept, content removed)`
+                })
               )
             }
             yield* events.publish(

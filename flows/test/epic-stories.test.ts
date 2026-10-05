@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs"
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -25,6 +25,7 @@ import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEve
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { makeMemoryPlainFileStore, saveVersioned } from "@llm4ts/flow/Persistence"
+import { TranscriptEntry } from "@llm4ts/flow/Transcript"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { ReviewResult } from "@llm4ts/flow/Review"
 import {
@@ -60,8 +61,9 @@ import {
   localCoderServer,
   orientationFor,
   pruneUnknownAnchors,
-  removeTranscripts,
+  compactTranscripts,
   rubricStoryJudge,
+  storiesEnvironment,
   storyContextChars,
   parseEpicArgs,
   reasonerFromEnvironment,
@@ -710,22 +712,73 @@ describe("the story judge", () => {
   })
 })
 
-describe("removeTranscripts", () => {
-  it.effect("deletes the named runs' transcripts and keeps the others", () =>
+describe("compactTranscripts", () => {
+  it.effect("keeps the shape of the named runs' transcripts and removes their content", () =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "llm4ts-transcripts-")))
       const dir = (run: string) => join(root, ".llm4ts", "transcripts", run)
-      for (const run of ["run-1", "run-2", "run-3"]) {
+      const entries = [
+        {
+          _tag: "Call",
+          at: 1,
+          call: "call-1",
+          role: "coder",
+          executor: "gemini",
+          system: "rules",
+          input: "do it"
+        },
+        { _tag: "Tool", at: 2, call: "call-1", tool: "grep", args: "-r secret src" },
+        { _tag: "ToolResult", at: 3, call: "call-1", output: "src/a.ts: const secret = 1" },
+        { _tag: "Reply", at: 4, call: "call-1", text: "I changed src/a.ts" },
+        { _tag: "End", at: 5, call: "call-1", ms: 4 }
+      ]
+      for (const run of ["run-1", "run-2"]) {
         yield* Effect.promise(() => mkdir(dir(run), { recursive: true }))
-        yield* Effect.promise(() => writeFile(join(dir(run), "home.jsonl"), "{}\n"))
+        yield* Effect.promise(() =>
+          writeFile(
+            join(dir(run), "home.jsonl"),
+            entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n"
+          )
+        )
       }
-      const removed = yield* removeTranscripts(root, ["run-1", "run-2", "missing"])
-      assert.strictEqual(removed, 2)
-      const left = yield* Effect.promise(() => readdir(join(root, ".llm4ts", "transcripts")))
-      assert.deepStrictEqual(left, ["run-3"])
+      const compacted = yield* compactTranscripts(root, ["run-1", "missing"])
+      assert.strictEqual(compacted, 1)
+      const text = yield* Effect.promise(() => readFile(join(dir("run-1"), "home.jsonl"), "utf8"))
+      const decode = Schema.decodeUnknownSync(Schema.fromJsonString(TranscriptEntry))
+      const lines = text
+        .trim()
+        .split("\n")
+        .map((line) => decode(line))
+      assert.deepStrictEqual(
+        lines.map((line) => line._tag),
+        ["Call", "Tool", "ToolResult", "End"]
+      )
+      const [call, tool, result, end] = lines
+      assert.isTrue(
+        call?._tag === "Call" &&
+          call.input === "" &&
+          call.system === undefined &&
+          call.role === "coder"
+      )
+      assert.isTrue(tool?._tag === "Tool" && tool.tool === "grep" && tool.args === "")
+      assert.isTrue(result?._tag === "ToolResult" && result.output === "")
+      assert.isTrue(end?._tag === "End" && end.ms === 4)
+      assert.notInclude(text, "secret")
+      // the other run is untouched
+      const other = yield* Effect.promise(() => readFile(join(dir("run-2"), "home.jsonl"), "utf8"))
+      assert.include(other, "secret")
       yield* Effect.promise(() => rm(root, { recursive: true, force: true }))
     })
   )
+})
+
+describe("storiesEnvironment", () => {
+  it("turns transcripts on unless the environment says otherwise", () => {
+    assert.strictEqual(storiesEnvironment({}).LLM4TS_TRANSCRIPT, "on")
+    assert.strictEqual(storiesEnvironment({ LLM4TS_TRANSCRIPT: "off" }).LLM4TS_TRANSCRIPT, "off")
+    assert.strictEqual(storiesEnvironment({ LLM4TS_TRANSCRIPT: "on" }).LLM4TS_TRANSCRIPT, "on")
+    assert.strictEqual(storiesEnvironment({ HOME: "/x" }).HOME, "/x")
+  })
 })
 
 describe("storyContextChars", () => {

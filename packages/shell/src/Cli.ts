@@ -216,7 +216,7 @@ const runCommand = Command.make(
     transcript: Flag.Boolean("transcript").pipe(
       Flag.withDefault(false),
       Flag.withDescription(
-        "Record what each seat is told and answers under .llm4ts/transcripts/ (owner-only, secrets redacted), for llm4ts watch --tail; forwarded as LLM4TS_TRANSCRIPT"
+        "Record what each seat is told and answers under .llm4ts/transcripts/ (owner-only, secrets redacted), for llm4ts watch --tail; forwarded as LLM4TS_TRANSCRIPT. epic-stories records them by default; LLM4TS_TRANSCRIPT=off turns that off"
       )
     ),
     ui: Flag.Literals("ui", ["classic", "tree"]).pipe(

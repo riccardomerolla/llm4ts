@@ -10,8 +10,9 @@ import { redactText } from "@llm4ts/core/observability/Redaction"
 import { roleOr } from "./Timing.ts"
 
 /**
- * What the model was told and what it answered, per seat call — an opt-in
- * record (`llm4ts run --transcript`) that `llm4ts watch` tails. It lives in
+ * What the model was told and what it answered, per seat call — a record
+ * (`llm4ts run --transcript`; on by default in epic-stories, where
+ * `LLM4TS_TRANSCRIPT=off` turns it off) that `llm4ts watch` tails. It lives in
  * its own files, never in the trace, so the trace and `llm4ts profile` stay
  * content-free. Secrets are redacted and every field is capped.
  */

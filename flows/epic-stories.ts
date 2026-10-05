@@ -18,6 +18,9 @@
 // (--fail-fast stops instead). The epic branch is left in place; the board
 // and the report under .llm4ts/epics/<epic-id>/ carry ESTIMATED usage
 // figures (ADR 0013).
+// Transcripts (what each seat was told and answered) are ON by default for
+// this flow — LLM4TS_TRANSCRIPT=off turns them off — and --land compacts them
+// (shape kept, content removed) rather than deleting them (ADR 0025).
 import { runFlowMain } from "@llm4ts/runner"
 import { rubricStoryJudge, runEpicStories } from "./lib/epic-stories.ts"
 

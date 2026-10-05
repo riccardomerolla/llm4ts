@@ -57,7 +57,9 @@ phases use.
 - Transcripts are the richest evidence and are off by default; the digest
   says when they were missing and the report advises `--transcript`.
 - `--land` removes earlier runs' transcripts, so a retro after landing sees
-  only the landing run's.
+  only the landing run's. (Since 2.29.0, ADR 0025: `--land` compacts them
+  instead — calls, tools and timings stay, inputs, replies, tool arguments
+  and outputs go — so a retro after landing still sees each story's shape.)
 - Divergence from the pinned llm4zio (which has no post-run analysis) is
   recorded in `docs/parity.md`.
 
