@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.29.0
+
+Why an `epic-stories` epic takes days with a CLI coder, and what now tells it
+where to go (ADR 0025).
+
+- **The planner sees the repository.** A deterministic orientation digest of
+  the epic checkout's tracked files — folders with counts, small folders in
+  full, package scripts, where tests live — goes to the planner and to every
+  coder's system prompt, under `LLM4TS_ORIENTATION_CHARS` (default 8000, `0`
+  to leave it out). No model call.
+- **Stories name what to read first.** `readFirst` paths chosen by the
+  planner; those not in the repository are dropped with a note; the rest open
+  the coder's starting code before the shared read-only files.
+- **Stories say what done looks like.** `acceptance` criteria from the
+  planner: the coder sees them as "Done when", its task plan names the
+  criterion each task satisfies, and the judge's `provides` dimension scores
+  against them. Plans written earlier parse unchanged and keep every hash.
+- **Findings travel between tasks.** Each task's reply ends with a short
+  `## Findings` section, kept at `stories/<id>.notes.md` and prepended to the
+  next task's prompt, so a six-task story explores once, not six times
+  (`implementPlanFlow({ carry })`).
+- **`llm4ts profile` shows coder work per story**: tool calls by kind, the
+  tasks the coder gave itself, and the explore calls and time before its
+  first edit — "16 explore calls and 8m00s before the coder's first edit".
+- **Transcripts are on by default for epic-stories** (`LLM4TS_TRANSCRIPT=off`
+  turns them off); `--land` compacts them to their shape instead of deleting
+  them, so a slow story stays explainable without keeping customer code.
+
 ## 2.28.1
 
 - **A saturated roster no longer stalls `epic-stories`.** With executors

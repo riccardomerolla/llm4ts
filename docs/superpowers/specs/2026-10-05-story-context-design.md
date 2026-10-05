@@ -1,6 +1,6 @@
 # Story context: why epic-stories takes days, and what changes
 
-Date: 2026-10-05 · Status: agreed (grilled), to implement in one minor release
+Date: 2026-10-05 · Status: implemented in 2.29.0 (ADR 0025)
 
 ## The problem as observed
 

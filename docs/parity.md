@@ -569,3 +569,11 @@ reference release.
   that pins a presented chain behind its fingerprint, and a WS-Trust STS
   call from a user-owned template whose SAML assertion is carried as raw
   bytes in every call's Security header. llm4zio has no SOAP kit. Additive.
+- Story context (ADR 0025, 2026-10-05): a deterministic repository
+  orientation digest for the planner and every coder, `readFirst` anchors
+  pruned to paths that exist and opening the starting code, `acceptance`
+  criteria the coder plans against and the judge scores against, findings
+  carried from one task to the next, coder work per story in `llm4ts
+profile`, transcripts on by default and compacted on land. llm4zio's
+  stories carry no anchors or criteria and its coder starts every task cold.
+  Additive.
