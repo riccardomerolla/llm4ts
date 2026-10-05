@@ -237,7 +237,12 @@ export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("Execut
   role: Schema.String,
   label: Schema.optionalKey(Schema.String),
   /** Took the role on its own context's coder slot: nobody independent could. */
-  borrowed: Schema.optionalKey(Schema.Boolean)
+  borrowed: Schema.optionalKey(Schema.Boolean),
+  /**
+   * Why it borrowed: `nobody` else takes the role (or all are out for the
+   * run); `held`: every other executor that could has its slots held by coders.
+   */
+  because: Schema.optionalKey(Schema.Literals(["nobody", "held"]))
 }) {}
 
 export class ExecutorReleased extends Schema.TaggedClass<ExecutorReleased>()("ExecutorReleased", {
@@ -294,7 +299,11 @@ export const rosterEventMessage = (event: FlowEvent): string | undefined => {
   switch (event._tag) {
     case "ExecutorLeased":
       return event.borrowed === true
-        ? `roster: ${event.executor} takes ${event.role}${forLabel(event.label)} on its own coder's slot — not independent (no other executor can take ${event.role})`
+        ? `roster: ${event.executor} takes ${event.role}${forLabel(event.label)} on its own coder's slot — not independent (${
+            event.because === "held"
+              ? `every other executor that takes ${event.role} is held by a coder`
+              : `no other executor can take ${event.role}`
+          })`
         : `roster: ${event.executor} takes ${event.role}${forLabel(event.label)}`
     case "ExecutorExcluded":
       return `roster: ${event.executor} out of the round ${event.reason}`

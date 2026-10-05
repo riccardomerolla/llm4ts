@@ -391,6 +391,8 @@ export interface Lease {
   readonly role: Role
   /** Frees the slot; idempotent, and also run when the lease's scope closes. */
   readonly release: Effect.Effect<void>
+  /** Took no slot: the context's own coder executor serves the call (see `LeaseOptions.borrow`). */
+  readonly borrowed: boolean
 }
 
 export interface LeaseOptions {
@@ -400,6 +402,18 @@ export interface LeaseOptions {
   readonly prefer?: string
   /** Who is asking, for the events (a story's worktree). */
   readonly label?: string
+  /**
+   * The executor holding this context's coder, used without a slot (its
+   * coder is idle while the context makes this call) when independence
+   * cannot be had: no executor outside `avoid` can ever take the role, or
+   * every one in the round that could has all its slots held by coders. A
+   * coder's slot frees only when its story ends, and that story may itself
+   * be waiting on a call like this one — waiting for it would saturate the
+   * roster. An executor that is out of the round is still borrowed in the
+   * first case (the call fails on it, as it would on anyone), never in the
+   * second (a story in the round will free a slot).
+   */
+  readonly borrow?: ExecutorSpec
 }
 
 export interface ExecutorStatus {
@@ -423,6 +437,12 @@ export interface RosterShape {
   ) => Effect.Effect<Lease | undefined, never, Scope.Scope>
   /** Whether an executor outside `avoid` has the role and is not out for the run. */
   readonly canEverServe: (role: Role, avoid?: ReadonlyArray<string>) => Effect.Effect<boolean>
+  /**
+   * Whether every executor in the round that takes `role`, outside `avoid`,
+   * has all its slots held by coders — and there is at least one. A lease
+   * for `role` would then wait for a story to end, not for a call.
+   */
+  readonly coderHeld: (role: Role, avoid?: ReadonlyArray<string>) => Effect.Effect<boolean>
   /** Free slots for `role` now, across executors in the round. */
   readonly available: (role: Role) => Effect.Effect<number>
   /** Configured slots for `role`. */
@@ -567,7 +587,29 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
             )
       )
       yield* Effect.addFinalizer(() => free)
-      return { executor: spec, role, release: free }
+      return { executor: spec, role, release: free, borrowed: false }
+    })
+
+  /** A lease over the context's own coder executor: no slot taken, none freed. */
+  const borrowedLease = (
+    spec: ExecutorSpec,
+    role: Role,
+    label: string | undefined,
+    because: "nobody" | "held"
+  ): Effect.Effect<Lease, never, Scope.Scope> =>
+    Effect.gen(function* () {
+      const labelled = label === undefined ? {} : { label }
+      yield* events.publish(
+        ExecutorLeased.make({ executor: spec.id, role, ...labelled, borrowed: true, because })
+      )
+      const done = yield* Ref.make(false)
+      const free = Effect.flatMap(Ref.getAndSet(done, true), (was) =>
+        was
+          ? Effect.void
+          : events.publish(ExecutorReleased.make({ executor: spec.id, role, ...labelled }))
+      )
+      yield* Effect.addFinalizer(() => free)
+      return { executor: spec, role, release: free, borrowed: true }
     })
 
   /** One attempt: expire, pick, take the slot — all under the lock. */
@@ -614,6 +656,19 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
             exclusions.get(spec.id)?.kind !== "run"
         )
       )
+    )
+
+  const coderHeld = (role: Role, avoid: ReadonlyArray<string> = []): Effect.Effect<boolean> =>
+    lock.withPermit(
+      Effect.sync(() => {
+        const inRound = eligible(role, avoid)
+        return (
+          inRound.length > 0 &&
+          inRound.every(
+            (spec) => (usage.get(spec.id) ?? { busy: 0, busyCoders: 0 }).busyCoders >= slotsOf(spec)
+          )
+        )
+      })
     )
 
   /** Probes every `health` exclusion whose next probe is due; a live one comes back. */
@@ -710,6 +765,17 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
   ): Effect.Effect<Lease, RosterExhausted, Scope.Scope> =>
     Effect.gen(function* () {
       const avoid = leaseOptions.avoid ?? []
+      const borrow =
+        leaseOptions.borrow !== undefined && hasRole(leaseOptions.borrow, role)
+          ? leaseOptions.borrow
+          : undefined
+      /** Borrowing when the round is held by coders needs an executor in the round. */
+      const borrowInRound = (): Effect.Effect<ExecutorSpec | undefined> =>
+        lock.withPermit(
+          Effect.sync(() =>
+            borrow !== undefined && !exclusions.has(borrow.id) ? borrow : undefined
+          )
+        )
       let announced = false
       const asked = yield* Clock.currentTimeMillis
       // A lease that had to wait says how long, for the story it is for.
@@ -732,6 +798,10 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
           return yield* leaseOf(spec, role, leaseOptions.label)
         }
         if (!(yield* canEverServe(role, avoid))) {
+          if (borrow !== undefined) {
+            yield* waited
+            return yield* borrowedLease(borrow, role, leaseOptions.label, "nobody")
+          }
           const reasons = yield* lock.withPermit(
             Effect.sync(() =>
               executors
@@ -746,6 +816,13 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
             role,
             reasons: reasons.length === 0 ? ["no executor in the roster takes this role"] : reasons
           })
+        }
+        if (yield* coderHeld(role, avoid)) {
+          const own = yield* borrowInRound()
+          if (own !== undefined) {
+            yield* waited
+            return yield* borrowedLease(own, role, leaseOptions.label, "held")
+          }
         }
         if (!announced) {
           announced = true
@@ -876,6 +953,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
     lease,
     tryLease,
     canEverServe,
+    coderHeld,
     available,
     slots,
     report,
