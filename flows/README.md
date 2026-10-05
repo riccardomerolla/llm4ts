@@ -386,7 +386,9 @@ its slots and a priority per role:
 
 - A story holds one coder for its lifetime. Reviewer, judge and verifier
   calls lease an executor per call, never the one coding the story, unless
-  nobody else can take the role (then the run says "not independent").
+  nobody else can take the role or every executor that could is held by a
+  coder (then the run says "not independent", and why). Give an executor
+  that codes and reasons at least two slots to keep its reviews independent.
 - Lower priority first; equal priorities take turns. An executor that codes
   and reasons keeps one slot for reasoning (`coderSlots`).
 - A usage limit, three rate limits in 10 minutes, a serving engine that is

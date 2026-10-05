@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.28.1
+
+- **A saturated roster no longer stalls `epic-stories`.** With executors
+  whose every slot a coder may hold (one slot each, or `coderSlots` equal to
+  `slots`), the default concurrency fills the roster with story coders, and
+  each story's reviewer, judge and verifier call — which avoids its own
+  coder for independence — waited for another story to end, while that
+  story waited the same way: the run sat at "waiting for an executor to take
+  reviewer: one busy; two busy" for good. The roster now borrows the
+  context's own coder executor (whose coder is idle during the call) not
+  only when nobody else can ever take the role, but also when every
+  executor in the round that could is held by a coder, and says which:
+  "not independent (every other executor that takes reviewer is held by a
+  coder)". A call in flight on another executor is still waited for; an
+  executor out of the round is never borrowed to sidestep a coder (its
+  story will free a slot). Borrowing moves from the seat into the roster
+  (`LeaseOptions.borrow`, `Lease.borrowed`, `coderHeld`), and a borrowed
+  lease is released like any other, so the agent tree stops counting it
+  forever. ADR 0019 amended.
+
 ## 2.28.0
 
 The soap-ace flows in a locked-down bank network (ADR 0024).

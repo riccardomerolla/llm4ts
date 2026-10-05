@@ -12,10 +12,9 @@ import { ConfigError, type LlmError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { Message, type ConnectorCapabilities, type LlmChunk } from "@llm4ts/core/Models"
 import { describeFlowError, type FlowError } from "./FlowError.ts"
-import { ExecutorHandedOver, ExecutorLeased, type FlowEventsShape } from "./FlowEvents.ts"
+import { ExecutorHandedOver, type FlowEventsShape } from "./FlowEvents.ts"
 import {
   describeExclusion,
-  hasRole,
   type ExecutorSpec,
   type Lease,
   type Role,
@@ -102,7 +101,11 @@ export interface RosterSeatOptions {
   readonly events: FlowEventsShape
   /** Executors this seat must not use: the context's coder, for independence. */
   readonly avoid?: Effect.Effect<ReadonlyArray<string>>
-  /** Used without a slot when nobody outside `avoid` can ever serve the role. */
+  /**
+   * The context's coder executor, used without a slot when independence
+   * cannot be had: nobody outside `avoid` can ever serve the role, or every
+   * executor that could is held by a coder (`LeaseOptions.borrow`).
+   */
   readonly borrow?: Effect.Effect<ExecutorSpec | undefined>
   /** Who is asking, for the events. */
   readonly label?: string
@@ -127,22 +130,15 @@ export const rosterSeat = (
   ): Effect.Effect<ExecutorSpec, LlmError, Scope.Scope> =>
     Effect.gen(function* () {
       const avoid = [...(options.avoid === undefined ? [] : yield* options.avoid), ...alsoAvoid]
-      if (avoid.length > 0 && !(yield* roster.canEverServe(role, avoid))) {
-        const borrowed = options.borrow === undefined ? undefined : yield* options.borrow
-        if (borrowed !== undefined && hasRole(borrowed, role)) {
-          yield* options.events.publish(
-            ExecutorLeased.make({
-              executor: borrowed.id,
-              role,
-              ...(options.label === undefined ? {} : { label: options.label }),
-              borrowed: true
-            })
-          )
-          return borrowed
-        }
-      }
+      // The roster decides who serves: an independent executor, or, when
+      // none can ever serve or every one is held by a coder, the context's own.
+      const borrow = options.borrow === undefined ? undefined : yield* options.borrow
       const lease = yield* roster
-        .lease(role, { avoid, ...(options.label === undefined ? {} : { label: options.label }) })
+        .lease(role, {
+          avoid,
+          ...(options.label === undefined ? {} : { label: options.label }),
+          ...(borrow === undefined ? {} : { borrow })
+        })
         .pipe(Effect.mapError(asLlmError))
       return lease.executor
     })

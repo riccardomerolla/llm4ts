@@ -35,7 +35,12 @@ import {
   priorityOf,
   rosterViolations
 } from "@llm4ts/flow/Roster"
-import { makeHeldCoder, rosterSeat, type RosterSeat } from "@llm4ts/flow/RosterSeats"
+import {
+  makeHeldCoder,
+  rosterSeat,
+  type HeldCoder,
+  type RosterSeat
+} from "@llm4ts/flow/RosterSeats"
 
 /** What the classic terminal shows for the roster's events, in order. */
 const rosterLines = (recorded: ReadonlyArray<FlowEvent>): ReadonlyArray<string> =>
@@ -540,6 +545,138 @@ describe("Roster seats", () => {
         assert.isTrue(recorded.some((message) => message.includes("not independent")))
         // The slot went back when the call ended.
         assert.strictEqual(yield* roster.available("judge"), 2 + 3)
+      })
+    )
+  )
+
+  // Two executors with one slot each, both taking every role: the stories
+  // hold both slots, and every reviewer call would wait for a story to end —
+  // which waits on its own reviewer. The roster is saturated, not busy.
+  it.effect("a per-call seat borrows its coder when every other executor is held by a coder", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const every = ["planner", "coder", "reviewer", "judge", "verifier"]
+        const one = executor("one", { harness: "claude", roles: every })
+        const two = executor("two", { harness: "codex", roles: every })
+        const roster = yield* makeRoster({ executors: [one, two], events })
+        const source = { seatFor: seatFor(log, () => undefined) }
+        const held = (dir: string) =>
+          makeHeldCoder(roster, source, dir, { events, eager: true, label: dir })
+        const a = yield* held("a")
+        const b = yield* held("b")
+        assert.deepStrictEqual([yield* a.executor, yield* b.executor], ["one", "two"])
+        assert.strictEqual(yield* roster.available("reviewer"), 0)
+        assert.isTrue(yield* roster.coderHeld("reviewer", ["one"]))
+        const reviewerOf = (story: HeldCoder, label: string) =>
+          rosterSeat(roster, source, "reviewer", label, {
+            events,
+            avoid: Effect.map(story.executor, (id) => (id === undefined ? [] : [id])),
+            borrow: story.lease,
+            label
+          })
+        const reviewing = yield* Effect.forkScoped(text(reviewerOf(a, "a"), "review a"))
+        yield* TestClock.adjust("1 hour")
+        assert.strictEqual(yield* Fiber.join(reviewing), "one ok")
+        assert.strictEqual(yield* text(reviewerOf(b, "b"), "review b"), "two ok")
+        const recorded = yield* events.recorded
+        const lines = rosterLines(recorded)
+        assert.isTrue(
+          lines.includes(
+            "roster: one takes reviewer for a on its own coder's slot — not independent (every other executor that takes reviewer is held by a coder)"
+          ),
+          lines.join("\n")
+        )
+        // A borrowed lease is released like any other, for the views that count leases.
+        const released = recorded.filter(
+          (event) => event._tag === "ExecutorReleased" && event.role === "reviewer"
+        )
+        assert.strictEqual(released.length, 2)
+        // Nobody waited: the stories never saw a "waiting for an executor" line.
+        assert.isFalse(lines.some((line) => line.includes("waiting for an executor")))
+        assert.strictEqual(yield* roster.available("reviewer"), 0)
+      })
+    )
+  )
+
+  it.effect("a per-call seat waits for a call in flight, and borrows once coders take over", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const every = ["planner", "coder", "reviewer", "judge", "verifier"]
+        const one = executor("one", { harness: "claude", roles: every })
+        const two = executor("two", { harness: "codex", roles: every })
+        const roster = yield* makeRoster({ executors: [one, two], events })
+        const source = { seatFor: seatFor(log, () => undefined) }
+        const a = yield* makeHeldCoder(roster, source, "a", { events, eager: true, label: "a" })
+        assert.strictEqual(yield* a.executor, "one")
+        // A reasoning call on `two` is in flight: the next reviewer waits for it, not for a story.
+        const inFlight = yield* roster.lease("judge", { label: "the run" })
+        assert.strictEqual(inFlight.executor.id, "two")
+        assert.isFalse(yield* roster.coderHeld("reviewer", ["one"]))
+        // Story b is already queued for a coder slot, ahead of the reviewer.
+        const b = yield* Effect.forkScoped(
+          makeHeldCoder(roster, source, "b", { events, eager: true, label: "b" })
+        )
+        yield* TestClock.adjust("1 minute")
+        assert.isUndefined(b.pollUnsafe())
+        const reviewer = rosterSeat(roster, source, "reviewer", "a", {
+          events,
+          avoid: Effect.map(a.executor, (id) => (id === undefined ? [] : [id])),
+          borrow: a.lease,
+          label: "a"
+        })
+        const reviewing = yield* Effect.forkScoped(text(reviewer, "review a"))
+        yield* TestClock.adjust("1 minute")
+        assert.isUndefined(reviewing.pollUnsafe())
+        // The call ends and story b's coder takes the slot: the reviewer
+        // gives up on independence instead of waiting for that story to end.
+        yield* inFlight.release
+        yield* TestClock.adjust("1 minute")
+        assert.strictEqual(yield* (yield* Fiber.join(b)).executor, "two")
+        assert.strictEqual(yield* Fiber.join(reviewing), "one ok")
+        const waited = (yield* events.recorded).flatMap((event) =>
+          event._tag === "Timed" && event.kind === "wait" ? [event.label] : []
+        )
+        assert.deepStrictEqual(waited, ["roster coder", "roster reviewer"])
+      })
+    )
+  )
+
+  it.effect("the roster never borrows an executor out of the round to escape held coders", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const every = ["planner", "coder", "reviewer", "judge", "verifier"]
+        const one = executor("one", { harness: "claude", roles: every })
+        const two = executor("two", { harness: "codex", roles: every })
+        const roster = yield* makeRoster({ executors: [one, two], events })
+        const coderOnTwo = yield* roster.lease("coder", { avoid: ["one"] })
+        assert.strictEqual(coderOnTwo.executor.id, "two")
+        yield* roster.exclude(
+          Exclusion.make({
+            id: "one",
+            kind: "until",
+            until: at("2070-01-01T00:00:00Z"),
+            reason: "usage limit"
+          })
+        )
+        // `one` is out: borrowed only when nobody could ever serve, never to
+        // sidestep a coder — its story will free the slot.
+        const waiting = yield* Effect.forkScoped(
+          roster.lease("reviewer", { avoid: ["one"], borrow: one, label: "a" })
+        )
+        yield* TestClock.adjust("1 minute")
+        assert.isUndefined(waiting.pollUnsafe())
+        yield* coderOnTwo.release
+        const lease = yield* Fiber.join(waiting)
+        assert.deepStrictEqual([lease.executor.id, lease.borrowed], ["two", false])
+        // With nobody else at all, the out-of-round executor is borrowed, as before.
+        yield* roster.exclude(Exclusion.make({ id: "two", kind: "run", reason: "not logged in" }))
+        const borrowed = yield* roster.lease("judge", { avoid: ["one"], borrow: one })
+        assert.deepStrictEqual([borrowed.executor.id, borrowed.borrowed], ["one", true])
       })
     )
   )

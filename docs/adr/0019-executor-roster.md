@@ -106,3 +106,23 @@ knowing how many executors there are.
 - The persisted exclusion state is advisory and last-writer-wins across
   concurrent runs; a stale entry costs one probe or one failed call.
 - `llm4zio` has no counterpart; `docs/parity.md` records the divergence.
+
+## Amendment (2026-10-05): borrowing when the round is held by coders
+
+Decision 2 lets a call borrow the context's own executor only when
+independence "cannot be served at all". A roster whose executors' every
+slot a coder may hold (one slot each — the default — or `coderSlots` equal
+to `slots`) fills with story coders at the default concurrency, and each
+story's per-call seat then waits for another story to end, while that
+story waits the same way: the run saturates. A coder's slot frees only
+when its story ends, so waiting on one is waiting on a story, not on a
+call. The roster (`LeaseOptions.borrow`) now borrows the context's own
+executor — whose coder is idle for the length of the call — in that case
+too, as soon as every executor in the round that could take the role has
+all its slots held by coders, and the event says which case it is
+(`ExecutorLeased.because`: `nobody` or `held`). A call in flight on another
+executor is still waited for; an executor out of the round is never
+borrowed to sidestep a coder, since the story holding the slot will free
+it. Independence stays the rule wherever an executor keeps a slot for
+reasoning; a roster of single-slot executors trades it for progress and
+is told so on every such call.
