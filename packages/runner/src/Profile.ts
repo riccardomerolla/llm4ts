@@ -65,6 +65,15 @@ export const Gap = Schema.Struct({
 })
 export type Gap = typeof Gap.Type
 
+/** The coder's tool calls by kind of work (build, install and git count as other). */
+export const ToolCalls = Schema.Struct({
+  explore: Schema.Int,
+  edit: Schema.Int,
+  test: Schema.Int,
+  other: Schema.Int
+})
+export type ToolCalls = typeof ToolCalls.Type
+
 export const StoryProfile = Schema.Struct({
   id: Schema.String,
   executor: Schema.optionalKey(Schema.String),
@@ -81,7 +90,14 @@ export const StoryProfile = Schema.Struct({
    * call) but not ended: a run still going. Counted as model time so far.
    */
   openTurnMs: Ms,
-  openTurnTools: Schema.Int
+  openTurnTools: Schema.Int,
+  toolCalls: ToolCalls,
+  /** Task stages the coder ran on this lane: the tasks it gave itself, plus any revision. */
+  tasks: Schema.Int,
+  /** From the story's start to the coder's first edit; absent when it never edited. */
+  firstEditMs: Schema.optionalKey(Ms),
+  /** Explore calls (ls, find, grep, read) made before that first edit. */
+  exploreBeforeEdit: Schema.Int
 })
 export type StoryProfile = typeof StoryProfile.Type
 
@@ -159,6 +175,10 @@ interface Lane {
   /** Since when a coder turn has been working without ending, and its tool calls. */
   openSince: number | undefined
   openTools: number
+  tasks: number
+  toolCalls: { explore: number; edit: number; test: number; other: number }
+  firstEdit: number | undefined
+  exploreBeforeEdit: number
 }
 
 interface Lease {
@@ -321,9 +341,20 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
             skipped: false,
             moments: [{ at, what: describe(event) }],
             openSince: undefined,
-            openTools: 0
+            openTools: 0,
+            tasks: 0,
+            toolCalls: { explore: 0, edit: 0, test: 0, other: 0 },
+            firstEdit: undefined,
+            exploreBeforeEdit: 0
           })
           continue
+        }
+        if (
+          lane !== undefined &&
+          !storyStage.test(event.stage) &&
+          !event.stage.startsWith(`story ${lane.id}:`)
+        ) {
+          lane.tasks += 1
         }
         break
       }
@@ -340,6 +371,17 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
       case "Timed": {
         allTimed.push({ at, event })
         lane?.timed.push({ at, event })
+        if (lane !== undefined && event.kind === "tool" && event.category !== undefined) {
+          const kind =
+            event.category === "explore" || event.category === "edit" || event.category === "test"
+              ? event.category
+              : "other"
+          lane.toolCalls[kind] += 1
+          if (kind === "edit" && lane.firstEdit === undefined) {
+            lane.firstEdit = at - lane.start
+            lane.exploreBeforeEdit = lane.toolCalls.explore
+          }
+        }
         if (lane !== undefined && event.kind === "model" && event.label === "coder") {
           lane.openSince = undefined
           lane.openTools = 0
@@ -578,6 +620,10 @@ const storyProfile = (
     gaps: estimated ? [] : gapsOf(lane),
     openTurnMs,
     openTurnTools: open ? lane.openTools : 0,
+    toolCalls: { ...lane.toolCalls },
+    tasks: lane.tasks,
+    ...(lane.firstEdit === undefined ? {} : { firstEditMs: lane.firstEdit }),
+    exploreBeforeEdit: lane.exploreBeforeEdit,
     id: lane.id,
     ...(lane.executor === undefined ? {} : { executor: lane.executor }),
     status: lane.status,
@@ -680,6 +726,18 @@ const findingsOf = (facts: {
       candidates.push({
         ms: story.openTurnMs,
         text: `${story.id}: a coder turn still running for ${duration(story.openTurnMs)} (${plural(story.openTurnTools, "tool call")} so far)`
+      })
+    }
+  }
+  for (const story of facts.stories) {
+    const wandered =
+      story.firstEditMs !== undefined &&
+      story.wallMs >= 60_000 &&
+      (story.exploreBeforeEdit >= 15 || story.firstEditMs >= story.wallMs / 4)
+    if (wandered && story.firstEditMs !== undefined) {
+      candidates.push({
+        ms: story.firstEditMs,
+        text: `${story.id}: ${plural(story.exploreBeforeEdit, "explore call")} and ${duration(story.firstEditMs)} before the coder's first edit — it found its way instead of being told where to go`
       })
     }
   }
@@ -795,6 +853,41 @@ export const renderProfile = (report: ProfileReport): string => {
           : ""
       ])
     ),
+    ...(report.stories.every(
+      (story) =>
+        story.toolCalls.explore +
+          story.toolCalls.edit +
+          story.toolCalls.test +
+          story.toolCalls.other ===
+        0
+    )
+      ? []
+      : [
+          "",
+          "Coder work per story",
+          ...table(
+            [
+              "story",
+              "tasks",
+              "explore",
+              "edit",
+              "test",
+              "other",
+              "before 1st edit",
+              "1st edit at"
+            ],
+            report.stories.map((story) => [
+              story.id,
+              String(story.tasks),
+              String(story.toolCalls.explore),
+              String(story.toolCalls.edit),
+              String(story.toolCalls.test),
+              String(story.toolCalls.other),
+              story.firstEditMs === undefined ? "" : `${story.exploreBeforeEdit} explore`,
+              story.firstEditMs === undefined ? "never" : duration(story.firstEditMs)
+            ])
+          )
+        ]),
     ...(report.skipped.length === 0
       ? []
       : [`  skipped (merged on an earlier run): ${report.skipped.join(", ")}`]),

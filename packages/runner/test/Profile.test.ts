@@ -298,3 +298,76 @@ describe("makeProfileProgram", () => {
     })
   )
 })
+
+/**
+ * One story, "list", whose coder gave itself two tasks and spent 16 explore
+ * calls over 8 minutes before its first edit; a later test call; 10 minutes
+ * in all.
+ */
+const wandering: ReadonlyArray<TreeInput> = [
+  at(0, StageStarted.make({ stage: "story list", lane: "list", executor: "gemini" })),
+  at(1, StageStarted.make({ stage: "Add the list page", lane: "list" })),
+  ...Array.from({ length: 16 }, (_, index) =>
+    at(
+      10 + index * 30,
+      Timed.make({ kind: "tool", label: "grep", category: "explore", ms: 200, lane: "list" })
+    )
+  ),
+  at(
+    8 * minute,
+    Timed.make({ kind: "tool", label: "write_file", category: "edit", ms: 300, lane: "list" })
+  ),
+  at(8 * minute + 5, Timed.make({ kind: "model", label: "coder", ms: 8 * 60_000, lane: "list" })),
+  at(8 * minute + 10, StageStarted.make({ stage: "Add the list test", lane: "list" })),
+  at(
+    9 * minute,
+    Timed.make({
+      kind: "tool",
+      label: "run_shell_command",
+      category: "test",
+      ms: 20_000,
+      lane: "list"
+    })
+  ),
+  at(
+    9 * minute + 30,
+    Timed.make({ kind: "tool", label: "write_file", category: "edit", ms: 300, lane: "list" })
+  ),
+  at(10 * minute, Timed.make({ kind: "model", label: "coder", ms: 110_000, lane: "list" })),
+  at(10 * minute, StageCompleted.make({ stage: "story list", lane: "list" }))
+]
+
+describe("coder work per story", () => {
+  it("counts tool calls by kind, the coder's tasks, and what came before the first edit", () => {
+    const [list] = profileOf(wandering).stories
+    assert.deepStrictEqual(list?.toolCalls, { explore: 16, edit: 2, test: 1, other: 0 })
+    assert.strictEqual(list?.tasks, 2)
+    assert.strictEqual(list?.firstEditMs, 8 * 60_000)
+    assert.strictEqual(list?.exploreBeforeEdit, 16)
+  })
+
+  it("names a story that found its way instead of being told where to go", () => {
+    const findings = profileOf(wandering).findings.map((finding) => finding.text)
+    assert.include(
+      findings.join("\n"),
+      "list: 16 explore calls and 8m00s before the coder's first edit — it found its way instead of being told where to go"
+    )
+    const text = renderProfile(profileOf(wandering))
+    assert.include(text, "Coder work per story")
+    assert.include(text, "before 1st edit")
+  })
+
+  it("an older trace without tool categories profiles as before", () => {
+    const [home] = profileOf(measured).stories
+    assert.deepStrictEqual(home?.toolCalls, { explore: 0, edit: 0, test: 0, other: 0 })
+    assert.isUndefined(home?.firstEditMs)
+    assert.strictEqual(home?.exploreBeforeEdit, 0)
+    assert.notInclude(renderProfile(profileOf(measured)), "Coder work per story")
+    assert.notInclude(
+      profileOf(measured)
+        .findings.map((finding) => finding.text)
+        .join("\n"),
+      "found its way"
+    )
+  })
+})
