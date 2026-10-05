@@ -74,6 +74,26 @@ describe("orientationOf", () => {
     assert.include(text, "## Repository orientation")
   })
 
+  it("noise folders are noise only at the top level, except dependencies and dot-state", () => {
+    const text = orientationOf({
+      files: [
+        "build/bundle.js",
+        "out/site.html",
+        "src/features/build/page.tsx",
+        "src/out/report.ts",
+        "packages/app/node_modules/x/index.js",
+        "packages/app/.llm4ts/trace.jsonl"
+      ],
+      budget: 8_000
+    })
+    assert.include(text, "src/features/build/page.tsx")
+    assert.include(text, "src/out/report.ts")
+    assert.notInclude(text, "build/bundle.js")
+    assert.notInclude(text, "out/site.html")
+    assert.notInclude(text, "node_modules")
+    assert.notInclude(text, ".llm4ts")
+  })
+
   it("a folder too deep is summarised by its count, not expanded", () => {
     const deep = ["a/b/c/d/e/one.ts", "a/b/c/d/e/two.ts", "a/b/c/d/f/three.ts"]
     const text = orientationOf({ files: deep, budget: 8_000 })
@@ -92,5 +112,7 @@ describe("orientationChars", () => {
       orientationChars: 12_000
     })
     assert.deepStrictEqual(orientationChars({ LLM4TS_ORIENTATION_CHARS: "lots" }), {})
+    assert.deepStrictEqual(orientationChars({ LLM4TS_ORIENTATION_CHARS: "" }), {})
+    assert.deepStrictEqual(orientationChars({ LLM4TS_ORIENTATION_CHARS: "  " }), {})
   })
 })

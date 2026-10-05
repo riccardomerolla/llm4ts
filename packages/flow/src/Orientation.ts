@@ -18,8 +18,10 @@ export interface OrientationInput {
 
 export const defaultOrientationChars = 8_000
 
-/** Folders never worth a coder's attention: dependencies, build output, llm4ts state. */
-const noiseDirs = new Set(["node_modules", "dist", "build", "out", "coverage", ".git", ".llm4ts"])
+/** Folders never worth a coder's attention, wherever they sit: dependencies and state. */
+const noiseAnywhere = new Set(["node_modules", ".git", ".llm4ts"])
+/** Build output is noise at the top level only: `src/features/build/` is code. */
+const noiseAtRoot = new Set(["dist", "build", "out", "coverage"])
 const noiseFiles = new Set(["pnpm-lock.yaml", "package-lock.json", "yarn.lock", "bun.lockb"])
 
 /** Folders deeper than this are summarised by their count. */
@@ -39,7 +41,11 @@ const folderOf = (path: string): Folder => ({ path, files: 0, children: new Map(
 
 const isNoise = (file: string): boolean => {
   const parts = file.split("/")
-  return parts.some((part) => noiseDirs.has(part)) || noiseFiles.has(parts.at(-1) ?? "")
+  return (
+    parts.some((part) => noiseAnywhere.has(part)) ||
+    (parts.length > 1 && noiseAtRoot.has(parts[0] ?? "")) ||
+    noiseFiles.has(parts.at(-1) ?? "")
+  )
 }
 
 const treeOf = (files: ReadonlyArray<string>): Folder => {
@@ -178,9 +184,9 @@ export const orientationOf = (input: OrientationInput): string | undefined => {
 export const orientationChars = (
   environment: Readonly<Record<string, string | undefined>>
 ): { readonly orientationChars?: number } => {
-  const raw = environment.LLM4TS_ORIENTATION_CHARS
-  const value = Number(raw?.trim() ?? "")
-  return raw === undefined || !Number.isInteger(value) || value < 0
+  const raw = environment.LLM4TS_ORIENTATION_CHARS?.trim()
+  const value = Number(raw ?? "")
+  return raw === undefined || raw.length === 0 || !Number.isInteger(value) || value < 0
     ? {}
     : { orientationChars: value }
 }

@@ -52,6 +52,16 @@ describe("appendNote and withNotes", () => {
     assert.include(trimmed, "### third task")
   })
 
+  it("a finding's own headings are flattened so eviction never splits a section", () => {
+    const first = appendNote(undefined, "t1", "- a\n\n### sub heading\n- b")
+    assert.strictEqual(first, "### t1\n- a\n\nsub heading\n- b")
+    const second = appendNote(first, "t2", "- c")
+    const trimmed = appendNote(second, "t3", "- d", 30)
+    assert.notInclude(trimmed, "t1")
+    assert.notInclude(trimmed, "- b")
+    assert.include(trimmed, "### t3")
+  })
+
   it("the newest section always survives, even alone over the limit", () => {
     const only = appendNote(undefined, "big", "y".repeat(100), 20)
     assert.include(only, "### big")

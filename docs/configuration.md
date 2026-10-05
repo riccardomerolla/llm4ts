@@ -52,8 +52,10 @@ off) is how much of the repository orientation digest (folders with counts,
 scripts, where tests live) the planner and every coder see (ADR 0025).
 `LLM4TS_TRANSCRIPT=on` (what `llm4ts run --transcript` sets) records each
 seat's input and output under `.llm4ts/transcripts/`, for `llm4ts watch
---tail`; `epic-stories` records them by default (`off` to stop), and `--land`
-compacts them to their shape (calls, tools, timings; no content).
+--tail`; `epic-stories` records them by default (`off` to stop) — a `--plan-only` or
+refine-planning run therefore leaves a small transcript of the planner's call
+too — and `--land` compacts them to their shape (calls, tools, timings; no
+content).
 
 With a Google Cloud project and a **Vertex AI service-account key** as the
 only model access, see `vertex-service-account.md`: which harnesses accept

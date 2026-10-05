@@ -213,6 +213,16 @@ const countBy = (items: ReadonlyArray<string>): string =>
     .map(([key, count]) => `${key} ×${count}`)
     .join(", ")
 
+/**
+ * A transcript `--land` compacted: every call's input is empty and no reply
+ * is left (ADR 0025). Its shape is still worth reading; its words are gone.
+ */
+const isCompacted = (entries: ReadonlyArray<TranscriptEntry>): boolean =>
+  entries.length > 0 &&
+  entries.every((entry) =>
+    entry._tag === "Call" ? entry.input.length === 0 : entry._tag !== "Reply"
+  )
+
 const head = (text: string, limit = transcriptHead): string => {
   const flat = text.replace(/\s+/g, " ").trim()
   return flat.length <= limit ? flat : `${flat.slice(0, limit)}…`
@@ -373,11 +383,17 @@ const storySection = (
         `- failed tool results: ${failures.length}`
       ]
       const firstFailure = failures[0]
-      if (firstFailure !== undefined && firstFailure._tag === "ToolResult") {
+      if (
+        firstFailure !== undefined &&
+        firstFailure._tag === "ToolResult" &&
+        firstFailure.output.length > 0
+      ) {
         transcriptLines.push(`- first failed tool result: ${head(firstFailure.output)}`)
       }
       if (lastCall !== undefined && lastCall._tag === "Call") {
-        transcriptLines.push(`- last call: ${lastCall.role} — ${head(lastCall.input)}`)
+        transcriptLines.push(
+          `- last call: ${lastCall.role} — ${isCompacted(entries) ? "(compacted)" : head(lastCall.input)}`
+        )
       }
       if (lastReply !== undefined && lastReply._tag === "Reply") {
         transcriptLines.push(`- last reply: ${head(lastReply.text)}`)
@@ -460,7 +476,14 @@ export const renderRetroDigest = (inputs: RetroInputs): string => {
     "",
     `- run outcome: ${trace.outcome ?? "unknown (the trace has no end line: the process died)"}`,
     `- stories: ${inputs.plan.stories.length} planned, ${candidates.length} to look at (${candidates.map((c) => c.story.id).join(", ") || "none"})`,
-    `- transcripts: ${inputs.transcripts === undefined ? "none (the run was started without --transcript)" : "present"}`,
+    `- transcripts: ${
+      inputs.transcripts === undefined
+        ? "none (the run was started without --transcript)"
+        : [...inputs.transcripts.values()].some((entries) => entries.length > 0) &&
+            [...inputs.transcripts.values()].every(isCompacted)
+          ? "present, compacted (calls, tools and timings; content removed on land)"
+          : "present"
+    }`,
     ...(retries.length === 0 ? [] : [`- retries across the run: ${countBy(retries)}`]),
     ...(runLines.length === 0
       ? []

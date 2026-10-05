@@ -631,6 +631,69 @@ describe("Flow", () => {
     })
   )
 
+  it.effect("carry: Findings given on the confirmation turn are kept too", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      // The fake git's first diff (after the task turn) is empty, the next (after the
+      // confirmation turn) shows work: counter at 1 skips exactly one.
+      const diffCalls = yield* Ref.make(1)
+      const turns = yield* Ref.make(0)
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      // First turn: nothing done, no findings. Confirmation turn: the work, with findings.
+      const twoTurnCoder: LlmServiceShape = {
+        ...messageSnapshotCoderService(yield* Ref.make<ReadonlyArray<ReadonlyArray<Message>>>([])),
+        executeStreamWithHistory: (_messages) =>
+          Stream.unwrap(
+            Ref.getAndUpdate(turns, (current) => current + 1).pipe(
+              Effect.map((seen) =>
+                Stream.make(
+                  LlmChunk.make({
+                    delta:
+                      seen === 0
+                        ? "I looked around and did nothing yet."
+                        : "Implemented.\n\n## Findings\n- learned on the confirmation turn",
+                    finishReason: "stop"
+                  })
+                )
+              )
+            )
+          )
+      }
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: twoTurnCoder,
+        git: makeFakeGitSkippingFirstDiff(gitLog, diffCalls),
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement the plan",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+      yield* implementPlanFlow(context, {
+        store,
+        planPath: ".llm4ts/plan-carry-confirm.md",
+        plan: Effect.succeed(
+          Plan.make({
+            epicId: "epic-carry-confirm",
+            tasks: [Task.make({ title: "only task", description: "do the thing" })]
+          })
+        ),
+        chatPerTask: true,
+        carry: {
+          read: memory.store.read(".llm4ts/notes.md"),
+          write: (notes) => memory.store.writeAtomic(".llm4ts/notes.md", notes)
+        }
+      })
+      const notes = yield* memory.store.read(".llm4ts/notes.md")
+      assert.include(notes ?? "", "### only task")
+      assert.include(notes ?? "", "learned on the confirmation turn")
+    })
+  )
+
   it.effect(
     "chatPerTask true: a task skipped for producing no changes still marks progress complete for the next task's fresh Chat",
     () =>

@@ -28,6 +28,16 @@ where to go (ADR 0025).
 - **Transcripts are on by default for epic-stories** (`LLM4TS_TRANSCRIPT=off`
   turns them off); `--land` compacts them to their shape instead of deleting
   them, so a slow story stays explainable without keeping customer code.
+- Reviewed before release: unsafe `readFirst` anchors (`../x`, `/abs`, `.`)
+  are dropped before git sees them, in refine rounds too; anchors take at
+  most half of the starting-code budget; a changed story entry drops its
+  carried notes; the profile's first-edit clock starts at the coder's first
+  task and the "found its way" finding needs real explore calls; a
+  `## Findings:` heading with a colon is read; findings given on the
+  confirmation turn are kept; `build/` and `out/` are noise only at the top
+  level; an empty `LLM4TS_ORIENTATION_CHARS` or `LLM4TS_STORY_CONTEXT_CHARS`
+  means the default; `--land` reports unreadable transcript lines it dropped;
+  a retro digest says when its transcripts are compacted.
 
 ## 2.28.1
 

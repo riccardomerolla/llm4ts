@@ -237,6 +237,30 @@ const loadInputs = (files: PlainFileStoreShape) =>
   })
 
 describe("retro digest", () => {
+  it.effect("says when the transcripts are compacted: shape only, no content to quote", () =>
+    Effect.gen(function* () {
+      const compacted: ReadonlyArray<TranscriptEntry> = [
+        { _tag: "Call", at: 1, call: "call-1", role: "coder", input: "" },
+        { _tag: "Tool", at: 2, call: "call-1", tool: "grep", args: "" },
+        { _tag: "ToolResult", at: 3, call: "call-1", output: "", failed: true },
+        { _tag: "End", at: 4, call: "call-1", ms: 42_000 }
+      ]
+      const files = yield* seeded
+      const inputs = {
+        ...(yield* loadInputs(files)),
+        transcripts: new Map([["a", compacted]]),
+        budget: 8_000
+      }
+      const digest = renderRetroDigest(inputs)
+      assert.include(
+        digest,
+        "transcripts: present, compacted (calls, tools and timings; content removed on land)"
+      )
+      assert.include(digest, "- last call: coder — (compacted)")
+      assert.notInclude(digest, "first failed tool result: ")
+    })
+  )
+
   it.effect("looks at failed and waiting stories, never merged ones, and sums up each one", () =>
     Effect.gen(function* () {
       const files = yield* seeded

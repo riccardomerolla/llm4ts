@@ -208,17 +208,21 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
         // details. `planSoFar`, threaded through by implementTaskLoop, is the
         // single source of truth for completion progress instead.
         const notes = options.carry === undefined ? undefined : yield* options.carry.read
-        const reply = yield* coder.ask(
-          options.carry === undefined
-            ? plan.taskPrompt(task)
-            : `${withNotes(plan.taskPrompt(task), notes)}\n${findingsRequest}`
+        /** What the task's reply learned goes to the carried notes, whichever turn did the work. */
+        const keepFindings = (reply: string): Effect.Effect<void, FlowError> =>
+          Effect.gen(function* () {
+            const found = options.carry === undefined ? undefined : findingsIn(reply)
+            if (options.carry !== undefined && found !== undefined) {
+              yield* options.carry.write(appendNote(notes, task.title, found))
+            }
+          })
+        yield* keepFindings(
+          yield* coder.ask(
+            options.carry === undefined
+              ? plan.taskPrompt(task)
+              : `${withNotes(plan.taskPrompt(task), notes)}\n${findingsRequest}`
+          )
         )
-        if (options.carry !== undefined) {
-          const found = findingsIn(reply)
-          if (found !== undefined) {
-            yield* options.carry.write(appendNote(notes, task.title, found))
-          }
-        }
         const produced = yield* context.git.diffAll
         if (produced.trim().length === 0) {
           // An empty diff is ambiguous: the task may be genuinely satisfied
@@ -233,6 +237,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
               "Otherwise, implement the task now."
             ].join("\n")
           )
+          yield* keepFindings(confirmation)
           const afterConfirmation = yield* context.git.diffAll
           if (afterConfirmation.trim().length === 0) {
             const judged =

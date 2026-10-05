@@ -1605,25 +1605,32 @@ const compactedEntry = (entry: TranscriptEntry): TranscriptEntry | undefined => 
   }
 }
 
+export interface CompactedTranscripts {
+  /** Runs that had transcripts to compact. */
+  readonly runs: number
+  /** Lines no entry could be read from (a torn write): dropped, since they may hold content. */
+  readonly unreadable: number
+}
+
 /**
  * Rewrites the transcripts of these runs keeping their shape — calls, roles,
  * executors, tool names, timings — and dropping every input, reply, tool
  * argument and output, so a landed epic keeps no copy of its customer code
  * yet `llm4ts profile` and a retro can still see how each story went.
- * Returns how many runs had transcripts.
  */
 export const compactTranscripts = (
   workDir: string,
   runIds: ReadonlyArray<string>
-): Effect.Effect<number> =>
+): Effect.Effect<CompactedTranscripts> =>
   Effect.reduce(
     runIds,
-    () => 0,
+    (): CompactedTranscripts => ({ runs: 0, unreadable: 0 }),
     (compacted, runId) => {
       const directory = join(workDir, ".llm4ts", "transcripts", runId)
       return Effect.gen(function* () {
         yield* Effect.tryPromise(() => stat(directory))
         const names = yield* Effect.tryPromise(() => readdir(directory))
+        let unreadable = 0
         for (const name of names.filter((candidate) => candidate.endsWith(".jsonl"))) {
           const path = join(directory, name)
           const text = yield* Effect.tryPromise(() => readFile(path, "utf8"))
@@ -1633,6 +1640,7 @@ export const compactTranscripts = (
             .flatMap((line) => {
               const decoded = decodeTranscriptLine(line)
               if (decoded._tag === "None") {
+                unreadable += 1
                 return []
               }
               const kept = compactedEntry(decoded.value)
@@ -1642,7 +1650,7 @@ export const compactTranscripts = (
             writeFile(path, lines.length === 0 ? "" : `${lines.join("\n")}\n`, { mode: 0o600 })
           )
         }
-        return compacted + 1
+        return { runs: compacted.runs + 1, unreadable: compacted.unreadable + unreadable }
       }).pipe(Effect.orElseSucceed(() => compacted))
     }
   )
@@ -1654,10 +1662,9 @@ export const compactTranscripts = (
 export const storyContextChars = (
   environment: Readonly<Record<string, string | undefined>>
 ): { readonly contextChars?: number } => {
-  const value = Number(environment.LLM4TS_STORY_CONTEXT_CHARS?.trim() ?? "")
-  return environment.LLM4TS_STORY_CONTEXT_CHARS === undefined ||
-    !Number.isInteger(value) ||
-    value < 0
+  const raw = environment.LLM4TS_STORY_CONTEXT_CHARS?.trim()
+  const value = Number(raw ?? "")
+  return raw === undefined || raw.length === 0 || !Number.isInteger(value) || value < 0
     ? {}
     : { contextChars: value }
 }
@@ -2110,10 +2117,14 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               .map((run) => run.runId)
               .filter((runId) => runId !== context.trace?.runId)
             const compacted = yield* compactTranscripts(input.workDir, earlier)
-            if (compacted > 0) {
+            if (compacted.runs > 0) {
               yield* events.publish(
                 Info.make({
-                  message: `epic ${plan.epicId}: compacted ${compacted} run transcript(s) (shape kept, content removed)`
+                  message:
+                    `epic ${plan.epicId}: compacted ${compacted.runs} run transcript(s) (shape kept, content removed)` +
+                    (compacted.unreadable === 0
+                      ? ""
+                      : `; ${compacted.unreadable} unreadable line(s) dropped`)
                 })
               )
             }

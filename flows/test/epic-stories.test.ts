@@ -737,12 +737,14 @@ describe("compactTranscripts", () => {
         yield* Effect.promise(() =>
           writeFile(
             join(dir(run), "home.jsonl"),
-            entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n"
+            [...entries.map((entry) => JSON.stringify(entry)), "{not json, a torn write"].join(
+              "\n"
+            ) + "\n"
           )
         )
       }
       const compacted = yield* compactTranscripts(root, ["run-1", "missing"])
-      assert.strictEqual(compacted, 1)
+      assert.deepStrictEqual(compacted, { runs: 1, unreadable: 1 })
       const text = yield* Effect.promise(() => readFile(join(dir("run-1"), "home.jsonl"), "utf8"))
       const decode = Schema.decodeUnknownSync(Schema.fromJsonString(TranscriptEntry))
       const lines = text
@@ -791,6 +793,7 @@ describe("storyContextChars", () => {
       contextChars: 80_000
     })
     assert.deepStrictEqual(storyContextChars({ LLM4TS_STORY_CONTEXT_CHARS: "lots" }), {})
+    assert.deepStrictEqual(storyContextChars({ LLM4TS_STORY_CONTEXT_CHARS: "" }), {})
   })
 })
 

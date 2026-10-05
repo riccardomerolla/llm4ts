@@ -65,9 +65,16 @@ export const appendNote = (
   found: string,
   limit = notesLimit
 ): string => {
+  // A finding's own headings are flattened: `### ` is this file's section
+  // marker, and eviction must never split a section in two.
+  const flat = found
+    .trim()
+    .split(/\r?\n/u)
+    .map((line) => line.replace(/^#{1,6}[ \t]*/u, ""))
+    .join("\n")
   const sections = [
     ...(notes === undefined || notes.trim().length === 0 ? [] : notes.split(/\n\n(?=### )/u)),
-    `### ${title}\n${found.trim()}`
+    `### ${title}\n${flat}`
   ]
   while (sections.length > 1 && sections.join("\n\n").length > limit) {
     sections.shift()
