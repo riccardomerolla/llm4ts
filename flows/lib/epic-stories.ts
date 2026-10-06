@@ -59,7 +59,7 @@ import {
   type EpicReport
 } from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
-import { ReviewIssue, type FixPromptOptions } from "@llm4ts/flow/Review"
+import { ReviewIssue, reviewRulesPreamble, type FixPromptOptions } from "@llm4ts/flow/Review"
 import { compactGateArtifacts, gatesIn, type GateRunOptions } from "@llm4ts/flow/Gates"
 import { loadTranscript, nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import {
@@ -1337,6 +1337,8 @@ export const storyJudgeQuery = (
         ]
       : []),
     "",
+    reviewRulesPreamble,
+    "",
     "The response holds the complete subject. Judge what it shows; do not explore the",
     "repository, read other files, or run anything."
   ].join("\n")
@@ -1563,6 +1565,20 @@ export const gateTailChars = (
   const raw = Number.parseInt(environment.LLM4TS_GATE_TAIL_CHARS ?? "", 10)
   return Number.isFinite(raw) && raw > 0 ? raw : 4000
 }
+
+/** `LLM4TS_REVIEW_VOTES` (default 1): independent votes of the adversarial lens per round. */
+export const reviewVotes = (
+  environment: Readonly<Record<string, string | undefined>>
+): { readonly votes?: number } => {
+  const raw = Number.parseInt(environment.LLM4TS_REVIEW_VOTES ?? "", 10)
+  return Number.isFinite(raw) && raw > 1 ? { votes: raw } : {}
+}
+
+/** `LLM4TS_REVIEW_FIXER=separate`: review findings go to a fresh fixer chat, not the implementer's. */
+export const reviewFixer = (
+  environment: Readonly<Record<string, string | undefined>>
+): { readonly fixer?: "separate" } =>
+  environment.LLM4TS_REVIEW_FIXER?.trim().toLowerCase() === "separate" ? { fixer: "separate" } : {}
 
 export const gateRunOptions = (
   environment: Readonly<Record<string, string | undefined>>
@@ -2266,6 +2282,8 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                     )
                   }),
               fix: fixPromptOptions(process.env),
+              ...reviewVotes(process.env),
+              ...reviewFixer(process.env),
               // A task's `verified:` claims are checked against the tool calls
               // its transcript shows (ADR 0027 decision 6); no transcript, no check.
               toolCalls: (story, since) =>

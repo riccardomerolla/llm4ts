@@ -23,6 +23,7 @@ import {
 } from "./OracleGuard.ts"
 import { cachedReview, fingerprintOf } from "./ReviewCache.ts"
 import {
+  ReviewFindingDemoted,
   Info,
   JudgmentObserved,
   ReviewFinding,
@@ -32,7 +33,7 @@ import {
   type FlowEventsShape
 } from "./FlowEvents.ts"
 import { attr, withKindSpan } from "./Spans.ts"
-import { Reviewer } from "./Reviewer.ts"
+import { Reviewer, parseReviewer } from "./Reviewer.ts"
 import { publishUsage } from "./Usage.ts"
 import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
 import { truth, type JudgmentResult, type TruthAnswer } from "@llm4ts/core/judgment/Schemas"
@@ -111,6 +112,40 @@ export const reviewJsonSchema: JsonSchema = {
 const reviewer = (name: string, systemPrompt: string, screen: string, files = ".*"): Reviewer =>
   Reviewer.make({ name, systemPrompt, files, screen })
 
+/**
+ * Rules with teeth (ADR 0027 decision 9), in front of every lens and the
+ * judge rubric: what no reviewer accepts whatever its concern. A pack's
+ * `## Review rules` extends it; `preamble: off` leaves it out.
+ */
+export const reviewRulesPreamble = [
+  "Rules every reviewer applies, whatever its concern:",
+  "- A stubbed body, a placeholder return, a TODO where logic belongs, or a function that only",
+  "  satisfies the type checker is a Critical finding.",
+  "- A skipped, deleted, weakened or hard-coded test is a Critical finding.",
+  "- A layering workaround (a runtime hook where a signature should change, a cast or `any`",
+  "  to silence a type, a duplicated type to avoid an import) is a Critical finding.",
+  "- If the change needs a paragraph-long comment to justify why a workaround is acceptable,",
+  "  the code is wrong, not the comment; report it."
+].join("\n")
+
+/** The one lens whose job is the Bun port's reviewer brief: find why the diff does not work. */
+export const adversarialReviewer = reviewer(
+  "adversarial",
+  [
+    "Your only job is to find reasons this change does not work. Assume the code is wrong and",
+    "look for the evidence: a path that is never taken, an error that is swallowed, a value that",
+    "is wrong at a boundary (empty, zero, negative, unicode, concurrent), a promise or effect that",
+    "is never awaited or yielded, a resource that leaks, a test that passes without exercising the",
+    "change. The diff is the whole subject. Report every concrete way it fails as a finding with",
+    "the file and line; an empty list means you looked and found none, not that it is fine."
+  ].join("\n"),
+  "The diff plausibly contains a defect an adversarial reader would find: a wrong boundary, an unhandled path, a leaked resource, a test that does not exercise the change."
+)
+
+/** The prompt a lens is asked with: the preamble (unless the lens opts out), then its own rules. */
+export const lensPrompt = (lens: Reviewer): string =>
+  lens.preamble === false ? lens.systemPrompt : `${reviewRulesPreamble}\n\n${lens.systemPrompt}`
+
 export const correctnessReviewer = reviewer(
   "code-functionality",
   [
@@ -165,12 +200,14 @@ export const effectReviewer = reviewer(
 )
 
 export const minimalReviewers: ReadonlyArray<Reviewer> = Object.freeze([
+  adversarialReviewer,
   correctnessReviewer,
   readabilityReviewer,
   testReviewer
 ])
 
 export const allReviewers: ReadonlyArray<Reviewer> = Object.freeze([
+  adversarialReviewer,
   correctnessReviewer,
   testReviewer,
   readabilityReviewer,
@@ -532,6 +569,112 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
   })
 })
 
+const placeKey = (issue: ReviewIssue): string =>
+  issue.file === undefined
+    ? `title:${issue.title.trim().toLowerCase()}`
+    : `${issue.file}:${issue.line ?? ""}`
+
+/**
+ * Independent votes of one lens merged (ADR 0027 decision 7): any Critical
+ * blocks; Warnings are unioned, one per place; an Info survives only when
+ * more than one vote raised it.
+ */
+export const mergeVotes = (votes: ReadonlyArray<ReviewResult>): ReviewResult => {
+  if (votes.length <= 1) {
+    return votes[0] ?? ReviewResult.make({ issues: [] })
+  }
+  const seen = new Map<string, { issue: ReviewIssue; count: number }>()
+  for (const vote of votes) {
+    for (const issue of vote.issues) {
+      const key = `${issue.severity}|${placeKey(issue)}`
+      const entry = seen.get(key)
+      if (entry === undefined) {
+        seen.set(key, { issue, count: 1 })
+      } else {
+        entry.count += 1
+      }
+    }
+  }
+  const issues = [...seen.values()]
+    .filter(({ issue, count }) => issue.severity !== "Info" || count > 1)
+    .map(({ issue }) => issue)
+  return ReviewResult.make({
+    issues,
+    summary: votes
+      .map((vote) => vote.summary)
+      .filter((summary) => summary.length > 0)
+      .join(" | ")
+  })
+}
+
+const inDiff = (file: string, changed: ReadonlyArray<string>): boolean => {
+  const wanted = file.replace(/^\.\//u, "")
+  return changed.some(
+    (path) => path === wanted || path.endsWith(`/${wanted}`) || wanted.endsWith(`/${path}`)
+  )
+}
+
+/**
+ * Findings that cannot be placed move down (ADR 0027 decision 10): a Critical
+ * without a file becomes a Warning, a finding whose file is not in the diff
+ * becomes an Info. Nothing is dropped; each move is published. With no
+ * changed-file list the result is returned as is.
+ */
+export const demoteUnplaced = Effect.fn("@llm4ts/flow/Review.demoteUnplaced")(function* (
+  lens: Reviewer,
+  result: ReviewResult,
+  changed: ReadonlyArray<string>,
+  events: FlowEventsShape
+): Effect.fn.Return<ReviewResult> {
+  if (changed.length === 0) {
+    return result
+  }
+  const issues: Array<ReviewIssue> = []
+  for (const issue of result.issues) {
+    let to: ReviewIssue["severity"] = issue.severity
+    let reason: string | undefined
+    if (issue.file !== undefined && !inDiff(issue.file, changed)) {
+      to = "Info"
+      reason = `names ${issue.file}, which the diff does not touch`
+    } else if (issue.file === undefined && issue.severity === "Critical") {
+      to = "Warning"
+      reason = "a Critical with no file"
+    }
+    if (reason !== undefined && to !== issue.severity) {
+      yield* events.publish(
+        ReviewFindingDemoted.make({
+          lens: lens.name,
+          title: issue.title,
+          from: issue.severity,
+          to,
+          reason
+        })
+      )
+      issues.push(ReviewIssue.make({ ...issue, severity: to }))
+    } else {
+      issues.push(issue)
+    }
+  }
+  return ReviewResult.make({ issues, summary: result.summary })
+})
+
+/** The repository's own review rules file, loaded as one extra lens; `undefined` when absent. */
+export const repoReviewRulesPath = ".llm4ts/review-rules.md"
+
+export const loadRepoReviewRules = (
+  files: PlainFileStoreShape,
+  workDir: string
+): Effect.Effect<Reviewer | undefined, FlowError> =>
+  files
+    .read(join(workDir, repoReviewRulesPath))
+    .pipe(
+      Effect.map((text) =>
+        text === undefined || text.trim().length === 0
+          ? undefined
+          : parseReviewer("repo-rules", text)
+      )
+    )
+
 export interface ReviewAndFixOptions {
   readonly reviewers: ReadonlyArray<Reviewer>
   readonly reviewerService: LlmServiceShape
@@ -569,6 +712,10 @@ export interface ReviewAndFixOptions {
   readonly fix?: FixPromptOptions
   /** Fail the round when the change deletes or skips tests (ADR 0027 decision 4). */
   readonly oracle?: OracleGateOptions
+  /** Independent votes of the adversarial lens per round (ADR 0027 decision 7). Default 1. */
+  readonly votes?: number
+  /** Applies a fix prompt somewhere other than the implementer's chat (a separate fixer). */
+  readonly fixWith?: (prompt: string) => Effect.Effect<string, FlowError>
 }
 
 export interface ReviewCacheLocation {
@@ -671,7 +818,7 @@ export const reviewWith = (
   taskTitle: string,
   diff: string
 ): Effect.Effect<ReviewResult, FlowLlmError> => {
-  const prompt = `${lens.systemPrompt}\n\n${reviewPrompt(taskTitle, diff)}`
+  const prompt = `${lensPrompt(lens)}\n\n${reviewPrompt(taskTitle, diff)}`
   // Usage is published per attempt — a schema retry costs real tokens too.
   const attempt = (text: string): Effect.Effect<ReviewResult, LlmError> =>
     service.executeStructuredWithUsage(text, ReviewResult, reviewJsonSchema).pipe(
@@ -739,16 +886,36 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
           : yield* prescreenReviewers(options.prescreen, options.events, diff, selected)
       const chosen = screened.reviewers
       const cache = options.cache
-      const review = (lens: Reviewer): Effect.Effect<ReviewResult, FlowError> =>
+      const votes = Math.max(1, options.votes ?? 1)
+      const reviewVote = (lens: Reviewer, vote: number): Effect.Effect<ReviewResult, FlowError> =>
         cache === undefined
           ? reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
           : cachedReview(
               cache.files,
-              join(cache.dir, `${fileSlug(lens.name)}.json`),
-              fingerprintOf([lens.name, lens.systemPrompt, options.taskTitle, diff]),
+              join(cache.dir, `${fileSlug(lens.name)}${vote === 0 ? "" : `-vote${vote}`}.json`),
+              fingerprintOf([lens.name, lensPrompt(lens), String(vote), options.taskTitle, diff]),
               reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
             )
-      const run = (lens: Reviewer) => Effect.map(review(lens), (result) => ({ lens, result }))
+      // Votes multiply only the adversarial lens: its recall is what independent
+      // eyes improve; the concern lenses are cheap scoped questions.
+      const review = (lens: Reviewer): Effect.Effect<ReviewResult, FlowError> =>
+        lens.name === adversarialReviewer.name && votes > 1
+          ? Effect.map(
+              Effect.forEach(
+                Array.from({ length: votes }, (_, index) => index),
+                (vote) => reviewVote(lens, vote),
+                { concurrency: "unbounded" }
+              ),
+              mergeVotes
+            )
+          : reviewVote(lens, 0)
+      const run = (lens: Reviewer) =>
+        Effect.flatMap(review(lens), (result) =>
+          Effect.map(demoteUnplaced(lens, result, files, options.events), (placed) => ({
+            lens,
+            result: placed
+          }))
+        )
       const parallelism = options.parallelism ?? 0
       const results =
         parallelism > 0
@@ -812,7 +979,8 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       if (settled) {
         return result
       }
-      yield* options.coder.ask(fixPrompt(result, options.fix))
+      const fix = fixPrompt(result, options.fix)
+      yield* options.fixWith === undefined ? options.coder.ask(fix) : options.fixWith(fix)
       return yield* loop(round + 1, result)
     })
 

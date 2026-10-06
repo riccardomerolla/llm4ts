@@ -88,6 +88,11 @@ launching a paid phase yourself.
   JUnit, pytest and Rust. A task that deletes a test file, adds a marker or
   lowers the passed-test count fails its gate round unless the plan says it
   may (`testsChange: true`).
+- `## Review rules` (optional) holds rules every lens of this pack carries
+  after the shared preamble (no stubs, no skipped tests, no layering
+  workaround); `- preamble: off` leaves the shared preamble out. A target
+  repository without a pack puts the same kind of rules in
+  `.llm4ts/review-rules.md`.
 - Judge dimensions are `- name (0..max): rubric`; extract scores every spec
   with them before a human approves it. Two to four precise dimensions beat
   many vague ones.

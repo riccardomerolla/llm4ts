@@ -171,6 +171,19 @@ export class CapabilityUnenforceable extends Schema.TaggedClass<CapabilityUnenfo
   }
 ) {}
 
+/** A review finding moved down a severity because it could not be placed in the diff (ADR 0027). */
+export class ReviewFindingDemoted extends Schema.TaggedClass<ReviewFindingDemoted>()(
+  "ReviewFindingDemoted",
+  {
+    lens: Schema.String,
+    title: Schema.String,
+    from: Schema.Literals(["Critical", "Warning", "Info"]),
+    to: Schema.Literals(["Critical", "Warning", "Info"]),
+    reason: Schema.String,
+    lane: Schema.optionalKey(Schema.String)
+  }
+) {}
+
 /** A task's `verified:` claims against the tool calls its transcript shows (ADR 0027). */
 export class EvidenceChecked extends Schema.TaggedClass<EvidenceChecked>()("EvidenceChecked", {
   task: Schema.String,
@@ -347,6 +360,7 @@ export const FlowEvent = Schema.Union([
   CapabilityDeniedEvent,
   CapabilityUnenforceable,
   EvidenceChecked,
+  ReviewFindingDemoted,
   Declassified,
   ExecutorLeased,
   ExecutorReleased,

@@ -167,6 +167,35 @@ describe("2.0 manifest keys", () => {
     })
   )
 
+  it.effect(
+    "reads '## Review rules': the text rides on every pack lens, `preamble: off` leaves the shared preamble out",
+    () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeMemoryWorkspace()
+        const head = "# Pack: p\n\nsource: cobol\nsources: .*\\.cbl\n"
+        yield* workspace.write(
+          "packs/p/pack.md",
+          `${head}\n## Review rules\n\n- preamble: off\n\nNever call the ESB from a page.\n`
+        )
+        yield* workspace.write("packs/p/reviewers/fidelity.md", "Check the mapping.")
+        yield* workspace.write("packs/q/pack.md", head)
+        yield* workspace.write("packs/q/reviewers/fidelity.md", "Check the mapping.")
+        const withRules = yield* loadPack(workspace, "packs/p")
+        assert.strictEqual(withRules.reviewRules?.preamble, false)
+        assert.strictEqual(withRules.reviewRules?.text, "Never call the ESB from a page.")
+        const lensP = withRules.lenses[0]
+        assert.include(
+          lensP?.systemPrompt ?? "",
+          "Pack review rules:\nNever call the ESB from a page."
+        )
+        assert.strictEqual(lensP?.preamble, false)
+        const plain = yield* loadPack(workspace, "packs/q")
+        assert.isUndefined(plain.reviewRules)
+        assert.strictEqual(plain.lenses[0]?.systemPrompt, "Check the mapping.")
+        assert.isUndefined(plain.lenses[0]?.preamble)
+      })
+  )
+
   it.effect("reads '## Oracle' test-file pattern and extra markers; absent means undefined", () =>
     Effect.gen(function* () {
       const workspace = yield* makeMemoryWorkspace()

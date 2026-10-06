@@ -599,3 +599,10 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   a claim that never ran is a `fabricated status` finding for the judge, the
   profile and the retro. llm4zio's coder prompts carry no shared contract
   and its claims are never checked. Additive.
+- Adversarial review (ADR 0027, 2026-10-06): an adversarial lens in the
+  minimal set, a shared rules preamble on every lens and judge rubric,
+  independent votes merged in code, a separate fixer, demotion of findings
+  that cannot be placed in the diff, and `.llm4ts/review-rules.md`. llm4zio
+  reviews with concern lenses once and the implementer applies its own
+  findings. The preamble changes every reviewer prompt once (one review-cache
+  miss per lens); votes and the fixer are off by default.

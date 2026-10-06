@@ -15,11 +15,18 @@ import { Reviewer } from "@llm4ts/flow/Pack"
 import {
   ReviewIssue,
   ReviewResult,
+  adversarialReviewer,
   applyTriage,
+  demoteUnplaced,
   fixPrompt,
+  lensPrompt,
   lintCommand,
   llmDriven,
-  reviewAndFixLoop
+  loadRepoReviewRules,
+  mergeVotes,
+  minimalReviewers,
+  reviewAndFixLoop,
+  reviewRulesPreamble
 } from "@llm4ts/flow/Review"
 import { GateBaseline } from "@llm4ts/flow/Gates"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
@@ -928,6 +935,164 @@ describe("oracle guard in the review loop (ADR 0027)", () => {
           (event) => event._tag === "Info" && event.message.includes("count comparison skipped")
         )
         assert.strictEqual(notes.length, 1)
+      })
+  )
+})
+
+describe("adversarial review (ADR 0027)", () => {
+  const issue = (
+    severity: "Critical" | "Warning" | "Info",
+    title: string,
+    file?: string,
+    line?: number
+  ): ReviewIssue =>
+    ReviewIssue.make({
+      severity,
+      title,
+      description: "",
+      ...(file === undefined ? {} : { file }),
+      ...(line === undefined ? {} : { line })
+    })
+
+  it("the adversarial lens is in the minimal set and every lens carries the preamble unless it opts out", () => {
+    assert.isTrue(minimalReviewers.some((lens) => lens.name === adversarialReviewer.name))
+    assert.include(lensPrompt(adversarialReviewer), reviewRulesPreamble)
+    assert.include(lensPrompt(adversarialReviewer), "Assume the code is wrong")
+    const quiet = Reviewer.make({ name: "quiet", systemPrompt: "Own rules.", preamble: false })
+    assert.strictEqual(lensPrompt(quiet), "Own rules.")
+  })
+
+  it("mergeVotes: any Critical blocks, Warnings are one per place, an Info needs two votes", () => {
+    const merged = mergeVotes([
+      ReviewResult.make({
+        issues: [
+          issue("Critical", "boom", "src/a.ts", 3),
+          issue("Warning", "naming", "src/a.ts", 9),
+          issue("Info", "style", "src/a.ts", 20)
+        ],
+        summary: "one"
+      }),
+      ReviewResult.make({
+        issues: [
+          issue("Warning", "other words", "src/a.ts", 9),
+          issue("Warning", "elsewhere", "src/b.ts", 1),
+          issue("Info", "nit")
+        ],
+        summary: "two"
+      })
+    ])
+    assert.deepStrictEqual(
+      merged.issues.map((entry) => [entry.severity, entry.title]),
+      [
+        ["Critical", "boom"],
+        ["Warning", "naming"],
+        ["Warning", "elsewhere"]
+      ]
+    )
+    assert.strictEqual(merged.summary, "one | two")
+    const single = ReviewResult.make({ issues: [issue("Info", "nit")], summary: "" })
+    assert.strictEqual(mergeVotes([single]), single)
+  })
+
+  it.effect(
+    "demoteUnplaced: a Critical without a file becomes a Warning, an off-diff finding an Info, each published",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const placed = yield* demoteUnplaced(
+          lens(),
+          ReviewResult.make({
+            issues: [
+              issue("Critical", "no file"),
+              issue("Critical", "wrong file", "src/other.ts", 1),
+              issue("Critical", "right", "src/a.ts", 2)
+            ],
+            summary: ""
+          }),
+          ["src/a.ts"],
+          events
+        )
+        assert.deepStrictEqual(
+          placed.issues.map((entry) => [entry.severity, entry.title]),
+          [
+            ["Warning", "no file"],
+            ["Info", "wrong file"],
+            ["Critical", "right"]
+          ]
+        )
+        const demoted = (yield* events.recorded).filter(
+          (event) => event._tag === "ReviewFindingDemoted"
+        )
+        assert.strictEqual(demoted.length, 2)
+        const untouched = yield* demoteUnplaced(lens(), placed, [], events)
+        assert.strictEqual(untouched, placed)
+      })
+  )
+
+  it.effect(
+    "votes run the adversarial lens several times and merge; the fix goes through fixWith when given",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const values = yield* Ref.make<ReadonlyArray<unknown>>([
+          {
+            issues: [
+              { severity: "Critical", title: "vote one", description: "", file: "f", line: 1 }
+            ],
+            summary: "a"
+          },
+          {
+            issues: [
+              { severity: "Warning", title: "vote two", description: "", file: "f", line: 2 }
+            ],
+            summary: "b"
+          },
+          { issues: [], summary: "clean" },
+          { issues: [], summary: "clean" }
+        ])
+        const calls = yield* Ref.make(0)
+        const asks = yield* Ref.make(0)
+        const fixes: Array<string> = []
+        const coder = yield* makeChat(coderService(asks))
+        const result = yield* reviewAndFixLoop({
+          reviewers: [adversarialReviewer],
+          reviewerService: reviewerService(values, calls),
+          coder,
+          taskTitle: "t",
+          currentDiff: Effect.succeed("diff --git a/f b/f\n+x"),
+          changedFiles: Effect.succeed(["f"]),
+          events,
+          maxRounds: 2,
+          votes: 2,
+          fixWith: (prompt) =>
+            Effect.sync(() => {
+              fixes.push(prompt)
+              return "fixed"
+            })
+        })
+        assert.isTrue(result.isClean)
+        assert.strictEqual(yield* Ref.get(calls), 4)
+        assert.strictEqual(fixes.length, 1)
+        assert.include(fixes[0] ?? "", "vote one")
+        assert.include(fixes[0] ?? "", "vote two")
+        assert.strictEqual(yield* Ref.get(asks), 0)
+      })
+  )
+
+  it.effect(
+    "the repository's review rules file loads as one lens; absent or empty means none",
+    () =>
+      Effect.gen(function* () {
+        const memory = yield* makeMemoryPlainFileStore({
+          "/repo/.llm4ts/review-rules.md": "---\nfiles: src/.*\n---\nNever log a token."
+        })
+        const rules = yield* loadRepoReviewRules(memory.store, "/repo")
+        assert.strictEqual(rules?.name, "repo-rules")
+        assert.strictEqual(rules?.systemPrompt, "Never log a token.")
+        assert.strictEqual(rules?.files, "src/.*")
+        const none = yield* makeMemoryPlainFileStore({ "/repo/.llm4ts/review-rules.md": "  \n" })
+        assert.isUndefined(yield* loadRepoReviewRules(none.store, "/repo"))
+        assert.isUndefined(yield* loadRepoReviewRules(memory.store, "/elsewhere"))
       })
   )
 })

@@ -1,3 +1,4 @@
+import { reviewRulesPreamble } from "./Review.ts"
 import * as Effect from "effect/Effect"
 import { Sample, type Dimension, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { makeEvaluator, type Evaluator } from "@llm4ts/core/eval/Evaluator"
@@ -141,7 +142,9 @@ export const withJudgment = (
 const join = (root: string, path: string): string =>
   `${root.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`
 
+/** The shared review rules (ADR 0027 decision 9) precede every rubric the judge scores with. */
 const rubricText = (dimensions: ReadonlyArray<Dimension>): string =>
+  `${reviewRulesPreamble}\n\n` +
   dimensions
     .map((dimension) => `${dimension.name} (0..${dimension.maxScore}): ${dimension.rubric}`)
     .join("\n")

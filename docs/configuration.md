@@ -251,6 +251,31 @@ the red tests. A pack extends what counts as a test file or a marker in a
 summary line the guard reads (Vitest, Jest, pytest, cargo, mocha, JUnit) and
 says once when they do not.
 
+## Review
+
+Every lens (the built-in ones, a pack's `reviewers/*.md`, the repository's
+own rules) is asked with the shared review-rules preamble first (ADR 0027
+decision 9): no stubbed bodies, no skipped, deleted or weakened tests, no
+layering workaround, and "a paragraph-long justification means the code is
+wrong". The adversarial lens, whose only job is to find why the diff does not
+work, is in the minimal set. A pack extends the rules in a `## Review rules`
+section (`- preamble: off` leaves the shared preamble out of that pack's
+lenses); a repository without a pack puts its rules in
+`.llm4ts/review-rules.md` (a reviewer file: optional `files:` frontmatter,
+then the rules), which every review round loads as one extra lens. A finding
+a reviewer cannot place is moved down, never dropped: a Critical with no file
+becomes a Warning, a finding naming a file the diff does not touch becomes an
+Info, each as a `ReviewFindingDemoted` event.
+
+| Variable              | Effect                                                                                                                |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_REVIEW_VOTES` | Independent votes of the adversarial lens per round; any Critical blocks. Default `1`                                 |
+| `LLM4TS_REVIEW_FIXER` | `separate`: findings go to a fresh fixer chat briefed to apply them and nothing else. Default: the implementer's chat |
+
+Votes multiply only the adversarial lens; the concern lenses run once. With a
+roster, consecutive votes take turns across executors (ADR 0019), so two
+votes usually come from two models.
+
 ## Autonomy contract and evidence
 
 Every coder's system prompt opens with one paragraph from

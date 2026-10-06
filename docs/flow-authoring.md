@@ -468,6 +468,14 @@ takes `onTaskReply(task, reply, trailer, startedAt)`, called with each task's
 parsed `verified:` and `confidence:` lines, which is where epic-stories
 checks the claims against the transcript.
 
+Review itself has three knobs on `implementPlanFlow` (ADR 0027): `votes`
+runs the adversarial lens that many times per round and merges the votes in
+code; `fixer: "separate"` sends the findings to a fresh chat on the coder seat
+with the fixer brief and the carried notes instead of the implementer's chat;
+`repoRules` loads the repository's `.llm4ts/review-rules.md` as one extra
+lens (`loadRepoReviewRules(files, workDir)`). `reviewAndFixLoop` exposes the
+same as `votes` and `fixWith`.
+
 ### The task loop
 
 The loop itself is `implementTaskLoop` with your own per-task body: ask the

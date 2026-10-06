@@ -252,6 +252,8 @@ const describe = (event: FlowEvent): string => {
       return "a capability check"
     case "EvidenceChecked":
       return "an evidence check"
+    case "ReviewFindingDemoted":
+      return "a review finding demoted"
     case "ExecutorLeased":
     case "ExecutorReleased":
     case "ExecutorExcluded":

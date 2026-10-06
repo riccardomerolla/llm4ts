@@ -72,6 +72,7 @@ import {
   ReviewIssue,
   ReviewResult,
   applyTriage,
+  loadRepoReviewRules,
   type FixPromptOptions,
   type GateTriageOptions
 } from "./Review.ts"
@@ -659,6 +660,10 @@ export interface StoriesOptions {
   readonly fix?: FixPromptOptions
   /** Test-file and marker patterns for the oracle guard; default rules when absent (ADR 0027). */
   readonly oracleRules?: OracleRules
+  /** Independent votes of the adversarial lens per review round (ADR 0027 decision 7). Default 1. */
+  readonly votes?: number
+  /** Who applies review findings: the implementer's chat (default) or a separate fixer (ADR 0027 decision 8). */
+  readonly fixer?: "coder" | "separate"
   /**
    * The autonomy contract profile for the coder's system prompt (ADR 0027
    * decision 5). Default: the roster executor's `contract`, else `full`.
@@ -1447,6 +1452,11 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           result
         ),
       onTaskReply: (task, _reply, trailer, startedAt) => checkEvidence(task, trailer, startedAt),
+      // The repository's own review rules ride along as one extra lens
+      // (ADR 0027 decision 9), read from the epic checkout.
+      repoRules: loadRepoReviewRules(files, context.workDir),
+      ...(options.votes === undefined ? {} : { votes: options.votes }),
+      ...(options.fixer === undefined ? {} : { fixer: options.fixer }),
       ...(options.reviewers === undefined ? {} : { reviewers: options.reviewers }),
       ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds })
     })

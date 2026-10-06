@@ -4,7 +4,7 @@ import { Dimension } from "@llm4ts/core/eval/Eval"
 import type { ConsolidateRules } from "./Domains.ts"
 import { PlanParseError } from "./FlowError.ts"
 import { oracleRulesFrom, type OracleRules } from "./OracleGuard.ts"
-import { parseReviewer, type Reviewer } from "./Reviewer.ts"
+import { Reviewer, parseReviewer } from "./Reviewer.ts"
 import { CoverageRule } from "./SpecChecks.ts"
 import type { WorkspaceError, WorkspaceShape } from "./Workspace.ts"
 
@@ -74,6 +74,11 @@ export interface Pack {
    * over the defaults. Absent: the defaults.
    */
   readonly oracle: OracleRules | undefined
+  /**
+   * The `## Review rules` section (ADR 0027 decision 9): extra rules every
+   * pack lens carries after the shared preamble, or `- preamble: off`.
+   */
+  readonly reviewRules: { readonly text: string; readonly preamble: boolean } | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
   readonly prompt: (name: string) => string | undefined
@@ -237,9 +242,36 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
   const gates = Object.fromEntries(
     Object.entries(gateValues).map(([name, command]) => [name, command.split(/\s+/)])
   )
+  const reviewRulesBody = section(manifest.sections, "Review rules")
+  const reviewRulesValues = namedItems(reviewRulesBody)
+  const reviewRules =
+    reviewRulesBody === undefined
+      ? undefined
+      : {
+          text: reviewRulesBody
+            .split(/\r?\n/)
+            .filter((line) => !/^- preamble:/iu.test(line.trim()))
+            .join("\n")
+            .trim(),
+          preamble: reviewRulesValues.preamble?.toLowerCase() !== "off"
+        }
   const lenses = Object.entries(lensFiles)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, text]) => parseReviewer(name, text))
+    // The pack's own review rules ride on every lens; `preamble: off` leaves
+    // the shared preamble out (ADR 0027 decision 9).
+    .map((lens) =>
+      reviewRules === undefined
+        ? lens
+        : Reviewer.make({
+            ...lens,
+            systemPrompt:
+              reviewRules.text.length === 0
+                ? lens.systemPrompt
+                : `${lens.systemPrompt}\n\nPack review rules:\n${reviewRules.text}`,
+            ...(reviewRules.preamble ? {} : { preamble: false })
+          })
+    )
   const fields = manifest.fields
   if (fields["programFiles"] !== undefined) {
     return yield* PlanParseError.make({
@@ -346,6 +378,7 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     specSchema,
     consolidate,
     oracle,
+    reviewRules,
     dir: directory,
     gate: (name) => gates[name],
     prompt: (name) => prompts[name],

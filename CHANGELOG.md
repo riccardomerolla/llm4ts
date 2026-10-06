@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+Release B of the rewrite-grade loops (ADR 0027): review that assumes the
+code is wrong, a loop that notices when it stalls, and a retro that edits the
+rules.
+
+- **An adversarial lens, with votes.** `adversarialReviewer` joins the
+  minimal set: its only job is reasons the diff does not work.
+  `LLM4TS_REVIEW_VOTES` runs it that many times per round, merged in code
+  (any Critical blocks, Warnings one per place, an Info needs two votes).
+- **Rules with teeth, everywhere.** A shared preamble (no stubs, no skipped
+  or deleted tests, no layering workaround, "a paragraph-long justification
+  means the code is wrong") opens every lens and every judge rubric; a pack's
+  `## Review rules` extends it or sets `preamble: off`; a repository without a
+  pack puts its rules in `.llm4ts/review-rules.md`, loaded as one extra lens.
+  Expect one review-cache miss per lens after upgrading.
+- **A separate fixer.** `LLM4TS_REVIEW_FIXER=separate` sends findings to a
+  fresh chat on the coder seat with the fixer brief ("apply the findings,
+  nothing else, skip a wrong one and say so") and the story's carried notes;
+  the implementer's chat never sees its own review.
+- **Findings that cannot be placed move down, never out.** A Critical with no
+  file becomes a Warning, a finding naming a file outside the diff an Info,
+  each a `ReviewFindingDemoted` event.
+
 ## 2.31.0
 
 Release A of the rewrite-grade loops (ADR 0027,

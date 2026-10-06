@@ -9,7 +9,9 @@ export class Reviewer extends Schema.Class<Reviewer>("Reviewer")({
    * decide whether this lens is worth a full pass (ADR 0017). Absent, one is
    * derived from the system prompt.
    */
-  screen: Schema.optionalKey(Schema.String)
+  screen: Schema.optionalKey(Schema.String),
+  /** False leaves the shared review-rules preamble (ADR 0027) off this lens; default on. */
+  preamble: Schema.optionalKey(Schema.Boolean)
 }) {
   /** The screening statement, explicit or derived. */
   get screeningStatement(): string {

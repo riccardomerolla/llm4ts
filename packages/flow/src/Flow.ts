@@ -44,6 +44,7 @@ import {
 } from "./Review.ts"
 import type { OracleRules } from "./OracleGuard.ts"
 import type { Reviewer } from "./Reviewer.ts"
+import { withContract } from "./AutonomyContract.ts"
 
 export { publishUsage, structuredAndPublish } from "./Usage.ts"
 
@@ -109,6 +110,16 @@ export interface ImplementPlanOptions {
    * `testsChange` is true.
    */
   readonly oracle?: { readonly rules?: OracleRules; readonly testsChange?: boolean }
+  /** Independent votes of the adversarial lens per round (ADR 0027 decision 7). Default 1. */
+  readonly votes?: number
+  /**
+   * Who applies review findings (ADR 0027 decision 8): the implementer's own
+   * chat (default), or a fresh chat on the coder seat briefed to apply the
+   * findings and nothing else, with the carried notes for orientation.
+   */
+  readonly fixer?: "coder" | "separate"
+  /** The repository's own review rules (`.llm4ts/review-rules.md`), loaded by the caller, as one extra lens. */
+  readonly repoRules?: Effect.Effect<Reviewer | undefined, FlowError>
   /** How gate output reaches the coder in the fix prompt. */
   readonly fix?: FixPromptOptions
   /** Where each review lens's answer is kept, so a rerun over the same diff asks nothing. */
@@ -210,6 +221,14 @@ const defaultCommitMessage = (plan: Plan, task: Task): string => `${plan.epicId}
 
 const composeSystem = (base: string | undefined, note: string): string =>
   [base, note].filter((part): part is string => part !== undefined && part.length > 0).join("\n\n")
+
+/** The separate fixer's brief (ADR 0027 decision 8): the Bun port's fixer, word for word in spirit. */
+export const fixerBrief = [
+  "You apply review findings to a change another coder made. Apply the findings. Nothing else.",
+  "Surgical edits only: no refactors, no extras, no new tests beyond what a finding asks for.",
+  "If a finding is wrong (the reviewer misread the code), skip it and say so in one line.",
+  "Then stop."
+].join("\n")
 
 /**
  * The task's triage: the explicit one, or one built from `baseline` over the
@@ -354,6 +373,23 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           }
         }
         const triage = yield* triageFor(context, options)
+        const repoRules = options.repoRules === undefined ? undefined : yield* options.repoRules
+        const reviewers = [
+          ...(options.reviewers ?? minimalReviewers),
+          ...(repoRules === undefined ? [] : [repoRules])
+        ]
+        const fixWith =
+          options.fixer === "separate"
+            ? (prompt: string): Effect.Effect<string, FlowError> =>
+                Effect.flatMap(
+                  makeChat(context.coder, {
+                    events: context.events,
+                    agent: "coder",
+                    system: withContract(fixerBrief)
+                  }),
+                  (fixer) => fixer.ask(withNotes(prompt, notes))
+                )
+            : undefined
         const oracle: OracleGateOptions | undefined =
           options.oracle === undefined
             ? undefined
@@ -368,7 +404,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
                   : { baseCount: Effect.map(triage.baseline, (base) => base?.passedCount) })
               }
         yield* reviewAndFixLoop({
-          reviewers: options.reviewers ?? minimalReviewers,
+          reviewers,
           reviewerService: flowReviewer(context),
           coder,
           taskTitle: task.title,
@@ -379,6 +415,8 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           ...(options.format === undefined ? {} : { format: options.format }),
           ...(triage === undefined ? {} : { triage }),
           ...(oracle === undefined ? {} : { oracle }),
+          ...(options.votes === undefined ? {} : { votes: options.votes }),
+          ...(fixWith === undefined ? {} : { fixWith }),
           ...(options.fix === undefined ? {} : { fix: options.fix }),
           ...(options.reviewCache === undefined ? {} : { cache: options.reviewCache }),
           ...(options.onReview === undefined
