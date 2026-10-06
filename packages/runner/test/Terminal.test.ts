@@ -75,6 +75,20 @@ describe("terminal rendering", () => {
     assert.strictEqual(terminalLine(release), "")
   })
 
+  it("names what a lease is for, so parallel reviewer leases read apart", () => {
+    assert.strictEqual(
+      terminalLine(
+        ExecutorLeased.make({
+          executor: "topolino",
+          role: "reviewer",
+          label: "home",
+          purpose: "adversarial lens"
+        })
+      ),
+      "· roster: topolino takes reviewer for home · adversarial lens"
+    )
+  })
+
   it("shows a gate or setup command starting, and no other work's start", () => {
     const gate = Began.make({ kind: "gate", label: "pnpm test", lane: "home" })
     assert.isTrue(rendersEvent("Normal", gate))

@@ -28,6 +28,7 @@ import {
   passedCountIn
 } from "./OracleGuard.ts"
 import { cachedReview, fingerprintOf } from "./ReviewCache.ts"
+import { withCallPurpose } from "./Timing.ts"
 import {
   Began,
   ReviewFindingDemoted,
@@ -905,14 +906,21 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       const chosen = screened.reviewers
       const cache = options.cache
       const votes = Math.max(1, options.votes ?? 1)
+      // Each lens is its own call; the roster's lease says which, so four
+      // parallel reviewer leases read as four questions, not one repeated.
+      const lensCall = (lens: Reviewer, vote: number): Effect.Effect<ReviewResult, FlowError> =>
+        withCallPurpose(
+          `${lens.name} lens${votes > 1 && lens.name === adversarialReviewer.name ? ` · vote ${vote + 1} of ${votes}` : ""}`,
+          reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
+        )
       const reviewVote = (lens: Reviewer, vote: number): Effect.Effect<ReviewResult, FlowError> =>
         cache === undefined
-          ? reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
+          ? lensCall(lens, vote)
           : cachedReview(
               cache.files,
               join(cache.dir, `${fileSlug(lens.name)}${vote === 0 ? "" : `-vote${vote}`}.json`),
               fingerprintOf([lens.name, lensPrompt(lens), String(vote), options.taskTitle, diff]),
-              reviewWith(options.reviewerService, options.events, lens, options.taskTitle, diff)
+              lensCall(lens, vote)
             )
       // Votes multiply only the adversarial lens: its recall is what independent
       // eyes improve; the concern lenses are cheap scoped questions.
@@ -935,6 +943,21 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
           }))
         )
       const parallelism = options.parallelism ?? 0
+      if (chosen.length > 1) {
+        yield* options.events.publish(
+          Info.make({
+            message: `review round ${round} of "${options.taskTitle}": ${chosen.length} lenses ${
+              parallelism === 1 ? "one at a time" : "in parallel"
+            } (${chosen
+              .map((lens) =>
+                lens.name === adversarialReviewer.name && votes > 1
+                  ? `${lens.name} ×${votes}`
+                  : lens.name
+              )
+              .join(", ")})`
+          })
+        )
+      }
       const results =
         parallelism > 0
           ? yield* Effect.forEach(chosen, run, { concurrency: parallelism })

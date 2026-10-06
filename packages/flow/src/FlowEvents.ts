@@ -274,6 +274,8 @@ export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("Execut
   executor: Schema.String,
   role: Schema.String,
   label: Schema.optionalKey(Schema.String),
+  /** What the call is for beyond its role: a review lens, a vote. */
+  purpose: Schema.optionalKey(Schema.String),
   /** Took the role on its own context's coder slot, no slot of its own free: nobody independent could. */
   borrowed: Schema.optionalKey(Schema.Boolean),
   /**
@@ -338,7 +340,9 @@ export const rosterEventMessage = (event: FlowEvent): string | undefined => {
     label === undefined ? "" : ` for ${label}`
   switch (event._tag) {
     case "ExecutorLeased": {
-      const taken = `roster: ${event.executor} takes ${event.role}${forLabel(event.label)}`
+      const taken = `roster: ${event.executor} takes ${event.role}${forLabel(event.label)}${
+        event.purpose === undefined ? "" : ` · ${event.purpose}`
+      }`
       if (event.because === undefined && event.borrowed !== true) {
         return taken
       }

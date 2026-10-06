@@ -13,6 +13,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { Message, type ConnectorCapabilities, type LlmChunk } from "@llm4ts/core/Models"
 import { describeFlowError, type FlowError } from "./FlowError.ts"
 import { ExecutorHandedOver, type FlowEventsShape } from "./FlowEvents.ts"
+import { callPurpose } from "./Timing.ts"
 import {
   describeExclusion,
   hasRole,
@@ -141,10 +142,12 @@ export const rosterSeat = (
       // The roster decides who serves: an independent executor, or, when
       // none can ever serve or every one is held by a coder, the context's own.
       const borrow = options.borrow === undefined ? undefined : yield* options.borrow
+      const purpose = yield* callPurpose
       const lease = yield* roster
         .lease(role, {
           avoid,
           ...(options.label === undefined ? {} : { label: options.label }),
+          ...(purpose === undefined ? {} : { purpose }),
           ...(borrow === undefined ? {} : { borrow })
         })
         .pipe(Effect.mapError(asLlmError))

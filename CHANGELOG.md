@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.35.3
+
+Parallel calls of one role say what each is for.
+
+- **Parallel reviewer leases say which lens.** A task review asks its
+  lenses (adversarial, correctness, readability, tests) at once, and each
+  takes its own reviewer lease, so the roster printed the same
+  `takes reviewer for <story>` line four times. Each lease now names its
+  purpose, e.g. `roster: topolino takes reviewer for home · adversarial lens`
+  (adversarial votes add `· vote 2 of 3`), and so does the roster's waiting
+  line. Each review round opens with one line naming its lenses, e.g.
+  `review round 1 of "<task>": 4 lenses in parallel (…)`.
+
 ## 2.35.2
 
 `epic-stories` says why it runs fewer stories than it could, and every run
