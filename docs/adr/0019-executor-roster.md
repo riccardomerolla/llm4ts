@@ -126,3 +126,22 @@ borrowed to sidestep a coder, since the story holding the slot will free
 it. Independence stays the rule wherever an executor keeps a slot for
 reasoning; a roster of single-slot executors trades it for progress and
 is told so on every such call.
+
+## Amendment (2026-10-06): a reasoning call waits only for a call
+
+The rehearsal of 2026-10-06: a story coding on codex (two slots, one kept
+for reasoning), claude — the only other reviewer — paused by the operator
+until the morning. The story's reviewer avoided codex for independence and
+waited for claude, for hours, with codex's reasoning slot free. Decision 6
+("waiting is unbounded") was meant for the coder, whose work has nowhere
+else to go; a per-call reasoning seat with a context of its own has. The
+rule is now: a reasoning call waits only for another call to end. When no
+executor outside the context's own is in the round (`out`), or every one
+that is has all its slots held by coders (`held`), the context's own
+executor takes the call — on a free slot of its own when it has one, as an
+ordinary lease that counts, else without a slot (its coder is idle for the
+length of the call). The event names the case (`ExecutorLeased.because`),
+and the terminal says "on its own slot" or "on its own coder's slot".
+Independence is decided per call, so the next call goes back to an
+independent executor the moment one returns. The context's own executor,
+out of the round itself, is still waited past unless nobody can ever serve.

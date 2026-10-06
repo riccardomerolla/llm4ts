@@ -104,9 +104,10 @@ export interface RosterSeatOptions {
   /** Executors this seat must not use: the context's coder, for independence. */
   readonly avoid?: Effect.Effect<ReadonlyArray<string>>
   /**
-   * The context's coder executor, used without a slot when independence
-   * cannot be had: nobody outside `avoid` can ever serve the role, or every
-   * executor that could is held by a coder (`LeaseOptions.borrow`).
+   * The context's coder executor, taken when independence cannot be had —
+   * nobody outside `avoid` can ever serve the role, every executor that
+   * could is held by a coder, or out of the round — on a free slot of its
+   * own, or without one (`LeaseOptions.borrow`).
    */
   readonly borrow?: Effect.Effect<ExecutorSpec | undefined>
   /** Who is asking, for the events. */

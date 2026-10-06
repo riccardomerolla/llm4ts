@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.31.1
+
+- **A story's reviewer no longer waits for a paused executor while its own
+  has a slot free.** A story coding on codex (two slots, one kept for
+  reasoning) with claude, the only other reviewer, paused by the operator
+  sat at "waiting for an executor to take reviewer: claude paused until …"
+  for hours. The roster leased reasoning calls only off the story's own
+  executor, for independence, and waited out any exclusion. A reasoning
+  call now waits only for another call to end: when every other executor
+  that takes the role is out of the round, or held by a coder, the story's
+  own executor takes the call — on a free slot of its own when it has one,
+  as an ordinary lease, else without a slot — and the trace says so: "codex
+  takes reviewer for … on its own slot — not independent (every other
+  executor that takes reviewer is out of the round)". Independence is
+  decided per call, so the next review goes back to claude the moment it
+  returns. `Lease.because`, `independenceBlocked` on the roster; ADR 0019
+  amended.
 ## 2.31.0
 
 Release A of the rewrite-grade loops (ADR 0027,

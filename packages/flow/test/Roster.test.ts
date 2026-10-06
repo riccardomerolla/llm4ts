@@ -645,6 +645,64 @@ describe("Roster seats", () => {
     )
   )
 
+  // The rehearsal of 2026-10-06: a story coding on codex (two slots, one
+  // for coding), claude — the only other reviewer — paused by the operator
+  // for hours. The reviewer took nobody and the story sat "waiting for an
+  // executor to take reviewer: claude paused until …".
+  it.effect("a per-call seat takes its own executor's free slot when every other is out", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const roster = yield* makeRoster({ executors: [local, codex, claude], events })
+        const source = { seatFor: seatFor(log, () => undefined) }
+        yield* roster.lease("coder", { label: "pi" })
+        const story = yield* makeHeldCoder(roster, source, "a", { events, eager: true, label: "a" })
+        assert.strictEqual(yield* story.executor, "codex")
+        yield* roster.exclude(
+          Exclusion.make({
+            id: "claude",
+            kind: "manual",
+            until: at("2026-10-06T05:37:30Z"),
+            reason: "paused by the operator"
+          })
+        )
+        const reviewer = rosterSeat(roster, source, "reviewer", "a", {
+          events,
+          avoid: Effect.map(story.executor, (id) => (id === undefined ? [] : [id])),
+          borrow: story.lease,
+          label: "a"
+        })
+        assert.strictEqual(yield* roster.independenceBlocked("reviewer", ["codex"]), "out")
+        // codex's reasoning slot is free: a real lease, on its own slot, at once.
+        assert.strictEqual(yield* text(reviewer, "review a"), "codex ok")
+        const lines = rosterLines(yield* events.recorded)
+        assert.isTrue(
+          lines.includes(
+            "roster: codex takes reviewer for a on its own slot — not independent (every other executor that takes reviewer is out of the round)"
+          ),
+          lines.join("\n")
+        )
+        assert.isFalse(lines.some((line) => line.includes("waiting for an executor")))
+        assert.strictEqual(yield* roster.available("reviewer"), 1)
+        // With codex's reasoning slot taken by another call, the seat borrows instead of waiting.
+        const other = yield* roster.lease("judge", { label: "the run" })
+        assert.strictEqual(other.executor.id, "codex")
+        assert.strictEqual(yield* text(reviewer, "review a again"), "codex ok")
+        assert.isTrue(
+          (yield* events.recorded).some(
+            (event) =>
+              event._tag === "ExecutorLeased" && event.borrowed === true && event.because === "out"
+          )
+        )
+        yield* other.release
+        // Independence is per call: once claude is back, the next review goes there.
+        yield* roster.resume("claude")
+        assert.strictEqual(yield* text(reviewer, "review a once more"), "claude ok")
+      })
+    )
+  )
+
   it.effect("the roster never borrows an executor out of the round to escape held coders", () =>
     Effect.scoped(
       Effect.gen(function* () {
