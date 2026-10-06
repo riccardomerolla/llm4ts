@@ -11,6 +11,12 @@ const scope = [
   "it, never narrowing it quietly, widening it, or swapping it for a neighbouring task."
 ]
 
+const workspace = [
+  "Your working directory is the whole of your world. The tool that runs you is not part of the",
+  "task: do not look for its installation, source code, processes or environment, and read its",
+  "files only where your instructions name them. What it expects of you is in your instructions."
+]
+
 const noGaming = [
   "Never edit, skip, delete or weaken a test to make a gate pass. A test you believe is wrong is a",
   "finding to report, not a line to change; a pre-existing bug outside your task is a finding, not",
@@ -34,8 +40,9 @@ const evidence = [
 ]
 
 /**
- * The contract for a profile. `full` is the default; `minimal` keeps scope
- * and the no-gaming rule for a model that over-verifies under the full text;
+ * The contract for a profile. `full` is the default; `minimal` keeps scope,
+ * the workspace rule and the no-gaming rule for a model that over-verifies
+ * under the full text;
  * `off` is the empty string, for a flow that writes its own rules.
  */
 export const autonomyContract = (profile: ContractProfile = "full"): string => {
@@ -43,9 +50,16 @@ export const autonomyContract = (profile: ContractProfile = "full"): string => {
     case "off":
       return ""
     case "minimal":
-      return [...scope, ...noGaming].join("\n")
+      return [...scope, ...workspace, ...noGaming].join("\n")
     case "full":
-      return [...unattended, ...scope, ...minimalChange, ...noGaming, ...evidence].join("\n")
+      return [
+        ...unattended,
+        ...scope,
+        ...workspace,
+        ...minimalChange,
+        ...noGaming,
+        ...evidence
+      ].join("\n")
   }
 }
 

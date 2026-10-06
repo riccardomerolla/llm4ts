@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
-import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
+import { childEnvironment, nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 
 const nodeCommand = (script: string): ReadonlyArray<string> => [process.execPath, "-e", script]
 
@@ -142,5 +142,48 @@ describe("NodeProcessExecutor", () => {
         assert.deepStrictEqual(lines, ["alpha", "beta"])
       })
     )
+  )
+})
+
+describe("childEnvironment", () => {
+  it("passes the environment on without the orchestrator's own variables, then the call's", () => {
+    assert.deepStrictEqual(
+      childEnvironment(
+        {
+          PATH: "/usr/bin",
+          HOME: "/home/me",
+          GEMINI_API_KEY: "k",
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318",
+          LLM4TS_FLOW: "epic-stories",
+          LLM4TS_ROSTER: "/home/me/roster.json",
+          _: "/root/.nvm/versions/node/v24.15.0/bin/llm4ts",
+          UNSET: undefined
+        },
+        { MODE: "fast" }
+      ),
+      {
+        PATH: "/usr/bin",
+        HOME: "/home/me",
+        GEMINI_API_KEY: "k",
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318",
+        MODE: "fast"
+      }
+    )
+  })
+
+  it.effect("a spawned process does not see LLM4TS_ variables", () =>
+    Effect.gen(function* () {
+      process.env.LLM4TS_PROBE = "visible"
+      try {
+        const result = yield* nodeProcessExecutor.run(
+          nodeCommand("process.stdout.write(String(process.env.LLM4TS_PROBE))"),
+          process.cwd(),
+          {}
+        )
+        assert.strictEqual(result.stdout.join(""), "undefined")
+      } finally {
+        delete process.env.LLM4TS_PROBE
+      }
+    })
   )
 })

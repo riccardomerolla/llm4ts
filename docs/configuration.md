@@ -304,12 +304,15 @@ marks the report, like tasks and story edits.
 
 Every coder's system prompt opens with one paragraph from
 `@llm4ts/flow/AutonomyContract` (ADR 0027 decision 5): nobody is watching;
-act, do not announce; the task is the whole scope; make the smallest change;
+act, do not announce; the task is the whole scope; the working directory is
+the coder's whole world (it does not go looking for the tool running it —
+its installation, source, processes or environment — and reads llm4ts's
+files only where its instructions name them); make the smallest change;
 pre-existing bugs and wrong tests are findings, not fixes; never edit, skip
 or delete a test to pass; end with the commands run, not a claim. The
 built-in flows use it through `withContract(...)`; a roster entry picks a
 profile per executor with `"contract": "full" | "minimal" | "off"` (`minimal`
-keeps the scope and no-gaming rules for a model that over-verifies under the
+keeps the scope, workspace and no-gaming rules for a model that over-verifies under the
 full text; `off` is for a flow that writes its own rules).
 
 A task's `## Findings` section ends with one `verified: <command>` line per
