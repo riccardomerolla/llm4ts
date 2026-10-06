@@ -58,7 +58,8 @@ import {
 } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
-import { timedJudgment, timedSeat, withTimedRole } from "@llm4ts/flow/Timing"
+import { timedJudgment, timedSeat, withTimedRole, type TimedSeatOptions } from "@llm4ts/flow/Timing"
+import { otelContent } from "@llm4ts/flow/Spans"
 import { transcriptSeat, type TranscriptSink } from "@llm4ts/flow/Transcript"
 import { nodeTranscriptFiles, nodeTranscriptSink, transcriptsWanted } from "./Transcripts.ts"
 import { idleAfterFrom } from "./AgentTree.ts"
@@ -362,6 +363,13 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   const runEnvironment = options.environment ?? process.env
   const estimateOptions = estimatedUsageOptionsFromEnv(runEnvironment)
   const meterUsage = options.estimateUsage ?? !switchedOff(runEnvironment.LLM4TS_ESTIMATE_USAGE)
+  // Every seat's spans (ADR 0026): content only when asked, an estimate on a
+  // call the backend reports no usage for, and who served it when known.
+  const seatOptions = (executor?: Effect.Effect<string | undefined>): TimedSeatOptions => ({
+    content: otelContent(runEnvironment),
+    ...(meterUsage ? { estimate: estimateOptions } : {}),
+    ...(executor === undefined ? {} : { executor })
+  })
   const metered = (service: LlmServiceShape): Effect.Effect<LlmServiceShape> =>
     meterUsage
       ? Effect.map(makeEstimatedUsageMeter(service, estimateOptions), (meter) => meter.service)
@@ -490,18 +498,26 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   ): FlowContextShape =>
     FlowContext.of({
       // Every call is timed on the lane's events, under its role.
-      reasoning: recorded(timedSeat(seats.reasoning, laneEvents, "reasoning"), lane, "reasoning"),
+      reasoning: recorded(
+        timedSeat(seats.reasoning, laneEvents, "reasoning", seatOptions()),
+        lane,
+        "reasoning"
+      ),
       coder: {
         ...seats.coder,
-        ...recorded(timedSeat(seats.coder, laneEvents, "coder"), lane, "coder")
+        ...recorded(timedSeat(seats.coder, laneEvents, "coder", seatOptions()), lane, "coder")
       },
       judgment: timedJudgment(seats.judgment, laneEvents),
-      judge: recorded(timedSeat(seats.judge, laneEvents, "judgment"), lane, "judgment"),
+      judge: recorded(
+        timedSeat(seats.judge, laneEvents, "judgment", seatOptions()),
+        lane,
+        "judgment"
+      ),
       git: makeGitTool(dependencies.process, workDir, laneEvents),
       hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
       events: laneEvents,
       reviewers: seats.reviewers.map((reviewer) =>
-        recorded(timedSeat(reviewer, laneEvents, "reviewer"), lane, "reviewer")
+        recorded(timedSeat(reviewer, laneEvents, "reviewer", seatOptions()), lane, "reviewer")
       ),
       coderCapabilities: seats.coder.capabilities,
       userPrompt: options.userPrompt,
@@ -671,7 +687,8 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
               label
             }),
             laneEvents,
-            role
+            role,
+            seatOptions()
           ),
           lane,
           role
@@ -709,7 +726,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         return FlowContext.of({
           reasoning: view.forRole(rebind ? "planner" : "reviewer"),
           coder: recorded(
-            timedSeat(held.service, laneEvents, "coder"),
+            timedSeat(held.service, laneEvents, "coder", seatOptions(held.executor)),
             lane,
             "coder",
             held.executor
