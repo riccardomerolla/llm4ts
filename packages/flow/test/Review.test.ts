@@ -15,10 +15,13 @@ import { Reviewer } from "@llm4ts/flow/Pack"
 import {
   ReviewIssue,
   ReviewResult,
+  applyTriage,
+  fixPrompt,
   lintCommand,
   llmDriven,
   reviewAndFixLoop
 } from "@llm4ts/flow/Review"
+import { GateBaseline } from "@llm4ts/flow/Gates"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import * as Fiber from "effect/Fiber"
 import { TestClock } from "effect/testing"
@@ -686,5 +689,155 @@ describe("lintCommand timeout and class", () => {
       assert.isTrue(result.isClean)
       assert.strictEqual((yield* memory.files)["/state/gates/0.log"], "ok")
     })
+  )
+})
+
+describe("fixPrompt evidence", () => {
+  const long = Array.from({ length: 200 }, (_, index) => `line ${index}`).join("\n")
+  const gate = ReviewResult.make({
+    issues: [
+      ReviewIssue.make({
+        severity: "Critical",
+        title: "lint failed: pnpm test",
+        description: long,
+        logPath: "/state/stories/a/gates/1-pnpm-test.log"
+      })
+    ],
+    summary: "lint failed"
+  })
+
+  it("caps the output to the tail and points a CLI coder at the log as its only evidence", () => {
+    const prompt = fixPrompt(gate, { tailChars: 100, showPaths: true })
+    assert.include(prompt, "line 199")
+    assert.notInclude(prompt, "line 0\n")
+    assert.include(prompt, "/state/stories/a/gates/1-pnpm-test.log")
+    assert.include(prompt, "only runtime evidence")
+    assert.include(prompt, "confidence: low")
+  })
+
+  it("an API coder gets the tail and no path", () => {
+    const prompt = fixPrompt(gate, { tailChars: 100, showPaths: false })
+    assert.notInclude(prompt, "/state/stories")
+    assert.include(prompt, "only runtime evidence")
+  })
+
+  it("a review finding without a gate renders exactly as before", () => {
+    const finding = ReviewResult.make({
+      issues: [ReviewIssue.make({ severity: "Warning", title: "naming", description: "rename x" })],
+      summary: ""
+    })
+    assert.strictEqual(
+      fixPrompt(finding),
+      "Address these review findings, then stop:\n- [Warning] naming: rename x"
+    )
+  })
+})
+
+describe("applyTriage", () => {
+  const roots = ["/wt/a"]
+  const lint = (output: string) =>
+    ReviewResult.make({
+      issues: [
+        ReviewIssue.make({
+          severity: "Critical",
+          title: "lint failed: pnpm test",
+          description: output
+        })
+      ],
+      summary: "lint failed"
+    })
+  const baseline = GateBaseline.make({
+    baseCommit: "abc",
+    appDir: ".",
+    commands: ["pnpm test"],
+    failingLines: ["FAIL old.test.ts > old"],
+    recordedAt: 0
+  })
+
+  it.effect("inherited failures are published once as Info and do not block", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+      const triage = { baseline: Effect.succeed(baseline), roots }
+      const first = yield* applyTriage(lint("FAIL old.test.ts > old"), triage, events, reported)
+      const second = yield* applyTriage(lint("FAIL old.test.ts > old"), triage, events, reported)
+      assert.isTrue(first.isClean)
+      assert.isTrue(second.isClean)
+      const infos = (yield* events.recorded).filter((event) => event._tag === "Info")
+      assert.strictEqual(infos.length, 1)
+      assert.include(infos[0]?._tag === "Info" ? infos[0].message : "", "inherited from the base")
+    })
+  )
+
+  it.effect(
+    "a new failure blocks with origin new; a line green on the rerun is flaky and does not",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+        const blocked = yield* applyTriage(
+          lint("FAIL old.test.ts > old\nFAIL new.test.ts > new"),
+          { baseline: Effect.succeed(baseline), roots },
+          events,
+          reported
+        )
+        assert.strictEqual(blocked.issues[0]?.origin, "new")
+        assert.include(blocked.issues[0]?.description ?? "", "new.test.ts")
+        assert.notInclude(blocked.issues[0]?.description ?? "", "old.test.ts")
+
+        const flaky = yield* applyTriage(
+          lint("FAIL old.test.ts > old\nFAIL flaky.test.ts > flaky"),
+          {
+            baseline: Effect.succeed(baseline),
+            roots,
+            rerunTest: Effect.succeed(lint("FAIL old.test.ts > old"))
+          },
+          events,
+          reported
+        )
+        assert.isTrue(flaky.isClean)
+        const infos = (yield* events.recorded).filter((event) => event._tag === "Info")
+        assert.isTrue(
+          infos.some((event) => event._tag === "Info" && event.message.includes("flaky"))
+        )
+      })
+  )
+
+  it.effect("a rerun that stays red keeps the new failure charged", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+      const result = yield* applyTriage(
+        lint("FAIL new.test.ts > new"),
+        {
+          baseline: Effect.succeed(baseline),
+          roots,
+          rerunTest: Effect.succeed(lint("FAIL new.test.ts > new"))
+        },
+        events,
+        reported
+      )
+      assert.isFalse(result.isClean)
+    })
+  )
+
+  it.effect(
+    "without triage options, or without a stored baseline, the result is returned untouched",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+        const result = lint("FAIL old.test.ts > old")
+        assert.strictEqual(yield* applyTriage(result, undefined, events, reported), result)
+        assert.strictEqual(
+          yield* applyTriage(
+            result,
+            { baseline: Effect.succeed(undefined), roots },
+            events,
+            reported
+          ),
+          result
+        )
+      })
   )
 })

@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { collect } from "@llm4ts/core/Streaming"
 import { withToolActivity } from "./Activity.ts"
@@ -26,8 +27,11 @@ import { implementTaskLoop, stage } from "./PlanExecution.ts"
 import { truth } from "@llm4ts/core/judgment/Schemas"
 import { certaintyOf, decide, judgmentOf, type JudgmentMode } from "./Judgment.ts"
 import {
+  applyTriage,
   minimalReviewers,
   reviewAndFixLoop,
+  type FixPromptOptions,
+  type GateTriageOptions,
   type ReviewResult,
   type ReviewCacheLocation
 } from "./Review.ts"
@@ -77,6 +81,10 @@ export interface ImplementPlanOptions {
   readonly maxRounds?: number
   readonly lint?: Effect.Effect<ReviewResult, FlowError>
   readonly format?: Effect.Effect<void, FlowError>
+  /** Charge the lint gate only with failures the task caused (ADR 0027). */
+  readonly triage?: GateTriageOptions
+  /** How gate output reaches the coder in the fix prompt. */
+  readonly fix?: FixPromptOptions
   /** Where each review lens's answer is kept, so a rerun over the same diff asks nothing. */
   readonly reviewCache?: ReviewCacheLocation
   /** Told after every review round of every task, settled or not. */
@@ -280,6 +288,8 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
           ...(options.lint === undefined ? {} : { lint: options.lint }),
           ...(options.format === undefined ? {} : { format: options.format }),
+          ...(options.triage === undefined ? {} : { triage: options.triage }),
+          ...(options.fix === undefined ? {} : { fix: options.fix }),
           ...(options.reviewCache === undefined ? {} : { cache: options.reviewCache }),
           ...(options.onReview === undefined
             ? {}
@@ -291,7 +301,13 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
               })
         })
         if (options.lint !== undefined) {
-          const gate = yield* options.lint
+          const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+          const gate = yield* applyTriage(
+            yield* options.lint,
+            options.triage,
+            context.events,
+            reported
+          )
           if (!gate.isClean) {
             return yield* FlowAborted.make({
               message: [

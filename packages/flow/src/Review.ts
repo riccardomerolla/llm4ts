@@ -2,6 +2,7 @@ import { join } from "node:path"
 import * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type { LlmError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
@@ -12,6 +13,7 @@ import { guarded } from "./CapabilityGuard.ts"
 import type { Chat } from "./Chat.ts"
 import { FlowLlmError, ProcessError, describeFlowError, type FlowError } from "./FlowError.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
+import { GateBaseline, isGateIssue, triageGates } from "./GateTriage.ts"
 import { cachedReview, fingerprintOf } from "./ReviewCache.ts"
 import {
   Info,
@@ -248,11 +250,101 @@ export const reviewPrompt = (task: string, diff: string): string =>
     diff
   ].join("\n")
 
-export const fixPrompt = (result: ReviewResult): string =>
-  [
+export interface FixPromptOptions {
+  /** Characters of a gate's output kept in the prompt, from the end. Default 4000. */
+  readonly tailChars?: number
+  /** Name the gate log's path (a CLI coder can open it; an API coder cannot). Default false. */
+  readonly showPaths?: boolean
+}
+
+export const defaultGateTailChars = 4_000
+
+const evidenceNote =
+  "The gate output above is your only runtime evidence. If you are guessing without it, say `confidence: low` in your Findings."
+
+export const fixPrompt = (result: ReviewResult, options: FixPromptOptions = {}): string => {
+  const tailChars = options.tailChars ?? defaultGateTailChars
+  const lines = result.issues.map((issue) => {
+    const gate = isGateIssue(issue)
+    const description =
+      gate && issue.description.length > tailChars
+        ? `…${issue.description.slice(-tailChars)}`
+        : issue.description
+    const path =
+      gate && options.showPaths === true && issue.logPath !== undefined
+        ? ` (full output: ${issue.logPath})`
+        : ""
+    return `- [${issue.severity}] ${issue.title}: ${description}${path}`
+  })
+  const hasGate = result.issues.some(isGateIssue)
+  return [
     "Address these review findings, then stop:",
-    ...result.issues.map((issue) => `- [${issue.severity}] ${issue.title}: ${issue.description}`)
+    ...lines,
+    ...(hasGate ? ["", evidenceNote] : [])
   ].join("\n")
+}
+
+export interface GateTriageOptions {
+  /** The baseline for the code this change started from; `undefined` means no triage. */
+  readonly baseline: Effect.Effect<GateBaseline | undefined, FlowError>
+  /** Root prefixes stripped from gate output before comparing (the work dir, the app dir). */
+  readonly roots: ReadonlyArray<string>
+  /** Re-run the test gate alone to tell a flaky line from a new one; omit to never rerun. */
+  readonly rerunTest?: Effect.Effect<ReviewResult, FlowError>
+}
+
+const listed = (lines: ReadonlyArray<string>): string => lines.map((line) => `  ${line}`).join("\n")
+
+/**
+ * Charges a lint result only with what the change caused (ADR 0027).
+ * Inherited lines are published once per `reported` set as Info; with
+ * `rerunTest`, a new line that is green on one rerun of the test gate is
+ * flaky: published, not charged. Without options or a baseline the result
+ * is returned as is.
+ */
+export const applyTriage = Effect.fn("@llm4ts/flow/Review.applyTriage")(function* (
+  lint: ReviewResult,
+  triage: GateTriageOptions | undefined,
+  events: FlowEventsShape,
+  reported: Ref.Ref<ReadonlySet<string>>
+): Effect.fn.Return<ReviewResult, FlowError> {
+  if (triage === undefined || lint.isClean) {
+    return lint
+  }
+  const baseline = yield* triage.baseline
+  if (baseline === undefined) {
+    return lint
+  }
+  let triaged = triageGates(lint, baseline, triage.roots)
+  const seen = yield* Ref.get(reported)
+  const unseen = triaged.inherited.filter((line) => !seen.has(line))
+  if (unseen.length > 0) {
+    yield* Ref.update(reported, (set) => new Set([...set, ...unseen]))
+    yield* events.publish(
+      Info.make({
+        message: `${unseen.length} gate failure(s) inherited from the base, not charged to this change:\n${listed(unseen)}`
+      })
+    )
+  }
+  if (!triaged.blocking.isClean && triaged.newLines.length > 0 && triage.rerunTest !== undefined) {
+    const again = yield* triage.rerunTest
+    const stillRed = new Set(triageGates(again, baseline, triage.roots).newLines)
+    const flaky = triaged.newLines.filter((line) => !stillRed.has(line))
+    if (flaky.length > 0) {
+      yield* events.publish(
+        Info.make({
+          message: `${flaky.length} gate failure(s) flaky (red once, green on rerun), not charged:\n${listed(flaky)}`
+        })
+      )
+      triaged = triageGates(
+        again,
+        GateBaseline.make({ ...baseline, failingLines: [...baseline.failingLines, ...flaky] }),
+        triage.roots
+      )
+    }
+  }
+  return triaged.blocking
+})
 
 export const mergeReviewResults = (results: ReadonlyArray<ReviewResult>): ReviewResult =>
   ReviewResult.make({
@@ -398,6 +490,10 @@ export interface ReviewAndFixOptions {
     result: ReviewResult,
     settled: boolean
   ) => Effect.Effect<void, FlowError>
+  /** Charge the lint gate only with failures the change caused (ADR 0027). */
+  readonly triage?: GateTriageOptions
+  /** How gate output reaches the coder in the fix prompt. */
+  readonly fix?: FixPromptOptions
 }
 
 export interface ReviewCacheLocation {
@@ -541,13 +637,15 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
     )
   )
   const format = options.format ?? Effect.void
+  const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
 
   const reviewOnce = (
     round: number,
     previous: ReviewResult | undefined
   ): Effect.Effect<ReviewResult, FlowError> =>
     Effect.gen(function* () {
-      const lint = yield* options.lint ?? Effect.succeed(ReviewResult.make({ issues: [] }))
+      const lintRaw = yield* options.lint ?? Effect.succeed(ReviewResult.make({ issues: [] }))
+      const lint = yield* applyTriage(lintRaw, options.triage, options.events, reported)
       if (!lint.isClean) {
         return lint
       }
@@ -633,7 +731,7 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       if (settled) {
         return result
       }
-      yield* options.coder.ask(fixPrompt(result))
+      yield* options.coder.ask(fixPrompt(result, options.fix))
       return yield* loop(round + 1, result)
     })
 

@@ -21,6 +21,7 @@ import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
+import { GateBaseline } from "@llm4ts/flow/Gates"
 import { makeMemoryPlainFileStore, makePlanStore } from "@llm4ts/flow/Persistence"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
@@ -1044,6 +1045,74 @@ describe("Flow gate and diff safety", () => {
       assert.strictEqual(error._tag, "Aborted")
       assert.match(error.message, /refusing to commit/)
       assert.deepStrictEqual(log.commits, [])
+    })
+  )
+
+  it.effect("a lint gate red only with inherited failures commits when triage is given", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const asked = yield* Ref.make<ReadonlyArray<string>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      const plan = Plan.make({
+        epicId: "epic-inherited",
+        tasks: [Task.make({ title: "unrelated task", description: "touches nothing red" })]
+      })
+      const inheritedGate = Effect.succeed(
+        ReviewResult.make({
+          issues: [
+            ReviewIssue.make({
+              severity: "Critical",
+              title: "lint failed: pnpm test",
+              description: "FAIL old.test.ts > old"
+            })
+          ],
+          summary: "lint failed"
+        })
+      )
+      const baseline = GateBaseline.make({
+        baseCommit: "base",
+        appDir: ".",
+        commands: ["pnpm test"],
+        failingLines: ["FAIL old.test.ts > old"],
+        recordedAt: 0
+      })
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: coderService(asked),
+        git: makeFakeGit(gitLog),
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+
+      yield* implementPlanFlow(context, {
+        store,
+        planPath: ".llm4ts/plan-inherited.md",
+        plan: Effect.succeed(plan),
+        maxRounds: 1,
+        lint: inheritedGate,
+        triage: { baseline: Effect.succeed(baseline), roots: ["/repo"] }
+      })
+      const log = yield* Ref.get(gitLog)
+      assert.strictEqual(log.commits.length, 1)
+
+      const withoutTriage = yield* Effect.flip(
+        implementPlanFlow(context, {
+          store,
+          planPath: ".llm4ts/plan-inherited-2.md",
+          plan: Effect.succeed(plan),
+          maxRounds: 1,
+          lint: inheritedGate
+        })
+      )
+      assert.strictEqual(withoutTriage._tag, "Aborted")
+      assert.match(withoutTriage.message, /refusing to commit/)
     })
   )
 
