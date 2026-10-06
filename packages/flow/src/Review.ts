@@ -21,6 +21,7 @@ import {
   Timed,
   type FlowEventsShape
 } from "./FlowEvents.ts"
+import { attr, withKindSpan } from "./Spans.ts"
 import { Reviewer } from "./Reviewer.ts"
 import { publishUsage } from "./Usage.ts"
 import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
@@ -275,20 +276,25 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
     return ReviewResult.make({ issues: [], summary: "" })
   }
   const started = yield* Clock.currentTimeMillis
-  const result = yield* guarded(
-    Capabilities.Exec(executable),
-    `lint: ${command.join(" ")}`,
-    events,
-    process.run(command, workDir, {}).pipe(
-      Effect.mapError((cause) =>
-        ProcessError.make({
-          message: command.join(" "),
-          detail: cause.message
-        })
+  // A TOOL span (ADR 0026) and a Timed event: the command as configured and
+  // its exit code, never its output.
+  const result = yield* withKindSpan(
+    `gate ${command.join(" ")}`,
+    { kind: "TOOL", attributes: { [attr.gateCommand]: command.join(" ") } },
+    guarded(
+      Capabilities.Exec(executable),
+      `lint: ${command.join(" ")}`,
+      events,
+      process.run(command, workDir, {}).pipe(
+        Effect.mapError((cause) =>
+          ProcessError.make({
+            message: command.join(" "),
+            detail: cause.message
+          })
+        )
       )
-    )
+    ).pipe(Effect.tap((ran) => Effect.annotateCurrentSpan(attr.gateExit, ran.exitCode)))
   )
-  // The command as configured and its exit code: never its output.
   yield* events.publish(
     Timed.make({
       kind: "gate",

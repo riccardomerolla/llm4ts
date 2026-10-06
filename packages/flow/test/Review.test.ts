@@ -26,6 +26,8 @@ import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
 import { JudgmentBackendError } from "@llm4ts/core/judgment/Judgment"
 import { origins, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 import type { JudgmentMode } from "@llm4ts/flow/Judgment"
+import { attr, kindAttribute } from "@llm4ts/flow/Spans"
+import { recordingTracer } from "./support/RecordingTracer.ts"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -578,6 +580,32 @@ describe("lintCommand timing", () => {
         [["gate", "pnpm test", 42_000, 1]]
       )
       assert.notInclude(JSON.stringify(timed), "secret")
+    })
+  )
+})
+
+describe("lintCommand spans", () => {
+  it.effect("a gate command is a TOOL span with its command and exit code, never its output", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const { tracer, spans } = recordingTracer()
+      const process = makeProcessExecutor({
+        run: () =>
+          Effect.succeed(ProcessResult.make({ stdout: ["FAIL secret detail"], exitCode: 1 })),
+        runStreaming: () => Stream.empty
+      })
+      yield* lintCommand(process, events, ["pnpm", "test"], "/wt/a").pipe(Effect.withTracer(tracer))
+      const gate = spans().find((span) => span.attributes[kindAttribute] === "TOOL")
+      assert.deepStrictEqual(
+        [
+          gate?.name,
+          gate?.attributes[attr.gateCommand],
+          gate?.attributes[attr.gateExit],
+          gate?.ended
+        ],
+        ["gate pnpm test", "pnpm test", 1, true]
+      )
+      assert.notInclude(JSON.stringify(spans()), "secret")
     })
   )
 })
