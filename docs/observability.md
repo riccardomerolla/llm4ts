@@ -71,7 +71,10 @@ Metrics (generic endpoint only): `llm4ts.tokens`, `llm4ts.cost.usd`,
 
 ## When nothing shows up
 
-`llm4ts doctor` prints where spans go and whether the endpoint answers. A
+`llm4ts doctor` prints where spans go and whether the endpoint answers, and a
+run with export on checks once at its start, posting an empty protobuf batch:
+anything but a 2xx prints one warning. Bodies are OTLP protobuf, the encoding
+Phoenix accepts (it rejects JSON with 415) and every collector understands. A
 collector that is down never fails a run: spans are dropped and the run end
 waits at most three seconds for the last batch. Nothing is exported while the
 test suite runs, whatever the shell says.

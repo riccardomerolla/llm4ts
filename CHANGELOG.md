@@ -49,6 +49,18 @@ status` Warning in the story findings, an evidence note the judge reads
   `examples/epic-light.roster.json` and `docs/harness-evals/README.md` hold
   the roster and the before/after protocol.
 
+## 2.30.1
+
+- **Spans reach Phoenix.** The exporter now sends OTLP **protobuf**, the
+  encoding Phoenix accepts; 2.30.0 sent JSON, which Phoenix's traces endpoint
+  answers with `415 Unsupported content type`, and Effect's exporter then
+  dropped every batch for a minute at debug level — a run printed the Phoenix
+  header and nothing arrived. Protobuf is OTLP/HTTP's default and every
+  collector takes it. The start-of-run probe now POSTs an empty protobuf
+  batch and trusts only a 2xx (Phoenix answered the old OPTIONS probe with
+  405, which looked like "answers"), so a rejecting endpoint warns at once.
+  Verified against a live Phoenix.
+
 ## 2.30.0
 
 A run in Phoenix, Langfuse or any OpenTelemetry backend (ADR 0026).

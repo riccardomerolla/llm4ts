@@ -1,12 +1,19 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Ref from "effect/Ref"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as OtlpExporter from "effect/observability/OtlpExporter"
+import { withKindSpan } from "@llm4ts/flow/Spans"
 import {
   otelConfig,
   otelDoctorLine,
   otelLayer,
   otelSummary,
   otelWarning,
-  phoenixTracesUrl
+  phoenixTracesUrl,
+  probeOtelEndpoint
 } from "@llm4ts/runner/Otel"
 
 describe("otelConfig", () => {
@@ -78,4 +85,68 @@ describe("otelWarning", () => {
       "⚠ otel: nothing answers at http://c:4318 — spans will be dropped (the run is unaffected)"
     )
   })
+})
+
+describe("the exporter on the wire", () => {
+  it.effect("posts protobuf to Phoenix's traces URL: the one content type it accepts", () =>
+    Effect.gen(function* () {
+      const seen = yield* Ref.make<
+        ReadonlyArray<{ readonly url: string; readonly contentType: string | undefined }>
+      >([])
+      const http = Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Ref.update(seen, (all) => [
+            ...all,
+            {
+              url: request.url,
+              // the body is a union; only the variants that carry bytes name a type
+              contentType: "contentType" in request.body ? request.body.contentType : undefined
+            }
+          ]).pipe(
+            Effect.as(HttpClientResponse.fromWeb(request, new Response(null, { status: 200 })))
+          )
+        )
+      )
+      yield* withKindSpan("run", { kind: "CHAIN" }, Effect.void).pipe(
+        Effect.provide(
+          otelLayer(
+            { mode: "phoenix", tracesUrl: phoenixTracesUrl },
+            { serviceVersion: "0.0.0", project: "portal" },
+            {},
+            http
+          )
+        )
+      )
+      const requests = yield* Ref.get(seen)
+      assert.deepStrictEqual(requests, [
+        { url: phoenixTracesUrl, contentType: "application/x-protobuf" }
+      ])
+    })
+  )
+})
+
+describe("probeOtelEndpoint", () => {
+  const config = { mode: "phoenix", tracesUrl: phoenixTracesUrl } as const
+  it.effect("posts an empty protobuf batch and trusts only a 2xx", () =>
+    Effect.gen(function* () {
+      const asked: Array<{ url: string; contentType: string | undefined }> = []
+      const answering = (status: number) => (url: string, init: RequestInit) => {
+        const headers = new Headers(init.headers)
+        asked.push({ url, contentType: headers.get("content-type") ?? undefined })
+        return Promise.resolve(new Response(null, { status }))
+      }
+      assert.strictEqual(yield* probeOtelEndpoint(config, answering(200)), true)
+      assert.strictEqual(yield* probeOtelEndpoint(config, answering(415)), false)
+      assert.strictEqual(
+        yield* probeOtelEndpoint(config, () => Promise.reject(new Error("ECONNREFUSED"))),
+        false
+      )
+      assert.isUndefined(yield* probeOtelEndpoint({ mode: "off" }, answering(200)))
+      assert.deepStrictEqual(asked[0], {
+        url: phoenixTracesUrl,
+        contentType: "application/x-protobuf"
+      })
+    })
+  )
 })
