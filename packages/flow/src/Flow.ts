@@ -1,3 +1,5 @@
+import { join } from "node:path"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
@@ -22,7 +24,8 @@ import {
   type FlowEventsShape
 } from "./FlowEvents.ts"
 import type { Plan, Task } from "./Plan.ts"
-import type { PlanStoreShape } from "./Persistence.ts"
+import type { PlainFileStoreShape, PlanStoreShape } from "./Persistence.ts"
+import { ensureBaseline } from "./GateTriage.ts"
 import { implementTaskLoop, stage } from "./PlanExecution.ts"
 import { truth } from "@llm4ts/core/judgment/Schemas"
 import { certaintyOf, decide, judgmentOf, type JudgmentMode } from "./Judgment.ts"
@@ -83,6 +86,17 @@ export interface ImplementPlanOptions {
   readonly format?: Effect.Effect<void, FlowError>
   /** Charge the lint gate only with failures the task caused (ADR 0027). */
   readonly triage?: GateTriageOptions
+  /**
+   * Without `triage`: record the gates' result on each task's starting
+   * commit under this store and triage against it (ADR 0027). The gates run
+   * once per new commit, before the task; `lint` is what they are.
+   */
+  readonly baseline?: {
+    readonly files: PlainFileStoreShape
+    readonly dir: string
+    readonly commands: ReadonlyArray<ReadonlyArray<string>>
+    readonly appDir?: string
+  }
   /** How gate output reaches the coder in the fix prompt. */
   readonly fix?: FixPromptOptions
   /** Where each review lens's answer is kept, so a rerun over the same diff asks nothing. */
@@ -173,6 +187,40 @@ const defaultCommitMessage = (plan: Plan, task: Task): string => `${plan.epicId}
 
 const composeSystem = (base: string | undefined, note: string): string =>
   [base, note].filter((part): part is string => part !== undefined && part.length > 0).join("\n\n")
+
+/**
+ * The task's triage: the explicit one, or one built from `baseline` over the
+ * commit the task starts from (HEAD now), or none.
+ */
+const triageFor = (
+  context: FlowContextShape,
+  options: ImplementPlanOptions
+): Effect.Effect<GateTriageOptions | undefined, FlowError> =>
+  Effect.gen(function* () {
+    if (options.triage !== undefined) {
+      return options.triage
+    }
+    if (options.baseline === undefined || options.lint === undefined) {
+      return undefined
+    }
+    const base = options.baseline
+    const appDir = base.appDir ?? "."
+    const roots = [join(context.workDir, appDir), context.workDir]
+    const commit = yield* context.git.checkpoint
+    return {
+      baseline: ensureBaseline({
+        files: base.files,
+        stateDir: base.dir,
+        commit,
+        appDir,
+        commands: base.commands,
+        run: options.lint,
+        roots,
+        now: Clock.currentTimeMillis
+      }),
+      roots
+    }
+  })
 
 export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(function* (
   context: FlowContextShape,
@@ -278,6 +326,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
             })
           }
         }
+        const triage = yield* triageFor(context, options)
         yield* reviewAndFixLoop({
           reviewers: options.reviewers ?? minimalReviewers,
           reviewerService: flowReviewer(context),
@@ -288,7 +337,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
           ...(options.lint === undefined ? {} : { lint: options.lint }),
           ...(options.format === undefined ? {} : { format: options.format }),
-          ...(options.triage === undefined ? {} : { triage: options.triage }),
+          ...(triage === undefined ? {} : { triage }),
           ...(options.fix === undefined ? {} : { fix: options.fix }),
           ...(options.reviewCache === undefined ? {} : { cache: options.reviewCache }),
           ...(options.onReview === undefined
@@ -302,12 +351,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
         })
         if (options.lint !== undefined) {
           const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
-          const gate = yield* applyTriage(
-            yield* options.lint,
-            options.triage,
-            context.events,
-            reported
-          )
+          const gate = yield* applyTriage(yield* options.lint, triage, context.events, reported)
           if (!gate.isClean) {
             return yield* FlowAborted.make({
               message: [

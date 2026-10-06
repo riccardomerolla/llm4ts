@@ -583,3 +583,9 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   Effect's own exporter — Phoenix with `--otel`, any collector with the
   `OTEL_*` variables; content off by default. llm4zio has no telemetry
   export. Additive.
+- Gate baselines and triage (ADR 0027, 2026-10-06): the pinned llm4zio
+  charges a task with every red gate; llm4ts records a baseline per base
+  commit and charges only new failing lines, lists inherited ones, reruns
+  the test gate once to tell flaky from new, bounds a gate with
+  `LLM4TS_GATE_TIMEOUT`, and writes gate output to the run's state folder.
+  Additive: without gate commands or a `baseline` option nothing changes.

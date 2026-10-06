@@ -216,6 +216,29 @@ capped), `full` adds the system prompt. `LLM4TS_FLOW` is set by the shell to
 the flow's name for the run span. Nothing is exported while the test suite
 runs.
 
+## Gates
+
+The target's gate commands (typecheck, lint, test, build, or `LLM4TS_GATES`)
+run after every task and after every merge (ADR 0013). Since ADR 0027 a gate
+has a timeout, a class and a memory: the gates' result on the code a change
+started from is recorded as a baseline under the run's state folder
+(`gates/baselines.json`, keyed by commit, app dir and commands), and a change
+is charged only with the failing lines it added. Lines already red on the
+base are listed once as inherited; a test-gate line red once and green on one
+rerun is flaky; neither blocks. Gate output is written to
+`stories/<id>/gates/<n>-<command>.log` in the state folder, and the fix
+prompt carries its tail and, for CLI coders, its path. Without gate commands
+(a flow that passes `lint` but no `baseline`) every red line blocks, as
+before.
+
+| Variable                 | Effect                                                                 |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `LLM4TS_GATE_TIMEOUT`    | Seconds before a gate is killed and reported as a hang. Default `1200` |
+| `LLM4TS_GATE_TAIL_CHARS` | Characters of gate output in the fix prompt. Default `4000`            |
+
+`--land` deletes the baselines and compacts the gate logs to their failing
+lines.
+
 ## Capabilities
 
 Filesystem, process, network, Git, and forge operations require explicit

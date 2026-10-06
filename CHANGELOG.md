@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+Gates with a memory (ADR 0027, the first half of release A of the
+rewrite-grade loops: `docs/research/rewrite-grade-loops-plan.md`).
+
+- **A story is charged only with the gate failures it caused.** The gates'
+  result on the epic head is recorded as a baseline at run start and after
+  every merge; failing lines already on the base are listed once as inherited
+  (in the story findings and an "Inherited gate failures" section of the
+  report) and never block; a test-gate line red once and green on one rerun
+  is flaky and reported. The post-merge epic gate undoes a merge only for new
+  failures, so an epic on a red base can merge. `implementPlanFlow` takes a
+  `baseline` option for the same per task.
+- **A gate has a timeout and a class.** `LLM4TS_GATE_TIMEOUT` (default 1200
+  seconds) kills a hung gate and reports it as `hang`; a signal exit is
+  `crash`.
+- **Gate output is a file.** `stories/<id>/gates/<n>-<command>.log` in the
+  run's state folder; the fix prompt carries its tail (`LLM4TS_GATE_TAIL_CHARS`,
+  default 4000) and, for CLI coders, its path, as the coder's only runtime
+  evidence. `--land` compacts logs to failing lines and deletes baselines.
+- `gatesIn` moved from the epic-stories lib to `@llm4ts/flow/Gates`; the
+  lib's `inAppDir` now forwards the lane and log arguments it used to drop.
+
 ## 2.30.0
 
 A run in Phoenix, Langfuse or any OpenTelemetry backend (ADR 0026).

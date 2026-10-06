@@ -424,6 +424,32 @@ const compileGate = lintCommand(
 const firstTitle = planWithSpec.tasks[0]?.title
 ```
 
+A gate can be bounded and remembered (ADR 0027). `lintCommand` takes
+`{ timeout, log }`: a gate still running at the timeout ends as one Critical
+of class `hang`, and the log receives the whole output while the fix prompt
+gets a capped tail and the path. `implementPlanFlow` takes
+`baseline: { files, dir, commands }` and then charges a task only with the
+failing lines its starting commit did not already have; `gatesIn` from
+`@llm4ts/flow/Gates` runs a list of commands with both:
+
+<!-- prettier-ignore -->
+```ts
+const gates = gatesIn(nodeProcessExecutor, context.events, commands, {
+  timeout: Duration.seconds(1200)
+})
+yield* implementPlanFlow(context, {
+  store,
+  planPath,
+  plan,
+  lint: gates(input.workDir),
+  baseline: { files: nodePlainFileStore, dir: join(input.workDir, ".llm4ts"), commands },
+  fix: { tailChars: 4000, showPaths: true }
+})
+```
+
+Without `baseline` every red line blocks, as before. `sdd` deliberately has
+none: its red tests are the contract, not an inherited failure.
+
 ### The task loop
 
 The loop itself is `implementTaskLoop` with your own per-task body: ask the

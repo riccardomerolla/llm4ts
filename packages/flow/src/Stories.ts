@@ -23,8 +23,8 @@ import { implementPlanFlow } from "./Flow.ts"
 import {
   GateBaseline,
   baselineKey,
+  ensureBaseline as ensureStoredBaseline,
   failingLinesOf,
-  readBaseline,
   storyGateLogDir,
   triageGates,
   writeBaseline,
@@ -800,14 +800,15 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   ): Effect.Effect<GateBaseline | undefined, FlowError> =>
     gateCommands === undefined
       ? Effect.succeed(undefined)
-      : Effect.gen(function* () {
-          const stored = yield* readBaseline(files, options.stateDir, keyFor(commit))
-          if (stored !== undefined) {
-            return stored
-          }
-          const baseline = yield* baselineOf(commit, yield* run, workDir)
-          yield* writeBaseline(files, options.stateDir, keyFor(commit), baseline)
-          return baseline
+      : ensureStoredBaseline({
+          files,
+          stateDir: options.stateDir,
+          commit,
+          appDir,
+          commands: gateCommands,
+          run,
+          roots: rootsOf(workDir),
+          now: Clock.currentTimeMillis
         })
   /** What each story inherited, for its outcome. */
   const inheritedByStory = new Map<string, ReadonlyArray<string>>()

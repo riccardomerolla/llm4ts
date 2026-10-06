@@ -1116,6 +1116,68 @@ describe("Flow gate and diff safety", () => {
     })
   )
 
+  it.effect(
+    "with `baseline`, the gates on a task's starting commit are recorded once and inherited reds do not block",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeFlowEventHub()
+        const asked = yield* Ref.make<ReadonlyArray<string>>([])
+        const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+        const memory = yield* makeMemoryPlainFileStore()
+        const store = makePlanStore(memory.store)
+        const plan = Plan.make({
+          epicId: "epic-baseline",
+          tasks: [
+            Task.make({ title: "first", description: "touches nothing red" }),
+            Task.make({ title: "second", description: "touches nothing red either" })
+          ]
+        })
+        const gateRuns = yield* Ref.make(0)
+        const inheritedGate = Ref.update(gateRuns, (count) => count + 1).pipe(
+          Effect.as(
+            ReviewResult.make({
+              issues: [
+                ReviewIssue.make({
+                  severity: "Critical",
+                  title: "lint failed: pnpm test",
+                  description: "FAIL old.test.ts > old"
+                })
+              ],
+              summary: "lint failed"
+            })
+          )
+        )
+        const context: FlowContextShape = {
+          reasoning: cleanReviewer,
+          coder: coderService(asked),
+          git: makeFakeGit(gitLog),
+          hosting: failingHosting,
+          events,
+          reviewers: [cleanReviewer],
+          coderCapabilities: ConnectorCapabilities.make({}),
+          userPrompt: "implement",
+          workDir: "/repo",
+          workspace: "/repo"
+        }
+
+        yield* implementPlanFlow(context, {
+          store,
+          planPath: ".llm4ts/plan-baseline.md",
+          plan: Effect.succeed(plan),
+          maxRounds: 1,
+          lint: inheritedGate,
+          baseline: { files: memory.store, dir: "/repo/.llm4ts", commands: [["pnpm", "test"]] }
+        })
+        const log = yield* Ref.get(gitLog)
+        assert.strictEqual(log.commits.length, 2)
+        const files = yield* memory.files
+        assert.isDefined(files["/repo/.llm4ts/gates/baselines.json"])
+        // The fake git's checkpoint never moves, so one baseline serves both
+        // tasks: one recording run, then one lint run and one commit check per task.
+        assert.strictEqual(yield* Ref.get(gateRuns), 5)
+      })
+  )
+
   it.effect("skips no-change tasks only when the coder confirms them satisfied", () =>
     Effect.gen(function* () {
       const events = yield* makeFlowEventHub()

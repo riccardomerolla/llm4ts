@@ -190,6 +190,50 @@ export const readBaseline = (
 ): Effect.Effect<GateBaseline | undefined, PersistenceError> =>
   Effect.map(readAll(files, baselinesPath(stateDir)), (all) => all[key])
 
+export interface EnsureBaselineArgs<E> {
+  readonly files: PlainFileStoreShape
+  readonly stateDir: string
+  /** The commit the change starts from. */
+  readonly commit: string
+  readonly appDir: string
+  readonly commands: ReadonlyArray<ReadonlyArray<string>>
+  /** Runs the gates on that commit; called only when no baseline is stored. */
+  readonly run: Effect.Effect<ReviewResult, E>
+  /** Root prefixes stripped from gate output (the work dir, the app dir). */
+  readonly roots: ReadonlyArray<string>
+  readonly now: Effect.Effect<number>
+}
+
+/**
+ * The baseline for a commit: the stored one, or a fresh one recorded from
+ * `run`. Lazy on purpose, so a second change on an unchanged commit costs
+ * no gate run.
+ */
+export const ensureBaseline = <E>(
+  args: EnsureBaselineArgs<E>
+): Effect.Effect<GateBaseline, E | PersistenceError> =>
+  Effect.gen(function* () {
+    const key = baselineKey({
+      baseCommit: args.commit,
+      appDir: args.appDir,
+      commands: args.commands
+    })
+    const stored = yield* readBaseline(args.files, args.stateDir, key)
+    if (stored !== undefined) {
+      return stored
+    }
+    const result = yield* args.run
+    const baseline = GateBaseline.make({
+      baseCommit: args.commit,
+      appDir: args.appDir,
+      commands: args.commands.map((command) => command.join(" ")),
+      failingLines: failingLinesOf(result, args.roots),
+      recordedAt: yield* args.now
+    })
+    yield* writeBaseline(args.files, args.stateDir, key, baseline)
+    return baseline
+  })
+
 export const writeBaseline = (
   files: PlainFileStoreShape,
   stateDir: string,
