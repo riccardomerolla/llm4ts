@@ -276,6 +276,18 @@ Votes multiply only the adversarial lens; the concern lenses run once. With a
 roster, consecutive votes take turns across executors (ADR 0019), so two
 votes usually come from two models.
 
+A loop that stops making progress ends typed, as `Stalled`, instead of
+spending its rounds (ADR 0027 decision 11): a fix round that leaves the diff
+byte-identical, a coder turn that repeats the same tool call with the same
+arguments too many times in a row, or, when asked, a turn with no output
+for too long. The story fails with the signal in its reason, dependents
+hold, and the retro digest shows it.
+
+| Variable               | Effect                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `LLM4TS_STALL_REPEATS` | Identical tool calls in a row that end the turn. Default `5`                          |
+| `LLM4TS_STALL_MINUTES` | Minutes without output that end the turn. Unset: off (a slow seat looks like silence) |
+
 ## Autonomy contract and evidence
 
 Every coder's system prompt opens with one paragraph from

@@ -45,6 +45,7 @@ import {
 import type { OracleRules } from "./OracleGuard.ts"
 import type { Reviewer } from "./Reviewer.ts"
 import { withContract } from "./AutonomyContract.ts"
+import type { StallOptions } from "./Stall.ts"
 
 export { publishUsage, structuredAndPublish } from "./Usage.ts"
 
@@ -120,6 +121,8 @@ export interface ImplementPlanOptions {
   readonly fixer?: "coder" | "separate"
   /** The repository's own review rules (`.llm4ts/review-rules.md`), loaded by the caller, as one extra lens. */
   readonly repoRules?: Effect.Effect<Reviewer | undefined, FlowError>
+  /** End a coder turn that repeats one tool call or goes silent (ADR 0027 decision 11). */
+  readonly stall?: StallOptions
   /** How gate output reaches the coder in the fix prompt. */
   readonly fix?: FixPromptOptions
   /** Where each review lens's answer is kept, so a rerun over the same diff asks nothing. */
@@ -277,7 +280,8 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
     sharedCoder = yield* makeChat(context.coder, {
       events: context.events,
       agent: "coder",
-      ...(options.system === undefined ? {} : { system: options.system })
+      ...(options.system === undefined ? {} : { system: options.system }),
+      ...(options.stall === undefined ? {} : { stall: options.stall })
     })
   }
 
@@ -298,7 +302,8 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           coder = yield* makeChat(context.coder, {
             events: context.events,
             agent: "coder",
-            system: composeSystem(options.system, planSoFar.render)
+            system: composeSystem(options.system, planSoFar.render),
+            ...(options.stall === undefined ? {} : { stall: options.stall })
           })
         }
         // `plan.taskPrompt` deliberately reads the frozen `plan` captured at
@@ -385,7 +390,8 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
                   makeChat(context.coder, {
                     events: context.events,
                     agent: "coder",
-                    system: withContract(fixerBrief)
+                    system: withContract(fixerBrief),
+                    ...(options.stall === undefined ? {} : { stall: options.stall })
                   }),
                   (fixer) => fixer.ask(withNotes(prompt, notes))
                 )
@@ -417,6 +423,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           ...(oracle === undefined ? {} : { oracle }),
           ...(options.votes === undefined ? {} : { votes: options.votes }),
           ...(fixWith === undefined ? {} : { fixWith }),
+          ...(options.stall === undefined ? {} : { stallOnIdenticalDiff: true }),
           ...(options.fix === undefined ? {} : { fix: options.fix }),
           ...(options.reviewCache === undefined ? {} : { cache: options.reviewCache }),
           ...(options.onReview === undefined

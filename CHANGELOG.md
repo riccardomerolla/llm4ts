@@ -23,6 +23,13 @@ rules.
 - **Findings that cannot be placed move down, never out.** A Critical with no
   file becomes a Warning, a finding naming a file outside the diff an Info,
   each a `ReviewFindingDemoted` event.
+- **A loop that goes nowhere ends, typed.** A fix round that leaves the diff
+  byte-identical, a coder turn that repeats one tool call with the same
+  arguments five times in a row (`LLM4TS_STALL_REPEATS`), or, when
+  `LLM4TS_STALL_MINUTES` is set, a turn with no output for that long, end the
+  task as `Stalled` with the signal in the story's reason (ADR 0027
+  decision 11). `Chat.ask` fails with `FlowLlmError | Stalled`; a caller typed
+  against `FlowError` is unchanged.
 
 ## 2.31.0
 

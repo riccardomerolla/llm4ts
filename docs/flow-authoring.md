@@ -476,6 +476,13 @@ with the fixer brief and the carried notes instead of the implementer's chat;
 lens (`loadRepoReviewRules(files, workDir)`). `reviewAndFixLoop` exposes the
 same as `votes` and `fixWith`.
 
+A `stall` option (`{ repeats, silence }` from `@llm4ts/flow/Stall`) on
+`implementPlanFlow`, or on `makeChat`, ends a coder turn that repeats one
+tool call or goes silent with a typed `Stalled`, and makes the review loop
+end a task whose fix round left the diff unchanged
+(`stallOnIdenticalDiff`). `Chat.ask` therefore fails with
+`FlowLlmError | Stalled`; both are `FlowError` members.
+
 ### The task loop
 
 The loop itself is `implementTaskLoop` with your own per-task body: ask the

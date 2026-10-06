@@ -61,6 +61,7 @@ import {
 import { stableHash } from "@llm4ts/flow/Plan"
 import { ReviewIssue, reviewRulesPreamble, type FixPromptOptions } from "@llm4ts/flow/Review"
 import { compactGateArtifacts, gatesIn, type GateRunOptions } from "@llm4ts/flow/Gates"
+import { defaultStallRepeats, type StallOptions } from "@llm4ts/flow/Stall"
 import { loadTranscript, nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import {
   StoryPlan,
@@ -1580,6 +1581,22 @@ export const reviewFixer = (
 ): { readonly fixer?: "separate" } =>
   environment.LLM4TS_REVIEW_FIXER?.trim().toLowerCase() === "separate" ? { fixer: "separate" } : {}
 
+/**
+ * `LLM4TS_STALL_REPEATS` (default 5) ends a coder turn that repeats one tool
+ * call that many times in a row; `LLM4TS_STALL_MINUTES` (unset: off) ends a
+ * turn with no output for that long. ADR 0027 decision 11.
+ */
+export const stallOptions = (
+  environment: Readonly<Record<string, string | undefined>>
+): StallOptions => {
+  const repeats = Number.parseInt(environment.LLM4TS_STALL_REPEATS ?? "", 10)
+  const minutes = Number.parseFloat(environment.LLM4TS_STALL_MINUTES ?? "")
+  return {
+    repeats: Number.isFinite(repeats) && repeats >= 2 ? repeats : defaultStallRepeats,
+    ...(Number.isFinite(minutes) && minutes > 0 ? { silence: Duration.minutes(minutes) } : {})
+  }
+}
+
 export const gateRunOptions = (
   environment: Readonly<Record<string, string | undefined>>
 ): GateRunOptions => ({ timeout: Duration.seconds(gateTimeoutSeconds(environment)) })
@@ -2284,6 +2301,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               fix: fixPromptOptions(process.env),
               ...reviewVotes(process.env),
               ...reviewFixer(process.env),
+              stall: stallOptions(process.env),
               // A task's `verified:` claims are checked against the tool calls
               // its transcript shows (ADR 0027 decision 6); no transcript, no check.
               toolCalls: (story, since) =>

@@ -267,6 +267,21 @@ export class RosterExhausted extends Schema.TaggedError<RosterExhausted>()("Rost
 }
 
 /** One story failed; carries the story id so a fail-fast run names its cause. */
+/**
+ * A loop that stopped making progress (ADR 0027 decision 11): the review
+ * round saw the same diff twice, the coder repeated one tool call too many
+ * times, or the seat went silent for too long. A stopping condition the
+ * model does not control; the story fails and the retro diagnoses.
+ */
+export class Stalled extends Schema.TaggedError<Stalled>()("Stalled", {
+  signal: Schema.Literals(["identical-diff", "repeated-tool-call", "silence"]),
+  detail: Schema.String
+}) {
+  get message(): string {
+    return `stalled (${this.signal}): ${this.detail}`
+  }
+}
+
 export class StoryFailed extends Schema.TaggedError<StoryFailed>()("StoryFailed", {
   story: Schema.String,
   reason: Schema.String
@@ -371,6 +386,7 @@ export const FlowError = Schema.Union([
   EpicIncomplete,
   LandingFailed,
   StoryFailed,
+  Stalled,
   DecisionsInvalid,
   OpenPointsPending,
   ContractConflict,

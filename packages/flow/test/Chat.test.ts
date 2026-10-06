@@ -4,6 +4,8 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
+import * as Duration from "effect/Duration"
+import { TestClock } from "effect/testing"
 import { InvalidRequestError, ProviderError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk, TokenUsage, type Message } from "@llm4ts/core/Models"
@@ -237,6 +239,75 @@ describe("Chat usage events", () => {
       const withoutSink = yield* makeChat(usageService(true))
       const reply = yield* withoutSink.ask("no sink")
       assert.strictEqual(reply, "reply")
+    })
+  )
+})
+
+describe("Chat stall guard (ADR 0027)", () => {
+  const toolCall = (name: string, input: string): LlmChunk =>
+    LlmChunk.make({
+      delta: "",
+      metadata: { event: "tool_use", tool_name: name, tool_input: input }
+    })
+  const streaming = (chunks: ReadonlyArray<LlmChunk>): LlmServiceShape => ({
+    executeStream: (_prompt) => Stream.empty,
+    executeStreamWithHistory: (_messages) => Stream.fromIterable(chunks),
+    executeWithTools: (_prompt, _tools) => Effect.fail(unused),
+    executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+    executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
+    scoreLabels: unsupportedScoreLabels,
+    isAvailable: Effect.succeed(true)
+  })
+
+  it.effect("the same tool call five times in a row ends the turn as Stalled; four do not", () =>
+    Effect.gen(function* () {
+      const same = Array.from({ length: 5 }, () => toolCall("grep", '{"pattern":"x"}'))
+      const chat = yield* makeChat(
+        streaming([...same, LlmChunk.make({ delta: "done", finishReason: "stop" })]),
+        {
+          stall: { repeats: 5 }
+        }
+      )
+      const error = yield* Effect.flip(chat.ask("go"))
+      assert.strictEqual(error._tag, "Stalled")
+      assert.match(error.message, /stalled \(repeated-tool-call\)/)
+
+      const varied = [
+        ...same.slice(0, 4),
+        toolCall("grep", '{"pattern":"y"}'),
+        LlmChunk.make({ delta: "done", finishReason: "stop" })
+      ]
+      const fine = yield* makeChat(streaming(varied), { stall: { repeats: 5 } })
+      assert.strictEqual(yield* fine.ask("go"), "done")
+    })
+  )
+
+  it.effect("without the stall option a repeated tool call is nobody's business", () =>
+    Effect.gen(function* () {
+      const same = Array.from({ length: 9 }, () => toolCall("ls", "{}"))
+      const chat = yield* makeChat(
+        streaming([...same, LlmChunk.make({ delta: "ok", finishReason: "stop" })])
+      )
+      assert.strictEqual(yield* chat.ask("go"), "ok")
+    })
+  )
+
+  it.effect("silence longer than the limit ends the turn as Stalled", () =>
+    Effect.gen(function* () {
+      const quiet: LlmServiceShape = {
+        ...streaming([]),
+        executeStreamWithHistory: (_messages) =>
+          Stream.concat(Stream.make(LlmChunk.make({ delta: "thinking" })), Stream.never)
+      }
+      const chat = yield* makeChat(quiet, { stall: { silence: Duration.minutes(20) } })
+      const fiber = yield* Effect.forkChild(Effect.flip(chat.ask("go")))
+      // Let the forked turn reach its blocked pull before the clock moves.
+      yield* Effect.yieldNow
+      yield* Effect.yieldNow
+      yield* TestClock.adjust(Duration.minutes(21))
+      const error = yield* Fiber.join(fiber)
+      assert.strictEqual(error._tag, "Stalled")
+      assert.match(error.message, /silence/)
     })
   )
 })

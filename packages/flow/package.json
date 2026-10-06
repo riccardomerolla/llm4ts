@@ -82,6 +82,7 @@
     "./Spans": "./dist/Spans.js",
     "./Roster": "./dist/Roster.js",
     "./RosterSeats": "./dist/RosterSeats.js",
+    "./Stall": "./dist/Stall.js",
     "./Stories": "./dist/Stories.js",
     "./StoryPlan": "./dist/StoryPlan.js",
     "./Survey": "./dist/Survey.js",

@@ -11,7 +11,13 @@ import type { ProcessExecutorShape, ProcessResult } from "@llm4ts/core/ProcessEx
 import { Capabilities } from "@llm4ts/core/Capability"
 import { guarded } from "./CapabilityGuard.ts"
 import type { Chat } from "./Chat.ts"
-import { FlowLlmError, ProcessError, describeFlowError, type FlowError } from "./FlowError.ts"
+import {
+  FlowLlmError,
+  ProcessError,
+  Stalled,
+  describeFlowError,
+  type FlowError
+} from "./FlowError.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
 import { GateBaseline, isGateIssue, triageGates } from "./GateTriage.ts"
 import {
@@ -716,6 +722,8 @@ export interface ReviewAndFixOptions {
   readonly votes?: number
   /** Applies a fix prompt somewhere other than the implementer's chat (a separate fixer). */
   readonly fixWith?: (prompt: string) => Effect.Effect<string, FlowError>
+  /** End the task, typed `Stalled`, when a fix round leaves the diff byte-identical (ADR 0027 decision 11). */
+  readonly stallOnIdenticalDiff?: boolean
 }
 
 export interface ReviewCacheLocation {
@@ -951,12 +959,30 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       return mergeReviewResults(results.map(({ result }) => result))
     })
 
+  const lastDiff = yield* Ref.make<string | undefined>(undefined)
   const loop = (
     round: number,
     previous: ReviewResult | undefined
   ): Effect.Effect<ReviewResult, FlowError> =>
     Effect.gen(function* () {
       yield* format
+      // A fix round that changed nothing is a loop going nowhere (ADR 0027
+      // decision 11): the same diff twice in a row ends the task, typed.
+      const diffNow = yield* options.currentDiff
+      const before = yield* Ref.get(lastDiff)
+      if (
+        options.stallOnIdenticalDiff === true &&
+        round > 1 &&
+        before !== undefined &&
+        before === diffNow &&
+        previous !== undefined
+      ) {
+        return yield* Stalled.make({
+          signal: "identical-diff",
+          detail: `review round ${round} found the diff unchanged after the fix for ${previous.issues.length} finding(s)`
+        })
+      }
+      yield* Ref.set(lastDiff, diffNow)
       const result = yield* reviewOnce(round, previous)
       const settled = result.isClean || round >= maxRounds
       yield* options.events.publish(

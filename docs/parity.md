@@ -606,3 +606,7 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   reviews with concern lenses once and the implementer applies its own
   findings. The preamble changes every reviewer prompt once (one review-cache
   miss per lens); votes and the fixer are off by default.
+- Stall detection (ADR 0027, 2026-10-06): an identical diff across two review
+  rounds, one tool call repeated five times in a row, or (when asked) silence
+  end the task typed `Stalled`; llm4zio loops until its rounds or turns run
+  out. `Chat.ask` now fails with `FlowLlmError | Stalled`.

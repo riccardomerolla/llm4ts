@@ -3,9 +3,10 @@ import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { Message, type LlmResponse } from "@llm4ts/core/Models"
-import { collect } from "@llm4ts/core/Streaming"
+import { collectAny } from "@llm4ts/core/Streaming"
 import { withToolActivity } from "./Activity.ts"
-import { FlowLlmError } from "./FlowError.ts"
+import { FlowLlmError, type Stalled } from "./FlowError.ts"
+import { noRepeats, stallGuard, type StallOptions } from "./Stall.ts"
 import { Info, TokensUsed, type FlowEventsShape } from "./FlowEvents.ts"
 import { isContextOverflow } from "./TransientRetry.ts"
 
@@ -24,6 +25,8 @@ export interface ChatOptions {
   readonly events?: FlowEventsShape
   /** Request label for published `TokensUsed` events. Default: "chat". */
   readonly agent?: string
+  /** End a turn that repeats one tool call or goes silent (ADR 0027 decision 11). */
+  readonly stall?: StallOptions
 }
 
 const publishUsage = (options: ChatOptions, response: LlmResponse): Effect.Effect<void> =>
@@ -38,7 +41,7 @@ const publishUsage = (options: ChatOptions, response: LlmResponse): Effect.Effec
       )
 
 export interface Chat {
-  readonly ask: (prompt: string) => Effect.Effect<string, FlowLlmError>
+  readonly ask: (prompt: string) => Effect.Effect<string, FlowLlmError | Stalled>
   readonly messages: Effect.Effect<ReadonlyArray<Message>>
 }
 
@@ -60,15 +63,19 @@ export const makeChat = Effect.fn("@llm4ts/flow/Chat.make")(function* (
 ): Effect.fn.Return<Chat> {
   const history = yield* Ref.make(initialHistory(options))
   const gate = yield* Semaphore.make(1)
+  const repeats = yield* Ref.make(noRepeats)
 
   const send = (messages: ReadonlyArray<Message>) => {
     const stream = service.executeStreamWithHistory(messages)
-    return collect(options.events === undefined ? stream : withToolActivity(options.events, stream))
+    const watched = options.events === undefined ? stream : withToolActivity(options.events, stream)
+    return collectAny(
+      options.stall === undefined ? watched : stallGuard(watched, options.stall, repeats)
+    )
   }
 
   const askRound = Effect.fn("@llm4ts/flow/Chat.ask")(function* (
     prompt: string
-  ): Effect.fn.Return<string, FlowLlmError> {
+  ): Effect.fn.Return<string, FlowLlmError | Stalled> {
     const userTurn = Message.make({ role: "User", content: prompt })
     const earlier = yield* Ref.get(history)
     const full = [...earlier, userTurn]
@@ -81,7 +88,8 @@ export const makeChat = Effect.fn("@llm4ts/flow/Chat.make")(function* (
     // this turn alone, and continue the conversation from there.
     const response = yield* send(full).pipe(
       Effect.catchIf(
-        (error) => isContextOverflow(error) && full.length > system.length + 1,
+        (error) =>
+          error._tag !== "Stalled" && isContextOverflow(error) && full.length > system.length + 1,
         (error) =>
           Effect.gen(function* () {
             messages = [
@@ -106,7 +114,7 @@ export const makeChat = Effect.fn("@llm4ts/flow/Chat.make")(function* (
             return yield* send(messages)
           })
       ),
-      Effect.mapError(FlowLlmError.from)
+      Effect.mapError((error) => (error._tag === "Stalled" ? error : FlowLlmError.from(error)))
     )
     yield* publishUsage(options, response)
     yield* Ref.set(history, [

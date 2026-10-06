@@ -25,6 +25,12 @@ export const collect = Effect.fn("@llm4ts/core/Streaming.collect")(
     Stream.runFold(stream, () => LlmResponse.make({ content: "" }), appendChunk)
 )
 
+/** `collect` for a stream whose failures are not only `LlmError`s (a flow-level guard on it). */
+export const collectAny = <E, R>(
+  stream: Stream.Stream<LlmChunk, E, R>
+): Effect.Effect<LlmResponse, E, R> =>
+  Stream.runFold(stream, () => LlmResponse.make({ content: "" }), appendChunk)
+
 const estimateTokens = (text: string): number => Math.max(1, Math.floor(text.length / 4))
 
 export const trackProgress = <R, R2>(

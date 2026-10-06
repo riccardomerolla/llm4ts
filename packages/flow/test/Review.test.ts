@@ -1096,3 +1096,50 @@ describe("adversarial review (ADR 0027)", () => {
       })
   )
 })
+
+describe("stall on an identical diff (ADR 0027)", () => {
+  it.effect(
+    "a fix round that leaves the diff unchanged ends the task as Stalled when asked; silently loops otherwise",
+    () =>
+      Effect.gen(function* () {
+        const finding = {
+          issues: [
+            { severity: "Warning", title: "wrong condition", description: "", confidence: 1 }
+          ],
+          summary: "one"
+        }
+        const values = yield* Ref.make<ReadonlyArray<unknown>>([finding, finding, finding])
+        const calls = yield* Ref.make(0)
+        const asks = yield* Ref.make(0)
+        const events = yield* makeCollectingFlowEvents
+        const coder = yield* makeChat(coderService(asks))
+        const error = yield* Effect.flip(
+          reviewAndFixLoop({
+            reviewers: [lens()],
+            reviewerService: reviewerService(values, calls),
+            coder,
+            taskTitle: "task",
+            currentDiff: Effect.succeed("diff"),
+            events,
+            maxRounds: 3,
+            stallOnIdenticalDiff: true
+          })
+        )
+        assert.strictEqual(error._tag, "Stalled")
+        assert.match(error.message, /identical-diff/)
+        assert.strictEqual(yield* Ref.get(asks), 1)
+
+        yield* Ref.set(values, [finding, finding, finding])
+        const settled = yield* reviewAndFixLoop({
+          reviewers: [lens()],
+          reviewerService: reviewerService(values, calls),
+          coder,
+          taskTitle: "task",
+          currentDiff: Effect.succeed("diff"),
+          events,
+          maxRounds: 2
+        })
+        assert.isFalse(settled.isClean)
+      })
+  )
+})

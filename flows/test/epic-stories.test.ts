@@ -59,6 +59,9 @@ import {
   gateCommands,
   gateTailChars,
   gateTimeoutSeconds,
+  reviewFixer,
+  reviewVotes,
+  stallOptions,
   gatesIn,
   testGateCommand,
   judgeStory,
@@ -1162,4 +1165,19 @@ describe("gate knobs (ADR 0027)", () => {
       assert.deepStrictEqual(seen, [["/wt/frontend", "lane-a", { dir: "/state/gates" }]])
     })
   )
+})
+
+describe("review and stall knobs (ADR 0027)", () => {
+  it("reads votes, the fixer and the stall options from the environment", () => {
+    assert.deepStrictEqual(reviewVotes({}), {})
+    assert.deepStrictEqual(reviewVotes({ LLM4TS_REVIEW_VOTES: "1" }), {})
+    assert.deepStrictEqual(reviewVotes({ LLM4TS_REVIEW_VOTES: "2" }), { votes: 2 })
+    assert.deepStrictEqual(reviewFixer({}), {})
+    assert.deepStrictEqual(reviewFixer({ LLM4TS_REVIEW_FIXER: "Separate" }), { fixer: "separate" })
+    assert.deepStrictEqual(stallOptions({}), { repeats: 5 })
+    assert.deepStrictEqual(stallOptions({ LLM4TS_STALL_REPEATS: "1" }), { repeats: 5 })
+    const timed = stallOptions({ LLM4TS_STALL_REPEATS: "7", LLM4TS_STALL_MINUTES: "20" })
+    assert.strictEqual(timed.repeats, 7)
+    assert.isDefined(timed.silence)
+  })
 })

@@ -86,6 +86,7 @@ import { cachedValue, fingerprintOf } from "./ReviewCache.ts"
 import { withContract, type ContractProfile } from "./AutonomyContract.ts"
 import { fabricatedStatusIssues, unverifiedClaims } from "./Evidence.ts"
 import type { Trailer } from "./CarriedNotes.ts"
+import type { StallOptions } from "./Stall.ts"
 import type { Reviewer } from "./Reviewer.ts"
 import {
   dependentsOf,
@@ -664,6 +665,8 @@ export interface StoriesOptions {
   readonly votes?: number
   /** Who applies review findings: the implementer's chat (default) or a separate fixer (ADR 0027 decision 8). */
   readonly fixer?: "coder" | "separate"
+  /** End a coder turn that repeats one tool call or goes silent (ADR 0027 decision 11). */
+  readonly stall?: StallOptions
   /**
    * The autonomy contract profile for the coder's system prompt (ADR 0027
    * decision 5). Default: the roster executor's `contract`, else `full`.
@@ -1457,6 +1460,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       repoRules: loadRepoReviewRules(files, context.workDir),
       ...(options.votes === undefined ? {} : { votes: options.votes }),
       ...(options.fixer === undefined ? {} : { fixer: options.fixer }),
+      ...(options.stall === undefined ? {} : { stall: options.stall }),
       ...(options.reviewers === undefined ? {} : { reviewers: options.reviewers }),
       ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds })
     })
