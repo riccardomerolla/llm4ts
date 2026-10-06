@@ -396,6 +396,11 @@ const program = Effect.gen(function* () {
                 : testGate === undefined
                   ? {}
                   : { lint: testGate }),
+              oracle: {
+                diff: context.git.diffAll,
+                declared: testsTask,
+                ...(pack.oracle === undefined ? {} : { rules: pack.oracle })
+              },
               parallelism: 1
             })
             if (testsTask && testGate !== undefined) {

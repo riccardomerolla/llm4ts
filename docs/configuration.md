@@ -239,6 +239,18 @@ before.
 `--land` deletes the baselines and compacts the gate logs to their failing
 lines.
 
+The **oracle guard** runs beside the gates (ADR 0027 decision 4): a change
+that deletes a test file, adds a skip or focus marker (`.skip(`, `.only(`,
+`xit(`, `test.todo(`, `@Ignore`, `@Disabled`, `@pytest.mark.skip`,
+`#[ignore]`) or lowers the passed-test count against the baseline fails its
+gate round, with the file and line, and the fix round undoes it. A story whose
+job includes changing tests says so with `testsChange: true` in its plan
+entry; `sdd` and `modernize-implement` declare it for the task that writes
+the red tests. A pack extends what counts as a test file or a marker in a
+`## Oracle` section. The count check runs only when both sides report a
+summary line the guard reads (Vitest, Jest, pytest, cargo, mocha, JUnit) and
+says once when they do not.
+
 ## Capabilities
 
 Filesystem, process, network, Git, and forge operations require explicit

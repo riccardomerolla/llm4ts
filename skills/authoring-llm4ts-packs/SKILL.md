@@ -82,6 +82,12 @@ launching a paid phase yourself.
   control, dependency, and build directories are never entered.
 - Gates are `- name: command` lines under `## Gates`; implement and verify
   run each after every task. Use the target's real commands.
+- `## Oracle` (optional) tells the oracle guard what a test file is
+  (`- tests: <regex>`) and which extra skip or focus markers count
+  (`- markers: @Flaky, @Retry`), merged over the defaults for Vitest, Jest,
+  JUnit, pytest and Rust. A task that deletes a test file, adds a marker or
+  lowers the passed-test count fails its gate round unless the plan says it
+  may (`testsChange: true`).
 - Judge dimensions are `- name (0..max): rubric`; extract scores every spec
   with them before a human approves it. Two to four precise dimensions beat
   many vague ones.

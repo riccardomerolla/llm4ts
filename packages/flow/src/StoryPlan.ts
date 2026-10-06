@@ -44,6 +44,15 @@ export class Story extends Schema.Class<Story>("Story")({
   acceptance: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed([])),
     Schema.withDecodingDefaultKey(Effect.succeed([]))
+  ),
+  /**
+   * The story may delete, skip or rewrite tests (ADR 0027): the oracle guard
+   * stays silent for it. Absent or false, a deleted test file, an added skip
+   * marker or a passed-count drop is a gate failure.
+   */
+  testsChange: Schema.Boolean.pipe(
+    Schema.withConstructorDefault(Effect.succeed(false)),
+    Schema.withDecodingDefaultKey(Effect.succeed(false))
   )
 }) {}
 
@@ -366,7 +375,8 @@ export const storyHash = (story: Story): string =>
       ...(story.readFirst.length === 0
         ? {}
         : { readFirst: [...story.readFirst].map(normalizePath) }),
-      ...(story.acceptance.length === 0 ? {} : { acceptance: [...story.acceptance] })
+      ...(story.acceptance.length === 0 ? {} : { acceptance: [...story.acceptance] }),
+      ...(story.testsChange ? { testsChange: true } : {})
     })
   )
 

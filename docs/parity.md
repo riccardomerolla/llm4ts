@@ -589,3 +589,7 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   the test gate once to tell flaky from new, bounds a gate with
   `LLM4TS_GATE_TIMEOUT`, and writes gate output to the run's state folder.
   Additive: without gate commands or a `baseline` option nothing changes.
+- Oracle guard (ADR 0027, 2026-10-06): a change that deletes a test file,
+  adds a skip or focus marker or lowers the passed-test count fails its gate
+  round unless its story declares `testsChange: true`; llm4zio has no such
+  check. Stories without the field hash as before.

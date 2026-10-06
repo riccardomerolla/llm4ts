@@ -14,6 +14,13 @@ import type { Chat } from "./Chat.ts"
 import { FlowLlmError, ProcessError, describeFlowError, type FlowError } from "./FlowError.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
 import { GateBaseline, isGateIssue, triageGates } from "./GateTriage.ts"
+import {
+  type OracleRules,
+  checkOracle,
+  defaultOracleRules,
+  parseUnifiedDiff,
+  passedCountIn
+} from "./OracleGuard.ts"
 import { cachedReview, fingerprintOf } from "./ReviewCache.ts"
 import {
   Info,
@@ -68,7 +75,9 @@ export class ReviewResult extends Schema.Class<ReviewResult>("ReviewResult")({
   summary: Schema.String.pipe(
     Schema.withConstructorDefault(Effect.succeed("")),
     Schema.withDecodingDefaultKey(Effect.succeed(""))
-  )
+  ),
+  /** A test gate's passed-test count, when its output had a summary the oracle guard reads (ADR 0027). */
+  passed: Schema.optionalKey(Schema.Int)
 }) {
   get isClean(): boolean {
     return this.issues.length === 0
@@ -295,6 +304,57 @@ export interface GateTriageOptions {
 
 const listed = (lines: ReadonlyArray<string>): string => lines.map((line) => `  ${line}`).join("\n")
 
+export interface OracleGateOptions {
+  /** The change under review as a unified diff (committed and uncommitted). */
+  readonly diff: Effect.Effect<string, FlowError>
+  readonly rules?: OracleRules
+  /** The plan entry says tests may change (`testsChange: true`); the guard then stays silent. */
+  readonly declared?: boolean
+  /** Tests passing on the base, from its baseline; omitted or `undefined` skips the count check. */
+  readonly baseCount?: Effect.Effect<number | undefined, FlowError>
+}
+
+/**
+ * The oracle guard (ADR 0027 decision 4) joined to a lint result: deleted
+ * test files, added skip or focus markers and a passed-count drop become
+ * Critical issues the fix round can undo. When a count is unknown on either
+ * side the comparison is skipped and said once.
+ */
+export const withOracle = Effect.fn("@llm4ts/flow/Review.withOracle")(function* (
+  lint: ReviewResult,
+  oracle: OracleGateOptions | undefined,
+  events: FlowEventsShape,
+  noted: Ref.Ref<boolean>
+): Effect.fn.Return<ReviewResult, FlowError> {
+  if (oracle === undefined || oracle.declared === true) {
+    return lint
+  }
+  const diff = yield* oracle.diff
+  const base = oracle.baseCount === undefined ? undefined : yield* oracle.baseCount
+  if ((base === undefined || lint.passed === undefined) && !(yield* Ref.get(noted))) {
+    yield* Ref.set(noted, true)
+    yield* events.publish(
+      Info.make({
+        message:
+          "oracle guard: no passed-test count on the base or the change (no summary line the guard reads), count comparison skipped"
+      })
+    )
+  }
+  const issues = checkOracle(
+    parseUnifiedDiff(diff),
+    { base, current: lint.passed },
+    oracle.rules ?? defaultOracleRules,
+    false
+  )
+  return issues.length === 0
+    ? lint
+    : ReviewResult.make({
+        issues: [...lint.issues, ...issues],
+        summary: [lint.summary, "oracle guard"].filter((part) => part.length > 0).join("; "),
+        ...(lint.passed === undefined ? {} : { passed: lint.passed })
+      })
+})
+
 /**
  * Charges a lint result only with what the change caused (ADR 0027).
  * Inherited lines are published once per `reported` set as Info; with
@@ -346,14 +406,18 @@ export const applyTriage = Effect.fn("@llm4ts/flow/Review.applyTriage")(function
   return triaged.blocking
 })
 
-export const mergeReviewResults = (results: ReadonlyArray<ReviewResult>): ReviewResult =>
-  ReviewResult.make({
+export const mergeReviewResults = (results: ReadonlyArray<ReviewResult>): ReviewResult => {
+  const counts = results.flatMap((result) => (result.passed === undefined ? [] : [result.passed]))
+  return ReviewResult.make({
     issues: results.flatMap((result) => result.issues),
     summary: results
       .map((result) => result.summary)
       .filter((summary) => summary.length > 0)
-      .join("; ")
+      .join("; "),
+    // Several gates may count tests (unit and e2e): the sum is what the change must keep.
+    ...(counts.length === 0 ? {} : { passed: counts.reduce((sum, value) => sum + value, 0) })
   })
+}
 
 const processProblem = (
   stdout: ReadonlyArray<string>,
@@ -437,8 +501,16 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
     yield* options.log.files.writeAtomic(options.log.path, output)
     logPath = options.log.path
   }
+  const passed =
+    result === undefined
+      ? undefined
+      : passedCountIn([...result.stdout, ...result.stderr].join("\n"))
   if (result !== undefined && result.exitCode === 0) {
-    return ReviewResult.make({ issues: [], summary: "lint passed" })
+    return ReviewResult.make({
+      issues: [],
+      summary: "lint passed",
+      ...(passed === undefined ? {} : { passed })
+    })
   }
   const seconds =
     options.timeout === undefined ? 0 : Math.round(Duration.toSeconds(options.timeout))
@@ -455,7 +527,8 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
         ...(logPath === undefined ? {} : { logPath })
       })
     ],
-    summary: "lint failed"
+    summary: "lint failed",
+    ...(passed === undefined ? {} : { passed })
   })
 })
 
@@ -494,6 +567,8 @@ export interface ReviewAndFixOptions {
   readonly triage?: GateTriageOptions
   /** How gate output reaches the coder in the fix prompt. */
   readonly fix?: FixPromptOptions
+  /** Fail the round when the change deletes or skips tests (ADR 0027 decision 4). */
+  readonly oracle?: OracleGateOptions
 }
 
 export interface ReviewCacheLocation {
@@ -638,6 +713,7 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
   )
   const format = options.format ?? Effect.void
   const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+  const oracleNoted = yield* Ref.make(false)
 
   const reviewOnce = (
     round: number,
@@ -645,7 +721,12 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
   ): Effect.Effect<ReviewResult, FlowError> =>
     Effect.gen(function* () {
       const lintRaw = yield* options.lint ?? Effect.succeed(ReviewResult.make({ issues: [] }))
-      const lint = yield* applyTriage(lintRaw, options.triage, options.events, reported)
+      const lint = yield* withOracle(
+        yield* applyTriage(lintRaw, options.triage, options.events, reported),
+        options.oracle,
+        options.events,
+        oracleNoted
+      )
       if (!lint.isClean) {
         return lint
       }

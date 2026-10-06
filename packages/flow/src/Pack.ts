@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema"
 import { Dimension } from "@llm4ts/core/eval/Eval"
 import type { ConsolidateRules } from "./Domains.ts"
 import { PlanParseError } from "./FlowError.ts"
+import { oracleRulesFrom, type OracleRules } from "./OracleGuard.ts"
 import { parseReviewer, type Reviewer } from "./Reviewer.ts"
 import { CoverageRule } from "./SpecChecks.ts"
 import type { WorkspaceError, WorkspaceShape } from "./Workspace.ts"
@@ -67,6 +68,12 @@ export interface Pack {
    * fragment as context (`context:`). Absent: every program is its own feature.
    */
   readonly consolidate: ConsolidateRules | undefined
+  /**
+   * The `## Oracle` section (ADR 0027): `- tests: <regex>` for what a test
+   * file is and `- markers: a, b` for extra skip or focus markers, merged
+   * over the defaults. Absent: the defaults.
+   */
+  readonly oracle: OracleRules | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
   readonly prompt: (name: string) => string | undefined
@@ -266,6 +273,14 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
       message: `pack manifest 'spec-schema:' must be 'pagespec' when set, got: ${specSchema}`
     })
   }
+  const oracleValues = namedItems(section(manifest.sections, "Oracle"))
+  const oracle: OracleRules | undefined =
+    section(manifest.sections, "Oracle") === undefined
+      ? undefined
+      : oracleRulesFrom({
+          ...(oracleValues.tests === undefined ? {} : { tests: oracleValues.tests }),
+          markers: commaList(oracleValues.markers)
+        })
   const consolidateValues = namedItems(section(manifest.sections, "Consolidate"))
   const consolidate: ConsolidateRules | undefined =
     section(manifest.sections, "Consolidate") === undefined
@@ -330,6 +345,7 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     featureFiles,
     specSchema,
     consolidate,
+    oracle,
     dir: directory,
     gate: (name) => gates[name],
     prompt: (name) => prompts[name],

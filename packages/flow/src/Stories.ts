@@ -74,6 +74,12 @@ import {
   type FixPromptOptions,
   type GateTriageOptions
 } from "./Review.ts"
+import {
+  type OracleRules,
+  checkOracle,
+  defaultOracleRules,
+  parseUnifiedDiff
+} from "./OracleGuard.ts"
 import { cachedValue, fingerprintOf } from "./ReviewCache.ts"
 import type { Reviewer } from "./Reviewer.ts"
 import {
@@ -647,6 +653,8 @@ export interface StoriesOptions {
   ) => Effect.Effect<ReviewResult, FlowError>
   /** How gate output reaches the coder in the fix prompt. */
   readonly fix?: FixPromptOptions
+  /** Test-file and marker patterns for the oracle guard; default rules when absent (ADR 0027). */
+  readonly oracleRules?: OracleRules
   /** Story-level judge over the branch's diff against the epic branch; omit to skip. */
   readonly judge?: (
     story: Story,
@@ -789,6 +797,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         appDir,
         commands: (gateCommands ?? []).map((command) => command.join(" ")),
         failingLines: failingLinesOf(result, rootsOf(workDir)),
+        ...(result.passed === undefined ? {} : { passedCount: result.passed }),
         recordedAt
       })
     )
@@ -1141,14 +1150,6 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
     // The target's gates plus the perimeter: a stray path is a gate failure
     // the task review loop hands back to the coder before anything commits.
-    const gates: Effect.Effect<ReviewResult, FlowError> = Effect.gen(function* () {
-      const target = yield* options.gates(state.worktree, laneOf(story), {
-        files,
-        dir: storyGateLogDir(options.stateDir, story.id)
-      })
-      const changed = yield* perimeterNow(story, git)
-      return combined(target, perimeterGate([...changed.sharedReadOnly, ...changed.outside], story))
-    })
     // The epic head this worktree started from: what the story may inherit.
     const storyBase = yield* git.checkpoint
     const storyBaseline = ensureBaseline(
@@ -1156,6 +1157,35 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       options.gates(state.worktree, laneOf(story)),
       state.worktree
     )
+    // The oracle guard over the story's whole change against the epic:
+    // committed on the branch and uncommitted in the worktree (ADR 0027).
+    const oracleGate = (target: ReviewResult): Effect.Effect<ReviewResult, FlowError> =>
+      story.testsChange
+        ? Effect.succeed(ReviewResult.make({ issues: [] }))
+        : Effect.gen(function* () {
+            const committed = yield* git.diffVsBase(epicBranch)
+            const uncommitted = yield* git.diffAll
+            const base =
+              gateCommands === undefined ? undefined : (yield* storyBaseline)?.passedCount
+            const issues = checkOracle(
+              parseUnifiedDiff(`${committed}\n${uncommitted}`),
+              { base, current: target.passed },
+              options.oracleRules ?? defaultOracleRules,
+              false
+            )
+            return ReviewResult.make({ issues, summary: issues.length === 0 ? "" : "oracle guard" })
+          })
+    const gates: Effect.Effect<ReviewResult, FlowError> = Effect.gen(function* () {
+      const target = yield* options.gates(state.worktree, laneOf(story), {
+        files,
+        dir: storyGateLogDir(options.stateDir, story.id)
+      })
+      const changed = yield* perimeterNow(story, git)
+      return combined(
+        combined(target, perimeterGate([...changed.sharedReadOnly, ...changed.outside], story)),
+        yield* oracleGate(target)
+      )
+    })
     const triage: GateTriageOptions = {
       baseline: storyBaseline,
       roots: rootsOf(state.worktree),

@@ -841,3 +841,93 @@ describe("applyTriage", () => {
       })
   )
 })
+
+describe("oracle guard in the review loop (ADR 0027)", () => {
+  const skipDiff = [
+    "diff --git a/src/a.test.ts b/src/a.test.ts",
+    "--- a/src/a.test.ts",
+    "+++ b/src/a.test.ts",
+    "@@ -1,2 +1,2 @@",
+    "-it('a', () => {})",
+    "+it.skip('a', () => {})",
+    " export {}"
+  ].join("\n")
+
+  it.effect(
+    "an added skip marker fails the round and is handed to the coder; declared, it passes",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const values = yield* Ref.make<ReadonlyArray<unknown>>([])
+        const calls = yield* Ref.make(0)
+        const asks = yield* Ref.make(0)
+        const coder = yield* makeChat(coderService(asks))
+        const result = yield* reviewAndFixLoop({
+          reviewers: [],
+          reviewerService: reviewerService(values, calls),
+          coder,
+          taskTitle: "t",
+          currentDiff: Effect.succeed(skipDiff),
+          events,
+          maxRounds: 1,
+          oracle: { diff: Effect.succeed(skipDiff) }
+        })
+        assert.isFalse(result.isClean)
+        assert.include(result.issues[0]?.title ?? "", "oracle: skip or focus marker")
+        const declared = yield* reviewAndFixLoop({
+          reviewers: [],
+          reviewerService: reviewerService(values, calls),
+          coder,
+          taskTitle: "t",
+          currentDiff: Effect.succeed(skipDiff),
+          events,
+          maxRounds: 1,
+          oracle: { diff: Effect.succeed(skipDiff), declared: true }
+        })
+        assert.isTrue(declared.isClean)
+      })
+  )
+
+  it.effect(
+    "a passed-count drop against the base is a Critical; unknown counts are noted once",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const values = yield* Ref.make<ReadonlyArray<unknown>>([])
+        const calls = yield* Ref.make(0)
+        const asks = yield* Ref.make(0)
+        const coder = yield* makeChat(coderService(asks))
+        const green = Effect.succeed(
+          ReviewResult.make({ issues: [], summary: "lint passed", passed: 10 })
+        )
+        const dropped = yield* reviewAndFixLoop({
+          reviewers: [],
+          reviewerService: reviewerService(values, calls),
+          coder,
+          taskTitle: "t",
+          currentDiff: Effect.succeed(""),
+          events,
+          maxRounds: 1,
+          lint: green,
+          oracle: { diff: Effect.succeed(""), baseCount: Effect.succeed(12) }
+        })
+        assert.include(dropped.issues[0]?.title ?? "", "fewer tests pass")
+        const unknown = yield* reviewAndFixLoop({
+          reviewers: [],
+          reviewerService: reviewerService(values, calls),
+          coder,
+          taskTitle: "t",
+          currentDiff: Effect.succeed(""),
+          events,
+          maxRounds: 2,
+          lint: green,
+          oracle: { diff: Effect.succeed(""), baseCount: Effect.succeed(undefined) }
+        })
+        assert.isTrue(unknown.isClean)
+        const notes = (yield* events.recorded).filter(
+          (event) => event._tag === "Info" && event.message.includes("count comparison skipped")
+        )
+        assert.strictEqual(notes.length, 1)
+      })
+  )
+})

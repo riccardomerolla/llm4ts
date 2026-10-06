@@ -161,6 +161,9 @@ const program = Effect.gen(function* () {
               currentDiff: context.git.diffAll,
               events: context.events,
               lint: testsTask ? compileGate : testGate,
+              // The red tests are the contract: the first task may write
+              // them, no later task may delete or skip them (ADR 0027).
+              oracle: { diff: context.git.diffAll, declared: testsTask },
               parallelism: 1
             })
             if (testsTask) {

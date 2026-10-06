@@ -22,6 +22,8 @@ export class GateBaseline extends Schema.Class<GateBaseline>("GateBaseline")({
   /** Each gate command as configured, joined with one space. */
   commands: Schema.Array(Schema.String),
   failingLines: Schema.Array(Schema.String),
+  /** Tests passing on the base, when the test gate's output said (the oracle guard compares). */
+  passedCount: Schema.optionalKey(Schema.Int),
   recordedAt: Schema.Number
 }) {}
 
@@ -228,6 +230,7 @@ export const ensureBaseline = <E>(
       appDir: args.appDir,
       commands: args.commands.map((command) => command.join(" ")),
       failingLines: failingLinesOf(result, args.roots),
+      ...(result.passed === undefined ? {} : { passedCount: result.passed }),
       recordedAt: yield* args.now
     })
     yield* writeBaseline(args.files, args.stateDir, key, baseline)

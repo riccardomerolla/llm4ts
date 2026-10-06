@@ -60,6 +60,7 @@
     "./JudgmentLog": "./dist/JudgmentLog.js",
     "./Perimeter": "./dist/Perimeter.js",
     "./NodePreflight": "./dist/NodePreflight.js",
+    "./OracleGuard": "./dist/OracleGuard.js",
     "./Orientation": "./dist/Orientation.js",
     "./Persistence": "./dist/Persistence.js",
     "./Plan": "./dist/Plan.js",

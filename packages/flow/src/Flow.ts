@@ -33,11 +33,14 @@ import {
   applyTriage,
   minimalReviewers,
   reviewAndFixLoop,
+  withOracle,
   type FixPromptOptions,
   type GateTriageOptions,
+  type OracleGateOptions,
   type ReviewResult,
   type ReviewCacheLocation
 } from "./Review.ts"
+import type { OracleRules } from "./OracleGuard.ts"
 import type { Reviewer } from "./Reviewer.ts"
 
 export { publishUsage, structuredAndPublish } from "./Usage.ts"
@@ -97,6 +100,13 @@ export interface ImplementPlanOptions {
     readonly commands: ReadonlyArray<ReadonlyArray<string>>
     readonly appDir?: string
   }
+  /**
+   * The oracle guard (ADR 0027 decision 4) over each task's diff: deleted
+   * test files, skip or focus markers and a passed-count drop (against the
+   * baseline, when both counts are known) fail the round unless
+   * `testsChange` is true.
+   */
+  readonly oracle?: { readonly rules?: OracleRules; readonly testsChange?: boolean }
   /** How gate output reaches the coder in the fix prompt. */
   readonly fix?: FixPromptOptions
   /** Where each review lens's answer is kept, so a rerun over the same diff asks nothing. */
@@ -327,6 +337,19 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           }
         }
         const triage = yield* triageFor(context, options)
+        const oracle: OracleGateOptions | undefined =
+          options.oracle === undefined
+            ? undefined
+            : {
+                diff: context.git.diffAll,
+                ...(options.oracle.rules === undefined ? {} : { rules: options.oracle.rules }),
+                ...(options.oracle.testsChange === undefined
+                  ? {}
+                  : { declared: options.oracle.testsChange }),
+                ...(triage === undefined
+                  ? {}
+                  : { baseCount: Effect.map(triage.baseline, (base) => base?.passedCount) })
+              }
         yield* reviewAndFixLoop({
           reviewers: options.reviewers ?? minimalReviewers,
           reviewerService: flowReviewer(context),
@@ -338,6 +361,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           ...(options.lint === undefined ? {} : { lint: options.lint }),
           ...(options.format === undefined ? {} : { format: options.format }),
           ...(triage === undefined ? {} : { triage }),
+          ...(oracle === undefined ? {} : { oracle }),
           ...(options.fix === undefined ? {} : { fix: options.fix }),
           ...(options.reviewCache === undefined ? {} : { cache: options.reviewCache }),
           ...(options.onReview === undefined
@@ -351,7 +375,12 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
         })
         if (options.lint !== undefined) {
           const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
-          const gate = yield* applyTriage(yield* options.lint, triage, context.events, reported)
+          const gate = yield* withOracle(
+            yield* applyTriage(yield* options.lint, triage, context.events, reported),
+            oracle,
+            context.events,
+            yield* Ref.make(true)
+          )
           if (!gate.isClean) {
             return yield* FlowAborted.make({
               message: [

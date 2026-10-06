@@ -897,7 +897,8 @@ export const storyPlanJsonSchema: JsonSchema = {
           sharedReadOnly: { type: "array", items: { type: "string" } },
           readFirst: { type: "array", items: { type: "string" } },
           acceptance: { type: "array", items: { type: "string" } },
-          provides: { type: "array", items: { type: "string" } }
+          provides: { type: "array", items: { type: "string" } },
+          testsChange: { type: "boolean" }
         },
         required: [
           "id",
@@ -941,6 +942,9 @@ export const storyPlanInstructions = (
     "  the diff by a reviewer who will not run the app (a route that answers, a screen that shows",
     "  X, a test file beside the feature that covers Y). The coder plans its tasks against them",
     "  and the judge scores against them.",
+    "- `testsChange`: true only for a story whose job includes deleting, skipping or rewriting",
+    "  existing tests (a migration of a test suite, a removed feature). Every other story leaves",
+    "  it out: the gates fail a story that deletes a test file or adds a skip marker.",
     "- `owned` sets are pairwise DISJOINT: no path prefix appears under two stories.",
     "- Shared surfaces (the kit, the theme, house rules) are never edited by a feature story. A new",
     "  shared component is its own story, and every story using it depends on it.",

@@ -594,6 +594,40 @@ describe("Stories executor", () => {
       })
     )
 
+    const deletesTest = [
+      "diff --git a/src/features/a/a.test.ts b/src/features/a/a.test.ts",
+      "deleted file mode 100644",
+      "--- a/src/features/a/a.test.ts",
+      "+++ /dev/null",
+      "@@ -1,1 +0,0 @@",
+      "-it('a', () => {})"
+    ].join("\n")
+
+    it.effect(
+      "a story that deletes a test file is blocked by the oracle guard; declared, it merges",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeHarness({ branchDiff: () => deletesTest })
+          const context = yield* makeContext(harness)
+          const options = yield* makeOptions(harness, single, context, { maxRounds: 1 })
+          const report = yield* implementStoriesFlow(context, options)
+          assert.strictEqual(report.stories[0]?.status, "failed")
+          assert.include(report.stories[0]?.reason ?? "", "oracle: test file deleted")
+
+          const declaredPlan = StoryPlan.make({
+            ...single,
+            stories: [Story.make({ ...story("a"), testsChange: true })]
+          })
+          const again = yield* makeHarness({ branchDiff: () => deletesTest })
+          const againContext = yield* makeContext(again)
+          const againOptions = yield* makeOptions(again, declaredPlan, againContext, {
+            maxRounds: 1
+          })
+          const declared = yield* implementStoriesFlow(againContext, againOptions)
+          assert.strictEqual(declared.stories[0]?.status, "done")
+        })
+    )
+
     it.effect("without gate commands a red base still fails the story, as before", () =>
       Effect.gen(function* () {
         const harness = yield* makeHarness()

@@ -1178,6 +1178,57 @@ describe("Flow gate and diff safety", () => {
       })
   )
 
+  it.effect(
+    "the oracle option refuses a task whose diff adds a skip marker unless testsChange is set",
+    () =>
+      Effect.gen(function* () {
+        const skipDiff = [
+          "diff --git a/src/a.test.ts b/src/a.test.ts",
+          "--- a/src/a.test.ts",
+          "+++ b/src/a.test.ts",
+          "@@ -1,1 +1,1 @@",
+          "-it('a', () => {})",
+          "+it.skip('a', () => {})"
+        ].join("\n")
+        const run = (testsChange: boolean) =>
+          Effect.gen(function* () {
+            const events = yield* makeFlowEventHub()
+            const asked = yield* Ref.make<ReadonlyArray<string>>([])
+            const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+            const memory = yield* makeMemoryPlainFileStore()
+            const store = makePlanStore(memory.store)
+            const plan = Plan.make({
+              epicId: `epic-oracle-${testsChange}`,
+              tasks: [Task.make({ title: "skip a test", description: "skips a test" })]
+            })
+            const context: FlowContextShape = {
+              reasoning: cleanReviewer,
+              coder: coderService(asked),
+              git: { ...makeFakeGit(gitLog), diffAll: Effect.succeed(skipDiff) },
+              hosting: failingHosting,
+              events,
+              reviewers: [cleanReviewer],
+              coderCapabilities: ConnectorCapabilities.make({}),
+              userPrompt: "implement",
+              workDir: "/repo",
+              workspace: "/repo"
+            }
+            return implementPlanFlow(context, {
+              store,
+              planPath: `.llm4ts/plan-oracle-${testsChange}.md`,
+              plan: Effect.succeed(plan),
+              maxRounds: 1,
+              lint: Effect.succeed(ReviewResult.make({ issues: [] })),
+              oracle: { testsChange }
+            })
+          })
+        const refused = yield* Effect.flip(Effect.flatten(run(false)))
+        assert.match(refused.message, /oracle: skip or focus marker/)
+        const allowed = yield* Effect.flatten(run(true))
+        assert.strictEqual(allowed.tasks.length, 1)
+      })
+  )
+
   it.effect("skips no-change tasks only when the coder confirms them satisfied", () =>
     Effect.gen(function* () {
       const events = yield* makeFlowEventHub()

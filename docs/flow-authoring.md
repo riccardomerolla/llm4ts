@@ -450,6 +450,14 @@ yield* implementPlanFlow(context, {
 Without `baseline` every red line blocks, as before. `sdd` deliberately has
 none: its red tests are the contract, not an inherited failure.
 
+The oracle guard is the third gate-shaped check. `implementPlanFlow` takes
+`oracle: { rules?, testsChange? }` and `reviewAndFixLoop` takes
+`oracle: { diff, rules?, declared?, baseCount? }`: the task's diff is parsed
+for deleted test files and added skip or focus markers, and the passed-test
+count is compared with the base when both are known. `sdd` passes
+`declared: testsTask` so the task that writes the red tests may, and no later
+task may delete or skip them.
+
 ### The task loop
 
 The loop itself is `implementTaskLoop` with your own per-task body: ask the
@@ -470,6 +478,9 @@ yield* implementTaskLoop(store, context.events, planPath, planWithSpec, (task) =
       currentDiff: context.git.diffAll,
       events: context.events,
       lint: testsTask ? compileGate : testGate,
+      // The red tests are the contract: the first task may write
+      // them, no later task may delete or skip them (ADR 0027).
+      oracle: { diff: context.git.diffAll, declared: testsTask },
       parallelism: 1
     })
     if (testsTask) {
@@ -494,6 +505,9 @@ Details worth copying:
 - **Gate switching** (`lint: testsTask ? compileGate : testGate`) — the
   red-test task can only be expected to compile; every later task must pass
   the full test suite.
+- **The oracle guard** (`oracle: { diff, declared: testsTask }`) — the task
+  that writes the red tests may touch tests; a later task that deletes or
+  skips one fails its round instead of going green.
 - **Invariants after review.** The `red.isClean` check runs after the review
   loop settles: bounded review and commit-worthiness are separate judgments.
   `FlowAborted` fails the task rather than committing a violation.

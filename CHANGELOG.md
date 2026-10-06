@@ -22,6 +22,14 @@ rewrite-grade loops: `docs/research/rewrite-grade-loops-plan.md`).
   evidence. `--land` compacts logs to failing lines and deletes baselines.
 - `gatesIn` moved from the epic-stories lib to `@llm4ts/flow/Gates`; the
   lib's `inAppDir` now forwards the lane and log arguments it used to drop.
+- **No deleted or skipped tests without saying so.** The oracle guard
+  (ADR 0027 decision 4) fails a gate round whose diff deletes a test file or
+  adds a skip or focus marker, naming the file and line, and whose test gate
+  passes fewer tests than the base when both counts are known. A story
+  declares `testsChange: true` when changing tests is its job (the planner is
+  told when); `sdd` and `modernize-implement` declare it for the red-tests
+  task. Packs extend the test-file pattern and markers in a `## Oracle`
+  section. Stories written before this release hash unchanged.
 
 ## 2.30.0
 

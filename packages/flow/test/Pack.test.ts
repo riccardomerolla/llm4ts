@@ -167,6 +167,24 @@ describe("2.0 manifest keys", () => {
     })
   )
 
+  it.effect("reads '## Oracle' test-file pattern and extra markers; absent means undefined", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      const head = "# Pack: p\n\nsource: cobol\nsources: .*\\.cbl\n"
+      yield* workspace.write(
+        "packs/p/pack.md",
+        `${head}\n## Oracle\n\n- tests: ^src/test/\n- markers: @Flaky, @Retry\n`
+      )
+      yield* workspace.write("packs/q/pack.md", head)
+      const withOracle = yield* loadPack(workspace, "packs/p")
+      assert.strictEqual(withOracle.oracle?.testFiles, "^src/test/")
+      assert.include(withOracle.oracle?.markers ?? [], "@Flaky")
+      assert.include(withOracle.oracle?.markers ?? [], ".skip(")
+      const without = yield* loadPack(workspace, "packs/q")
+      assert.isUndefined(without.oracle)
+    })
+  )
+
   it.effect("reads '## Consolidate' cluster and context kinds and rejects unknown ones", () =>
     Effect.gen(function* () {
       const workspace = yield* makeMemoryWorkspace()

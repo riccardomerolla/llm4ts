@@ -169,6 +169,23 @@ describe("StoryPlan", () => {
   )
 })
 
+describe("testsChange (ADR 0027)", () => {
+  it("defaults to false and enters the hash only when true", () => {
+    const plain = Story.make({
+      id: "a",
+      title: "A",
+      description: "d",
+      dependsOn: [],
+      owned: ["src/a"],
+      sharedReadOnly: [],
+      provides: []
+    })
+    assert.isFalse(plain.testsChange)
+    assert.strictEqual(storyHash(Story.make({ ...plain, testsChange: false })), storyHash(plain))
+    assert.notStrictEqual(storyHash(Story.make({ ...plain, testsChange: true })), storyHash(plain))
+  })
+})
+
 describe("readFirst and acceptance", () => {
   it("default to empty and leave an older story's hash unchanged", () => {
     const plain = story("accounts-page", ["src/features/accounts"])
