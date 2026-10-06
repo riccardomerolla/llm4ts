@@ -781,6 +781,55 @@ export const setupRecoveryPrompt = (command: string): string =>
 const failed = (story: Story, reason: string): StoryFailed =>
   StoryFailed.make({ story: story.id, reason })
 
+/** What the story scheduler can say about stories it is not starting. */
+export interface LaunchPicture {
+  readonly epicId: string
+  readonly running: number
+  readonly concurrency: number
+  /** The roster's coder capacity; absent without a roster. */
+  readonly capacity?: number
+  /** Ready stories left for a coder slot to free. */
+  readonly readyWaiting: number
+  /** Stories whose dependencies are not merged yet, with the ones they wait for. */
+  readonly blocked: ReadonlyArray<{ readonly id: string; readonly on: ReadonlyArray<string> }>
+}
+
+const shownBlocked = 3
+
+/**
+ * One line on why fewer stories run than the cap allows, or `undefined`
+ * when nothing waits: dependencies first (the common case), then capacity.
+ */
+export const launchSummary = (picture: LaunchPicture): string | undefined => {
+  if (picture.blocked.length === 0 && picture.readyWaiting === 0) {
+    return undefined
+  }
+  const cap =
+    picture.capacity === undefined
+      ? `concurrency ${picture.concurrency}`
+      : `concurrency ${picture.concurrency}, ${picture.capacity} coder slot(s)`
+  const blocked =
+    picture.blocked.length === 0
+      ? []
+      : [
+          `${picture.blocked.length} waiting on dependencies: ${picture.blocked
+            .slice(0, shownBlocked)
+            .map((story) => `${story.id} ← ${story.on.join(", ")}`)
+            .join("; ")}${
+            picture.blocked.length > shownBlocked
+              ? ` (+${picture.blocked.length - shownBlocked} more)`
+              : ""
+          }`
+        ]
+  const starved =
+    picture.readyWaiting === 0 ? [] : [`${picture.readyWaiting} ready, waiting for a coder slot`]
+  return [
+    `epic ${picture.epicId}: ${picture.running} running (${cap})`,
+    ...blocked,
+    ...starved
+  ].join(" · ")
+}
+
 // ---- The executor -------------------------------------------------------------
 
 export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(function* (
@@ -1278,7 +1327,13 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         : { rerunTest: options.testGate(state.worktree, laneOf(story)) })
     }
     if (gateCommands !== undefined) {
-      const inherited = (yield* storyBaseline)?.failingLines ?? []
+      // Recorded here, before the first task, so the lane says what the time goes to.
+      const baseline = yield* stage(
+        laneOf(story),
+        `story ${story.id}: baseline gates`,
+        storyBaseline
+      )
+      const inherited = baseline?.failingLines ?? []
       if (inherited.length > 0) {
         inheritedByStory.set(story.id, inherited)
         yield* appendFindings(
@@ -1424,7 +1479,12 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       plan: planWithinPerimeter(
         plan,
         story,
-        (text) => planTasks(watchedSeats, story, text),
+        (text) =>
+          stage(
+            laneOf(story),
+            `story ${story.id}: plan tasks`,
+            planTasks(watchedSeats, story, text)
+          ),
         prompt,
         laneOf(story)
       ),
@@ -1816,6 +1876,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
   /** Why no further story may start in this run; stories already running finish. */
   let halted: string | undefined
+  /** The last launch summary said, so a picture is told once, when it changes. */
+  let toldLaunch: string | undefined
   /** Stories retried once after the serving engine recovered. */
   const recovered = new Set<string>()
 
@@ -1856,6 +1918,34 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           ) {
             starvedAt = capacity
           }
+          // Say why fewer stories run than the cap allows: a plan that
+          // chains its stories looks exactly like a scheduler that stalled.
+          const started = new Set([...current.running, ...launching.map((story) => story.id)])
+          const said = launchSummary({
+            epicId: plan.epicId,
+            running: started.size,
+            concurrency,
+            ...(context.roster === undefined ? {} : { capacity }),
+            readyWaiting: ready.length - launching.length,
+            blocked: plan.stories.flatMap((story) =>
+              current.done.has(story.id) ||
+              current.failed.has(story.id) ||
+              current.waiting.has(story.id) ||
+              started.has(story.id) ||
+              ready.includes(story)
+                ? []
+                : [
+                    {
+                      id: story.id,
+                      on: story.dependsOn.filter((dependency) => !current.done.has(dependency))
+                    }
+                  ]
+            )
+          })
+          if (said !== undefined && said !== toldLaunch) {
+            yield* events.publish(Info.make({ message: said }))
+          }
+          toldLaunch = said
         }
         if ((yield* Ref.get(running)).size === 0) {
           break
