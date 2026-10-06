@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.35.0
+
+LLM spans that show what was asked and answered, on every seat.
+
+- **Content on structured calls.** With `LLM4TS_OTEL_CONTENT=on`, only
+  streamed seat calls carried `input.value`, `output.value` and
+  `gen_ai.input/output.messages`; structured and scoring calls (planner,
+  reviewer, judge, PR summary) opened LLM spans with usage only, so on CLI
+  backends such as Gemini many spans showed no text. They now carry the
+  prompt and the decoded reply as JSON, through the same redaction and caps.
+  With content off, nothing changes.
+- **`llm4ts run --otel-content off|on|full`.** Forwards
+  `LLM4TS_OTEL_CONTENT`, so turning content on no longer needs an
+  environment variable. The flag wins over the shell's value.
+
 ## 2.34.0
 
 The rest of phase 3 (ADR 0028): the three port flows that make the
