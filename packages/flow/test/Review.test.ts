@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
@@ -606,6 +607,84 @@ describe("lintCommand spans", () => {
         ["gate pnpm test", "pnpm test", 1, true]
       )
       assert.notInclude(JSON.stringify(spans()), "secret")
+    })
+  )
+})
+
+describe("lintCommand timeout and class", () => {
+  const neverExits = makeProcessExecutor({
+    run: () => Effect.never,
+    runStreaming: () => Stream.empty
+  })
+
+  it.effect("a gate that never exits ends at the timeout as one Critical of class hang", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const fiber = yield* Effect.forkChild(
+        lintCommand(neverExits, events, ["pnpm", "test"], "/wt/a", {
+          timeout: Duration.seconds(30)
+        })
+      )
+      yield* TestClock.adjust(Duration.seconds(31))
+      const result = yield* Fiber.join(fiber)
+      assert.strictEqual(result.issues.length, 1)
+      assert.strictEqual(result.issues[0]?.gateClass, "hang")
+      assert.include(result.issues[0]?.description ?? "", "no exit after 30 seconds")
+      const timed = (yield* events.recorded).find((event) => event._tag === "Timed")
+      assert.strictEqual(timed?._tag === "Timed" ? timed.failed : undefined, true)
+      assert.isUndefined(timed?._tag === "Timed" ? timed.exitCode : 0)
+    })
+  )
+
+  it.effect("an exit code of 128 or more is class crash; a smaller non-zero exit is red", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const exits = (code: number) =>
+        makeProcessExecutor({
+          run: () => Effect.succeed(ProcessResult.make({ stdout: ["boom"], exitCode: code })),
+          runStreaming: () => Stream.empty
+        })
+      const crash = yield* lintCommand(exits(139), events, ["pnpm", "test"], "/wt/a")
+      const red = yield* lintCommand(exits(1), events, ["pnpm", "test"], "/wt/a")
+      assert.strictEqual(crash.issues[0]?.gateClass, "crash")
+      assert.strictEqual(red.issues[0]?.gateClass, "red")
+      assert.isUndefined(red.issues[0]?.logPath)
+    })
+  )
+
+  it.effect("writes the full output to the log when asked and names the path on the issue", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const memory = yield* makeMemoryPlainFileStore()
+      const process = makeProcessExecutor({
+        run: () =>
+          Effect.succeed(ProcessResult.make({ stdout: ["FAIL a"], stderr: ["warn"], exitCode: 1 })),
+        runStreaming: () => Stream.empty
+      })
+      const result = yield* lintCommand(process, events, ["pnpm", "test"], "/wt/a", {
+        log: { files: memory.store, path: "/state/stories/a/gates/1-pnpm-test.log" }
+      })
+      assert.strictEqual(result.issues[0]?.logPath, "/state/stories/a/gates/1-pnpm-test.log")
+      assert.strictEqual(
+        (yield* memory.files)["/state/stories/a/gates/1-pnpm-test.log"],
+        "FAIL a\nwarn"
+      )
+    })
+  )
+
+  it.effect("a green gate with a log sink writes the log too", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const memory = yield* makeMemoryPlainFileStore()
+      const process = makeProcessExecutor({
+        run: () => Effect.succeed(ProcessResult.make({ stdout: ["ok"], exitCode: 0 })),
+        runStreaming: () => Stream.empty
+      })
+      const result = yield* lintCommand(process, events, ["pnpm", "test"], "/wt/a", {
+        log: { files: memory.store, path: "/state/gates/0.log" }
+      })
+      assert.isTrue(result.isClean)
+      assert.strictEqual((yield* memory.files)["/state/gates/0.log"], "ok")
     })
   )
 })

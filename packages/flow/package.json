@@ -44,6 +44,8 @@
     "./FlowError": "./dist/FlowError.js",
     "./FlowEvents": "./dist/FlowEvents.js",
     "./FlowRecorder": "./dist/FlowRecorder.js",
+    "./GateTriage": "./dist/GateTriage.js",
+    "./Gates": "./dist/Gates.js",
     "./GitHubTool": "./dist/GitHubTool.js",
     "./GitTool": "./dist/GitTool.js",
     "./Landing": "./dist/Landing.js",

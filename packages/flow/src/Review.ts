@@ -1,11 +1,12 @@
 import { join } from "node:path"
 import * as Clock from "effect/Clock"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type { LlmError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import type { JsonSchema } from "@llm4ts/core/Models"
-import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
+import type { ProcessExecutorShape, ProcessResult } from "@llm4ts/core/ProcessExecutor"
 import { Capabilities } from "@llm4ts/core/Capability"
 import { guarded } from "./CapabilityGuard.ts"
 import type { Chat } from "./Chat.ts"
@@ -51,7 +52,13 @@ export class ReviewIssue extends Schema.Class<ReviewIssue>("ReviewIssue")({
   confidence: Schema.Number.pipe(
     Schema.withConstructorDefault(Effect.succeed(1)),
     Schema.withDecodingDefaultKey(Effect.succeed(1))
-  )
+  ),
+  /** A gate failure's triage against the base (ADR 0027); absent for review findings. */
+  origin: Schema.optionalKey(Schema.Literals(["new", "base", "flaky"])),
+  /** How a gate ended: a red exit, killed at the timeout, or a signal exit. */
+  gateClass: Schema.optionalKey(Schema.Literals(["red", "hang", "crash"])),
+  /** Where the gate's full output was written, when the caller asked for a log. */
+  logPath: Schema.optionalKey(Schema.String)
 }) {}
 
 export class ReviewResult extends Schema.Class<ReviewResult>("ReviewResult")({
@@ -265,54 +272,95 @@ const processProblem = (
   return detail.length === 0 ? `process exited with code ${exitCode}` : detail
 }
 
+export interface LintCommandOptions {
+  /** Kill the gate after this long; the issue is then `gateClass: "hang"`. Default: never. */
+  readonly timeout?: Duration.Duration
+  /** Write the gate's whole stdout and stderr here; the issue carries `logPath`. */
+  readonly log?: { readonly files: PlainFileStoreShape; readonly path: string }
+}
+
+const gateClassOf = (exitCode: number): "red" | "crash" => (exitCode >= 128 ? "crash" : "red")
+
 export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function* (
   process: ProcessExecutorShape,
   events: FlowEventsShape,
   command: ReadonlyArray<string>,
-  workDir: string
+  workDir: string,
+  options: LintCommandOptions = {}
 ): Effect.fn.Return<ReviewResult, FlowError> {
   const executable = command[0]
   if (executable === undefined) {
     return ReviewResult.make({ issues: [], summary: "" })
   }
+  const label = command.join(" ")
   const started = yield* Clock.currentTimeMillis
+  const run = guarded(
+    Capabilities.Exec(executable),
+    `lint: ${label}`,
+    events,
+    process.run(command, workDir, {}).pipe(
+      Effect.mapError((cause) =>
+        ProcessError.make({
+          message: label,
+          detail: cause.message
+        })
+      )
+    )
+  )
+  // Interrupting `run` interrupts the child through the executor's scope;
+  // `undefined` here means the gate never exited (ADR 0027: a hang is a
+  // gate failure that says so, never a stuck run).
+  const bounded: Effect.Effect<ProcessResult | undefined, FlowError> =
+    options.timeout === undefined
+      ? run
+      : run.pipe(
+          Effect.timeoutOption(options.timeout),
+          Effect.map((option) => (option._tag === "Some" ? option.value : undefined))
+        )
   // A TOOL span (ADR 0026) and a Timed event: the command as configured and
   // its exit code, never its output.
   const result = yield* withKindSpan(
-    `gate ${command.join(" ")}`,
-    { kind: "TOOL", attributes: { [attr.gateCommand]: command.join(" ") } },
-    guarded(
-      Capabilities.Exec(executable),
-      `lint: ${command.join(" ")}`,
-      events,
-      process.run(command, workDir, {}).pipe(
-        Effect.mapError((cause) =>
-          ProcessError.make({
-            message: command.join(" "),
-            detail: cause.message
-          })
-        )
+    `gate ${label}`,
+    { kind: "TOOL", attributes: { [attr.gateCommand]: label } },
+    bounded.pipe(
+      Effect.tap((ran) =>
+        ran === undefined ? Effect.void : Effect.annotateCurrentSpan(attr.gateExit, ran.exitCode)
       )
-    ).pipe(Effect.tap((ran) => Effect.annotateCurrentSpan(attr.gateExit, ran.exitCode)))
+    )
   )
+  const failed = result === undefined || result.exitCode !== 0
   yield* events.publish(
     Timed.make({
       kind: "gate",
-      label: command.join(" "),
+      label,
       ms: (yield* Clock.currentTimeMillis) - started,
-      exitCode: result.exitCode,
-      ...(result.exitCode === 0 ? {} : { failed: true })
+      ...(result === undefined ? {} : { exitCode: result.exitCode }),
+      ...(failed ? { failed: true } : {})
     })
   )
-  if (result.exitCode === 0) {
+  let logPath: string | undefined
+  if (options.log !== undefined) {
+    const output =
+      result === undefined ? "" : [...result.stdout, ...result.stderr].join("\n").trim()
+    yield* options.log.files.writeAtomic(options.log.path, output)
+    logPath = options.log.path
+  }
+  if (result !== undefined && result.exitCode === 0) {
     return ReviewResult.make({ issues: [], summary: "lint passed" })
   }
+  const seconds =
+    options.timeout === undefined ? 0 : Math.round(Duration.toSeconds(options.timeout))
   return ReviewResult.make({
     issues: [
       ReviewIssue.make({
         severity: "Critical",
-        title: `lint failed: ${command.join(" ")}`,
-        description: processProblem(result.stdout, result.stderr, result.exitCode)
+        title: `lint failed: ${label}`,
+        description:
+          result === undefined
+            ? `gate killed: no exit after ${seconds} seconds (LLM4TS_GATE_TIMEOUT)`
+            : processProblem(result.stdout, result.stderr, result.exitCode),
+        gateClass: result === undefined ? "hang" : gateClassOf(result.exitCode),
+        ...(logPath === undefined ? {} : { logPath })
       })
     ],
     summary: "lint failed"
