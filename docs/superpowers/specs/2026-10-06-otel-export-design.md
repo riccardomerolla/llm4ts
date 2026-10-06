@@ -1,6 +1,6 @@
 # OpenTelemetry export: what the agents do, tokens and costs, in Phoenix or any OTLP backend
 
-Date: 2026-10-06 · Status: agreed (grilled), to implement as 2.30.0 with ADR 0026
+Date: 2026-10-06 · Status: implemented in 2.30.0 (ADR 0026)
 
 ## Why
 

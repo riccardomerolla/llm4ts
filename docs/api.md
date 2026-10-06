@@ -37,7 +37,10 @@ export list; the following modules are the main entry points.
   prompt prefix; `verbalizedScoreLabelSequence` derives it from structured
   output when a backend has no native read. `mlx-lm` answers it from token
   log-probabilities in one forward pass.
-- `@llm4ts/core/observability/*`: metrics, tracing, recording, logging,
+- `@llm4ts/core/observability/*` (`Tracing`, `Metrics`, `MeteredLlmService`,
+  `StructuredLogger` are **deprecated** since 2.30.0, ADR 0026 — runs export
+  OpenTelemetry through `@llm4ts/runner/Otel` instead; `Redaction` and
+  `StreamRecorder` stay): metrics, tracing, recording, logging,
   redaction.
 
 ## Flow

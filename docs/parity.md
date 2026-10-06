@@ -577,3 +577,9 @@ reference release.
 profile`, transcripts on by default and compacted on land. llm4zio's
   stories carry no anchors or criteria and its coder starts every task cold.
   Additive.
+- OpenTelemetry export (ADR 0026, 2026-10-06): kind spans at the flow's
+  seams (run, story, task, seat call, tool call, gate, judge round) with
+  GenAI and OpenInference attributes, four metrics, exported over OTLP by
+  Effect's own exporter — Phoenix with `--otel`, any collector with the
+  `OTEL_*` variables; content off by default. llm4zio has no telemetry
+  export. Additive.

@@ -1,3 +1,8 @@
+/**
+ * @deprecated Since 2.30.0 (ADR 0026): llm4ts exports OpenTelemetry spans and
+ * metrics over OTLP from `@llm4ts/runner/Otel`; this in-memory module is not
+ * used by flow or runner and will be removed in the next major.
+ */
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"

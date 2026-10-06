@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.30.0
+
+A run in Phoenix, Langfuse or any OpenTelemetry backend (ADR 0026).
+
+- **`llm4ts run --otel`** exports spans to a local Arize Phoenix at
+  `localhost:6006`; `OTEL_EXPORTER_OTLP_ENDPOINT` sends traces and metrics to
+  any collector instead, every `OTEL_*` variable honoured. Effect's own OTLP
+  exporter: no SDK, no new dependency.
+- **One trace per story** (an AGENT span linked to the run's CHAIN span),
+  tasks and merges as CHAIN spans, every seat call an LLM span with
+  `gen_ai.*` tokens and the model name, harness tool calls as TOOL children
+  of it (opened on `tool_use`, closed on `tool_result`), gates as TOOL spans,
+  judge rounds as EVALUATOR spans carrying the dimension scores.
+  `session.id` groups a run; `llm4ts.story`, `llm4ts.epic`, `llm4ts.role`,
+  `llm4ts.executor` ride on every span. Effect's own function spans stay
+  unexported, so a trace shows the flow, not the call stack.
+- **Content stays home** unless `LLM4TS_OTEL_CONTENT=on` (prompts, replies,
+  tool I/O; redacted, capped) or `full` (the system prompt too).
+- **Costs**: exported only when the backend reported one; estimated usage is
+  exported with the real model name and `llm4ts.usage.estimated=true`.
+- **`llm4ts doctor`** prints where spans go and whether the endpoint answers.
+- `@llm4ts/core/observability/{Tracing,Metrics,MeteredLlmService,StructuredLogger}`
+  are deprecated; removal in the next major.
+
 ## 2.29.0
 
 Why an `epic-stories` epic takes days with a CLI coder, and what now tells it
