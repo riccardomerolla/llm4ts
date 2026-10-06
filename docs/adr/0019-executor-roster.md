@@ -93,7 +93,10 @@ knowing how many executors there are.
 
 - No flow changes to benefit: any flow gains failover of its coder and
   independent review. `epic-stories` additionally sizes its launches by the
-  free coder slots and records each story's executor on the board and in the
+  round's coder capacity (coder slots on executors not out of the round,
+  held or not: since 2.35.1, not the slots free that instant, which a
+  review or judge call holds for a moment) and launches more as soon as the
+  round grows; it records each story's executor on the board and in the
   report.
 - The story judge and the `BLOCKED_ON` verifier move from one epic-wide
   reasoning seat to per-story leases (`Stories` passes the story's seats to

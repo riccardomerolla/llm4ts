@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Clock from "effect/Clock"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -788,6 +789,56 @@ describe("Roster seats", () => {
         yield* roster.exclude(Exclusion.make({ id: "two", kind: "run", reason: "not logged in" }))
         const borrowed = yield* roster.lease("judge", { avoid: ["one"], borrow: one })
         assert.deepStrictEqual([borrowed.executor.id, borrowed.borrowed], ["one", true])
+      })
+    )
+  )
+})
+
+describe("Roster capacity", () => {
+  it.effect("counts the round's coder slots whether held or not, and follows the round", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const roster = yield* makeRoster({ executors: [local, onPrem, codex, claude], events })
+        assert.strictEqual(yield* roster.capacity("coder"), 5)
+        yield* roster.lease("coder")
+        // A held slot lowers what is free now, not what the round can run.
+        assert.strictEqual(yield* roster.available("coder"), 4)
+        assert.strictEqual(yield* roster.capacity("coder"), 5)
+
+        yield* roster.exclude(Exclusion.make({ id: "codex", kind: "manual", reason: "operator" }))
+        assert.strictEqual(yield* roster.capacity("coder"), 4)
+        // Already different: no wait.
+        assert.strictEqual(yield* roster.capacityChanged("coder", 5), 4)
+
+        const waiting = yield* Effect.forkScoped(roster.capacityChanged("coder", 4))
+        yield* Effect.yieldNow
+        assert.isUndefined(waiting.pollUnsafe())
+        yield* roster.resume("codex")
+        assert.strictEqual(yield* Fiber.join(waiting), 5)
+      })
+    )
+  )
+
+  it.effect("wakes when a cooldown ends, with nothing else happening", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const roster = yield* makeRoster({ executors: [onPrem, codex], events })
+        const now = yield* Clock.currentTimeMillis
+        yield* roster.exclude(
+          Exclusion.make({
+            id: "codex",
+            kind: "until",
+            reason: "rate limited",
+            until: now + 60_000
+          })
+        )
+        const waiting = yield* Effect.forkScoped(roster.capacityChanged("coder", 1))
+        yield* TestClock.adjust("30 seconds")
+        assert.isUndefined(waiting.pollUnsafe())
+        yield* TestClock.adjust("31 seconds")
+        assert.strictEqual(yield* Fiber.join(waiting), 2)
       })
     )
   )

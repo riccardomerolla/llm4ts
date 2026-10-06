@@ -41,6 +41,10 @@ export interface RosterView {
   readonly available: (role: Role) => Effect.Effect<number>
   /** Configured slots for `role`. */
   readonly slots: (role: Role) => number
+  /** Slots for `role` on the executors in the round, held or not. */
+  readonly capacity: (role: Role) => Effect.Effect<number>
+  /** Waits until `capacity(role)` is no longer `from`; returns the new value. */
+  readonly capacityChanged: (role: Role, from: number) => Effect.Effect<number>
   /** The executor holding this context's coder, once leased. */
   readonly executor: Effect.Effect<string | undefined>
   /** Every executor that held this context's coder, in order (handovers). */

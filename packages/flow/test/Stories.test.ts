@@ -10,6 +10,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { ConnectorCapabilities, LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import { makeLocalBoardSync, type BoardStatus } from "@llm4ts/flow/BoardSync"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
+import type { RosterView } from "@llm4ts/flow/RosterSeats"
 import { FlowAborted, MergeConflict, type FlowError } from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
@@ -1915,5 +1916,109 @@ describe("story spans", () => {
         assert.strictEqual(judge?.attributes["llm4ts.judge.tests"], 1)
         assert.strictEqual(judge?.attributes["llm4ts.judge.cleared"], true)
       })
+  )
+})
+
+describe("Stories executor under a roster", () => {
+  // Four stories nothing orders: the roster alone bounds how many run.
+  const wide = StoryPlan.make({
+    epicId: "wide",
+    epic: "Four independent stories.",
+    stories: [story("a"), story("b"), story("c"), story("d")]
+  })
+
+  /** A roster view whose coder capacity the test sets; no slot is ever free this instant. */
+  const rosterView = (capacity: Ref.Ref<number>, grown: Deferred.Deferred<void>): RosterView => ({
+    forRole: () => cleanReviewer,
+    available: () => Effect.succeed(0),
+    slots: () => 6,
+    capacity: () => Ref.get(capacity),
+    capacityChanged: (_role, from) =>
+      Effect.gen(function* () {
+        const now = yield* Ref.get(capacity)
+        if (now !== from) {
+          return now
+        }
+        yield* Deferred.await(grown)
+        return yield* Ref.get(capacity)
+      }),
+    executor: Effect.succeed(undefined),
+    history: Effect.succeed([])
+  })
+
+  const activeCount = (options: StoriesOptions): Effect.Effect<number, FlowError> =>
+    Effect.map(
+      statusOf(options),
+      (status) => [...status.values()].filter((value) => value === "active").length
+    )
+
+  it.effect(
+    "starts as many stories as the round has coder slots, though calls hold them this instant",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const latches = new Map(
+            yield* Effect.forEach(["a", "b", "c", "d"], (id) =>
+              Effect.map(Deferred.make<void>(), (latch) => [id, latch] as const)
+            )
+          )
+          const harness = yield* makeHarness({ latches })
+          const capacity = yield* Ref.make(3)
+          const roster = rosterView(capacity, yield* Deferred.make<void>())
+          const context = { ...(yield* makeContext(harness)), roster }
+          const options = yield* makeOptions(harness, wide, context, { concurrency: 6 })
+          const fiber = yield* Effect.forkScoped(implementStoriesFlow(context, options))
+
+          yield* settle(
+            Effect.map(activeCount(options), (count) => count === 3),
+            "three stories active"
+          )
+          assert.strictEqual((yield* statusOf(options)).get("d"), "planned")
+
+          yield* Effect.forEach([...latches.values()], (latch) =>
+            Deferred.succeed(latch, undefined)
+          )
+          const report = yield* Fiber.join(fiber)
+          assert.isTrue(report.stories.every((outcome) => outcome.status === "done"))
+        })
+      )
+  )
+
+  it.effect(
+    "a story waiting for coder capacity starts when the round grows, not when one ends",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const latches = new Map(
+            yield* Effect.forEach(["a", "b", "c", "d"], (id) =>
+              Effect.map(Deferred.make<void>(), (latch) => [id, latch] as const)
+            )
+          )
+          const harness = yield* makeHarness({ latches })
+          const capacity = yield* Ref.make(1)
+          const grown = yield* Deferred.make<void>()
+          const context = { ...(yield* makeContext(harness)), roster: rosterView(capacity, grown) }
+          const options = yield* makeOptions(harness, wide, context, { concurrency: 6 })
+          const fiber = yield* Effect.forkScoped(implementStoriesFlow(context, options))
+
+          yield* settle(
+            Effect.map(activeCount(options), (count) => count === 1),
+            "one story active"
+          )
+          // An executor comes back while story a still runs.
+          yield* Ref.set(capacity, 4)
+          yield* Deferred.succeed(grown, undefined)
+          yield* settle(
+            Effect.map(activeCount(options), (count) => count === 4),
+            "four stories active"
+          )
+
+          yield* Effect.forEach([...latches.values()], (latch) =>
+            Deferred.succeed(latch, undefined)
+          )
+          const report = yield* Fiber.join(fiber)
+          assert.isTrue(report.stories.every((outcome) => outcome.status === "done"))
+        })
+      )
   )
 })
