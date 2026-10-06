@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2.31.0
 
-Gates with a memory (ADR 0027, the first half of release A of the
-rewrite-grade loops: `docs/research/rewrite-grade-loops-plan.md`).
+Release A of the rewrite-grade loops (ADR 0027,
+`docs/research/rewrite-grade-loops-plan.md`): gates with a memory, an oracle
+guard, one autonomy contract, evidence checked against the transcript, and a
+light fixture to compare releases on.
 
 - **A story is charged only with the gate failures it caused.** The gates'
   result on the epic head is recorded as a baseline at run start and after
