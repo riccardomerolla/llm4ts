@@ -20,6 +20,16 @@ import type { LlmError } from "@llm4ts/core/Errors"
 import { BoardItem, type BoardSyncShape } from "./BoardSync.ts"
 import { makeChat } from "./Chat.ts"
 import { implementPlanFlow } from "./Flow.ts"
+import {
+  GateBaseline,
+  baselineKey,
+  failingLinesOf,
+  readBaseline,
+  storyGateLogDir,
+  triageGates,
+  writeBaseline,
+  type GateLogDir
+} from "./Gates.ts"
 import type { ContextOptions, FlowContextShape } from "./FlowContext.ts"
 import {
   describeFlowError,
@@ -57,7 +67,13 @@ import {
 import { Plan, Task } from "./Plan.ts"
 import { stage } from "./PlanExecution.ts"
 import { planFrom } from "./Planner.ts"
-import { ReviewIssue, ReviewResult } from "./Review.ts"
+import {
+  ReviewIssue,
+  ReviewResult,
+  applyTriage,
+  type FixPromptOptions,
+  type GateTriageOptions
+} from "./Review.ts"
 import { cachedValue, fingerprintOf } from "./ReviewCache.ts"
 import type { Reviewer } from "./Reviewer.ts"
 import {
@@ -133,7 +149,9 @@ export class StoryOutcome extends Schema.Class<StoryOutcome>("StoryOutcome")({
   executor: Schema.optionalKey(Schema.String),
   /** ESTIMATES, never measurements (ADR 0012). */
   estimatedTokens: Schema.optionalKey(Schema.Int),
-  estimatedCostUsd: Schema.optionalKey(Schema.Number)
+  estimatedCostUsd: Schema.optionalKey(Schema.Number),
+  /** Gate failures already red on the story's base, not charged to it (ADR 0027). */
+  inherited: Schema.optionalKey(Schema.Array(Schema.String))
 }) {}
 
 export class EpicReport extends Schema.Class<EpicReport>("EpicReport")({
@@ -183,6 +201,24 @@ export const renderEpicReport = (report: EpicReport): string => {
   }
   if (cost.length > 0) {
     lines.push(`- Estimated cost: ${money(cost.reduce((sum, value) => sum + value, 0))}`)
+  }
+  const inherited = new Map<string, Array<string>>()
+  for (const story of report.stories) {
+    for (const line of story.inherited ?? []) {
+      inherited.set(line, [...(inherited.get(line) ?? []), story.id])
+    }
+  }
+  if (inherited.size > 0) {
+    lines.push(
+      "",
+      "## Inherited gate failures",
+      "",
+      "Red on the base before the story ran; not charged to it. A cleanup story may own them.",
+      ""
+    )
+    for (const [line, stories] of inherited) {
+      lines.push(`- ${line} (stories: ${stories.join(", ")})`)
+    }
   }
   const coded = report.stories.filter((story) => story.executor !== undefined)
   if (coded.length > 0) {
@@ -592,8 +628,25 @@ export interface StoriesOptions {
    */
   readonly gates: (
     workDir: string,
+    events?: FlowEventsShape,
+    /** Where to write one log per gate command for this run; absent writes none. */
+    log?: GateLogDir
+  ) => Effect.Effect<ReviewResult, FlowError>
+  /**
+   * The gate commands as configured and the application directory (ADR 0027):
+   * with them, the gates' result on each epic head is recorded as a baseline
+   * and a story is charged only with the failing lines it added. Without
+   * them every red line blocks, as before.
+   */
+  readonly gateCommands?: ReadonlyArray<ReadonlyArray<string>>
+  readonly appDir?: string
+  /** The test gate alone, for one rerun that tells a flaky line from a new one; omit to never rerun. */
+  readonly testGate?: (
+    workDir: string,
     events?: FlowEventsShape
   ) => Effect.Effect<ReviewResult, FlowError>
+  /** How gate output reaches the coder in the fix prompt. */
+  readonly fix?: FixPromptOptions
   /** Story-level judge over the branch's diff against the epic branch; omit to skip. */
   readonly judge?: (
     story: Story,
@@ -717,6 +770,47 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     join(options.stateDir, `stories/${story.id}.findings.md`)
   /** What the coder's tasks learned, carried into the next task of the same story. */
   const notesPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.notes.md`)
+  // Gates with a memory (ADR 0027): baselines are keyed by the commit a
+  // change started from, the app dir and the commands; without commands
+  // nothing is recorded and every red line blocks, as before.
+  const appDir = options.appDir ?? "."
+  const gateCommands = options.gateCommands
+  const rootsOf = (workDir: string): ReadonlyArray<string> => [join(workDir, appDir), workDir]
+  const keyFor = (commit: string): string =>
+    baselineKey({ baseCommit: commit, appDir, commands: gateCommands ?? [] })
+  const baselineOf = (
+    commit: string,
+    result: ReviewResult,
+    workDir: string
+  ): Effect.Effect<GateBaseline> =>
+    Effect.map(Clock.currentTimeMillis, (recordedAt) =>
+      GateBaseline.make({
+        baseCommit: commit,
+        appDir,
+        commands: (gateCommands ?? []).map((command) => command.join(" ")),
+        failingLines: failingLinesOf(result, rootsOf(workDir)),
+        recordedAt
+      })
+    )
+  /** The baseline for `commit`, recording one from `run` when none is stored. */
+  const ensureBaseline = (
+    commit: string,
+    run: Effect.Effect<ReviewResult, FlowError>,
+    workDir: string
+  ): Effect.Effect<GateBaseline | undefined, FlowError> =>
+    gateCommands === undefined
+      ? Effect.succeed(undefined)
+      : Effect.gen(function* () {
+          const stored = yield* readBaseline(files, options.stateDir, keyFor(commit))
+          if (stored !== undefined) {
+            return stored
+          }
+          const baseline = yield* baselineOf(commit, yield* run, workDir)
+          yield* writeBaseline(files, options.stateDir, keyFor(commit), baseline)
+          return baseline
+        })
+  /** What each story inherited, for its outcome. */
+  const inheritedByStory = new Map<string, ReadonlyArray<string>>()
   const findingLines = (result: ReviewResult): ReadonlyArray<string> =>
     result.issues.map((issue) => {
       const where =
@@ -774,6 +868,11 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
   yield* epicCheckoutClean()
   yield* stage(events, "epic branch", context.git.checkoutOrCreate(epicBranch))
+  if (gateCommands !== undefined) {
+    // The gates as the epic head stands: what every story may inherit.
+    const epicHead = yield* context.git.checkpoint
+    yield* ensureBaseline(epicHead, options.gates(context.workDir, events), context.workDir)
+  }
 
   const waves = topologicalWaves(plan)
   const waveOf = (id: string): string | undefined => {
@@ -814,12 +913,29 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
               Timed.make({ kind: "merge", label: "merge", ms, ...(failed ? { failed } : {}) })
           )
           const gate = yield* options.gates(context.workDir, lane)
-          if (!gate.isClean) {
+          // Charged only with what the merge added: the head before it had
+          // a baseline (run start or the previous merge).
+          const before = yield* ensureBaseline(
+            checkpoint,
+            Effect.succeed(ReviewResult.make({ issues: [] })),
+            context.workDir
+          )
+          const verdict = triageGates(gate, before, rootsOf(context.workDir))
+          if (!verdict.blocking.isClean) {
             // Never leave a red epic head for the next story to inherit.
             yield* context.git.rollback(checkpoint)
             return yield* failed(
               story,
-              `epic gates failed after merging; merge undone:\n${issueLines(gate)}`
+              `epic gates failed after merging; merge undone:\n${issueLines(verdict.blocking)}`
+            )
+          }
+          if (gateCommands !== undefined) {
+            const mergedHead = yield* context.git.checkpoint
+            yield* writeBaseline(
+              files,
+              options.stateDir,
+              keyFor(mergedHead),
+              yield* baselineOf(mergedHead, gate, context.workDir)
             )
           }
           yield* laneOf(story).publish(
@@ -1025,10 +1141,43 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     // The target's gates plus the perimeter: a stray path is a gate failure
     // the task review loop hands back to the coder before anything commits.
     const gates: Effect.Effect<ReviewResult, FlowError> = Effect.gen(function* () {
-      const target = yield* options.gates(state.worktree, laneOf(story))
+      const target = yield* options.gates(state.worktree, laneOf(story), {
+        files,
+        dir: storyGateLogDir(options.stateDir, story.id)
+      })
       const changed = yield* perimeterNow(story, git)
       return combined(target, perimeterGate([...changed.sharedReadOnly, ...changed.outside], story))
     })
+    // The epic head this worktree started from: what the story may inherit.
+    const storyBase = yield* git.checkpoint
+    const storyBaseline = ensureBaseline(
+      storyBase,
+      options.gates(state.worktree, laneOf(story)),
+      state.worktree
+    )
+    const triage: GateTriageOptions = {
+      baseline: storyBaseline,
+      roots: rootsOf(state.worktree),
+      ...(options.testGate === undefined
+        ? {}
+        : { rerunTest: options.testGate(state.worktree, laneOf(story)) })
+    }
+    if (gateCommands !== undefined) {
+      const inherited = (yield* storyBaseline)?.failingLines ?? []
+      if (inherited.length > 0) {
+        inheritedByStory.set(story.id, inherited)
+        yield* appendFindings(
+          story,
+          "gate failures inherited from the base (not charged to this story)",
+          ReviewResult.make({
+            issues: inherited.map((line) =>
+              ReviewIssue.make({ severity: "Info", title: line, description: "", origin: "base" })
+            ),
+            summary: ""
+          })
+        )
+      }
+    }
 
     const coderTurn = (text: string): Effect.Effect<string, FlowError> =>
       Effect.flatMap(makeChat(storyContext.coder, { system, events, agent: "coder" }), (chat) =>
@@ -1037,7 +1186,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
     const commitGreen = (message: string, why: string): Effect.Effect<void, FlowError> =>
       Effect.gen(function* () {
-        const regated = yield* gates
+        const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+        const regated = yield* applyTriage(yield* gates, triage, laneOf(story), reported)
         if (!regated.isClean) {
           return yield* failed(story, `gates broke ${why}:\n${issueLines(regated)}`)
         }
@@ -1171,6 +1321,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       },
       checkoutBranch: false,
       lint: gates,
+      triage,
+      ...(options.fix === undefined ? {} : { fix: options.fix }),
       // A story's final state is judged and gated downstream (judge round,
       // perimeter check, epic gates), so a task the coder finds already
       // satisfied — without saying the exact sentinel — must not sink the
@@ -1406,6 +1558,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         ...(last === undefined ? {} : { executor: last })
       })
     )
+    const inherited = inheritedByStory.get(story.id)
     return StoryOutcome.make({
       id: story.id,
       title: story.title,
@@ -1414,7 +1567,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       ...(result.judge === undefined ? {} : { judge: result.judge }),
       ...(result.executor === undefined ? {} : { executor: result.executor }),
       ...(result.totals === undefined ? {} : { estimatedTokens: result.totals.total }),
-      ...(result.totals?.costUsd === undefined ? {} : { estimatedCostUsd: result.totals.costUsd })
+      ...(result.totals?.costUsd === undefined ? {} : { estimatedCostUsd: result.totals.costUsd }),
+      ...(inherited === undefined ? {} : { inherited })
     })
   })
 

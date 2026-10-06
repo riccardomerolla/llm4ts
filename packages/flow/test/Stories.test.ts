@@ -521,6 +521,97 @@ describe("Stories executor", () => {
       })
   )
 
+  describe("gate baselines (ADR 0027)", () => {
+    const redLint = (output: string): ReviewResult =>
+      ReviewResult.make({
+        issues: [
+          ReviewIssue.make({
+            severity: "Critical",
+            title: "lint failed: pnpm test",
+            description: output
+          })
+        ],
+        summary: "lint failed"
+      })
+    /** Gates whose output depends on the directory they run in; clean elsewhere. */
+    const gatesByDir =
+      (outputs: Readonly<Record<string, string>>): StoriesOptions["gates"] =>
+      (workDir) => {
+        const output = outputs[workDir]
+        return Effect.succeed(output === undefined ? clean : redLint(output))
+      }
+    const worktreeA = "/repo/.llm4ts/worktrees/a"
+
+    it.effect(
+      "a red base lets a story that did not touch it merge, lists the red once, and records a baseline",
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeHarness()
+          const context = yield* makeContext(harness)
+          const options = yield* makeOptions(harness, single, context, {
+            gateCommands: [["pnpm", "test"]],
+            gates: gatesByDir({
+              "/repo": "FAIL old.test.ts > old",
+              [worktreeA]: "FAIL old.test.ts > old"
+            })
+          })
+
+          const report = yield* implementStoriesFlow(context, options)
+
+          assert.strictEqual(report.stories[0]?.status, "done")
+          assert.deepStrictEqual(report.stories[0]?.inherited, ["FAIL old.test.ts > old"])
+          const files = yield* memoryFilesOf(options)
+          assert.isDefined(files[`${options.stateDir}/gates/baselines.json`])
+          assert.include(files[`${options.stateDir}/report.md`] ?? "", "## Inherited gate failures")
+          assert.include(
+            files[`${options.stateDir}/stories/a.findings.md`] ?? "",
+            "inherited from the base"
+          )
+          const log = yield* Ref.get(harness.log)
+          assert.include(log, "merge:story/single/a")
+          assert.notInclude(log, "rollback:checkpoint")
+        })
+    )
+
+    it.effect("a story that breaks a second test is blocked on that test only", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const context = yield* makeContext(harness)
+        const options = yield* makeOptions(harness, single, context, {
+          gateCommands: [["pnpm", "test"]],
+          maxRounds: 1,
+          gates: gatesByDir({
+            "/repo": "FAIL old.test.ts > old",
+            [worktreeA]: "FAIL old.test.ts > old\nFAIL new.test.ts > new"
+          })
+        })
+
+        const report = yield* implementStoriesFlow(context, options)
+
+        assert.strictEqual(report.stories[0]?.status, "failed")
+        assert.include(report.stories[0]?.reason ?? "", "new.test.ts")
+        assert.notInclude(report.stories[0]?.reason ?? "", "old.test.ts")
+      })
+    )
+
+    it.effect("without gate commands a red base still fails the story, as before", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const context = yield* makeContext(harness)
+        const options = yield* makeOptions(harness, single, context, {
+          gates: gatesByDir({ [worktreeA]: "FAIL old.test.ts > old" })
+        })
+
+        const report = yield* implementStoriesFlow(context, options)
+
+        assert.strictEqual(report.stories[0]?.status, "failed")
+        assert.isUndefined(report.stories[0]?.inherited)
+        const files = yield* memoryFilesOf(options)
+        assert.isUndefined(files[`${options.stateDir}/gates/baselines.json`])
+      })
+    )
+  })
+
   it.effect("fail-fast stops the epic with a typed StoryFailed", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ redGates: ["/repo/.llm4ts/worktrees/a"] })

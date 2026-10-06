@@ -55,8 +55,12 @@ import {
   defaultGateCommands,
   epicIdFor,
   flagsFromEnvironment,
+  fixPromptOptions,
   gateCommands,
+  gateTailChars,
+  gateTimeoutSeconds,
   gatesIn,
+  testGateCommand,
   judgeStory,
   localCoderServer,
   orientationFor,
@@ -1108,4 +1112,54 @@ describe("storyJudgeQuery with acceptance criteria", () => {
     assert.include(query, "Done when (the story's acceptance criteria")
     assert.include(query, "1. GET /a answers 200")
   })
+})
+
+describe("gate knobs (ADR 0027)", () => {
+  it("reads the gate timeout in seconds with a 20-minute default", () => {
+    assert.strictEqual(gateTimeoutSeconds({}), 1200)
+    assert.strictEqual(gateTimeoutSeconds({ LLM4TS_GATE_TIMEOUT: "90" }), 90)
+    assert.strictEqual(gateTimeoutSeconds({ LLM4TS_GATE_TIMEOUT: "" }), 1200)
+    assert.strictEqual(gateTimeoutSeconds({ LLM4TS_GATE_TIMEOUT: "soon" }), 1200)
+    assert.strictEqual(gateTimeoutSeconds({ LLM4TS_GATE_TIMEOUT: "-5" }), 1200)
+  })
+
+  it("reads the fix prompt's gate tail with a 4000-character default, paths shown", () => {
+    assert.strictEqual(gateTailChars({}), 4000)
+    assert.strictEqual(gateTailChars({ LLM4TS_GATE_TAIL_CHARS: "500" }), 500)
+    assert.deepStrictEqual(fixPromptOptions({}), { tailChars: 4000, showPaths: true })
+  })
+
+  it("finds the test gate among the commands, whatever the script is called", () => {
+    assert.deepStrictEqual(
+      testGateCommand([
+        ["pnpm", "typecheck"],
+        ["pnpm", "test"]
+      ]),
+      ["pnpm", "test"]
+    )
+    assert.deepStrictEqual(testGateCommand([["pnpm", "vitest", "run"]]), ["pnpm", "vitest", "run"])
+    assert.deepStrictEqual(testGateCommand([["npm", "run", "test:unit"]]), [
+      "npm",
+      "run",
+      "test:unit"
+    ])
+    assert.isUndefined(
+      testGateCommand([
+        ["pnpm", "lint"],
+        ["pnpm", "build"]
+      ])
+    )
+  })
+
+  it.effect("inAppDir forwards the arguments after the work dir", () =>
+    Effect.gen(function* () {
+      const seen: Array<ReadonlyArray<unknown>> = []
+      const step = (workDir: string, lane?: string, log?: { dir: string }) => {
+        seen.push([workDir, lane, log])
+        return Effect.void
+      }
+      yield* inAppDir("frontend", step)("/wt", "lane-a", { dir: "/state/gates" })
+      assert.deepStrictEqual(seen, [["/wt/frontend", "lane-a", { dir: "/state/gates" }]])
+    })
+  )
 })

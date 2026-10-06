@@ -59,7 +59,8 @@ import {
   type EpicReport
 } from "@llm4ts/flow/Stories"
 import { stableHash } from "@llm4ts/flow/Plan"
-import { ReviewIssue } from "@llm4ts/flow/Review"
+import { ReviewIssue, type FixPromptOptions } from "@llm4ts/flow/Review"
+import { compactGateArtifacts, gatesIn, type GateRunOptions } from "@llm4ts/flow/Gates"
 import {
   StoryPlan,
   dependenciesOf,
@@ -96,8 +97,7 @@ import {
   ReviewResult,
   ScriptUsage,
   coderFor,
-  lintCommand,
-  mergeReviewResults
+  lintCommand
 } from "@llm4ts/runner"
 
 // ---- Flags ------------------------------------------------------------------
@@ -1420,9 +1420,12 @@ export const appDirFor = (
 
 /** Runs a per-checkout step in the app directory of whichever checkout it is given. */
 export const inAppDir =
-  <A>(appDir: string, step: (workDir: string) => Effect.Effect<A, FlowError>) =>
-  (workDir: string): Effect.Effect<A, FlowError> =>
-    step(appDir === "." ? workDir : join(workDir, appDir))
+  <A, Rest extends ReadonlyArray<unknown>>(
+    appDir: string,
+    step: (workDir: string, ...rest: Rest) => Effect.Effect<A, FlowError>
+  ) =>
+  (workDir: string, ...rest: Rest): Effect.Effect<A, FlowError> =>
+    step(appDir === "." ? workDir : join(workDir, appDir), ...rest)
 
 // ---- Worktree setup --------------------------------------------------------------
 
@@ -1537,25 +1540,45 @@ export const gateCommands = (
     .filter((command) => command.length > 0)
 }
 
-/** Runs the gates in a directory, stopping at the first red one (later output would be noise). */
-export const gatesIn =
-  (
-    process: ProcessExecutorShape,
-    events: FlowEventsShape,
-    commands: ReadonlyArray<ReadonlyArray<string>>
-  ) =>
-  (workDir: string, laneEvents?: FlowEventsShape): Effect.Effect<ReviewResult, FlowError> =>
-    Effect.gen(function* () {
-      const results: Array<ReviewResult> = []
-      for (const command of commands) {
-        const result = yield* lintCommand(process, laneEvents ?? events, command, workDir)
-        results.push(result)
-        if (!result.isClean) {
-          break
-        }
-      }
-      return mergeReviewResults(results)
-    })
+/** The gate runner lives in `@llm4ts/flow/Gates` (ADR 0027); re-exported for forks and tests. */
+export { gatesIn }
+
+/** `LLM4TS_GATE_TIMEOUT` in seconds (default 1200): a gate still running after it is a hang. */
+export const gateTimeoutSeconds = (
+  environment: Readonly<Record<string, string | undefined>>
+): number => {
+  const raw = Number.parseInt(environment.LLM4TS_GATE_TIMEOUT ?? "", 10)
+  return Number.isFinite(raw) && raw > 0 ? raw : 1200
+}
+
+/** `LLM4TS_GATE_TAIL_CHARS` (default 4000): how much gate output the fix prompt carries. */
+export const gateTailChars = (
+  environment: Readonly<Record<string, string | undefined>>
+): number => {
+  const raw = Number.parseInt(environment.LLM4TS_GATE_TAIL_CHARS ?? "", 10)
+  return Number.isFinite(raw) && raw > 0 ? raw : 4000
+}
+
+export const gateRunOptions = (
+  environment: Readonly<Record<string, string | undefined>>
+): GateRunOptions => ({ timeout: Duration.seconds(gateTimeoutSeconds(environment)) })
+
+/** The gate command that runs the tests, for the one flaky rerun; undefined when none does. */
+export const testGateCommand = (
+  commands: ReadonlyArray<ReadonlyArray<string>>
+): ReadonlyArray<string> | undefined =>
+  commands.find((command) =>
+    command.some((part, index) => index > 0 && /(?:^|[^a-z])(?:test|vitest|jest)/iu.test(part))
+  )
+
+/**
+ * How gate output reaches the coder: a capped tail, and the log's path. The
+ * epic-stories coders are CLI harnesses that can open a file; an API coder
+ * still gets the tail and ignores the path.
+ */
+export const fixPromptOptions = (
+  environment: Readonly<Record<string, string | undefined>>
+): FixPromptOptions => ({ tailChars: gateTailChars(environment), showPaths: true })
 
 // ---- The flow program, shared by epic-stories and its forks -------------------
 
@@ -2107,11 +2130,29 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               target: flags.land,
               rounds: yield* landRounds(plan.epicId, flags.land, rounds),
               keepWorktrees: flags.keepWorktrees,
-              gates: inAppDir(appDir, gatesIn(nodeProcessExecutor, events, commands)),
+              gates: inAppDir(
+                appDir,
+                gatesIn(nodeProcessExecutor, events, commands, gateRunOptions(process.env))
+              ),
               system: ["House rules of the target repository (CONTRIBUTING.md):", guidance].join(
                 "\n"
               )
             })
+            // The gates' memory goes with the landed epic: baselines are
+            // reproducible, logs keep only their failing lines (ADR 0027).
+            const gateArtifacts = yield* compactGateArtifacts(
+              files,
+              stateDir,
+              plan.stories.map((story) => story.id),
+              commands
+            )
+            if (gateArtifacts.baselines > 0 || gateArtifacts.logs > 0) {
+              yield* events.publish(
+                Info.make({
+                  message: `epic ${plan.epicId}: removed ${gateArtifacts.baselines} gate baseline file(s), compacted ${gateArtifacts.logs} gate log(s) to their failing lines`
+                })
+              )
+            }
             // The epic's earlier runs' transcripts go with it; this run's may still be read.
             const earlier = (yield* readEpicRuns(files, stateDir))
               .map((run) => run.runId)
@@ -2161,7 +2202,11 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               : [
                   `The application lives in ${appDir}/ — its package.json, sources and tests; the gates run there.`
                 ]
-          const gates = inAppDir(appDir, gatesIn(nodeProcessExecutor, events, commands))
+          const gates = inAppDir(
+            appDir,
+            gatesIn(nodeProcessExecutor, events, commands, gateRunOptions(process.env))
+          )
+          const testCommand = testGateCommand(commands)
           const setupCommand = worktreeSetupCommand(process.env)
           const healthUrl = serverHealthUrl(localServer, process.env)
           const report = yield* implementStoriesFlow(
@@ -2198,6 +2243,24 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                     setupAgent: setupAgentEnabled(process.env)
                   }),
               gates,
+              // Gates with a memory (ADR 0027): a story is charged only with
+              // the failing lines it added to the epic head it started from.
+              gateCommands: commands,
+              appDir,
+              ...(testCommand === undefined
+                ? {}
+                : {
+                    testGate: inAppDir(
+                      appDir,
+                      gatesIn(
+                        nodeProcessExecutor,
+                        events,
+                        [testCommand],
+                        gateRunOptions(process.env)
+                      )
+                    )
+                  }),
+              fix: fixPromptOptions(process.env),
               // With a roster, the judge and the verifier are leased per story,
               // away from the executor coding it (ADR 0019).
               ...storyContextChars(process.env),
