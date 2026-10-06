@@ -3,8 +3,11 @@
 Status: 2026-10-06. Phases 1, 2 and 4.1/4.2/4.3/4.6 shipped as 2.31.0 and
 2.32.0 under ADR 0027; phase 3's queue primitive, `port-files`,
 `port-compile` and the `zig-rust` pack shipped under ADR 0028, followed by
-`port-guide`, `port-ledger`, `port-tests` and the `scala-ts` pack. Phases
-4.4, 4.5, 4.7, 4.8 and the live pilots remain proposals.
+`port-guide`, `port-ledger`, `port-tests` and the `scala-ts` pack; worktree
+shards and a `javac` format followed as an ADR 0028 addendum. Phases 4.4,
+4.5, 4.7 and 4.8 shipped under ADR 0029 (effort per role, headless
+isolation, a cached prefix and usage on the Anthropic seat, `llm4ts profile
+--against`). The live pilots (phase 5) remain to run.
 
 This plan distils two research notes written the same day from primary
 sources, and maps them onto llm4ts's existing seams:

@@ -179,6 +179,38 @@ describe("roster files", () => {
       )
     )
   })
+
+  it("shapes a seat with the role's effort and the executor's isolation (ADR 0029)", () => {
+    const spec = ExecutorSpec.make({
+      id: "claude",
+      harness: "claude",
+      roles: ["coder", "judge"],
+      effort: { coder: "low", default: "high" },
+      isolated: true
+    })
+    const coder = executorConfig(spec, false, environment, "coder")
+    const judge = executorConfig(spec, true, environment, "judge")
+    const unroled = executorConfig(spec, false, environment)
+    assert.instanceOf(coder, CliConnectorConfig)
+    if (coder instanceof CliConnectorConfig && judge instanceof CliConnectorConfig) {
+      assert.strictEqual(coder.effort, "low")
+      assert.isTrue(coder.isolated)
+      assert.strictEqual(judge.effort, "high")
+      assert.isTrue(judge.readOnly)
+    }
+    if (unroled instanceof CliConnectorConfig) {
+      assert.isUndefined(unroled.effort)
+    }
+    const api = executorConfig(
+      ExecutorSpec.make({ id: "a", harness: "anthropic", roles: ["judge"], effort: "max" }),
+      true,
+      environment,
+      "judge"
+    )
+    if (api instanceof ApiConnectorConfig) {
+      assert.strictEqual(api.effort, "max")
+    }
+  })
 })
 
 describe("llm4ts roster", () => {

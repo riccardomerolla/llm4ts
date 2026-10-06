@@ -10,7 +10,11 @@ import {
   OpenAIChatCompletionRequest,
   OpenAIChatCompletionRequestWithTools
 } from "@llm4ts/core/providers/OpenAIModels"
-import { makeOpenAIProvider, openAIHistoryMessages } from "@llm4ts/core/providers/OpenAIProvider"
+import {
+  buildOpenAIChatRequest,
+  makeOpenAIProvider,
+  openAIHistoryMessages
+} from "@llm4ts/core/providers/OpenAIProvider"
 import { collect } from "@llm4ts/core/Streaming"
 
 const config = (
@@ -142,6 +146,21 @@ describe("OpenAIProvider", () => {
       }
     })
   )
+
+  it("sends reasoning_effort only when an effort is asked, max as xhigh (ADR 0029)", () => {
+    const plain = buildOpenAIChatRequest(
+      LlmConfig.make({ provider: "OpenAI", model: "gpt-5.5" }),
+      [],
+      false
+    )
+    assert.isUndefined(plain.reasoning_effort)
+    const deep = buildOpenAIChatRequest(
+      LlmConfig.make({ provider: "OpenAI", model: "gpt-5.5", effort: "max" }),
+      [],
+      false
+    )
+    assert.strictEqual(deep.reasoning_effort, "xhigh")
+  })
 
   it.effect("maps all conversation roles to OpenAI history messages", () =>
     Effect.gen(function* () {

@@ -162,6 +162,9 @@ export const enrichApiConnector = (
   })
 }
 
+const switchedOn = (value: string | undefined): boolean =>
+  value !== undefined && ["1", "true", "on", "yes"].includes(value.trim().toLowerCase())
+
 export const prepareConnector = (
   config: ConnectorConfig,
   workDir: string,
@@ -169,7 +172,13 @@ export const prepareConnector = (
 ): ConnectorConfig =>
   config instanceof ApiConnectorConfig
     ? enrichApiConnector(config, environment)
-    : CliConnectorConfig.make({ ...config, workingDir: workDir })
+    : CliConnectorConfig.make({
+        ...config,
+        workingDir: workDir,
+        // `LLM4TS_ISOLATED=1` asks every CLI seat of the run to leave the
+        // repository's own harness material unloaded (ADR 0029).
+        ...(switchedOn(environment.LLM4TS_ISOLATED) ? { isolated: true } : {})
+      })
 
 /** The API provider a name stands for (`LLM4TS_PROVIDER`, a roster executor's `harness`). */
 export const apiPresetFor = (name: string): ApiConnectorConfig | undefined => {

@@ -12,11 +12,25 @@ export class Diagnostic extends Schema.Class<Diagnostic>("Diagnostic")({
   unit: Schema.optionalKey(Schema.String)
 }) {}
 
-export const DiagnosticsFormat = Schema.Literals(["json", "cargo", "tsc"])
+export const DiagnosticsFormat = Schema.Literals(["json", "cargo", "tsc", "javac"])
 export type DiagnosticsFormat = typeof DiagnosticsFormat.Type
+
+export const diagnosticsFormatOf = (value: string | undefined): DiagnosticsFormat => {
+  const lower = value?.trim().toLowerCase()
+  return lower === "cargo" || lower === "tsc" || lower === "javac" ? lower : "json"
+}
 
 const decodeJsonLine = Schema.decodeUnknownOption(Schema.fromJsonString(Diagnostic))
 const tscLine = /^(.+?)\((\d+),\d+\): error (TS\d+: .+)$/u
+// `javac`: `path/File.java:12: error: message`; Maven: `[ERROR] /path/File.java:[12,5] message`.
+const javacLine = /^(.+\.java):(\d+): error: (.+)$/u
+const mavenLine = /^\[ERROR\] (.+\.java):\[(\d+),\d+\] (.+)$/u
+
+/** The Maven module a Java file belongs to (the path before `/src/`), else its folder. */
+const javaUnitOf = (file: string): string => {
+  const at = file.indexOf("/src/")
+  return at > 0 ? file.slice(0, at) : dirname(file)
+}
 
 const CargoMessage = Schema.fromJsonString(
   Schema.Struct({
@@ -44,14 +58,31 @@ const decodeCargo = Schema.decodeUnknownOption(CargoMessage)
 /**
  * `json`: one `{file, line?, message, unit?}` object per line. `cargo`:
  * `cargo check --message-format=json`, errors only, the crate as the unit.
- * `tsc`: `tsc --pretty false`, the file's top folders as the unit. Lines
- * that do not parse are skipped: a build prints more than diagnostics.
+ * `tsc`: `tsc --pretty false`, the file's top folders as the unit. `javac`:
+ * javac's or Maven's error lines, the Maven module as the unit. Lines that
+ * do not parse are skipped: a build prints more than diagnostics.
  */
 export const parseDiagnostics = (
   text: string,
   format: DiagnosticsFormat = "json"
 ): ReadonlyArray<Diagnostic> => {
   const out: Array<Diagnostic> = []
+  if (format === "javac") {
+    for (const raw of text.split("\n")) {
+      const line = raw.trim()
+      const match = javacLine.exec(line) ?? mavenLine.exec(line)
+      if (match?.[1] === undefined || match[3] === undefined) continue
+      out.push(
+        Diagnostic.make({
+          file: match[1],
+          line: Number.parseInt(match[2] ?? "0", 10),
+          message: match[3],
+          unit: javaUnitOf(match[1])
+        })
+      )
+    }
+    return out
+  }
   if (format === "tsc") {
     // `tsc --pretty false`: `path(line,col): error TS1234: message`; the unit is the top folder.
     for (const raw of text.split("\n")) {

@@ -1,9 +1,29 @@
 import * as Schema from "effect/Schema"
 import { JsonSchema } from "../Models.ts"
 
+/** A prompt-cache breakpoint (ADR 0029): the prefix up to this block is cached. */
+export class AnthropicCacheControl extends Schema.Class<AnthropicCacheControl>(
+  "AnthropicCacheControl"
+)({
+  type: Schema.Literal("ephemeral")
+}) {}
+
+export class AnthropicTextBlock extends Schema.Class<AnthropicTextBlock>("AnthropicTextBlock")({
+  type: Schema.Literal("text"),
+  text: Schema.String,
+  cache_control: Schema.optionalKey(AnthropicCacheControl)
+}) {}
+
 export class AnthropicMessage extends Schema.Class<AnthropicMessage>("AnthropicMessage")({
   role: Schema.String,
-  content: Schema.String
+  /** Plain text, or text blocks when one carries a cache marker. */
+  content: Schema.Union([Schema.String, Schema.Array(AnthropicTextBlock)])
+}) {}
+
+export class AnthropicOutputConfig extends Schema.Class<AnthropicOutputConfig>(
+  "AnthropicOutputConfig"
+)({
+  effort: Schema.Literals(["low", "medium", "high", "max"])
 }) {}
 
 export class AnthropicRequest extends Schema.Class<AnthropicRequest>("AnthropicRequest")({
@@ -11,8 +31,9 @@ export class AnthropicRequest extends Schema.Class<AnthropicRequest>("AnthropicR
   max_tokens: Schema.Int,
   messages: Schema.Array(AnthropicMessage),
   temperature: Schema.optionalKey(Schema.Number),
-  system: Schema.optionalKey(Schema.String),
-  stream: Schema.optionalKey(Schema.Boolean)
+  system: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(AnthropicTextBlock)])),
+  stream: Schema.optionalKey(Schema.Boolean),
+  output_config: Schema.optionalKey(AnthropicOutputConfig)
 }) {}
 
 export class AnthropicContentBlock extends Schema.Class<AnthropicContentBlock>(
@@ -24,7 +45,9 @@ export class AnthropicContentBlock extends Schema.Class<AnthropicContentBlock>(
 
 export class AnthropicUsage extends Schema.Class<AnthropicUsage>("AnthropicUsage")({
   input_tokens: Schema.optionalKey(Schema.Int),
-  output_tokens: Schema.optionalKey(Schema.Int)
+  output_tokens: Schema.optionalKey(Schema.Int),
+  cache_read_input_tokens: Schema.optionalKey(Schema.NullOr(Schema.Int)),
+  cache_creation_input_tokens: Schema.optionalKey(Schema.NullOr(Schema.Int))
 }) {}
 
 export class AnthropicResponse extends Schema.Class<AnthropicResponse>("AnthropicResponse")({
@@ -67,7 +90,8 @@ export class AnthropicRequestWithTools extends Schema.Class<AnthropicRequestWith
   messages: Schema.Array(AnthropicMessage),
   tools: Schema.Array(AnthropicTool),
   temperature: Schema.optionalKey(Schema.Number),
-  system: Schema.optionalKey(Schema.String)
+  system: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(AnthropicTextBlock)])),
+  output_config: Schema.optionalKey(AnthropicOutputConfig)
 }) {}
 
 export class AnthropicResponseWithTools extends Schema.Class<AnthropicResponseWithTools>(
@@ -88,9 +112,20 @@ export class AnthropicStreamChunkDelta extends Schema.Class<AnthropicStreamChunk
   stop_reason: Schema.optionalKey(Schema.NullOr(Schema.String))
 }) {}
 
+/** The `message_start` event's message: where input and cache usage arrive. */
+export class AnthropicStreamMessage extends Schema.Class<AnthropicStreamMessage>(
+  "AnthropicStreamMessage"
+)({
+  model: Schema.optionalKey(Schema.String),
+  usage: Schema.optionalKey(AnthropicUsage)
+}) {}
+
 export class AnthropicStreamChunk extends Schema.Class<AnthropicStreamChunk>(
   "AnthropicStreamChunk"
 )({
   type: Schema.String,
-  delta: Schema.optionalKey(AnthropicStreamChunkDelta)
+  delta: Schema.optionalKey(AnthropicStreamChunkDelta),
+  message: Schema.optionalKey(AnthropicStreamMessage),
+  /** On `message_delta`: the output tokens so far. */
+  usage: Schema.optionalKey(AnthropicUsage)
 }) {}

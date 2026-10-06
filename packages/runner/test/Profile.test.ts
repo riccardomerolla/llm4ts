@@ -17,7 +17,14 @@ import {
   type FlowEvent
 } from "@llm4ts/flow/FlowEvents"
 import type { TreeInput } from "@llm4ts/runner/AgentTree"
-import { ProfileReport, makeProfileProgram, profileOf, renderProfile } from "@llm4ts/runner/Profile"
+import {
+  ProfileReport,
+  makeProfileProgram,
+  profileDelta,
+  profileOf,
+  renderProfile,
+  renderProfileDelta
+} from "@llm4ts/runner/Profile"
 
 const t0 = 1_790_000_000_000
 const at = (seconds: number, event: FlowEvent): TreeInput => ({
@@ -260,6 +267,32 @@ describe("profileOf", () => {
       [500_000, 400_000, 2]
     )
     assert.include(renderProfile(report), "estimated")
+  })
+})
+
+describe("profileDelta (ADR 0029)", () => {
+  it("compares two runs in the harness-evals order and says which way each moved", () => {
+    const before = profileOf(measured)
+    const after = profileOf([
+      ...measured,
+      at(2200, Timed.make({ kind: "model", label: "reviewer", ms: 120_000, lane: "home" }))
+    ])
+    const delta = profileDelta(before, after)
+    const rows = Object.fromEntries(delta.rows.map((row) => [row.label, row]))
+    assert.strictEqual(rows["stories done"]?.before, 1)
+    assert.strictEqual(rows["reviewer calls"]?.before, 1)
+    assert.strictEqual(rows["reviewer calls"]?.after, 2)
+    assert.strictEqual(rows["gate failures"]?.before, 1)
+    assert.strictEqual(rows["model time"]?.unit, "ms")
+    assert.deepStrictEqual(
+      delta.rows.slice(0, 3).map((row) => row.label),
+      ["stories done", "stories failed", "explore calls before the first edit"]
+    )
+    const text = renderProfileDelta(delta, { before: "before.json", after: "trace-2.jsonl" })
+    assert.include(text, "llm4ts profile · before.json → trace-2.jsonl")
+    assert.match(text, /reviewer calls\s+1\s+2\s+\+1 \(100%\) worse/)
+    assert.match(text, /stories done\s+1\s+1\s+=/)
+    assert.include(text, "llm4ts costs --repo <repo>")
   })
 })
 

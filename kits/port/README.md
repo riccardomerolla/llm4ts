@@ -30,3 +30,5 @@ commands.
 | ---------- | ------------------------------- | ----------------------------------- | ------------------------ |
 | `zig-rust` | Zig → Rust                      | `cargo check --message-format=json` | pointer and slice fields |
 | `scala-ts` | Scala 3 / ZIO 2 → TS / Effect 4 | `tsc --pretty false`                | classes, objects, traits |
+
+`## Diagnostics` reads `json` (one object per line), `cargo` (`--message-format=json`), `tsc` (`--pretty false`) or `javac` (javac's and Maven's error lines, the Maven module as the unit).

@@ -9,9 +9,9 @@ export { duration }
 import { formatCount } from "./Terminal.ts"
 import {
   resolveTraceTarget,
+  WatchTargetMissing,
   type TraceChoice,
-  type TraceSources,
-  type WatchTargetMissing
+  type TraceSources
 } from "./Watch.ts"
 
 /**
@@ -1014,18 +1014,158 @@ export const renderProfile = (report: ProfileReport): string => {
   ].join("\n")
 }
 
+// ── delta ───────────────────────────────────────────────────────────────────
+
+/** One line of a before/after comparison (ADR 0029): a count or a duration. */
+export const DeltaRow = Schema.Struct({
+  label: Schema.String,
+  before: Schema.Number,
+  after: Schema.Number,
+  unit: Schema.Literals(["count", "ms"]),
+  /** Which direction is better, for the arrow; `none` for neutral facts. */
+  better: Schema.Literals(["lower", "higher", "none"])
+})
+export type DeltaRow = typeof DeltaRow.Type
+
+export const ProfileDelta = Schema.Struct({
+  rows: Schema.Array(DeltaRow)
+})
+export type ProfileDelta = typeof ProfileDelta.Type
+
+const roleCalls = (report: ProfileReport, role: string): number =>
+  sum(report.models.filter((row) => row.role === role).map((row) => row.calls))
+
+/**
+ * The harness-evals comparison (`docs/harness-evals/README.md`), in its
+ * order: how much the coders explored before editing, how often review and
+ * judgment were called, what the gates said, how honest the claims were,
+ * then where the time went. Tokens and cost are `llm4ts costs`' business.
+ */
+export const profileDelta = (before: ProfileReport, after: ProfileReport): ProfileDelta => {
+  const count = (
+    label: string,
+    pick: (report: ProfileReport) => number,
+    better: DeltaRow["better"] = "lower"
+  ): DeltaRow => ({
+    label,
+    before: pick(before),
+    after: pick(after),
+    unit: "count",
+    better
+  })
+  const time = (label: string, pick: (report: ProfileReport) => number): DeltaRow => ({
+    label,
+    before: pick(before),
+    after: pick(after),
+    unit: "ms",
+    better: "lower"
+  })
+  return {
+    rows: [
+      count("stories done", (r) => r.stories.filter((s) => s.status === "done").length, "higher"),
+      count("stories failed", (r) => r.stories.filter((s) => s.status === "failed").length),
+      count("explore calls before the first edit", (r) =>
+        sum(r.stories.map((s) => s.exploreBeforeEdit))
+      ),
+      count("coder turns", (r) => sum(r.stories.map((s) => s.turns.count))),
+      count("coder edits", (r) => sum(r.stories.map((s) => s.toolCalls.edit)), "none"),
+      count("coder test runs", (r) => sum(r.stories.map((s) => s.toolCalls.test)), "none"),
+      count("reviewer calls", (r) => roleCalls(r, "reviewer")),
+      count("judge calls", (r) => roleCalls(r, "judge")),
+      count("gate runs", (r) => sum(r.gates.map((g) => g.runs))),
+      count("gate failures", (r) => sum(r.gates.map((g) => g.failed))),
+      count("fabricated verification claims", (r) => sum(r.stories.map((s) => s.unverifiedClaims))),
+      count("low-confidence tasks", (r) => sum(r.stories.map((s) => s.lowConfidenceTasks))),
+      count(
+        "stories whose prompt grew over 3×",
+        (r) => r.stories.filter((s) => s.turns.promptGrowth).length
+      ),
+      time("wall", (r) => r.wallMs),
+      time("model time", (r) => r.totals.model),
+      time("coder tool time", (r) => r.totals.tools),
+      time("gate time", (r) => r.totals.gates),
+      time("waiting", (r) => r.totals.waiting)
+    ]
+  }
+}
+
+const deltaCell = (row: DeltaRow): string => {
+  const diff = row.after - row.before
+  if (diff === 0) {
+    return "="
+  }
+  const shown = row.unit === "ms" ? duration(Math.abs(diff)) : String(Math.abs(diff))
+  const sign = diff > 0 ? "+" : "-"
+  const verdict =
+    row.better === "none" ? "" : diff < 0 === (row.better === "lower") ? " better" : " worse"
+  const percent = row.before === 0 ? "" : ` (${Math.round((diff / row.before) * 100)}%)`
+  return `${sign}${shown}${percent}${verdict}`
+}
+
+export const renderProfileDelta = (
+  delta: ProfileDelta,
+  labels: { readonly before: string; readonly after: string }
+): string =>
+  [
+    `llm4ts profile · ${labels.before} → ${labels.after}`,
+    "",
+    ...table(
+      ["measure", "before", "after", "change"],
+      delta.rows.map((row) => [
+        row.label,
+        row.unit === "ms" ? duration(row.before) : String(row.before),
+        row.unit === "ms" ? duration(row.after) : String(row.after),
+        deltaCell(row)
+      ])
+    ),
+    "",
+    "* tokens and cost per role: llm4ts costs --repo <repo>"
+  ].join("\n")
+
 export interface ProfileOptions extends TraceChoice {
   readonly json?: boolean
+  /** A trace, or a `--json` report saved earlier, to compare the profiled run against (ADR 0029). */
+  readonly against?: string
 }
 
 const encodeReport = Schema.encodeSync(Schema.fromJsonString(ProfileReport))
+const decodeReport = Schema.decodeUnknownOption(Schema.fromJsonString(ProfileReport))
+const encodeDelta = Schema.encodeSync(Schema.fromJsonString(ProfileDelta))
 
-/** The report for a trace, an epic's latest run, or the newest trace: text, or JSON for comparing runs. */
+const reportAt = Effect.fn("@llm4ts/runner/Profile.reportAt")(function* (
+  files: TraceSources["files"],
+  path: string
+): Effect.fn.Return<ProfileReport, FlowError | WatchTargetMissing> {
+  if (path.endsWith(".json")) {
+    const text = yield* files.read(path)
+    const decoded = text === undefined ? undefined : decodeReport(text)
+    if (decoded === undefined || decoded._tag === "None") {
+      return yield* WatchTargetMissing.make({
+        message: `${path} is not a profile report (write one with llm4ts profile --json)`
+      })
+    }
+    return decoded.value
+  }
+  return profileOf(treeInputsOfTrace(yield* readTrace(files, path)))
+})
+
+/**
+ * The report for a trace, an epic's latest run, or the newest trace: text,
+ * or JSON for comparing runs; with `against`, the delta from that earlier
+ * run to this one.
+ */
 export const makeProfileProgram = Effect.fn("@llm4ts/runner/Profile.make")(function* (
   options: ProfileOptions,
   sources: TraceSources
 ): Effect.fn.Return<string, FlowError | WatchTargetMissing> {
   const target = yield* resolveTraceTarget(options, sources)
   const report = profileOf(treeInputsOfTrace(yield* readTrace(sources.files, target.tracePath)))
+  if (options.against !== undefined) {
+    const before = yield* reportAt(sources.files, options.against)
+    const delta = profileDelta(before, report)
+    return options.json === true
+      ? encodeDelta(delta)
+      : renderProfileDelta(delta, { before: options.against, after: target.tracePath })
+  }
   return options.json === true ? encodeReport(report) : renderProfile(report)
 })

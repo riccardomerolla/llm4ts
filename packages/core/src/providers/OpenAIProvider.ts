@@ -7,6 +7,7 @@ import { AuthenticationError, ConfigError, ParseError, type LlmError } from "../
 import type { HttpClientShape } from "../HttpClient.ts"
 import type { StructuredResult } from "../LlmService.ts"
 import {
+  ConnectorCapabilities,
   ConnectorIds,
   LlmChunk,
   ToolCall,
@@ -18,6 +19,7 @@ import {
   type ToolDefinition
 } from "../Models.ts"
 import { parseFromText } from "../StructuredOutput.ts"
+import { effortWord } from "./CliSupport.ts"
 import {
   OpenAIChatChunk,
   OpenAIChatCompletionRequest,
@@ -74,7 +76,8 @@ export const buildOpenAIChatRequest = (
     temperature: config.temperature ?? 0.7,
     stream,
     ...(config.maxTokens === undefined ? {} : { max_tokens: config.maxTokens }),
-    ...(responseFormat === undefined ? {} : { response_format: responseFormat })
+    ...(responseFormat === undefined ? {} : { response_format: responseFormat }),
+    ...(config.effort === undefined ? {} : { reasoning_effort: effortWord(config.effort, "xhigh") })
   })
 
 export const buildOpenAIToolRequest = (
@@ -326,6 +329,7 @@ export const makeOpenAIProvider = (
     executeStreamWithHistory: (messages) => executeStreamRequest(openAIHistoryMessages(messages)),
     executeWithTools,
     executeStructuredWithUsage,
-    isAvailable
+    isAvailable,
+    capabilities: ConnectorCapabilities.make({ readOnlyEnforcement: "enforced", effort: "mapped" })
   })
 }

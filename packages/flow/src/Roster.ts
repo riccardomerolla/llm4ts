@@ -13,6 +13,7 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import type { LlmError } from "@llm4ts/core/Errors"
+import { Effort } from "@llm4ts/core/Models"
 import { RosterExhausted, type FlowError } from "./FlowError.ts"
 import {
   Began,
@@ -66,7 +67,14 @@ export class ExecutorSpec extends Schema.Class<ExecutorSpec>("ExecutorSpec")({
   /** In a repository roster: removes the user roster's entry with this id. */
   disabled: Schema.optionalKey(Schema.Boolean),
   /** The autonomy contract profile this executor's coder prompts carry (ADR 0027); default `full`. */
-  contract: Schema.optionalKey(Schema.Literals(["full", "minimal", "off"]))
+  contract: Schema.optionalKey(Schema.Literals(["full", "minimal", "off"])),
+  /**
+   * Reasoning effort (ADR 0029): one for every role, or per role with a
+   * `default`, mapped to the harness's own flag; absent keeps its default.
+   */
+  effort: Schema.optionalKey(Schema.Union([Effort, Schema.Record(Schema.String, Effort)])),
+  /** Run the harness without the repository's own hooks, MCP servers, settings and instructions (ADR 0029). */
+  isolated: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 export class RosterDocument extends Schema.Class<RosterDocument>("RosterDocument")({
@@ -115,6 +123,15 @@ export const coderSlotsOf = (spec: ExecutorSpec): number => {
   }
   const reasons = rolesOf(spec).some((role) => reasoningRoles.includes(role))
   return hasRole(spec, "coder") && reasons && slots > 1 ? slots - 1 : slots
+}
+
+/** The effort a role runs at on this executor (ADR 0029); absent is the harness's default. */
+export const effortOf = (spec: ExecutorSpec, role: Role): Effort | undefined => {
+  const effort = spec.effort
+  if (effort === undefined || typeof effort === "string") {
+    return effort
+  }
+  return effort[role] ?? effort.default
 }
 
 export const priorityOf = (spec: ExecutorSpec, role: Role): number => {
@@ -205,6 +222,14 @@ export const rosterViolations = (document: RosterDocument): ReadonlyArray<string
     for (const [name, text] of Object.entries(spec.cooldown ?? {})) {
       if (typeof text === "string" && parseDuration(text) === undefined) {
         violations.push(`${where} has an unreadable ${name} cooldown '${text}'`)
+      }
+    }
+    if (spec.effort !== undefined && typeof spec.effort !== "string") {
+      const unknown = Object.keys(spec.effort).filter((key) => key !== "default" && !isRole(key))
+      if (unknown.length > 0) {
+        violations.push(
+          `${where} sets effort for unknown role(s) ${unknown.join(", ")} (roles: ${roles.join(", ")}, or default)`
+        )
       }
     }
   }

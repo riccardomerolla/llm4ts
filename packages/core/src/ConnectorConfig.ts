@@ -1,7 +1,7 @@
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { ConnectorId, ConnectorIds, LlmConfig, type LlmProvider } from "./Models.ts"
+import { ConnectorId, ConnectorIds, Effort, LlmConfig, type LlmProvider } from "./Models.ts"
 
 export class DockerSandbox extends Schema.TaggedClass<DockerSandbox>()("Docker", {
   image: Schema.String,
@@ -49,7 +49,11 @@ export class ApiConnectorConfig extends Schema.TaggedClass<ApiConnectorConfig>()
       Schema.withConstructorDefault(Effect.succeed(Duration.seconds(30)))
     ),
     temperature: Schema.optionalKey(Schema.Number),
-    maxTokens: Schema.optionalKey(Schema.Int)
+    maxTokens: Schema.optionalKey(Schema.Int),
+    /** Reasoning effort to ask of the backend (ADR 0029); absent keeps its default. */
+    effort: Schema.optionalKey(Effort),
+    /** Prompt-cache markers where the provider has them (Anthropic); default on. */
+    promptCache: Schema.optionalKey(Schema.Boolean)
   }
 ) {}
 
@@ -80,7 +84,15 @@ export class CliConnectorConfig extends Schema.TaggedClass<CliConnectorConfig>()
     // instead of an error. Connector families that don't build a
     // `noTools`-aware argv (only PiConnector does today) ignore this field
     // and fall back to their `readOnly` behavior.
-    noTools: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false)))
+    noTools: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+    /** Reasoning effort to ask of the harness (ADR 0029); absent keeps its default. */
+    effort: Schema.optionalKey(Effort),
+    /**
+     * Run the harness without the target repository's own hooks, MCP
+     * servers, settings, extensions and instruction files (ADR 0029). How
+     * completely a connector honours it is `capabilities.isolatedHeadless`.
+     */
+    isolated: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false)))
   }
 ) {}
 
@@ -118,7 +130,9 @@ export const toLlmConfig = (config: ApiConnectorConfig): LlmConfig =>
     ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
     ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }),
     ...(config.temperature === undefined ? {} : { temperature: config.temperature }),
-    ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens })
+    ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
+    ...(config.effort === undefined ? {} : { effort: config.effort }),
+    ...(config.promptCache === undefined ? {} : { promptCache: config.promptCache })
   })
 
 const emptyConnectors: ReadonlyArray<ConnectorConfig> = Object.freeze([])

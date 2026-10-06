@@ -6,6 +6,7 @@ import { ProviderError } from "../Errors.ts"
 import { ConnectorCapabilities, ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
+  effortWord,
   cumulativeUsage,
   failClassifiedCliError,
   jsonBooleanField,
@@ -29,6 +30,11 @@ export const piExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> =
   // session, unsafe for a one-shot complete() call with no tool-loop
   // continuation (see the field's doc comment on CliConnectorConfig).
   ...(config.noTools ? ["--no-tools"] : config.readOnly ? ["--tools", "read"] : []),
+  // `--thinking` is pi's effort flag (off, minimal, low, medium, high, xhigh).
+  ...(config.effort === undefined ? [] : ["--thinking", effortWord(config.effort, "xhigh")]),
+  // Isolation is partial (ADR 0029): project extensions and skills stay
+  // out; pi still reads AGENTS.md from the working directory and its parents.
+  ...(config.isolated ? ["--no-extensions", "--no-skills"] : []),
   ...sortedFlagArgs(config.flags)
 ]
 
@@ -182,7 +188,9 @@ export const makePiConnector = (
     // capability removal, the same mechanism class as claude's `--tools`.
     capabilities: ConnectorCapabilities.make({
       interactiveSessions: true,
-      readOnlyEnforcement: "enforced"
+      readOnlyEnforcement: "enforced",
+      effort: "mapped",
+      isolatedHeadless: "partial"
     }),
     buildArgv: (prompt, _context) => ["pi", "-p", ...extraArgs, prompt],
     buildInteractiveArgv: (_context) => ["pi", ...extraArgs],

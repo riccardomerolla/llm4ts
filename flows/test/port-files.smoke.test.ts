@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync, rmSync } from "node:fs"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
@@ -100,6 +101,36 @@ const seed = (root: string, repo: string): void => {
 }
 
 describe("port flows end to end (model stubbed)", { timeout: smokeTimeout * 2 }, () => {
+  it("spreads the drafts over worktree shards, merges them back and removes the shards", () => {
+    const fixture = makeFixture()
+    const repo = join(fixture.root, "repo")
+    try {
+      seed(fixture.root, repo)
+      installStub(fixture, stubProgram(responder))
+      const run = runFlow(fixture, "port-files", repo, {
+        LLM4TS_PACK: "packs/smoke-port",
+        LLM4TS_PORT_CONCURRENCY: "2",
+        LLM4TS_PORT_SHARDS: "2"
+      })
+      assert.strictEqual(run.status, 0, failureReport("sharded", run))
+      assert.isTrue(existsSync(join(repo, "src/a.rs")))
+      assert.isTrue(existsSync(join(repo, "src/b.rs")))
+      assert.isFalse(existsSync(join(repo, ".llm4ts/port/shards/1")))
+      const worktrees = execFileSync("git", ["worktree", "list"], { cwd: repo, encoding: "utf8" })
+      assert.notInclude(worktrees, "shards")
+      const branches = execFileSync("git", ["branch", "--list", "llm4ts/port-shard-*"], {
+        cwd: repo,
+        encoding: "utf8"
+      })
+      assert.strictEqual(branches.trim(), "")
+      const log = execFileSync("git", ["log", "--oneline"], { cwd: repo, encoding: "utf8" })
+      assert.include(log, "port: merge shard-")
+      assert.include(`${run.stdout}\n${run.stderr}`, "2 shard(s)")
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true })
+    }
+  })
+
   it("pilots one file behind an approval, then drafts the rest with a ledger and a report", () => {
     const fixture = makeFixture()
     const repo = join(fixture.root, "repo")

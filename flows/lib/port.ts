@@ -200,6 +200,8 @@ export const portEnv = (
   readonly batch: number
   readonly votes: number
   readonly sourceChars: number
+  /** Worktrees to spread `port-files` over; 0 (the default) works in the one checkout. */
+  readonly shards: number
 } => {
   const int = (raw: string | undefined, fallback: number, min = 1): number => {
     const value = Number.parseInt(raw ?? "", 10)
@@ -210,6 +212,7 @@ export const portEnv = (
     concurrency: int(environment.LLM4TS_PORT_CONCURRENCY, 4),
     batch: int(environment.LLM4TS_PORT_BATCH, 100),
     votes: int(environment.LLM4TS_REVIEW_VOTES, 2),
-    sourceChars: int(environment.LLM4TS_PORT_SOURCE_CHARS, 120_000, 1_000)
+    sourceChars: int(environment.LLM4TS_PORT_SOURCE_CHARS, 120_000, 1_000),
+    shards: int(environment.LLM4TS_PORT_SHARDS, 0, 1)
   }
 }

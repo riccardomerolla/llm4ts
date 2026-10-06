@@ -601,6 +601,7 @@ export interface ProfileFlags {
   readonly repo: Option.Option<string>
   readonly epic: Option.Option<string>
   readonly json: boolean
+  readonly against: Option.Option<string>
 }
 
 /** Turns the `profile` flags into program options; every rejection is a usage error. */
@@ -621,7 +622,8 @@ export const profileOptionsFrom = (
       ),
       ...(Option.isSome(flags.trace) ? { trace: resolve(cwd, flags.trace.value) } : {}),
       ...(Option.isSome(flags.epic) ? { epic: flags.epic.value } : {}),
-      ...(flags.json ? { json: true } : {})
+      ...(flags.json ? { json: true } : {}),
+      ...(Option.isSome(flags.against) ? { against: resolve(cwd, flags.against.value) } : {})
     }
   })
 
@@ -643,6 +645,12 @@ const profileCommand = Command.make(
     json: Flag.Boolean("json").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Emit the report as JSON, to compare runs")
+    ),
+    against: Flag.String("against").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "An earlier run (a trace, or a report saved with --json) to compare this one against: the harness-evals delta"
+      )
     )
   },
   (config) =>

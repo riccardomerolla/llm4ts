@@ -189,6 +189,28 @@ describe("buildCostReport", () => {
     )
   })
 
+  it("groups spend by the seat's label so a run shows what each role cost (ADR 0029)", () => {
+    const report = buildCostReport([
+      sample(at("2026-09-18T09:10:00Z"), "run-1", 6_000, { agent: "coder", costUsd: 0.6 }),
+      sample(at("2026-09-18T09:11:00Z"), "run-1", 3_000, { agent: "judge", costUsd: 0.3 }),
+      sample(at("2026-09-18T09:12:00Z"), "run-1", 1_000, { agent: "coder" })
+    ])
+    assert.deepStrictEqual(
+      report.byAgent.map((entry) => [
+        entry.agent,
+        entry.totals.total,
+        Math.round(entry.share * 100)
+      ]),
+      [
+        ["coder", 7_000, 70],
+        ["judge", 3_000, 30]
+      ]
+    )
+    const text = renderCostReport(report)
+    assert.include(text, "by role (the seat's label):")
+    assert.include(text, "  coder  7,000 tokens (70%)")
+  })
+
   it("describes an empty window without dividing by zero", () => {
     const report = buildCostReport([])
 

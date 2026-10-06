@@ -29,6 +29,14 @@ const streamEvent = (type: string, delta: Readonly<Record<string, string>>): str
     delta
   })}`
 
+/** The text of a message or system field, whether plain or in cache-marked blocks. */
+const textOf = (content: string | ReadonlyArray<{ readonly text: string }> | undefined): string =>
+  content === undefined
+    ? ""
+    : typeof content === "string"
+      ? content
+      : content.map((block) => block.text).join("")
+
 const decodeRequest = (request: HttpRequest): Effect.Effect<AnthropicRequest, unknown> =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(AnthropicRequest))(request.body ?? "")
 
@@ -155,7 +163,7 @@ describe("AnthropicProvider", () => {
       assert.deepStrictEqual(result, { answer: 42 })
       if (request !== undefined) {
         const body = yield* decodeRequest(request)
-        assert.match(body.messages[0]?.content ?? "", /valid JSON/)
+        assert.match(textOf(body.messages[0]?.content), /valid JSON/)
         assert.isFalse(body.stream)
       }
     })
@@ -249,5 +257,123 @@ describe("AnthropicProvider", () => {
         assert.strictEqual(error.raw, "malformed")
       }
     })
+  )
+
+  it.effect(
+    "marks the system block and the last message for the prompt cache, and sends the effort (ADR 0029)",
+    () =>
+      Effect.gen(function* () {
+        const recording = yield* makeRecordingHttpClient(
+          () => Effect.succeed("{}"),
+          () => Stream.make(streamEvent("message_delta", { stop_reason: "end_turn" }))
+        )
+        const provider = makeAnthropicProvider(
+          LlmConfig.make({ ...providerConfig(), effort: "high" }),
+          recording.client
+        )
+        yield* collect(
+          provider.executeStreamWithHistory([
+            Message.make({ role: "System", content: "stable rules" }),
+            Message.make({ role: "User", content: "first" }),
+            Message.make({ role: "Assistant", content: "reply" }),
+            Message.make({ role: "User", content: "second" })
+          ])
+        )
+        const request = (yield* recording.recorded)[0]
+        assert.isDefined(request)
+        if (request !== undefined) {
+          const body: unknown = JSON.parse(request.body ?? "{}")
+          assert.deepStrictEqual(body, {
+            model: "claude-3-5-sonnet-20241022",
+            max_tokens: 4096,
+            stream: true,
+            system: [{ type: "text", text: "stable rules", cache_control: { type: "ephemeral" } }],
+            // Earlier turns stay plain strings: the prefix is byte-stable.
+            messages: [
+              { role: "user", content: "first" },
+              { role: "assistant", content: "reply" },
+              {
+                role: "user",
+                content: [{ type: "text", text: "second", cache_control: { type: "ephemeral" } }]
+              }
+            ],
+            output_config: { effort: "high" }
+          })
+        }
+        assert.strictEqual(provider.capabilities.effort, "mapped")
+      })
+  )
+
+  it.effect(
+    "sends plain strings and no output_config when caching is off and no effort is asked",
+    () =>
+      Effect.gen(function* () {
+        const recording = yield* makeRecordingHttpClient(
+          () => Effect.succeed("{}"),
+          () => Stream.make(streamEvent("message_delta", { stop_reason: "end_turn" }))
+        )
+        const provider = makeAnthropicProvider(
+          LlmConfig.make({ ...providerConfig(), promptCache: false }),
+          recording.client
+        )
+        yield* collect(
+          provider.executeStreamWithHistory([
+            Message.make({ role: "System", content: "rules" }),
+            Message.make({ role: "User", content: "hi" })
+          ])
+        )
+        const request = (yield* recording.recorded)[0]
+        if (request !== undefined) {
+          const body = yield* decodeRequest(request)
+          assert.strictEqual(body.system, "rules")
+          assert.strictEqual(body.messages[0]?.content, "hi")
+          assert.isUndefined(body.output_config)
+        }
+      })
+  )
+
+  it.effect(
+    "reports usage from message_start and message_delta, cache reads as cached tokens",
+    () =>
+      Effect.gen(function* () {
+        const recording = yield* makeRecordingHttpClient(
+          () => Effect.succeed("{}"),
+          () =>
+            Stream.make(
+              `data: ${JSON.stringify({
+                type: "message_start",
+                message: {
+                  model: "claude-sonnet-5-5",
+                  usage: {
+                    input_tokens: 10,
+                    cache_read_input_tokens: 900,
+                    cache_creation_input_tokens: 90,
+                    output_tokens: 1
+                  }
+                }
+              })}`,
+              streamEvent("content_block_delta", { type: "text_delta", text: "ok" }),
+              `data: ${JSON.stringify({
+                type: "message_delta",
+                delta: { stop_reason: "end_turn" },
+                usage: { output_tokens: 25 }
+              })}`
+            )
+        )
+        const provider = makeAnthropicProvider(providerConfig(), recording.client)
+        const response = yield* collect(provider.executeStream("hello"))
+        assert.strictEqual(response.content, "ok")
+        assert.deepStrictEqual(
+          response.usage === undefined
+            ? undefined
+            : {
+                prompt: response.usage.prompt,
+                completion: response.usage.completion,
+                total: response.usage.total,
+                cached: response.usage.cached
+              },
+          { prompt: 1000, completion: 25, total: 1025, cached: 900 }
+        )
+      })
   )
 })

@@ -610,6 +610,19 @@ questions and the policy together in one place per flow, observe before
 automating (see `docs/judgment-decision-map.md`), and never skip on doubt:
 `hold` means escalate or run the full check.
 
+## A stable prefix
+
+A `Chat` sends its whole history every turn, and the request is the
+previous request plus the new exchange, byte for byte (a test in
+`Chat.test.ts` holds that invariant; the one exception is the
+context-overflow retry, which keeps the system prompt and the current turn
+only). Keep it that way in a flow: put what never changes (rules, the
+contract, the rulebook) in `system`, and what changes per turn (the task,
+the diff, a gate's tail) in the ask. Providers that cache a prefix — the
+Anthropic connector marks the system block and the last message for its
+cache (ADR 0029) — then charge for the new turn alone, and a flow that
+rewrites its system prompt mid-chat pays for the whole history again.
+
 ## Testing a flow
 
 Flows are functions over `FlowContextShape`, so they test without any LLM,

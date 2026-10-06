@@ -73,3 +73,31 @@ describe("tsc diagnostics", () => {
     )
   })
 })
+
+describe("javac diagnostics", () => {
+  it("reads javac and Maven error lines, the Maven module as the unit", () => {
+    const text = [
+      "[INFO] Compiling 12 source files",
+      "[ERROR] /work/bank/core/src/main/java/com/bank/Ledger.java:[12,5] cannot find symbol",
+      "[ERROR]   symbol: class Money",
+      "/work/bank/web/src/main/java/com/bank/web/Home.java:40: error: incompatible types: String cannot be converted to int",
+      "Note: Some input files use unchecked operations.",
+      "2 errors"
+    ].join("\n")
+    const diagnostics = parseDiagnostics(text, "javac")
+    assert.deepStrictEqual(
+      diagnostics.map((diagnostic) => [diagnostic.file, diagnostic.line, diagnostic.unit]),
+      [
+        ["/work/bank/core/src/main/java/com/bank/Ledger.java", 12, "/work/bank/core"],
+        ["/work/bank/web/src/main/java/com/bank/web/Home.java", 40, "/work/bank/web"]
+      ]
+    )
+    assert.strictEqual(diagnostics[0]?.message, "cannot find symbol")
+    assert.deepStrictEqual(
+      groupDiagnostics(diagnostics).map((group) => group.unit),
+      ["/work/bank/core", "/work/bank/web"]
+    )
+    // A file outside any src/ folder falls back to its directory.
+    assert.strictEqual(parseDiagnostics("Tool.java:3: error: boom", "javac")[0]?.unit, ".")
+  })
+})

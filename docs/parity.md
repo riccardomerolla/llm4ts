@@ -623,3 +623,14 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   `port-guide`, `port-ledger`, `port-tests`, the `tsc` diagnostics format and
   the `scala-ts` pack; `Pack` gains `## Ledger`, `## Differential`,
   `## Audit`. llm4zio has none of these. Additive.
+- Harness discipline (ADR 0029, 2026-10-06): one effort vocabulary
+  (`low|medium|high|max`) mapped per harness and set per role in the
+  roster; a headless isolation grade with `--bare` on Claude Code; the
+  Anthropic API seat marks its prefix for the prompt cache and reports
+  usage; `llm4ts profile --against` and a by-role table in `llm4ts costs`.
+  llm4zio has neither an executor roster nor a profile; nothing to mirror.
+  Additive: nothing is sent until a roster asks for it.
+- Work queue shards and `javac` diagnostics (ADR 0028 addendum,
+  2026-10-06): `runQueue` spreads items over worktree shards
+  (`LLM4TS_PORT_SHARDS`); `parseDiagnostics` reads javac and Maven error
+  lines. llm4ts-only. Additive.

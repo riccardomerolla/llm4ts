@@ -167,6 +167,16 @@ Explicit `baseUrl` and redacted `apiKey` values always win. LM Studio and Ollama
 use their local default endpoints and require no credential. See the
 [real examples](../examples/README.md) for runnable commands.
 
+The Anthropic connector marks the system prompt and the last message as
+prompt-cache breakpoints (`cache_control: ephemeral`, ADR 0029), so a chat
+whose history only grows at the end reads every earlier turn from the
+cache; it reports usage (input, output, cache reads as `cached`, cache
+writes counted as input), so the seat is measured rather than estimated.
+`promptCache: false` on the connector config turns the markers off. An
+`effort` on an API connector config becomes `output_config.effort`
+(Anthropic) or `reasoning_effort` (OpenAI); the other API providers ignore
+it and say so on the run's events.
+
 ## Kits and packs
 
 The modernization and conversion flows read a pack selected by `LLM4TS_PACK`
@@ -324,13 +334,54 @@ Warning in the story's findings, travels to the judge as an evidence note,
 is counted in `llm4ts profile`, and is a signature the retro reads. An API
 coder keeps no tool transcript, so its claims are reported as unchecked.
 
+## Roster: effort per role and isolation
+
+A roster entry (ADR 0019) can shape what its seats spend and what they load
+(ADR 0029):
+
+```json
+{
+  "id": "claude",
+  "harness": "claude",
+  "roles": ["coder", "reviewer", "judge"],
+  "effort": { "coder": "low", "default": "high" },
+  "isolated": true
+}
+```
+
+`effort` is `low`, `medium`, `high` or `max`, one for every role or per
+role with a `default`; the runner configures each seat with the effort of
+the role it serves, so one executor drafts at `low` and judges at `high`.
+Each harness maps it to its own flag or ignores it with a
+`CapabilityUnenforceable` event (`docs/provider-capabilities.md`); unset, the
+harness keeps its default. The Bun port's shape is mechanical drafting on
+the cheapest setting and the rulebook audit on the strongest. `isolated`
+asks the harness to leave the repository's own hooks, MCP servers,
+settings and instruction files unloaded; `LLM4TS_ISOLATED=1` asks it of
+every CLI seat in a run. `llm4ts costs` ends with a by-role table (the
+seat's label: coder, planner, reviewer, judge, judgment, chat) so a run
+shows what the strongest model was spent on.
+
+## Harness evals
+
+`llm4ts profile --against <trace|report.json>` compares the profiled run
+with an earlier one in the order `docs/harness-evals/README.md` asks for:
+stories done and failed, explore calls before the first edit, coder turns,
+reviewer and judge calls, gate runs and failures, fabricated verification
+claims, low-confidence tasks, then wall, model, tool, gate and waiting
+time, each with its change and whether that is better. `--json` with
+`--against` emits the delta rows. A report saved with `llm4ts profile
+--json > before.json` is the natural "before".
+
 ## Ports
 
 The port flows (ADR 0028) port a code base file by file with a porting pack
 (`LLM4TS_PACK`, e.g. the built-in `zig-rust` or `scala-ts`): `target:` (the
 target path template), `comment:` (the `PORT STATUS` trailer's comment
 marker), `prompts/porting.md` (the rulebook), pitfall cards, `## Diagnostics`
-(`json`, `cargo` or `tsc`), `## Ledger` (what `port-ledger` classifies),
+(`json`, `cargo`, `tsc` or `javac`, the last reading javac's and Maven's
+error lines with the Maven module as the unit), `## Ledger` (what
+`port-ledger` classifies),
 `## Differential` (the two test commands `port-tests` compares) and
 `## Audit` (the dimensions `port-guide` audits). In order: `port-guide`
 (`.llm4ts/port/guide-audit.md`, approved → appended to the rulebook on the
@@ -339,17 +390,18 @@ next run), `port-ledger` (`<specs-dir>/ledger.tsv`, committed), `port-files`
 (`diagnostics-<round>.md`), `port-tests` (`.llm4ts/port/tests/`: a
 `.baseline.json` and a `.diag.md` per test file, `report-<round>.md`).
 
-| Variable                     | Effect                                                                                 |
-| ---------------------------- | -------------------------------------------------------------------------------------- |
-| `LLM4TS_PORT_PILOT`          | Port this many files, write the pilot report, stop behind `- [ ] Approved`. Unset: all |
-| `LLM4TS_PORT_CONCURRENCY`    | Files or units worked at once. Default `4`                                             |
-| `LLM4TS_PORT_BATCH`          | Files per batch (6 when the batch's first file is over 2200 lines). Default `100`      |
-| `LLM4TS_PORT_SOURCE_CHARS`   | Characters of one source file in the implementer's prompt. Default `120000`            |
-| `LLM4TS_PORT_COMPILE_ROUNDS` | Rebuild rounds before `port-compile` stops with diagnostics left. Default `6`          |
-| `LLM4TS_PORT_TEST_ROUNDS`    | Differential rounds before `port-tests` stops with red files left. Default `4`         |
-| `LLM4TS_PORT_GUIDE_SAMPLE`   | Sample sources `port-guide` audits and trial-ports. Default `3`                        |
-| `LLM4TS_PORT_GUIDE_TRIAL`    | `off` skips the trial port (auditors and refuters only)                                |
-| `LLM4TS_REVIEW_VOTES`        | Adversarial votes per unit; the port flows default to `2`                              |
+| Variable                     | Effect                                                                                                                                                                                       |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_PORT_PILOT`          | Port this many files, write the pilot report, stop behind `- [ ] Approved`. Unset: all                                                                                                       |
+| `LLM4TS_PORT_CONCURRENCY`    | Files or units worked at once. Default `4`                                                                                                                                                   |
+| `LLM4TS_PORT_BATCH`          | Files per batch (6 when the batch's first file is over 2200 lines). Default `100`                                                                                                            |
+| `LLM4TS_PORT_SOURCE_CHARS`   | Characters of one source file in the implementer's prompt. Default `120000`                                                                                                                  |
+| `LLM4TS_PORT_COMPILE_ROUNDS` | Rebuild rounds before `port-compile` stops with diagnostics left. Default `6`                                                                                                                |
+| `LLM4TS_PORT_TEST_ROUNDS`    | Differential rounds before `port-tests` stops with red files left. Default `4`                                                                                                               |
+| `LLM4TS_PORT_GUIDE_SAMPLE`   | Sample sources `port-guide` audits and trial-ports. Default `3`                                                                                                                              |
+| `LLM4TS_PORT_GUIDE_TRIAL`    | `off` skips the trial port (auditors and refuters only)                                                                                                                                      |
+| `LLM4TS_REVIEW_VOTES`        | Adversarial votes per unit; the port flows default to `2`                                                                                                                                    |
+| `LLM4TS_PORT_SHARDS`         | Worktrees `port-files` spreads its implementers over (`.llm4ts/port/shards/<n>`, one branch each, merged into the checkout after every round, removed at the end). Default `0`: one checkout |
 
 ## Capabilities
 

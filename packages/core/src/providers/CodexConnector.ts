@@ -17,6 +17,7 @@ import { collect } from "../Streaming.ts"
 import type { TemporaryFilesShape } from "../TemporaryFiles.ts"
 import { parseFromText, withSchemaHint } from "../StructuredOutput.ts"
 import {
+  effortWord,
   failClassifiedCliError,
   isJsonRecord,
   jsonField,
@@ -39,7 +40,19 @@ export const codexExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string
         sandbox: "read-only"
       }
     : config.flags
-  return [...optionalModelArgs(config.model), ...sortedFlagArgs(effectiveFlags)]
+  return [
+    ...optionalModelArgs(config.model),
+    // Codex reads its effort from config: `-c model_reasoning_effort="…"`,
+    // top level `xhigh`.
+    ...(config.effort === undefined
+      ? []
+      : ["-c", `model_reasoning_effort="${effortWord(config.effort, "xhigh")}"`]),
+    // Isolation is partial (ADR 0029): the project's `.codex/config.toml`
+    // is skipped unless the user trusted that path, and this turns off the
+    // project's AGENTS.md; MCP servers from the user's own config still load.
+    ...(config.isolated ? ["-c", "project_doc_max_bytes=0"] : []),
+    ...sortedFlagArgs(effectiveFlags)
+  ]
 }
 
 export const codexSchemaEnforceable = (schema: JsonSchema): boolean => {
@@ -224,7 +237,9 @@ export const makeCodexConnector = (
     // `sandbox: read-only` is an OS-level sandbox — a real capability gate.
     capabilities: ConnectorCapabilities.make({
       interactiveSessions: true,
-      readOnlyEnforcement: "enforced"
+      readOnlyEnforcement: "enforced",
+      effort: "mapped",
+      isolatedHeadless: "partial"
     }),
     buildArgv: (prompt, _context) => ["codex", "exec", ...extraArgs, prompt],
     buildInteractiveArgv: (_context) => ["codex", ...extraArgs],

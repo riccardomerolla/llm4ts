@@ -62,6 +62,20 @@ describe("PiConnector", () => {
     ])
   })
 
+  it("maps effort to --thinking and isolation to --no-extensions --no-skills (ADR 0029)", () => {
+    const config = CliConnectorConfig.make({
+      connectorId: ConnectorIds.Pi,
+      effort: "max",
+      isolated: true
+    })
+    assert.deepStrictEqual(piExtraArgs(config), [
+      "--thinking",
+      "xhigh",
+      "--no-extensions",
+      "--no-skills"
+    ])
+  })
+
   it("disables every tool with --no-tools when noTools is set, even over readOnly", () => {
     const config = CliConnectorConfig.make({
       connectorId: ConnectorIds.Pi,

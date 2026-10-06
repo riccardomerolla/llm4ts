@@ -25,6 +25,7 @@ import {
 } from "@llm4ts/flow/FlowEvents"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import {
+  effortOf,
   Exclusion,
   ExecutorSpec,
   RosterDocument,
@@ -113,6 +114,23 @@ describe("Roster documents", () => {
     assert.include(violations.join("\n"), "executor 'b' takes no role")
     assert.include(violations.join("\n"), "coderSlots outside 0..slots")
     assert.include(violations.join("\n"), "unreadable usageLimit cooldown 'soon'")
+    assert.include(
+      rosterViolations(
+        RosterDocument.make({
+          executors: [executor("d", { effort: { coder: "low", boss: "high" } })]
+        })
+      ).join("\n"),
+      "effort for unknown role(s) boss"
+    )
+  })
+
+  it("reads the effort per role, one value for all, or none (ADR 0029)", () => {
+    assert.isUndefined(effortOf(executor("a"), "coder"))
+    assert.strictEqual(effortOf(executor("b", { effort: "high" }), "coder"), "high")
+    const shaped = executor("c", { effort: { coder: "low", default: "high" } })
+    assert.strictEqual(effortOf(shaped, "coder"), "low")
+    assert.strictEqual(effortOf(shaped, "judge"), "high")
+    assert.isUndefined(effortOf(executor("d", { effort: { judge: "max" } }), "coder"))
   })
 
   it("keeps a reasoning slot on an executor that also codes, and reads priorities per role", () => {

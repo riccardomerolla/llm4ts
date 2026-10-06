@@ -3,7 +3,8 @@
 Status: Accepted · Date: 2026-10-06
 Research: `docs/research/rewrite-grade-loops-plan.md` (phase 3) and
 `docs/research/bun-zig-to-rust-rewrite.md`.
-Specs: `specs/pending/work-queue-primitive.md`, `specs/pending/port-flow-family.md`.
+Specs: `specs/pending/work-queue-primitive.md`, `specs/pending/port-flow-family.md`,
+`specs/pending/queue-sharding-and-javac.md`.
 
 ## Context
 
@@ -88,7 +89,19 @@ in the tree, beside its target, as it was for Bun. The clean-room wall
 
 ## Not decided here
 
-A `javac`/`mvn` diagnostics format; sharding across worktrees (one checkout,
-one queue, concurrency on seats is enough for a first live run); folding the
-differential tier into `modernize-verify` (it stands as `port-tests`, whose
-packs name the two commands; the clean-room flows keep their vectors).
+Folding the differential tier into `modernize-verify` (it stands as
+`port-tests`, whose packs name the two commands; the clean-room flows keep
+their vectors).
+
+## Decided later (2026-10-06)
+
+- **A `javac` diagnostics format**: `parseDiagnostics(text, "javac")` reads
+  `javac`'s `path/File.java:12: error: message` and Maven's
+  `[ERROR] /path/File.java:[12,5] message`; the unit is the Maven module
+  (the path before `/src/`), else the file's folder.
+- **Sharding across worktrees**: `runQueue` takes optional `shards`
+  (`{ id, dir }`), hands each in-flight item one shard and never two items
+  the same shard at once; `port-files` with `LLM4TS_PORT_SHARDS=n` creates
+  `n` worktrees under `.llm4ts/port/shards/`, binds its seats there, commits
+  and merges each shard after every round and removes them at the end. One
+  checkout stays the default.

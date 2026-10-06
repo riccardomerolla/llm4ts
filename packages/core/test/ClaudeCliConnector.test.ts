@@ -83,6 +83,26 @@ describe("ClaudeCliConnector", () => {
     assert.isTrue(connector.capabilities.approval)
     assert.isTrue(connector.capabilities.resumableSessions)
     assert.strictEqual(connector.capabilities.readOnlyEnforcement, "enforced")
+    assert.strictEqual(connector.capabilities.effort, "mapped")
+    assert.strictEqual(connector.capabilities.isolatedHeadless, "enforced")
+  })
+
+  it("maps effort to --effort and isolation to --bare (ADR 0029)", () => {
+    const shaped = CliConnectorConfig.make({
+      connectorId: ConnectorIds.ClaudeCli,
+      model: "opus",
+      effort: "max",
+      isolated: true
+    })
+    assert.deepStrictEqual(claudeCliExtraArgs(shaped), [
+      "--model",
+      "opus",
+      "--effort",
+      "max",
+      "--bare"
+    ])
+    const plain = CliConnectorConfig.make({ connectorId: ConnectorIds.ClaudeCli })
+    assert.deepStrictEqual(claudeCliExtraArgs(plain), [])
   })
 
   it("lets an explicit tools flag win over the read-only allowlist, and omits it otherwise", () => {

@@ -88,7 +88,8 @@ import {
   type ExecutorSpec,
   type Role,
   type RosterDocument,
-  type RosterShape
+  type RosterShape,
+  effortOf
 } from "@llm4ts/flow/Roster"
 import {
   makeHeldCoder,
@@ -349,19 +350,54 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   // `capabilities.readOnlyEnforcement`.
   const announceReadOnlyGrade = (
     configuration: ConnectorConfig,
-    connector: { readonly capabilities: { readonly readOnlyEnforcement: string } }
-  ): Effect.Effect<void> =>
-    configuration instanceof CliConnectorConfig &&
-    configuration.readOnly &&
-    connector.capabilities.readOnlyEnforcement !== "enforced"
-      ? events.publish(
-          FlowEventsValues.CapabilityUnenforceable(
-            `readOnly requested from '${configuration.connectorId.value}', but its harness mapping ` +
-              `is ${connector.capabilities.readOnlyEnforcement} — the flag is a request, not a ` +
-              "capability removal"
-          )
-        )
-      : Effect.void
+    connector: {
+      readonly capabilities: {
+        readonly readOnlyEnforcement: string
+        readonly effort: string
+        readonly isolatedHeadless: string
+      }
+    }
+  ): Effect.Effect<void> => {
+    const name = configuration.connectorId.value
+    const notes: Array<string> = []
+    if (
+      configuration instanceof CliConnectorConfig &&
+      configuration.readOnly &&
+      connector.capabilities.readOnlyEnforcement !== "enforced"
+    ) {
+      notes.push(
+        `readOnly requested from '${name}', but its harness mapping ` +
+          `is ${connector.capabilities.readOnlyEnforcement} — the flag is a request, not a ` +
+          "capability removal"
+      )
+    }
+    // The same honesty for the ADR 0029 requests: an effort the harness
+    // has no flag for, an isolation the harness only partly provides.
+    if (configuration.effort !== undefined && connector.capabilities.effort !== "mapped") {
+      notes.push(
+        `effort '${configuration.effort}' requested from '${name}', but its harness has no ` +
+          "effort flag — the seat runs at the harness's own default"
+      )
+    }
+    if (
+      configuration instanceof CliConnectorConfig &&
+      configuration.isolated &&
+      connector.capabilities.isolatedHeadless !== "enforced"
+    ) {
+      notes.push(
+        `isolated requested from '${name}', but its harness isolation is ` +
+          `${connector.capabilities.isolatedHeadless} — ` +
+          (connector.capabilities.isolatedHeadless === "partial"
+            ? "the repository's own instruction file is still read"
+            : "nothing reaches the harness")
+      )
+    }
+    return Effect.forEach(
+      notes,
+      (detail) => events.publish(FlowEventsValues.CapabilityUnenforceable(detail)),
+      { discard: true }
+    )
+  }
   // Every seat is metered, so no run is silently free: a backend that reports
   // no token counts (`capabilities.usageReporting` false) is estimated from
   // character counts and labelled `estimated:<model>`, which is what makes
@@ -633,12 +669,15 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       cacheLock.withPermit(
         Effect.gen(function* () {
           const readOnly = role !== "coder"
-          const key = `${executor.id}\u0000${readOnly ? "ro" : "rw"}\u0000${workDir}`
+          // One seat per executor, mode, directory and effort: two roles
+          // asking the same effort share a process configuration.
+          const effort = effortOf(executor, role) ?? ""
+          const key = `${executor.id}\u0000${readOnly ? "ro" : "rw"}\u0000${workDir}\u0000${effort}`
           const cached = seatCache.get(key)
           if (cached !== undefined) {
             return cached
           }
-          const configuration = executorConfig(executor, readOnly, runEnvironment)
+          const configuration = executorConfig(executor, readOnly, runEnvironment, role)
           if (configuration === undefined) {
             return yield* RosterInvalid.make({
               violations: [`executor '${executor.id}' has an unknown harness '${executor.harness}'`]
@@ -659,7 +698,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       document.executors
         .filter((spec) => rolesOf(spec).includes("judge"))
         .flatMap((spec) => {
-          const configuration = executorConfig(spec, true, runEnvironment)
+          const configuration = executorConfig(spec, true, runEnvironment, "judge")
           return configuration === undefined ? [] : [configuration]
         })[0] ??
       reasoning

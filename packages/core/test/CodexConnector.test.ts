@@ -54,6 +54,14 @@ describe("CodexConnector", () => {
       "--sandbox",
       "read-only"
     ])
+    // ADR 0029: effort through config, `max` as codex's `xhigh`; isolation
+    // turns the project's AGENTS.md off.
+    assert.deepStrictEqual(
+      codexExtraArgs(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.Codex, effort: "max", isolated: true })
+      ),
+      ["-c", 'model_reasoning_effort="xhigh"', "-c", "project_doc_max_bytes=0"]
+    )
   })
 
   it("parses agent text, command tools, usage, and turn failures", () => {

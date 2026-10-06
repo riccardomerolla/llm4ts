@@ -1,5 +1,56 @@
 # Changelog
 
+## 2.36.0
+
+Harness discipline for every provider (ADR 0029), and two ADR 0028
+addenda: worktree shards for the work queue and a `javac` diagnostics
+format.
+
+- **Effort per role.** `Effort` (`low | medium | high | max`) in core; a
+  roster entry sets `"effort"` once or per role with a `default`, and the
+  runner configures each seat with the effort of the role it serves. Claude
+  Code gets `--effort`, Codex `-c model_reasoning_effort`, Pi `--thinking`,
+  the Anthropic API `output_config.effort`, OpenAI `reasoning_effort`
+  (`max` becomes `xhigh` where the harness says that); every other harness
+  ignores it and the run's events say so (`CapabilityUnenforceable`).
+  Nothing is sent until a roster asks. `ConnectorCapabilities.effort`
+  records the grade.
+- **Spend per role.** `llm4ts costs` ends with a by-role table (the seat's
+  label: coder, planner, reviewer, judge, judgment, chat) with each role's
+  share, so a run shows what the strongest model was spent on. The cost
+  report schema is 2.
+- **Headless isolation.** `CliConnectorConfig.isolated`, a roster entry's
+  `"isolated": true`, or `LLM4TS_ISOLATED=1` ask a CLI seat to leave the
+  repository's own hooks, MCP servers, settings, extensions and instruction
+  files unloaded. Claude Code: `--bare` (enforced). Codex:
+  `-c project_doc_max_bytes=0`, project config already skipped unless
+  trusted (partial). Pi: `--no-extensions --no-skills` (partial). Gemini:
+  `-e none` (partial). `ConnectorCapabilities.isolatedHeadless` grades it
+  and a request below `enforced` publishes `CapabilityUnenforceable`.
+- **A cached, measured Anthropic seat.** The Anthropic API connector marks
+  the system block and the last message with `cache_control: ephemeral`
+  and reports usage from `message_start` and `message_delta` (cache reads
+  as `cached`, cache writes counted as input), so the seat is no longer
+  estimated. `promptCache: false` turns the markers off. A `Chat` test
+  holds the stable-prefix invariant every provider's cache depends on.
+- **`llm4ts profile --against <trace|report.json>`** prints the delta of
+  two runs in the harness-evals order: stories done and failed, explore
+  calls before the first edit, coder turns, reviewer and judge calls, gate
+  runs and failures, fabricated verification claims, low-confidence tasks,
+  then wall, model, tool, gate and waiting time, each with its change and
+  direction. `docs/harness-evals/README.md` states what a harness change
+  ships with, including the `(tuned on <model>)` CHANGELOG line.
+- **Work queue shards.** `runQueue` takes `shards` (`{ id, dir }`), hands
+  each in-flight item one and never two items the same; `done` and `work`
+  receive the shard. `port-files` with `LLM4TS_PORT_SHARDS=n` creates `n`
+  worktrees under `.llm4ts/port/shards/`, binds its seats there, commits
+  and merges each shard after every round, syncs them, and removes them at
+  the end. One checkout stays the default.
+- **`javac` diagnostics.** `parseDiagnostics(text, "javac")` reads javac's
+  `File.java:12: error: …` and Maven's `[ERROR] …java:[12,5] …` lines, the
+  Maven module (the path before `/src/`) as the unit; a pack's
+  `## Diagnostics` accepts `format: javac`.
+
 ## 2.35.4
 
 Coders stay in their working tree.

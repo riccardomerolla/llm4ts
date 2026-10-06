@@ -125,6 +125,32 @@ describe("Chat", () => {
     })
   )
 
+  it.effect(
+    "keeps a stable prefix: every request is the previous one plus the new exchange (ADR 0029)",
+    () =>
+      Effect.gen(function* () {
+        const calls = yield* Ref.make<ReadonlyArray<ReadonlyArray<Message>>>([])
+        const chat = yield* makeChat(recordingService(calls), { system: "Stable rules." })
+        yield* chat.ask("one")
+        yield* chat.ask("two")
+        yield* chat.ask("three")
+        const seen = yield* Ref.get(calls)
+        assert.strictEqual(seen.length, 3)
+        for (let turn = 1; turn < seen.length; turn += 1) {
+          const previous = seen[turn - 1] ?? []
+          const current = seen[turn] ?? []
+          // The earlier request is a byte-for-byte prefix of the next one…
+          assert.deepStrictEqual(
+            current.slice(0, previous.length).map((message) => [message.role, message.content]),
+            previous.map((message) => [message.role, message.content])
+          )
+          // …and exactly two messages (the reply, the new ask) are appended.
+          assert.strictEqual(current.length, previous.length + 2)
+        }
+        assert.strictEqual(seen[0]?.[0]?.role, "System")
+      })
+  )
+
   it.effect("serializes concurrent asks so turns cannot interleave", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make<ReadonlyArray<ReadonlyArray<Message>>>([])

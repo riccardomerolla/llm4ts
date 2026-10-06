@@ -44,6 +44,8 @@ export class OpenAIChatCompletionRequest extends Schema.Class<OpenAIChatCompleti
   stream: Schema.optionalKey(Schema.Boolean),
   response_format: Schema.optionalKey(OpenAIResponseFormat),
   chat_template_kwargs: Schema.optionalKey(OpenAIChatTemplateKwargs),
+  /** Reasoning effort (ADR 0029): low, medium, high, xhigh; sent only when asked. */
+  reasoning_effort: Schema.optionalKey(Schema.String),
   logprobs: Schema.optionalKey(Schema.Boolean),
   top_logprobs: Schema.optionalKey(Schema.Int)
 }) {}

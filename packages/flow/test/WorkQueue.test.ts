@@ -114,4 +114,49 @@ describe("runQueue (ADR 0028)", () => {
       assert.match(error.message, /no-progress/)
     })
   )
+
+  it.effect("hands each in-flight item its own shard and never two items the same one", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const memory = yield* makeMemoryPlainFileStore()
+      const inFlight = yield* Ref.make<ReadonlyArray<string>>([])
+      const overlaps = yield* Ref.make(0)
+      const seen: Array<string> = []
+      const report = yield* runQueue({
+        label: "sharded",
+        items: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "e" }],
+        shards: [
+          { id: "s1", dir: "/w/s1" },
+          { id: "s2", dir: "/w/s2" }
+        ],
+        concurrency: 4,
+        done: (item, shard) =>
+          Effect.map(
+            memory.store.read(`${shard?.dir ?? "/w"}/${item.id}`),
+            (text) => text !== undefined
+          ),
+        work: (item, _round, shard) =>
+          Effect.gen(function* () {
+            assert.isDefined(shard)
+            const dir = shard?.dir ?? "/w"
+            const busy = yield* Ref.get(inFlight)
+            if (busy.includes(dir)) {
+              yield* Ref.update(overlaps, (n) => n + 1)
+            }
+            yield* Ref.update(inFlight, (list) => [...list, dir])
+            seen.push(`${item.id}@${shard?.id ?? "-"}`)
+            yield* Effect.yieldNow
+            yield* memory.store.writeAtomic(`${dir}/${item.id}`, "done")
+            yield* Ref.update(inFlight, (list) => list.filter((entry) => entry !== dir))
+            return {}
+          }),
+        events
+      })
+      assert.strictEqual(report.pending.length, 0)
+      assert.strictEqual(seen.length, 5)
+      assert.strictEqual(yield* Ref.get(overlaps), 0)
+      assert.isTrue(seen.some((entry) => entry.endsWith("@s1")))
+      assert.isTrue(seen.some((entry) => entry.endsWith("@s2")))
+    })
+  )
 })

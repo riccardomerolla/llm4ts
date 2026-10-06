@@ -57,6 +57,14 @@ export class ModelUsage extends Schema.Class<ModelUsage>("ModelUsage")({
   totals: UsageTotals
 }) {}
 
+/** Spend by the seat's label (coder, planner, reviewer, judge, judgment, chat): what each role cost (ADR 0029). */
+export class AgentUsage extends Schema.Class<AgentUsage>("AgentUsage")({
+  agent: Schema.String,
+  totals: UsageTotals,
+  /** Share of all tokens, measured and estimated together. */
+  share: Schema.Number
+}) {}
+
 export class UsageAverages extends Schema.Class<UsageAverages>("UsageAverages")({
   activeDays: Schema.Int,
   calendarDays: Schema.Int,
@@ -93,10 +101,11 @@ export class CostReport extends Schema.Class<CostReport>("CostReport")({
   projection: Schema.optionalKey(UsageProjection),
   byDay: Schema.Array(UsageBucket),
   byHour: Schema.Array(UsageBucket),
-  byModel: Schema.Array(ModelUsage)
+  byModel: Schema.Array(ModelUsage),
+  byAgent: Schema.Array(AgentUsage)
 }) {}
 
-export const CurrentCostReportSchema = 1
+export const CurrentCostReportSchema = 2
 
 const tokensUsedCodec = Schema.fromJsonString(TokensUsed)
 const decodeTokensUsed = Schema.decodeUnknownOption(tokensUsedCodec)
@@ -293,6 +302,24 @@ export const buildCostReport = (
           : -1
     )
 
+  const byAgentGroups = new Map<string, Array<UsageSample>>()
+  for (const sample of ordered) {
+    byAgentGroups.set(sample.agent, [...(byAgentGroups.get(sample.agent) ?? []), sample])
+  }
+  const byAgent = [...byAgentGroups.entries()]
+    .map(([agent, members]) => {
+      const agentTotals = totalsOf(members)
+      return AgentUsage.make({
+        agent,
+        totals: agentTotals,
+        share: tokens === 0 ? 0 : agentTotals.total / tokens
+      })
+    })
+    .sort(
+      (left, right) =>
+        right.totals.total - left.totals.total || left.agent.localeCompare(right.agent)
+    )
+
   return CostReport.make({
     schemaVersion: CurrentCostReportSchema,
     timeZone: zoneLabel(timeZone),
@@ -321,7 +348,8 @@ export const buildCostReport = (
     ...(projection === undefined ? {} : { projection }),
     byDay,
     byHour,
-    byModel
+    byModel,
+    byAgent
   })
 }
 
@@ -389,6 +417,16 @@ export const renderCostReport = (report: CostReport): string => {
         `  ${entry.model}  ${thousands(entry.totals.total)} tokens${money(entry.totals.costUsd)}`
     )
   )
+  if (report.byAgent.length > 0) {
+    sections.push(
+      "",
+      "by role (the seat's label):",
+      ...report.byAgent.map(
+        (entry) =>
+          `  ${entry.agent}  ${thousands(entry.totals.total)} tokens (${Math.round(entry.share * 100)}%)${money(entry.totals.costUsd)}`
+      )
+    )
+  }
   const notes = [
     `costs are backend-reported where available, otherwise estimated from the pricing table (rates as of ${report.pricesAsOf} — may be stale)`,
     ...(report.estimated.requests === 0

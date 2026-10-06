@@ -1,3 +1,4 @@
+import { diagnosticsFormatOf, type DiagnosticsFormat } from "./Diagnostics.ts"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { Dimension } from "@llm4ts/core/eval/Eval"
@@ -88,8 +89,8 @@ export interface Pack {
   readonly comment: string | undefined
   /**
    * `## Diagnostics` (ADR 0028): `- command: …` prints what is red after a
-   * build, `- format: json | cargo` says how to read it. Present only in a
-   * porting pack.
+   * build, `- format: json | cargo | tsc | javac` says how to read it.
+   * Present only in a porting pack.
    */
   /**
    * `## Ledger` (ADR 0028): what `port-ledger` classifies. `- unit: <regex>`
@@ -115,7 +116,7 @@ export interface Pack {
   /** `## Audit` (ADR 0028): `- dimensions: a, b, c` the rulebook auditors take; default list in the flow. */
   readonly audit: ReadonlyArray<string> | undefined
   readonly diagnostics:
-    | { readonly command: ReadonlyArray<string>; readonly format: "json" | "cargo" | "tsc" }
+    | { readonly command: ReadonlyArray<string>; readonly format: DiagnosticsFormat }
     | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
@@ -349,12 +350,7 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
       ? undefined
       : {
           command: diagnosticsValues.command.split(/\s+/),
-          format:
-            diagnosticsValues.format?.toLowerCase() === "cargo"
-              ? ("cargo" as const)
-              : diagnosticsValues.format?.toLowerCase() === "tsc"
-                ? ("tsc" as const)
-                : ("json" as const)
+          format: diagnosticsFormatOf(diagnosticsValues.format)
         }
   const ledgerValues = namedItems(section(manifest.sections, "Ledger"))
   const ledger =

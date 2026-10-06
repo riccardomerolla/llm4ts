@@ -20,10 +20,33 @@ outputs are kept here.
    ```
 
 3. `llm4ts profile --repo <seeded path>` on the run, saved as
-   `docs/harness-evals/<version>-<before|after>.md`.
+   `docs/harness-evals/<version>-<before|after>.md`, and
+   `llm4ts profile --json --repo <seeded path> > <version>-<before|after>.json`.
 4. Compare, in this order: explore calls before the first edit per story,
    review rounds, gate failures by origin (`new`, `base`, `flaky`),
    `fabricated status` count, inherited failures listed, cost.
+   `llm4ts profile --against <before.json> --repo <seeded path>` prints the
+   first part of that list as one delta table (ADR 0029); `llm4ts costs
+--repo <seeded path>` ends with the spend per role for the last part.
+
+## What a harness change ships with
+
+A change to a prompt, a reviewer lens, a default effort, a compaction or
+context window, a cache marker or a gate default is a harness change. It
+ships with:
+
+- the delta above, run on the light fixture with the comparison roster,
+  before and after, both profiles kept in this folder;
+- a CHANGELOG line that names the model the change was tuned on, in the
+  form `(tuned on claude-sonnet-5-5)`, because a prompt that helps one
+  model can hurt another and the next reader needs to know which was
+  measured;
+- when the change touches a connector's request (a cache header, an effort
+  flag), a connector test on the request body, since no replay can see a
+  header.
+
+Nothing here runs in CI: the protocol needs credentials. It is the rule the
+reviewer asks about.
 
 What the fixture plants, and what a correct run shows:
 

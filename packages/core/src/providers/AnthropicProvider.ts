@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
@@ -7,8 +8,10 @@ import { AuthenticationError, ConfigError, ParseError, type LlmError } from "../
 import type { HttpClientShape } from "../HttpClient.ts"
 import type { StructuredResult } from "../LlmService.ts"
 import {
+  ConnectorCapabilities,
   ConnectorIds,
   LlmChunk,
+  TokenUsage,
   ToolCall,
   ToolCallResponse,
   type JsonSchema,
@@ -20,14 +23,18 @@ import { collect } from "../Streaming.ts"
 import { parseFromText } from "../StructuredOutput.ts"
 import type { AnthropicContentBlockFull } from "./AnthropicModels.ts"
 import {
+  AnthropicCacheControl,
   AnthropicMessage,
+  AnthropicOutputConfig,
   AnthropicRequest,
   AnthropicRequestWithTools,
   AnthropicResponse,
   AnthropicResponseWithTools,
   AnthropicStreamChunk,
+  AnthropicTextBlock,
   AnthropicTool,
-  AnthropicToolInputSchema
+  AnthropicToolInputSchema,
+  AnthropicUsage
 } from "./AnthropicModels.ts"
 
 interface AnthropicRequiredConfig {
@@ -84,20 +91,76 @@ export const anthropicHistory = (messages: ReadonlyArray<Message>): AnthropicHis
     )
 })
 
+const ephemeral = AnthropicCacheControl.make({ type: "ephemeral" })
+
+const cachedBlock = (text: string): AnthropicTextBlock =>
+  AnthropicTextBlock.make({ type: "text", text, cache_control: ephemeral })
+
+/**
+ * Prompt-cache breakpoints (ADR 0029): one on the system block, one on the
+ * last message. The API caches the prefix up to each marker and looks the
+ * next request up at earlier markers too, so a chat whose history only
+ * grows at the end reads every earlier turn from the cache.
+ */
+export const withCacheMarkers = (
+  messages: ReadonlyArray<AnthropicMessage>,
+  system: string | undefined
+): {
+  readonly messages: ReadonlyArray<AnthropicMessage>
+  readonly system: string | ReadonlyArray<AnthropicTextBlock> | undefined
+} => {
+  const last = messages[messages.length - 1]
+  const marked =
+    last === undefined || typeof last.content !== "string"
+      ? messages
+      : [
+          ...messages.slice(0, -1),
+          AnthropicMessage.make({ role: last.role, content: [cachedBlock(last.content)] })
+        ]
+  return {
+    messages: marked,
+    system: system === undefined || system.length === 0 ? system : [cachedBlock(system)]
+  }
+}
+
 export const buildAnthropicRequest = (
   config: LlmConfig,
   messages: ReadonlyArray<AnthropicMessage>,
   stream: boolean,
   system?: string
-): AnthropicRequest =>
-  AnthropicRequest.make({
+): AnthropicRequest => {
+  const cached =
+    config.promptCache === false ? { messages, system } : withCacheMarkers(messages, system)
+  return AnthropicRequest.make({
     model: config.model,
     max_tokens: config.maxTokens ?? 4096,
-    messages,
+    messages: cached.messages,
     stream,
     ...(config.temperature === undefined ? {} : { temperature: config.temperature }),
-    ...(system === undefined ? {} : { system })
+    ...(cached.system === undefined ? {} : { system: cached.system }),
+    ...(config.effort === undefined
+      ? {}
+      : { output_config: AnthropicOutputConfig.make({ effort: config.effort }) })
   })
+}
+
+/**
+ * The API's usage as llm4ts counts it: cache reads and writes are prompt
+ * tokens the request paid for (at their own rates), `cached` is what was
+ * read from the cache.
+ */
+export const anthropicTokenUsage = (usage: AnthropicUsage): TokenUsage => {
+  const read = usage.cache_read_input_tokens ?? 0
+  const written = usage.cache_creation_input_tokens ?? 0
+  const prompt = (usage.input_tokens ?? 0) + read + written
+  const completion = usage.output_tokens ?? 0
+  return TokenUsage.make({
+    prompt,
+    completion,
+    total: prompt + completion,
+    ...(read > 0 ? { cached: read } : {})
+  })
+}
 
 export const buildAnthropicToolRequest = (
   config: LlmConfig,
@@ -123,7 +186,10 @@ export const buildAnthropicToolRequest = (
         })
       })
     ),
-    ...(config.temperature === undefined ? {} : { temperature: config.temperature })
+    ...(config.temperature === undefined ? {} : { temperature: config.temperature }),
+    ...(config.effort === undefined
+      ? {}
+      : { output_config: AnthropicOutputConfig.make({ effort: config.effort }) })
   })
 
 const contentFromResponse = (
@@ -195,46 +261,76 @@ export const makeAnthropicProvider = (
     Stream.unwrap(
       Effect.map(requiredConfig, ({ apiKey, baseUrl }) => {
         const request = buildAnthropicRequest(config, messages, true, system)
-        return httpClient
-          .postJsonStreamSSE(
-            `${baseUrl}/messages`,
-            JSON.stringify(request),
-            authHeaders(apiKey),
-            config.timeout
-          )
-          .pipe(
-            Stream.mapEffect(decodeStreamChunk),
-            Stream.flatMap((chunk) => {
-              if (chunk.type === "content_block_delta") {
-                const delta = chunk.delta?.text ?? ""
-                return delta.length === 0
-                  ? Stream.empty
-                  : Stream.succeed(
-                      LlmChunk.make({
-                        delta,
+        // Usage arrives in two events: `message_start` carries the input
+        // (and cache) counts, `message_delta` the output so far. The final
+        // chunk carries them together, so the seat is measured, not estimated.
+        const usage = Stream.unwrap(
+          Effect.map(Ref.make<AnthropicUsage | undefined>(undefined), (started) =>
+            httpClient
+              .postJsonStreamSSE(
+                `${baseUrl}/messages`,
+                JSON.stringify(request),
+                authHeaders(apiKey),
+                config.timeout
+              )
+              .pipe(
+                Stream.mapEffect(decodeStreamChunk),
+                Stream.mapEffect((chunk) =>
+                  chunk.type === "message_start" && chunk.message?.usage !== undefined
+                    ? Effect.as(Ref.set(started, chunk.message.usage), chunk)
+                    : Effect.succeed(chunk)
+                ),
+                Stream.flatMap((chunk) => {
+                  if (chunk.type === "content_block_delta") {
+                    const delta = chunk.delta?.text ?? ""
+                    return delta.length === 0
+                      ? Stream.empty
+                      : Stream.succeed(
+                          LlmChunk.make({
+                            delta,
+                            metadata: {
+                              provider: "anthropic",
+                              model: config.model
+                            }
+                          })
+                        )
+                  }
+                  const finishReason =
+                    chunk.type === "message_delta"
+                      ? (chunk.delta?.stop_reason ?? undefined)
+                      : undefined
+                  if (finishReason === undefined) {
+                    return Stream.empty
+                  }
+                  return Stream.fromEffect(
+                    Effect.map(Ref.get(started), (input) => {
+                      const combined =
+                        input === undefined && chunk.usage === undefined
+                          ? undefined
+                          : anthropicTokenUsage(
+                              AnthropicUsage.make({
+                                ...(input ?? {}),
+                                ...(chunk.usage?.output_tokens === undefined
+                                  ? {}
+                                  : { output_tokens: chunk.usage.output_tokens })
+                              })
+                            )
+                      return LlmChunk.make({
+                        delta: "",
+                        finishReason,
+                        ...(combined === undefined ? {} : { usage: combined }),
                         metadata: {
                           provider: "anthropic",
                           model: config.model
                         }
                       })
-                    )
-              }
-              const finishReason =
-                chunk.type === "message_delta" ? (chunk.delta?.stop_reason ?? undefined) : undefined
-              return finishReason === undefined
-                ? Stream.empty
-                : Stream.succeed(
-                    LlmChunk.make({
-                      delta: "",
-                      finishReason,
-                      metadata: {
-                        provider: "anthropic",
-                        model: config.model
-                      }
                     })
                   )
-            })
+                })
+              )
           )
+        )
+        return usage
       })
     )
 
@@ -315,6 +411,7 @@ export const makeAnthropicProvider = (
     },
     executeWithTools,
     executeStructuredWithUsage,
-    isAvailable
+    isAvailable,
+    capabilities: ConnectorCapabilities.make({ readOnlyEnforcement: "enforced", effort: "mapped" })
   })
 }

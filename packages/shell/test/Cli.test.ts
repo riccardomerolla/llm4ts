@@ -287,7 +287,13 @@ describe("watchOptionsFrom", () => {
 })
 
 describe("profileOptionsFrom", () => {
-  const none = { trace: Option.none(), repo: Option.none(), epic: Option.none(), json: false }
+  const none = {
+    trace: Option.none(),
+    repo: Option.none(),
+    epic: Option.none(),
+    json: false,
+    against: Option.none()
+  }
 
   it.effect("resolves the repository and the trace, and keeps --json", () =>
     Effect.gen(function* () {
@@ -298,6 +304,10 @@ describe("profileOptionsFrom", () => {
           "/work/llm4ts"
         ),
         { repo: "/work/portal", trace: "/work/llm4ts/t.jsonl", json: true }
+      )
+      assert.deepStrictEqual(
+        yield* profileOptionsFrom({ ...none, against: Option.some("before.json") }, "/work"),
+        { repo: "/work", against: "/work/before.json" }
       )
       const both = yield* Effect.flip(
         profileOptionsFrom({ ...none, trace: Option.some("t"), epic: Option.some("e") }, "/w")

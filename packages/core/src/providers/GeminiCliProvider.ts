@@ -122,6 +122,8 @@ export class GeminiCliExecutionContext extends Schema.Class<GeminiCliExecutionCo
   sandbox: Schema.optionalKey(GeminiSandbox),
   turnLimit: Schema.optionalKey(Schema.Int),
   readOnly: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  /** No project extensions (`-e none`); settings and GEMINI.md are still read (ADR 0029). */
+  isolated: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /** The seat's own environment (a roster `env`), under llm4ts's own keys. */
   envVars: Schema.Record(Schema.String, Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed<Readonly<Record<string, string>>>({}))
@@ -135,6 +137,7 @@ export const geminiCliExecutionContextFrom = (
     ...(config.workingDir === undefined ? {} : { cwd: config.workingDir }),
     ...(config.turnLimit === undefined ? {} : { turnLimit: config.turnLimit }),
     readOnly: config.readOnly,
+    isolated: config.isolated,
     envVars: config.envVars,
     ...(config.sandbox === undefined
       ? {}
@@ -226,7 +229,11 @@ export const buildGeminiArgs = (
     outputFormat,
     ...directories,
     ...(adminPolicyPath === undefined ? [] : ["--admin-policy", adminPolicyPath]),
-    ...(context.sandbox === undefined ? [] : ["-s"])
+    ...(context.sandbox === undefined ? [] : ["-s"]),
+    // Partial isolation: no extensions; `.gemini/settings.json` and
+    // GEMINI.md have no off switch, and the ADR 0027 harness policy above
+    // already keeps the model out of llm4ts's own packages.
+    ...(context.isolated ? ["-e", "none"] : [])
   ]
 }
 
@@ -964,7 +971,8 @@ export const makeGeminiCliProvider = (
     // every seat that runs.
     capabilities: ConnectorCapabilities.make({
       interactiveSessions: true,
-      readOnlyEnforcement: "enforced"
+      readOnlyEnforcement: "enforced",
+      isolatedHeadless: "partial"
     })
   })
 

@@ -97,6 +97,14 @@ describe("Gemini CLI configuration", () => {
       GEMINI_CLI_SYSTEM_DEFAULTS_PATH: "/tmp/turns.json"
     })
     assert.strictEqual(geminiTurnLimitSettingsJson(48), '{"model":{"maxSessionTurns":48}}')
+    // ADR 0029: isolation is partial — extensions off, settings still read.
+    assert.isFalse(args.includes("-e"))
+    const isolated = buildGeminiArgs(
+      config,
+      GeminiCliExecutionContext.make({ ...context, isolated: true }),
+      "stream-json"
+    )
+    assert.deepStrictEqual(isolated.slice(-2), ["-e", "none"])
   })
 
   it("maps read-only to headless default mode, and to plan mode only under a sandbox", () => {

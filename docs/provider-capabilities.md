@@ -4,17 +4,17 @@ This matrix records the stable capabilities a flow may inspect before running a
 connector. Runtime availability and authentication are reported separately by
 `healthCheck`.
 
-| Connector family              | Kind | Streaming | Structured output | Usage reporting | Interactive stdin | Resumable | Ask user | Approval | Read-only |
-| ----------------------------- | ---- | --------: | ----------------: | --------------: | ----------------: | --------: | -------: | -------: | --------: |
-| OpenAI, Anthropic, Gemini API | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced |
-| LM Studio, Ollama, Mock       | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced |
-| mlx-lm                        | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced |
-| Claude CLI                    | CLI  |       yes |               yes |             yes |               yes |       yes |      yes |      yes |  enforced |
-| Codex, Pi CLI                 | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  enforced |
-| Gemini CLI                    | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  enforced |
-| Antigravity CLI               | CLI  |       yes |               yes |              no |               yes |        no |       no |       no |  advisory |
-| OpenCode, Grok CLI            | CLI  |       yes |               yes |             yes |                no |        no |       no |       no |  advisory |
-| Copilot, Cursor CLI           | CLI  |       yes |               yes |              no |                no |        no |       no |       no |   ignored |
+| Connector family              | Kind | Streaming | Structured output | Usage reporting | Interactive stdin | Resumable | Ask user | Approval | Read-only | Effort                                     | Isolated headless |
+| ----------------------------- | ---- | --------: | ----------------: | --------------: | ----------------: | --------: | -------: | -------: | --------: | ------------------------------------------ | ----------------- |
+| OpenAI, Anthropic, Gemini API | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced | OpenAI, Anthropic: mapped; Gemini: ignored | ignored           |
+| LM Studio, Ollama, Mock       | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced | ignored                                    | ignored           |
+| mlx-lm                        | API  |       yes |               yes |             yes |                no |        no |       no |       no |  enforced | ignored                                    | ignored           |
+| Claude CLI                    | CLI  |       yes |               yes |             yes |               yes |       yes |      yes |      yes |  enforced | mapped                                     | enforced          |
+| Codex, Pi CLI                 | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  enforced | mapped                                     | partial           |
+| Gemini CLI                    | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  enforced | ignored                                    | partial           |
+| Antigravity CLI               | CLI  |       yes |               yes |              no |               yes |        no |       no |       no |  advisory | ignored                                    | ignored           |
+| OpenCode, Grok CLI            | CLI  |       yes |               yes |             yes |                no |        no |       no |       no |  advisory | ignored                                    | ignored           |
+| Copilot, Cursor CLI           | CLI  |       yes |               yes |              no |                no |        no |       no |       no |   ignored | ignored                                    | ignored           |
 
 The OpenCode HTTP compatibility provider exists as a direct API adapter, but the
 stable `opencode` registry identifier deliberately resolves to the CLI connector
@@ -68,6 +68,51 @@ Requesting `readOnly` from a non-enforced connector publishes a
 `CapabilityUnenforceable` flow event naming the connector and its grade, so
 runs never silently trust a request-shaped restriction. Reviewer seats that
 must not write should be picked on this capability.
+
+## Effort
+
+`ConnectorCapabilities.effort` says whether a connector maps the llm4ts
+effort vocabulary (`low`, `medium`, `high`, `max`; ADR 0029) to anything the
+harness reads. Nothing is sent when no effort is asked, so every seat keeps
+its harness's default until a roster entry sets one.
+
+| Connector     | Mapping                                                  |
+| ------------- | -------------------------------------------------------- |
+| Claude CLI    | `--effort low\|medium\|high\|max`                        |
+| Codex         | `-c model_reasoning_effort="low\|medium\|high\|xhigh"`   |
+| Pi            | `--thinking low\|medium\|high\|xhigh`                    |
+| Anthropic API | `output_config.effort` (`low\|medium\|high\|max`)        |
+| OpenAI API    | `reasoning_effort` (`low\|medium\|high\|xhigh`)          |
+| every other   | ignored; the request publishes `CapabilityUnenforceable` |
+
+`max` becomes `xhigh` where the harness's top level is called that. Whether a
+given model accepts a given level is the backend's business: a level the
+model rejects fails the call with the backend's own words.
+
+## Isolated headless
+
+`ConnectorCapabilities.isolatedHeadless` grades how completely a CLI
+connector's `isolated` request (`CliConnectorConfig.isolated`, a roster
+entry's `"isolated": true`, or `LLM4TS_ISOLATED=1` for the run) keeps the
+target repository's own harness material — hooks, MCP servers, settings,
+extensions, instruction files — out of a headless run (ADR 0029):
+
+- **enforced** — Claude Code's `--bare` (2.1.81+) loads none of it: no
+  hooks, skills, plugins, MCP servers, auto memory or CLAUDE.md discovery.
+- **partial** — some is kept out, the rest still read. Codex: the project's
+  `.codex/config.toml` is skipped unless the user trusted that path, and
+  `-c project_doc_max_bytes=0` turns the project's AGENTS.md off; MCP
+  servers from the user's own config still load. Pi: `--no-extensions
+--no-skills`; AGENTS.md is still read. Gemini CLI: `-e none`;
+  `.gemini/settings.json` and GEMINI.md have no off switch (the harness
+  policy of 2.35.4 already denies reading llm4ts's own packages).
+- **ignored** — nothing reaches argv (every other CLI); API providers run
+  no tools, so nothing loads and the question does not arise.
+
+Requesting `isolated` from a connector below `enforced` publishes a
+`CapabilityUnenforceable` event naming the grade, as `readOnly` does. It is
+off by default: isolation also removes the repository's own instructions
+from the coder, which a trusted repository wants kept.
 
 ## Label probabilities
 

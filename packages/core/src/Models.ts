@@ -178,6 +178,16 @@ export class StreamProgress extends Schema.Class<StreamProgress>("StreamProgress
   estimatedRemainingMs: Schema.optionalKey(Schema.Int)
 }) {}
 
+/**
+ * How much reasoning a seat is asked to spend (ADR 0029): one vocabulary
+ * across harnesses, mapped by each connector to its own flag (`--effort`,
+ * `--thinking`, `model_reasoning_effort`, `output_config.effort`,
+ * `reasoning_effort`) or ignored where the harness has none. `max` becomes
+ * `xhigh` on a harness without `max`. Nothing is sent when none is asked.
+ */
+export const Effort = Schema.Literals(["low", "medium", "high", "max"])
+export type Effort = typeof Effort.Type
+
 export class LlmConfig extends Schema.Class<LlmConfig>("LlmConfig")({
   provider: LlmProvider,
   model: Schema.String,
@@ -197,7 +207,11 @@ export class LlmConfig extends Schema.Class<LlmConfig>("LlmConfig")({
     Schema.withConstructorDefault(Effect.succeed(Duration.seconds(30)))
   ),
   temperature: Schema.optionalKey(Schema.Number),
-  maxTokens: Schema.optionalKey(Schema.Int)
+  maxTokens: Schema.optionalKey(Schema.Int),
+  /** Reasoning effort to ask of the backend (ADR 0029); absent keeps its default. */
+  effort: Schema.optionalKey(Effort),
+  /** Prompt-cache markers where the provider has them (Anthropic); default on. */
+  promptCache: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 export const withConfigDefaults = (config: LlmConfig): LlmConfig => {
@@ -263,6 +277,22 @@ export type InteractionSupport = typeof InteractionSupport.Type
 export const ReadOnlyEnforcement = Schema.Literals(["enforced", "advisory", "ignored"])
 export type ReadOnlyEnforcement = typeof ReadOnlyEnforcement.Type
 
+/** Whether a connector maps `effort` to anything the harness reads. */
+export const EffortSupport = Schema.Literals(["mapped", "ignored"])
+export type EffortSupport = typeof EffortSupport.Type
+
+/**
+ * How completely a CLI connector's `isolated` mapping keeps the target
+ * repository's own harness material (hooks, MCP servers, settings,
+ * extensions, instruction files) out of a headless run (ADR 0029):
+ * - "enforced": the harness documents a mode that loads none of it.
+ * - "partial": some of it is kept out by flags; the rest (typically the
+ *   repository's instruction file) is still read.
+ * - "ignored": nothing reaches argv.
+ */
+export const IsolationEnforcement = Schema.Literals(["enforced", "partial", "ignored"])
+export type IsolationEnforcement = typeof IsolationEnforcement.Type
+
 /**
  * How a connector produces the per-label probabilities behind `scoreLabels`:
  * - "logprobs": read off the backend's token log-probabilities in one
@@ -309,5 +339,11 @@ export class ConnectorCapabilities extends Schema.Class<ConnectorCapabilities>(
   ),
   readOnlyEnforcement: ReadOnlyEnforcement.pipe(
     Schema.withConstructorDefault(Effect.succeed<ReadOnlyEnforcement>("advisory"))
+  ),
+  effort: EffortSupport.pipe(
+    Schema.withConstructorDefault(Effect.succeed<EffortSupport>("ignored"))
+  ),
+  isolatedHeadless: IsolationEnforcement.pipe(
+    Schema.withConstructorDefault(Effect.succeed<IsolationEnforcement>("ignored"))
   )
 }) {}

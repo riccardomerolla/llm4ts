@@ -30,7 +30,8 @@ import {
   toolResultChunk,
   toolResultText,
   usageEventChunk,
-  type JsonValue
+  type JsonValue,
+  effortWord
 } from "./CliSupport.ts"
 
 /**
@@ -51,7 +52,16 @@ export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<st
         ...config.flags
       }
     : config.flags
-  return [...optionalModelArgs(config.model), ...sortedFlagArgs(effectiveFlags)]
+  return [
+    ...optionalModelArgs(config.model),
+    // `--effort` is Claude Code's own vocabulary: low, medium, high, max.
+    ...(config.effort === undefined ? [] : ["--effort", effortWord(config.effort)]),
+    // `--bare` (Claude Code 2.1.81+) skips hooks, skills, plugins, MCP,
+    // auto memory and CLAUDE.md discovery: the documented headless mode for
+    // a repository the run does not trust (ADR 0029).
+    ...(config.isolated ? ["--bare"] : []),
+    ...sortedFlagArgs(effectiveFlags)
+  ]
 }
 
 export const claudeCliInitModel = (line: string): string | undefined => {
@@ -256,7 +266,9 @@ export const makeClaudeCliConnector = (
       askUser: true,
       approval: true,
       resumableSessions: true,
-      readOnlyEnforcement: "enforced"
+      readOnlyEnforcement: "enforced",
+      effort: "mapped",
+      isolatedHeadless: "enforced"
     }),
     buildArgv: (prompt, _context) => ["claude", "--print", ...extraArgs, prompt],
     buildInteractiveArgv: (_context) => ["claude", ...extraArgs],

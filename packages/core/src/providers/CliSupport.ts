@@ -5,7 +5,7 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { ProviderError, type LlmError } from "../Errors.ts"
-import { LlmChunk, TokenUsage } from "../Models.ts"
+import { LlmChunk, TokenUsage, type Effort } from "../Models.ts"
 import { classifyUsageLimit } from "../UsageLimits.ts"
 
 export type JsonValue = typeof Schema.Json.Type
@@ -67,6 +67,13 @@ export const sortedFlagArgs = (flags: Readonly<Record<string, string>>): Readonl
 
 export const optionalModelArgs = (model: string | undefined): ReadonlyArray<string> =>
   model === undefined ? [] : ["--model", model]
+
+/**
+ * The harness's word for an llm4ts effort (ADR 0029): the same four words,
+ * except `max` on a harness whose top level is `xhigh`.
+ */
+export const effortWord = (effort: Effort, top: "max" | "xhigh" = "max"): string =>
+  effort === "max" ? top : effort
 
 export const toolEventChunk = (name: string, input: JsonValue | undefined, id?: string): LlmChunk =>
   LlmChunk.make({

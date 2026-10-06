@@ -5,6 +5,7 @@
 // feature with a DAG and a judge, a queue item is a file with a predicate.
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import { Stalled, describeFlowError, type FlowError } from "./FlowError.ts"
 import {
@@ -18,6 +19,17 @@ import type { PlainFileStoreShape } from "./Persistence.ts"
 
 export interface QueueItem {
   readonly id: string
+}
+
+/**
+ * One checkout the queue may work in (ADR 0028, decided later): a git
+ * worktree of its own, so units that build or edit shared files do not
+ * trip over each other. The flow creates, merges and removes shards; the
+ * queue only hands each in-flight item one and never two items the same.
+ */
+export interface Shard {
+  readonly id: string
+  readonly dir: string
 }
 
 export const Confidence = Schema.Literals(["high", "medium", "low"])
@@ -47,12 +59,18 @@ export interface WorkResult {
 export interface RunQueueOptions<Item extends QueueItem> {
   readonly label: string
   readonly items: ReadonlyArray<Item>
-  /** The filesystem predicate: an item whose output exists is done, whatever the ledger says. */
-  readonly done: (item: Item) => Effect.Effect<boolean, FlowError>
+  /**
+   * The filesystem predicate: an item whose output exists is done, whatever
+   * the ledger says. Right after `work` it is asked with the shard the work
+   * ran in, before the first round without one.
+   */
+  readonly done: (item: Item, shard?: Shard) => Effect.Effect<boolean, FlowError>
   /** One unit of work: implement, review, fix; the queue catches its failure. */
-  readonly work: (item: Item, round: number) => Effect.Effect<WorkResult, FlowError>
+  readonly work: (item: Item, round: number, shard?: Shard) => Effect.Effect<WorkResult, FlowError>
   readonly events: FlowEventsShape
   readonly concurrency?: number
+  /** Checkouts to spread the work over; at most one in-flight item per shard, so they also cap concurrency. */
+  readonly shards?: ReadonlyArray<Shard>
   /** Rounds over the items that failed; default 3. */
   readonly maxRounds?: number
   /** Where outcomes are appended, one JSON line each; omit to keep none. */
@@ -95,8 +113,22 @@ export const readLedger = (
 export const runQueue = Effect.fn("@llm4ts/flow/WorkQueue.run")(function* <Item extends QueueItem>(
   options: RunQueueOptions<Item>
 ): Effect.fn.Return<QueueReport<Item>, FlowError> {
-  const concurrency = Math.max(1, options.concurrency ?? 4)
+  const shards = options.shards ?? []
+  const concurrency = Math.max(
+    1,
+    Math.min(
+      options.concurrency ?? 4,
+      shards.length === 0 ? Number.POSITIVE_INFINITY : shards.length
+    )
+  )
   const maxRounds = Math.max(1, options.maxRounds ?? 3)
+  // The free shards: an item takes one before its work and returns it after.
+  const free = yield* Ref.make<ReadonlyArray<Shard>>(shards)
+  const takeShard: Effect.Effect<Shard | undefined> = Ref.modify(free, (list) =>
+    list.length === 0 ? [undefined, list] : [list[0], list.slice(1)]
+  )
+  const giveShard = (shard: Shard | undefined): Effect.Effect<void> =>
+    shard === undefined ? Effect.void : Ref.update(free, (list) => [...list, shard])
   const outcomes: Array<QueueOutcome> = []
   const record = (outcome: QueueOutcome): Effect.Effect<void, FlowError> =>
     Effect.gen(function* () {
@@ -137,7 +169,8 @@ export const runQueue = Effect.fn("@llm4ts/flow/WorkQueue.run")(function* <Item 
           const stage = `${options.label} ${item.id}`
           yield* options.events.publish(StageStarted.make({ stage, lane: item.id }))
           const started = yield* Clock.currentTimeMillis
-          const result = yield* options.work(item, round).pipe(
+          const shard = yield* takeShard
+          const result = yield* options.work(item, round, shard).pipe(
             Effect.map((value) => ({ ok: true as const, value })),
             Effect.catch((error: FlowError) =>
               Effect.succeed({ ok: false as const, error: describeFlowError(error) })
@@ -145,7 +178,8 @@ export const runQueue = Effect.fn("@llm4ts/flow/WorkQueue.run")(function* <Item 
           )
           const ended = yield* Clock.currentTimeMillis
           // The predicate decides, not the work's own account of itself.
-          const finished = result.ok && (yield* options.done(item))
+          const finished = result.ok && (yield* options.done(item, shard))
+          yield* giveShard(shard)
           const outcome = QueueOutcome.make({
             id: item.id,
             round,

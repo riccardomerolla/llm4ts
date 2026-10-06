@@ -29,7 +29,9 @@ import {
   rolesOf,
   rosterViolations,
   slotsOf,
-  type ExecutorSpec
+  type ExecutorSpec,
+  effortOf,
+  type Role
 } from "@llm4ts/flow/Roster"
 import { apiPresetFor, asReadOnly, coderFor, withEnvironment, withModel } from "./Connectors.ts"
 
@@ -88,8 +90,12 @@ export const isApiHarness = (harness: string): boolean =>
 export const executorConfig = (
   spec: ExecutorSpec,
   readOnly: boolean,
-  environment: Environment
+  environment: Environment,
+  role?: Role
 ): ConnectorConfig | undefined => {
+  // The role's effort (ADR 0029) and the executor's isolation ride on the
+  // configuration; each connector maps them to its own flags, or not.
+  const effort = role === undefined ? undefined : effortOf(spec, role)
   const cli = coderFor(spec.harness)
   if (cli !== undefined) {
     const modelled = spec.model === undefined ? cli : withModel(cli, spec.model)
@@ -101,16 +107,23 @@ export const executorConfig = (
       spec.env === undefined
         ? flagged
         : withEnvironment(flagged, substituteEnvironment(spec.env, environment).values)
-    return readOnly ? asReadOnly(withEnv) : withEnv
+    const shaped = CliConnectorConfig.make({
+      ...withEnv,
+      ...(effort === undefined ? {} : { effort }),
+      ...(spec.isolated === true ? { isolated: true } : {})
+    })
+    return readOnly ? asReadOnly(shaped) : shaped
   }
   const api = apiPresetFor(spec.harness)
   if (api === undefined) {
     return undefined
   }
   const modelled = spec.model === undefined ? api : withModel(api, spec.model)
-  return spec.baseUrl === undefined
-    ? modelled
-    : ApiConnectorConfig.make({ ...modelled, baseUrl: spec.baseUrl })
+  return ApiConnectorConfig.make({
+    ...modelled,
+    ...(spec.baseUrl === undefined ? {} : { baseUrl: spec.baseUrl }),
+    ...(effort === undefined ? {} : { effort })
+  })
 }
 
 /** The flow-level violations plus what needs the harness table and the environment. */
