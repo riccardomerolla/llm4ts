@@ -255,3 +255,27 @@ describe("pattern cards", () => {
     })
   )
 })
+
+describe("kits/port/packs/zig-rust (ADR 0028)", () => {
+  it.effect(
+    "is a porting pack: target template, comment marker, diagnostics, rulebook, lens, pitfall card",
+    () =>
+      Effect.gen(function* () {
+        const pack = yield* load("port", "zig-rust")
+        assert.strictEqual(pack.target, "{{dir}}/{{base}}.rs")
+        assert.strictEqual(pack.comment, "//")
+        assert.deepStrictEqual(pack.diagnostics, {
+          command: ["cargo", "check", "--workspace", "--message-format=json"],
+          format: "cargo"
+        })
+        assert.include(pack.prompt("porting") ?? "", "PORT STATUS")
+        assert.isTrue(pack.lenses.some((lens) => lens.name === "port-fidelity"))
+        assert.include(pack.reviewRules?.text ?? "", "SAFETY")
+        const cards = yield* Effect.flatMap(workspace, (space) =>
+          loadPatternCards(space, `${packDir("port", "zig-rust")}/patterns`)
+        )
+        assert.isTrue(cards.some((card) => card.id === "pitfalls-zig-rust"))
+        assert.doesNotThrow(() => new RegExp(pack.sources ?? ""))
+      })
+  )
+})

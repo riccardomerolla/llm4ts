@@ -9,7 +9,7 @@
  * tasks appended to a story's plan, or a story entry edited in the epic
  * plan (which restarts that story). Nothing is applied unreviewed.
  */
-import { join } from "node:path"
+import { join, resolve, sep } from "node:path"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -1278,7 +1278,14 @@ export const applyApprovedRetros = Effect.fn("@llm4ts/flow/Retro.apply")(functio
         yield* say(`${runId}: rule edit to ${edit.target} is not allowed; skipped`)
         continue
       }
-      const path = join(options.rulesRoot, edit.target)
+      const root = resolve(options.rulesRoot)
+      const path = resolve(root, edit.target)
+      // The allowlist already rejects absolute paths and `..`; this keeps the
+      // resolved file under the repository root whatever the string looked like.
+      if (path !== root && !path.startsWith(`${root}${sep}`)) {
+        yield* say(`${runId}: rule edit to ${edit.target} resolves outside the repository; skipped`)
+        continue
+      }
       const existing = yield* files.read(path).pipe(Effect.catch(() => Effect.succeed(undefined)))
       const next = applyRuleEdit(existing, edit)
       if (next === undefined) {

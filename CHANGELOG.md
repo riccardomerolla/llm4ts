@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+Phase 3 of the rewrite-grade loops (ADR 0028): the Bun port's third shape
+of work, as a primitive and two flows.
+
+- **A work queue.** `runQueue` in `@llm4ts/flow/WorkQueue`: items with a
+  filesystem definition of done, worked in rounds under a concurrency cap;
+  a failure, or work that leaves no output, is the next round's item; a
+  round that finishes nothing ends typed `Stalled` (`no-progress`); one
+  ledger line per item with its confidence and todo count; items are lanes
+  for `llm4ts watch` and `profile`.
+- **`port-files`.** Every source a porting pack matches is drafted at its
+  target path by one implementer that reads the rulebook, the pitfall cards
+  and exactly one source (no other sources, no build, no git), reviewed by
+  two adversarial votes, fixed by a separate fixer, ending in a
+  `PORT STATUS` trailer the ledger records. Batches of 100 (6 when led by a
+  file over 2200 lines), a commit per round, resume by target existing.
+  `LLM4TS_PORT_PILOT=n` ports n files and writes `.llm4ts/port/pilot.md`
+  with rates and extrapolation behind `- [ ] Approved`; the full run waits
+  for it.
+- **`port-compile`.** The pack's `## Diagnostics` command runs once per
+  round (`json` lines or `cargo` messages), what is red is grouped by unit,
+  one fixer per unit edits only that unit, two votes review, the flow
+  rebuilds and commits, until dry or `Stalled` after two rounds without a
+  lower count.
+- **The `port` kit** with the `zig-rust` reference pack: the rulebook
+  distilled from Bun's porting guide, a `port-fidelity` lens, the
+  `pitfalls-zig-rust` card with the four regressions the Bun port shipped,
+  `cargo check --message-format=json` as the diagnostics command. Packs gain
+  `target:`, `comment:` and `## Diagnostics`.
+
 ## 2.32.0
 
 Release B of the rewrite-grade loops (ADR 0027): review that assumes the

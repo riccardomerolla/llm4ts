@@ -274,7 +274,7 @@ export class RosterExhausted extends Schema.TaggedError<RosterExhausted>()("Rost
  * model does not control; the story fails and the retro diagnoses.
  */
 export class Stalled extends Schema.TaggedError<Stalled>()("Stalled", {
-  signal: Schema.Literals(["identical-diff", "repeated-tool-call", "silence"]),
+  signal: Schema.Literals(["identical-diff", "repeated-tool-call", "silence", "no-progress"]),
   detail: Schema.String
 }) {
   get message(): string {

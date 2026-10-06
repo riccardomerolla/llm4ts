@@ -6,28 +6,30 @@ a single self-contained script: it imports only `@llm4ts/*`, `effect`, and
 one-line description. These scripts double as the built-in flows of the
 `llm4ts` shell.
 
-| Flow                        | What it does                                                                                                                      | Requirements               |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
-| `hello.ts`                  | One prompt to the configured provider, mock by default                                                                            | none                       |
-| `implement.ts`              | Persistent plan, branch, task review/fix, and commits                                                                             | selected CLI + Git         |
-| `epic-design.ts`            | Legacy extract pack + target repo → an approved epic brief for `epic-stories`                                                     | reasoner CLI               |
-| `epic-stories.ts`           | Epic → story DAG → parallel coders in worktrees → epic branch                                                                     | reasoner CLI + pi + Git    |
-| `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                    | reasoner CLI               |
-| `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                               | selected CLI + GitHub      |
-| `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                            | selected CLI + Maven       |
-| `local.ts`                  | LM Studio reasoning followed by a local pi coding agent                                                                           | LM Studio + pi             |
-| `judge-suite.ts`            | Three-run LLM-as-a-Judge evaluation with variance reporting                                                                       | selected CLI               |
-| `modernize-survey.ts`       | Phase 0 — inventory, dependency graph, triage, wave plan                                                                          | selected CLI + Git + pack  |
-| `modernize-extract.ts`      | Phase 1 — legacy estate → judged, approved spec pack                                                                              | selected CLI + Git + pack  |
-| `modernize-refine.ts`       | Phase 1.5 (optional) — prune, deepen, consolidate the pack                                                                        | selected CLI + Git + pack  |
-| `modernize-pack-upgrade.ts` | Check a pack an older llm4ts extracted against the current rules; mark what to re-extract (no LLM)                                | Git + pack                 |
-| `modernize-seed.ts`         | Phase 2 — seed the target from the approved pack (no LLM)                                                                         | Git + pack + legacy repo   |
-| `modernize-implement.ts`    | Phase 3 — implement the plan behind the pack's gates                                                                              | selected CLI + Git + build |
-| `modernize-verify.ts`       | Phase 4 — equivalence vectors, replay, rule coverage                                                                              | selected CLI + replay cmd  |
-| `modernize-review.ts`       | Phase 5 — lens review, fix specs, distilled pack lessons                                                                          | selected CLI + Git + pack  |
-| `modernize-bench.ts`        | Measure an extraction run; report and project wave cost                                                                           | selected CLI + pack        |
-| `modernize-pack-check.ts`   | Phase -1 — load a pack, match its rules against an estate                                                                         | pack + estate (no LLM)     |
-| `pack-fork.ts`              | Fork a pack into one describing a real target repo's own conventions (not part of the legacy modernize sequence — no legacy repo) | selected CLI + Git + pack  |
+| Flow                        | What it does                                                                                                                      | Requirements                      |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `hello.ts`                  | One prompt to the configured provider, mock by default                                                                            | none                              |
+| `implement.ts`              | Persistent plan, branch, task review/fix, and commits                                                                             | selected CLI + Git                |
+| `epic-design.ts`            | Legacy extract pack + target repo → an approved epic brief for `epic-stories`                                                     | reasoner CLI                      |
+| `epic-stories.ts`           | Epic → story DAG → parallel coders in worktrees → epic branch                                                                     | reasoner CLI + pi + Git           |
+| `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                    | reasoner CLI                      |
+| `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                               | selected CLI + GitHub             |
+| `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                            | selected CLI + Maven              |
+| `local.ts`                  | LM Studio reasoning followed by a local pi coding agent                                                                           | LM Studio + pi                    |
+| `judge-suite.ts`            | Three-run LLM-as-a-Judge evaluation with variance reporting                                                                       | selected CLI                      |
+| `modernize-survey.ts`       | Phase 0 — inventory, dependency graph, triage, wave plan                                                                          | selected CLI + Git + pack         |
+| `modernize-extract.ts`      | Phase 1 — legacy estate → judged, approved spec pack                                                                              | selected CLI + Git + pack         |
+| `modernize-refine.ts`       | Phase 1.5 (optional) — prune, deepen, consolidate the pack                                                                        | selected CLI + Git + pack         |
+| `modernize-pack-upgrade.ts` | Check a pack an older llm4ts extracted against the current rules; mark what to re-extract (no LLM)                                | Git + pack                        |
+| `modernize-seed.ts`         | Phase 2 — seed the target from the approved pack (no LLM)                                                                         | Git + pack + legacy repo          |
+| `modernize-implement.ts`    | Phase 3 — implement the plan behind the pack's gates                                                                              | selected CLI + Git + build        |
+| `modernize-verify.ts`       | Phase 4 — equivalence vectors, replay, rule coverage                                                                              | selected CLI + replay cmd         |
+| `port-files.ts`             | Port a code base file by file on the work queue: one source per implementer, two votes, a fixer, a `PORT STATUS` trailer, a pilot | selected CLI + porting pack + Git |
+| `port-compile.ts`           | Compiler diagnostics as a work queue: one unit per fixer, one rebuild per round, until dry                                        | selected CLI + porting pack + Git |
+| `modernize-review.ts`       | Phase 5 — lens review, fix specs, distilled pack lessons                                                                          | selected CLI + Git + pack         |
+| `modernize-bench.ts`        | Measure an extraction run; report and project wave cost                                                                           | selected CLI + pack               |
+| `modernize-pack-check.ts`   | Phase -1 — load a pack, match its rules against an estate                                                                         | pack + estate (no LLM)            |
+| `pack-fork.ts`              | Fork a pack into one describing a real target repo's own conventions (not part of the legacy modernize sequence — no legacy repo) | selected CLI + Git + pack         |
 
 These flows deliberately invoke real providers or installed coding CLIs and
 are not part of the default test suite. Build the packages once before

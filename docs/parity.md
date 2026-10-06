@@ -614,3 +614,8 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   propose structured edits to rules files behind the same approval as its
   story fixes; the digest flags cross-story signatures. llm4zio's retro does
   not exist. Additive: proposals without `rules` decode as before.
+- Work queue and port flows (ADR 0028, 2026-10-06): `runQueue` (items with
+  a filesystem done predicate, rounds, a ledger, a typed stall), `port-files`
+  and `port-compile` with the `zig-rust` reference pack; llm4zio has neither
+  a queue nor port flows. `Pack` gains `target:`, `comment:` and
+  `## Diagnostics`; `Stalled` gains `no-progress`. Additive.

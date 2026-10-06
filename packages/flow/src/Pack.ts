@@ -79,6 +79,21 @@ export interface Pack {
    * pack lens carries after the shared preamble, or `- preamble: off`.
    */
   readonly reviewRules: { readonly text: string; readonly preamble: boolean } | undefined
+  /**
+   * `target:` (ADR 0028): the template of a source file's port
+   * (`{{dir}}/{{base}}.rs`); present only in a porting pack.
+   */
+  readonly target: string | undefined
+  /** `comment:` (ADR 0028): the target language's line-comment marker for the PORT STATUS trailer; default `//`. */
+  readonly comment: string | undefined
+  /**
+   * `## Diagnostics` (ADR 0028): `- command: …` prints what is red after a
+   * build, `- format: json | cargo` says how to read it. Present only in a
+   * porting pack.
+   */
+  readonly diagnostics:
+    | { readonly command: ReadonlyArray<string>; readonly format: "json" | "cargo" }
+    | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
   readonly prompt: (name: string) => string | undefined
@@ -305,6 +320,17 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
       message: `pack manifest 'spec-schema:' must be 'pagespec' when set, got: ${specSchema}`
     })
   }
+  const diagnosticsValues = namedItems(section(manifest.sections, "Diagnostics"))
+  const diagnostics =
+    diagnosticsValues.command === undefined
+      ? undefined
+      : {
+          command: diagnosticsValues.command.split(/\s+/),
+          format:
+            diagnosticsValues.format?.toLowerCase() === "cargo"
+              ? ("cargo" as const)
+              : ("json" as const)
+        }
   const oracleValues = namedItems(section(manifest.sections, "Oracle"))
   const oracle: OracleRules | undefined =
     section(manifest.sections, "Oracle") === undefined
@@ -379,6 +405,9 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     consolidate,
     oracle,
     reviewRules,
+    target: fields["target"],
+    comment: fields["comment"],
+    diagnostics,
     dir: directory,
     gate: (name) => gates[name],
     prompt: (name) => prompts[name],

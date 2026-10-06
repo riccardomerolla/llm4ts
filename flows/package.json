@@ -20,6 +20,8 @@
     "modernize-review": "node --experimental-strip-types modernize-review.ts",
     "modernize-bench": "node --experimental-strip-types modernize-bench.ts",
     "modernize-pack-check": "node --experimental-strip-types modernize-pack-check.ts",
+    "port-files": "node --experimental-strip-types port-files.ts",
+    "port-compile": "node --experimental-strip-types port-compile.ts",
     "judge-suite": "node --experimental-strip-types judge-suite.ts",
     "local": "node --experimental-strip-types local.ts",
     "sdd": "node --experimental-strip-types sdd.ts"

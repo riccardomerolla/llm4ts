@@ -17,13 +17,14 @@ JSP, Spring, or Next.js; a kit is where that knowledge lives.
   fixtures/          optional rehearsal material
 ```
 
-Three kits ship as built-ins:
+Four kits ship as built-ins:
 
-| Kit                                | Legacy → target                                   | Packs | Flows                                                                      |
-| ---------------------------------- | ------------------------------------------------- | ----- | -------------------------------------------------------------------------- |
-| [`mainframe-java`](mainframe-java) | COBOL/JCL and ACE → Spring Boot and Kafka Streams | 4     |                                                                            |
-| [`j2ee-nextjs`](j2ee-nextjs)       | JSP/servlets → Next.js SPA or Spring BFF          | 3     | `convert-page`, `convert-all`                                              |
-| [`soap-ace`](soap-ace)             | SOAP services → REST APIs on IBM ACE 12           | 1     | `soap-explore`, `soap-discover`, `soap-sample`, `soap-design`, `soap-epic` |
+| Kit                                | Legacy → target                                     | Packs | Flows                                                                      |
+| ---------------------------------- | --------------------------------------------------- | ----- | -------------------------------------------------------------------------- |
+| [`mainframe-java`](mainframe-java) | COBOL/JCL and ACE → Spring Boot and Kafka Streams   | 4     |                                                                            |
+| [`j2ee-nextjs`](j2ee-nextjs)       | JSP/servlets → Next.js SPA or Spring BFF            | 3     | `convert-page`, `convert-all`                                              |
+| [`soap-ace`](soap-ace)             | SOAP services → REST APIs on IBM ACE 12             | 1     | `soap-explore`, `soap-discover`, `soap-sample`, `soap-design`, `soap-epic` |
+| [`port`](port)                     | Language ports, file by file (Zig → Rust reference) | 1     | uses the engine's `port-files`, `port-compile`                             |
 
 ## Where kits are found
 

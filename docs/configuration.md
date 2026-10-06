@@ -319,6 +319,24 @@ Warning in the story's findings, travels to the judge as an evidence note,
 is counted in `llm4ts profile`, and is a signature the retro reads. An API
 coder keeps no tool transcript, so its claims are reported as unchecked.
 
+## Ports
+
+`port-files` and `port-compile` (ADR 0028) port a code base file by file
+with a porting pack (`LLM4TS_PACK`, e.g. the built-in `zig-rust`): a pack
+with `target:` (the target path template), `comment:` (the `PORT STATUS`
+trailer's comment marker), `prompts/porting.md` (the rulebook), pitfall
+cards and a `## Diagnostics` command. State lives under `.llm4ts/port/`:
+`ledger.jsonl`, `report.md`, `pilot.md`, `diagnostics-<round>.md`.
+
+| Variable                     | Effect                                                                                 |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `LLM4TS_PORT_PILOT`          | Port this many files, write the pilot report, stop behind `- [ ] Approved`. Unset: all |
+| `LLM4TS_PORT_CONCURRENCY`    | Files or units worked at once. Default `4`                                             |
+| `LLM4TS_PORT_BATCH`          | Files per batch (6 when the batch's first file is over 2200 lines). Default `100`      |
+| `LLM4TS_PORT_SOURCE_CHARS`   | Characters of one source file in the implementer's prompt. Default `120000`            |
+| `LLM4TS_PORT_COMPILE_ROUNDS` | Rebuild rounds before `port-compile` stops with diagnostics left. Default `6`          |
+| `LLM4TS_REVIEW_VOTES`        | Adversarial votes per unit; the port flows default to `2`                              |
+
 ## Capabilities
 
 Filesystem, process, network, Git, and forge operations require explicit
