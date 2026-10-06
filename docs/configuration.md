@@ -376,7 +376,8 @@ time, each with its change and whether that is better. `--json` with
 ## Ports
 
 The port flows (ADR 0028) port a code base file by file with a porting pack
-(`LLM4TS_PACK`, e.g. the built-in `zig-rust` or `scala-ts`): `target:` (the
+(`LLM4TS_PACK`, e.g. the built-in `zig-rust`, `scala-ts` or
+`cobol-springboot-port`): `target:` (the
 target path template), `comment:` (the `PORT STATUS` trailer's comment
 marker), `prompts/porting.md` (the rulebook), pitfall cards, `## Diagnostics`
 (`json`, `cargo`, `tsc` or `javac`, the last reading javac's and Maven's

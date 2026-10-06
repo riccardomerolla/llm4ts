@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.37.0
+
+A third porting pack: `cobol-springboot-port`.
+
+- **`kits/port/packs/cobol-springboot-port`** ports COBOL programs and
+  copybooks to Java on Spring Boot 3, file by file, with the ADR 0028 flows
+  (the `-port` suffix keeps it apart from the clean-room
+  `mainframe-java/cobol-springboot` pack, which `LLM4TS_PACK=cobol-springboot`
+  still names). The
+  rulebook maps a program to one `@Service` with a paragraph per method,
+  copybooks to a shared package ported once, `PIC` clauses to exact
+  numerics (`BigDecimal` at the PIC's scale, never `double` for money),
+  `FD`/`SELECT` and `EXEC SQL` to Spring Data repositories, `EXEC CICS` to a
+  controller boundary, `PERFORM THRU`, `EVALUATE` and `GO TO` to structured
+  flow with notes. `## Diagnostics` is Maven's compile in the `javac`
+  format shipped in 2.36.0; `## Ledger` names level-01 records, FDs and
+  paragraphs for `port-ledger` (RECORD, FILE, PARAGRAPH, SQL, CICS,
+  COPYBOOK, REPORT, UTIL); `## Differential` runs fixture inputs through
+  the legacy and the Java build; the `spring-fidelity` lens and a
+  thirteen-item pitfall card (decimal scale, MOVE truncation and padding,
+  signed overpunch, fall-through, REDEFINES, one-based subscripts, ROUNDED,
+  dates, file status) do the review.
+
 ## 2.36.0
 
 Harness discipline for every provider (ADR 0029), and two ADR 0028

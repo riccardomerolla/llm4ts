@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import { loadPack, type Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards, matchingPatternCards } from "@llm4ts/flow/Patterns"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
+import { unitsIn } from "@llm4ts/flow/Port"
 
 const kitsRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -292,6 +293,63 @@ describe("kits/port/packs/scala-ts (ADR 0028)", () => {
         assert.include(pack.prompt("porting") ?? "", "Effect.Effect<A, E, R>")
         assert.isTrue(pack.lenses.some((lens) => lens.name === "effect-fidelity"))
         assert.isTrue((pack.audit ?? []).length > 0)
+      })
+  )
+})
+
+describe("kits/port/packs/cobol-springboot-port (ADR 0028)", () => {
+  it.effect(
+    "is a porting pack for COBOL → Spring Boot: javac diagnostics, a ledger of records and paragraphs, a Spring lens",
+    () =>
+      Effect.gen(function* () {
+        const pack = yield* load("port", "cobol-springboot-port")
+        assert.strictEqual(pack.target, "src/main/java/legacy/{{dir}}/{{base}}.java")
+        assert.strictEqual(pack.comment, "//")
+        assert.deepStrictEqual(pack.diagnostics, {
+          command: ["mvn", "-q", "-B", "-DskipTests", "compile"],
+          format: "javac"
+        })
+        assert.include(pack.ledger?.classes ?? [], "PARAGRAPH")
+        assert.include(pack.ledger?.classes ?? [], "COPYBOOK")
+        assert.include(pack.prompt("porting") ?? "", "BigDecimal")
+        assert.include(pack.prompt("porting") ?? "", "PORT STATUS")
+        assert.isTrue(pack.lenses.some((lens) => lens.name === "spring-fidelity"))
+        assert.include(pack.reviewRules?.text ?? "", "BigDecimal")
+        assert.strictEqual(pack.differential?.timeoutSeconds, 120)
+        assert.isTrue((pack.audit ?? []).length > 0)
+        assert.doesNotThrow(() => new RegExp(pack.sources ?? ""))
+        // The ledger regex names level-01 records, FDs and paragraphs, nothing else.
+        const units = unitsIn(
+          [
+            "       IDENTIFICATION DIVISION.",
+            "       PROGRAM-ID. PAYROLL.",
+            "       FD  EMPLOYEE-FILE.",
+            "       01  EMPLOYEE-REC.",
+            "           05  EMP-ID        PIC 9(5).",
+            "           05  EMP-SALARY    PIC S9(7)V99 COMP-3.",
+            "       77  WS-COUNT          PIC 9(3).",
+            "       PROCEDURE DIVISION.",
+            "       1000-MAIN.",
+            "           PERFORM 2000-READ-INPUT THRU 2000-EXIT.",
+            "       2000-READ-INPUT.",
+            "           READ EMPLOYEE-FILE AT END MOVE 'Y' TO WS-EOF.",
+            "       2000-EXIT.",
+            "           EXIT."
+          ].join("\n"),
+          pack.ledger?.unit ?? ""
+        )
+        assert.deepStrictEqual(units, [
+          "EMPLOYEE-FILE",
+          "EMPLOYEE-REC",
+          "WS-COUNT",
+          "1000-MAIN",
+          "2000-READ-INPUT",
+          "2000-EXIT"
+        ])
+        const cards = yield* Effect.flatMap(workspace, (space) =>
+          loadPatternCards(space, `${packDir("port", "cobol-springboot-port")}/patterns`)
+        )
+        assert.isTrue(cards.some((card) => card.id === "pitfalls-cobol-springboot-port"))
       })
   )
 })
