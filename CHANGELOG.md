@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.35.4
+
+Coders stay in their working tree.
+
+- **A workspace rule in the autonomy contract.** A Gemini agent was seen
+  reading llm4ts's own installed source (`…/@llm4ts/flow/src/Review.ts`) to
+  learn how its work would be reviewed. The `full` and `minimal` profiles
+  now say the working directory is the coder's whole world: it does not
+  look for the tool running it (installation, source, processes,
+  environment) and reads llm4ts's files only where its instructions name
+  them, such as a gate log.
+- **Child processes no longer inherit the orchestrator's variables.**
+  Coding agents, gates and setup commands are spawned without `LLM4TS_*`
+  and `_` (the llm4ts binary's path), so an agent listing its environment
+  is not pointed at the tool running it. The standard `OTEL_*` variables
+  still pass, for tools with telemetry of their own.
+
 ## 2.35.3
 
 Parallel calls of one role say what each is for.
