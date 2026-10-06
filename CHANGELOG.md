@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.35.2
+
+`epic-stories` says why it runs fewer stories than it could, and what a
+story is doing before its first task.
+
+- **Why stories wait.** When fewer stories run than the cap allows, the run
+  logs one line each time the picture changes:
+  `epic <id>: 1 running (concurrency 6, 7 coder slot(s)) · 6 waiting on
+dependencies: b ← a; c ← a, b; …`, and how many ready stories are waiting
+  for a coder slot. A plan that chains its stories no longer looks like a
+  stalled scheduler.
+- **The lane names its first steps.** A story's baseline gates (the gates on
+  the commit it starts from) and its task planning are now stages, so
+  `watch` shows `story <id>: baseline gates` or `story <id>: plan tasks`
+  instead of `starting` while they run.
+
 ## 2.35.1
 
 `epic-stories` under a roster runs as many stories as asked again.
