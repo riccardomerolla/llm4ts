@@ -61,6 +61,7 @@ import {
 import { stableHash } from "@llm4ts/flow/Plan"
 import { ReviewIssue, type FixPromptOptions } from "@llm4ts/flow/Review"
 import { compactGateArtifacts, gatesIn, type GateRunOptions } from "@llm4ts/flow/Gates"
+import { loadTranscript, nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import {
   StoryPlan,
   dependenciesOf,
@@ -2265,6 +2266,24 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                     )
                   }),
               fix: fixPromptOptions(process.env),
+              // A task's `verified:` claims are checked against the tool calls
+              // its transcript shows (ADR 0027 decision 6); no transcript, no check.
+              toolCalls: (story, since) =>
+                context.trace === undefined
+                  ? Effect.succeed(undefined)
+                  : Effect.map(
+                      loadTranscript(
+                        nodeTranscriptFiles,
+                        join(input.workDir, ".llm4ts", "transcripts", context.trace.runId),
+                        { lane: story.id }
+                      ),
+                      (entries) =>
+                        entries === undefined
+                          ? undefined
+                          : entries.flatMap((entry) =>
+                              entry._tag === "Tool" && entry.at >= since ? [entry.args] : []
+                            )
+                    ),
               // With a roster, the judge and the verifier are leased per story,
               // away from the executor coding it (ADR 0019).
               ...storyContextChars(process.env),

@@ -251,6 +251,27 @@ the red tests. A pack extends what counts as a test file or a marker in a
 summary line the guard reads (Vitest, Jest, pytest, cargo, mocha, JUnit) and
 says once when they do not.
 
+## Autonomy contract and evidence
+
+Every coder's system prompt opens with one paragraph from
+`@llm4ts/flow/AutonomyContract` (ADR 0027 decision 5): nobody is watching;
+act, do not announce; the task is the whole scope; make the smallest change;
+pre-existing bugs and wrong tests are findings, not fixes; never edit, skip
+or delete a test to pass; end with the commands run, not a claim. The
+built-in flows use it through `withContract(...)`; a roster entry picks a
+profile per executor with `"contract": "full" | "minimal" | "off"` (`minimal`
+keeps the scope and no-gaming rules for a model that over-verifies under the
+full text; `off` is for a flow that writes its own rules).
+
+A task's `## Findings` section ends with one `verified: <command>` line per
+command the coder ran to check its work and a `confidence: high|medium|low`
+line. With transcripts on (the default for epic-stories), each `verified:`
+claim is checked against the tool calls the transcript shows for that task
+(ADR 0027 decision 6): a command that never ran is a `fabricated status`
+Warning in the story's findings, travels to the judge as an evidence note,
+is counted in `llm4ts profile`, and is a signature the retro reads. An API
+coder keeps no tool transcript, so its claims are reported as unchecked.
+
 ## Capabilities
 
 Filesystem, process, network, Git, and forge operations require explicit

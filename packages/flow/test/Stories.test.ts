@@ -628,6 +628,101 @@ describe("Stories executor", () => {
         })
     )
 
+    it.effect(
+      "a task that claims a command no tool call ran is a fabricated-status finding; no transcript means unchecked",
+      () =>
+        Effect.gen(function* () {
+          const reply = [
+            "done",
+            "",
+            "## Findings",
+            "- verified: pnpm test",
+            "- confidence: low"
+          ].join("\n")
+          const harness = yield* makeHarness({ replyFor: () => reply })
+          const context = yield* makeContext(harness)
+          const options = yield* makeOptions(harness, single, context, {
+            toolCalls: () => Effect.succeed(["ls -la", "cat src/features/a/index.ts"])
+          })
+          yield* implementStoriesFlow(context, options)
+          const files = yield* memoryFilesOf(options)
+          const findings = files[`${options.stateDir}/stories/a.findings.md`] ?? ""
+          assert.include(findings, "fabricated status: claimed `pnpm test`")
+
+          const unchecked = yield* makeHarness({ replyFor: () => reply })
+          const uncheckedContext = yield* makeContext(unchecked)
+          const uncheckedOptions = yield* makeOptions(unchecked, single, uncheckedContext, {
+            toolCalls: () => Effect.succeed(undefined)
+          })
+          yield* implementStoriesFlow(uncheckedContext, uncheckedOptions)
+          const uncheckedFiles = yield* memoryFilesOf(uncheckedOptions)
+          assert.notInclude(
+            uncheckedFiles[`${uncheckedOptions.stateDir}/stories/a.findings.md`] ?? "",
+            "fabricated status"
+          )
+        })
+    )
+
+    it.effect(
+      "the coder's system prompt carries the autonomy contract unless the profile is off",
+      () =>
+        Effect.gen(function* () {
+          const seen: Array<string> = []
+          const harness = yield* makeHarness()
+          const context = yield* makeContext(harness)
+          const options = yield* makeOptions(harness, single, context, {
+            system: (story) => Effect.succeed(`extra for ${story.id}`)
+          })
+          const spyingOptions: StoriesOptions = {
+            ...options,
+            contextFor: (workDir, contextOptions) =>
+              Effect.map(options.contextFor(workDir, contextOptions), (seats) => ({
+                ...seats,
+                context: {
+                  ...seats.context,
+                  coder: {
+                    ...seats.context.coder,
+                    executeStreamWithHistory: (messages) => {
+                      const system = messages.find((message) => message.role === "System")
+                      if (system !== undefined) seen.push(system.content)
+                      return seats.context.coder.executeStreamWithHistory(messages)
+                    }
+                  }
+                }
+              }))
+          }
+          yield* implementStoriesFlow(context, spyingOptions)
+          // The chat's git-ownership line comes first; the contract opens the flow's own prompt.
+          assert.isTrue(seen.some((system) => system.includes("Nobody is watching this run")))
+          assert.isTrue(seen.some((system) => system.includes("extra for a")))
+
+          const off = yield* makeHarness()
+          const offContext = yield* makeContext(off)
+          const offOptions = yield* makeOptions(off, single, offContext, { contract: "off" })
+          const offSeen: Array<string> = []
+          yield* implementStoriesFlow(offContext, {
+            ...offOptions,
+            contextFor: (workDir, contextOptions) =>
+              Effect.map(offOptions.contextFor(workDir, contextOptions), (seats) => ({
+                ...seats,
+                context: {
+                  ...seats.context,
+                  coder: {
+                    ...seats.context.coder,
+                    executeStreamWithHistory: (messages) => {
+                      const system = messages.find((message) => message.role === "System")
+                      if (system !== undefined) offSeen.push(system.content)
+                      return seats.context.coder.executeStreamWithHistory(messages)
+                    }
+                  }
+                }
+              }))
+          })
+          assert.isTrue(offSeen.length > 0)
+          assert.isFalse(offSeen.some((system) => system.includes("Nobody is watching")))
+        })
+    )
+
     it.effect("without gate commands a red base still fails the story, as before", () =>
       Effect.gen(function* () {
         const harness = yield* makeHarness()

@@ -171,6 +171,18 @@ export class CapabilityUnenforceable extends Schema.TaggedClass<CapabilityUnenfo
   }
 ) {}
 
+/** A task's `verified:` claims against the tool calls its transcript shows (ADR 0027). */
+export class EvidenceChecked extends Schema.TaggedClass<EvidenceChecked>()("EvidenceChecked", {
+  task: Schema.String,
+  claimed: Schema.Int,
+  /** Claims no tool call carried: fabricated status. */
+  unverified: Schema.Int,
+  confidence: Schema.optionalKey(Schema.Literals(["high", "medium", "low"])),
+  /** The run kept no tool transcript for this coder (an API seat), so nothing was checked. */
+  unchecked: Schema.optionalKey(Schema.Boolean),
+  lane: Schema.optionalKey(Schema.String)
+}) {}
+
 export class Declassified extends Schema.TaggedClass<Declassified>()("Declassified", {
   label: Schema.String
 }) {}
@@ -334,6 +346,7 @@ export const FlowEvent = Schema.Union([
   CapabilityUsedEvent,
   CapabilityDeniedEvent,
   CapabilityUnenforceable,
+  EvidenceChecked,
   Declassified,
   ExecutorLeased,
   ExecutorReleased,

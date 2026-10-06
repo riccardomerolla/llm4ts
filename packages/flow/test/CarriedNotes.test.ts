@@ -4,6 +4,7 @@ import {
   findingsIn,
   findingsRequest,
   notesHeading,
+  trailerIn,
   withNotes
 } from "@llm4ts/flow/CarriedNotes"
 
@@ -79,5 +80,27 @@ describe("appendNote and withNotes", () => {
   it("the request names the heading and keeps BLOCKED_ON last", () => {
     assert.include(findingsRequest, notesHeading)
     assert.include(findingsRequest, "BLOCKED_ON:")
+  })
+})
+
+describe("trailerIn (ADR 0027)", () => {
+  it("reads verified commands and the confidence from a Findings section", () => {
+    const trailer = trailerIn(
+      [
+        "- src/a.ts holds the feature",
+        "- verified: `pnpm test -- --run src/a.test.ts`",
+        "verified: pnpm typecheck",
+        "- confidence: medium"
+      ].join("\n")
+    )
+    assert.deepStrictEqual(trailer.verified, ["pnpm test -- --run src/a.test.ts", "pnpm typecheck"])
+    assert.strictEqual(trailer.confidence, "medium")
+  })
+
+  it("is empty without the lines, and the request asks for them", () => {
+    assert.deepStrictEqual(trailerIn("- nothing special"), { verified: [], confidence: undefined })
+    assert.deepStrictEqual(trailerIn(undefined), { verified: [], confidence: undefined })
+    assert.include(findingsRequest, "verified: <command>")
+    assert.include(findingsRequest, "confidence: high|medium|low")
   })
 })

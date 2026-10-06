@@ -97,7 +97,11 @@ export const StoryProfile = Schema.Struct({
   /** From the coder's first task (after setup and planning) to its first edit; absent when it never edited. */
   firstEditMs: Schema.optionalKey(Ms),
   /** Explore calls (ls, find, grep, read) made before that first edit. */
-  exploreBeforeEdit: Schema.Int
+  exploreBeforeEdit: Schema.Int,
+  /** Commands the coder's Findings claimed to have run that no tool call carried (ADR 0027). */
+  unverifiedClaims: Schema.Int,
+  /** Tasks whose Findings said `confidence: low`. */
+  lowConfidenceTasks: Schema.Int
 })
 export type StoryProfile = typeof StoryProfile.Type
 
@@ -181,6 +185,8 @@ interface Lane {
   toolCalls: { explore: number; edit: number; test: number; other: number }
   firstEdit: number | undefined
   exploreBeforeEdit: number
+  unverifiedClaims: number
+  lowConfidenceTasks: number
 }
 
 interface Lease {
@@ -244,6 +250,8 @@ const describe = (event: FlowEvent): string => {
     case "CapabilityDenied":
     case "CapabilityUnenforceable":
       return "a capability check"
+    case "EvidenceChecked":
+      return "an evidence check"
     case "ExecutorLeased":
     case "ExecutorReleased":
     case "ExecutorExcluded":
@@ -348,7 +356,9 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
             firstTask: undefined,
             toolCalls: { explore: 0, edit: 0, test: 0, other: 0 },
             firstEdit: undefined,
-            exploreBeforeEdit: 0
+            exploreBeforeEdit: 0,
+            unverifiedClaims: 0,
+            lowConfidenceTasks: 0
           })
           continue
         }
@@ -414,6 +424,14 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
       case "Info":
         if (lane !== undefined && event.message.startsWith(`story ${lane.id}: already merged`)) {
           lane.skipped = true
+        }
+        break
+      case "EvidenceChecked":
+        if (lane !== undefined) {
+          lane.unverifiedClaims += event.unverified
+          if (event.confidence === "low") {
+            lane.lowConfidenceTasks += 1
+          }
         }
         break
       default:
@@ -628,6 +646,8 @@ const storyProfile = (
     tasks: lane.tasks,
     ...(lane.firstEdit === undefined ? {} : { firstEditMs: lane.firstEdit }),
     exploreBeforeEdit: lane.exploreBeforeEdit,
+    unverifiedClaims: lane.unverifiedClaims,
+    lowConfidenceTasks: lane.lowConfidenceTasks,
     id: lane.id,
     ...(lane.executor === undefined ? {} : { executor: lane.executor }),
     status: lane.status,
@@ -763,6 +783,15 @@ const findingsOf = (facts: {
     .filter((candidate) => candidate.ms >= 1_000)
     .sort((left, right) => right.ms - left.ms)
     .slice(0, 3)
+  const fabricated = facts.stories.flatMap((story) =>
+    story.unverifiedClaims > 0
+      ? [
+          {
+            text: `${story.id}: the coder claimed ${plural(story.unverifiedClaims, "verification command")} that never ran — its account of its own testing is not evidence`
+          }
+        ]
+      : []
+  )
   const growth = facts.stories.flatMap((story) =>
     story.turns.promptGrowth &&
     story.turns.firstPrompt !== undefined &&
@@ -774,7 +803,7 @@ const findingsOf = (facts: {
         ]
       : []
   )
-  return [...ranked, ...growth]
+  return [...ranked, ...fabricated, ...growth]
 }
 
 const table = (

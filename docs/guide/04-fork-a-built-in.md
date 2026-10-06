@@ -17,6 +17,7 @@ the whole file you just copied:
 // Persistent plan: plan the task, then implement, review, and commit one task at a time.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
+import { withContract } from "@llm4ts/flow/AutonomyContract"
 import {
   coderFromEnv,
   defaultPlanPath,
@@ -49,7 +50,7 @@ const program = Effect.gen(function* () {
         store,
         planPath,
         plan: planFrom(context.reasoning, input.prompt),
-        system: "Implement one task at a time in the current repository."
+        system: withContract("Implement one task at a time in the current repository.")
       })
   )
 })

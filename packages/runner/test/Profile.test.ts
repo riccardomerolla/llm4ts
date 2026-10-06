@@ -6,6 +6,7 @@ import { EpicRun, appendEpicRun } from "@llm4ts/flow/EpicRuns"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import { TokenUsage } from "@llm4ts/core/Models"
 import {
+  EvidenceChecked,
   Info,
   StageCompleted,
   StageStarted,
@@ -389,5 +390,37 @@ describe("coder work per story", () => {
     assert.strictEqual(calm?.firstEditMs, 2 * minute * 1_000)
     assert.strictEqual(calm?.exploreBeforeEdit, 0)
     assert.notInclude(report.findings.map((finding) => finding.text).join("\n"), "found its way")
+  })
+})
+
+describe("evidence per story (ADR 0027)", () => {
+  it("counts unverified claims and low-confidence tasks, and names a story whose coder fabricated status", () => {
+    const report = profileOf([
+      at(0, StageStarted.make({ stage: "story list", lane: "list", executor: "gemini" })),
+      at(0, StageStarted.make({ stage: "Add the list page", lane: "list" })),
+      at(
+        60_000,
+        EvidenceChecked.make({
+          task: "Add the list page",
+          claimed: 2,
+          unverified: 1,
+          confidence: "low",
+          lane: "list"
+        })
+      ),
+      at(
+        90_000,
+        EvidenceChecked.make({ task: "Add the list test", claimed: 1, unverified: 0, lane: "list" })
+      ),
+      at(120_000, StageCompleted.make({ stage: "story list", lane: "list" }))
+    ])
+    const [list] = report.stories
+    assert.strictEqual(list?.unverifiedClaims, 1)
+    assert.strictEqual(list?.lowConfidenceTasks, 1)
+    assert.isTrue(
+      report.findings.some((finding) =>
+        finding.text.includes("list: the coder claimed 1 verification command that never ran")
+      )
+    )
   })
 })

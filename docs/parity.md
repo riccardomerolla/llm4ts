@@ -593,3 +593,9 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   adds a skip or focus marker or lowers the passed-test count fails its gate
   round unless its story declares `testsChange: true`; llm4zio has no such
   check. Stories without the field hash as before.
+- Autonomy contract and evidence (ADR 0027, 2026-10-06): one contract
+  paragraph opens every coder system prompt (three profiles, per roster
+  entry); a task's `verified:` claims are checked against its transcript and
+  a claim that never ran is a `fabricated status` finding for the judge, the
+  profile and the retro. llm4zio's coder prompts carry no shared contract
+  and its claims are never checked. Additive.

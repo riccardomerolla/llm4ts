@@ -41,6 +41,7 @@ import {
   type FlowError
 } from "./FlowError.ts"
 import {
+  EvidenceChecked,
   Info,
   JudgedDimension,
   StoryJudged,
@@ -81,6 +82,9 @@ import {
   parseUnifiedDiff
 } from "./OracleGuard.ts"
 import { cachedValue, fingerprintOf } from "./ReviewCache.ts"
+import { withContract, type ContractProfile } from "./AutonomyContract.ts"
+import { fabricatedStatusIssues, unverifiedClaims } from "./Evidence.ts"
+import type { Trailer } from "./CarriedNotes.ts"
 import type { Reviewer } from "./Reviewer.ts"
 import {
   dependentsOf,
@@ -655,6 +659,21 @@ export interface StoriesOptions {
   readonly fix?: FixPromptOptions
   /** Test-file and marker patterns for the oracle guard; default rules when absent (ADR 0027). */
   readonly oracleRules?: OracleRules
+  /**
+   * The autonomy contract profile for the coder's system prompt (ADR 0027
+   * decision 5). Default: the roster executor's `contract`, else `full`.
+   */
+  readonly contract?: ContractProfile
+  /**
+   * The arguments of every tool call the story's coder made since `since`
+   * (epoch ms), from the run's transcript; `undefined` when the run keeps
+   * none for it. With it, a task's `verified:` claims are checked
+   * (ADR 0027 decision 6).
+   */
+  readonly toolCalls?: (
+    story: Story,
+    since: number
+  ) => Effect.Effect<ReadonlyArray<string> | undefined, FlowError>
   /** Story-level judge over the branch's diff against the epic branch; omit to skip. */
   readonly judge?: (
     story: Story,
@@ -1098,13 +1117,69 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     const git = storyContext.git
     const watchedSeats: StorySeats = { ...seats, context: storyContext }
     const extra = options.system === undefined ? undefined : yield* options.system(story)
-    const system = [
-      perimeterRules(story, { plan, worktree: state.worktree, epicCheckout: context.workDir }),
-      gateRules,
-      extra
-    ]
-      .filter((part): part is string => part !== undefined && part.trim().length > 0)
-      .join("\n\n")
+    const contractProfile: ContractProfile =
+      options.contract ??
+      (coderExecutor === undefined ? undefined : roster?.contractOf?.(coderExecutor)) ??
+      "full"
+    const system = withContract(
+      [
+        perimeterRules(story, { plan, worktree: state.worktree, epicCheckout: context.workDir }),
+        gateRules,
+        extra
+      ]
+        .filter((part): part is string => part !== undefined && part.trim().length > 0)
+        .join("\n\n"),
+      contractProfile
+    )
+    /** What the coder claimed to have run and did not, task by task, for the judge. */
+    const evidenceNotes: Array<string> = []
+    const checkEvidence = (
+      task: Task,
+      trailer: Trailer,
+      startedAt: number
+    ): Effect.Effect<void, FlowError> =>
+      Effect.gen(function* () {
+        const calls =
+          options.toolCalls === undefined ? undefined : yield* options.toolCalls(story, startedAt)
+        const confidence =
+          trailer.confidence === undefined ? {} : { confidence: trailer.confidence }
+        if (calls === undefined) {
+          yield* laneOf(story).publish(
+            EvidenceChecked.make({
+              task: task.title,
+              claimed: trailer.verified.length,
+              unverified: 0,
+              unchecked: true,
+              lane: story.id,
+              ...confidence
+            })
+          )
+          return
+        }
+        const unverified = unverifiedClaims(trailer.verified, calls)
+        yield* laneOf(story).publish(
+          EvidenceChecked.make({
+            task: task.title,
+            claimed: trailer.verified.length,
+            unverified: unverified.length,
+            lane: story.id,
+            ...confidence
+          })
+        )
+        if (unverified.length > 0) {
+          evidenceNotes.push(
+            `task "${task.title}": claimed ${unverified.map((command) => `\`${command}\``).join(", ")} — no tool call ran it`
+          )
+          yield* appendFindings(
+            story,
+            `evidence "${task.title}" — ${unverified.length} claimed command(s) never ran`,
+            ReviewResult.make({ issues: fabricatedStatusIssues(unverified), summary: "" })
+          )
+        }
+        if (trailer.confidence === "low") {
+          evidenceNotes.push(`task "${task.title}": the coder said confidence: low`)
+        }
+      })
     const prompt = storyPrompt(story)
 
     // Catch up before setup: the epic may have changed the manifest too.
@@ -1371,6 +1446,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           }${settled ? "" : ", fixing"}`,
           result
         ),
+      onTaskReply: (task, _reply, trailer, startedAt) => checkEvidence(task, trailer, startedAt),
       ...(options.reviewers === undefined ? {} : { reviewers: options.reviewers }),
       ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds })
     })
@@ -1422,7 +1498,19 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         // be on the epic (an earlier story or run put it there). Judge that
         // code instead: the owned paths against the empty tree.
         const empty = diff.trim().length === 0
-        const subject = empty ? yield* git.diffVsBaseScoped(emptyTree, story.owned, false) : diff
+        const judgedCode = empty ? yield* git.diffVsBaseScoped(emptyTree, story.owned, false) : diff
+        // What the coder claimed and could not show travels with the subject
+        // (ADR 0027 decision 6): the judge weighs the code knowing the
+        // story's own account of its testing is not evidence.
+        const subject =
+          evidenceNotes.length === 0
+            ? judgedCode
+            : [
+                "Evidence notes from the run (not part of the diff):",
+                ...evidenceNotes.map((note) => `- ${note}`),
+                "",
+                judgedCode
+              ].join("\n")
         // The verdict is kept beside a fingerprint of what was judged: a
         // rerun that finds the same diff gets the same answer without a
         // model call, and the last verdict is on disk to read. Only the

@@ -20,6 +20,7 @@
 // Run: modernize-implement --repo ~/services/meridian-transfers
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
+import { withContract } from "@llm4ts/flow/AutonomyContract"
 import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
 import type { Evaluator } from "@llm4ts/core/eval/Evaluator"
@@ -377,7 +378,7 @@ const program = Effect.gen(function* () {
         yield* implementTaskLoop(store, context.events, planPath, plan, (task) =>
           Effect.gen(function* () {
             const testsTask = task.title === firstTitle
-            const coderChat = yield* makeChat(context.coder, { system })
+            const coderChat = yield* makeChat(context.coder, { system: withContract(system) })
             yield* coderChat.ask(plan.taskPrompt(task))
             yield* reviewAndFixLoop({
               reviewers: [...minimalReviewers, ...pack.lenses],

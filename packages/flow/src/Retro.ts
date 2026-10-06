@@ -461,6 +461,13 @@ export const renderRetroDigest = (inputs: RetroInputs): string => {
       case "CapabilityUnenforceable":
         runLines.push(`- capability unenforceable: ${event.detail}`)
         break
+      case "EvidenceChecked":
+        if (event.unverified > 0) {
+          runLines.push(
+            `- fabricated status: task "${event.task}"${event.lane === undefined ? "" : ` (story ${event.lane})`} claimed ${event.unverified} command(s) that never ran`
+          )
+        }
+        break
       case "ExecutorExcluded":
         runLines.push(`- executor excluded: ${event.executor} — ${event.reason}`)
         break

@@ -1,6 +1,7 @@
 // GitHub issue to pull request: assess the issue, plan, implement, push, and open a PR.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
+import { withContract } from "@llm4ts/flow/AutonomyContract"
 import {
   FlowAborted,
   ScriptUsage,
@@ -74,7 +75,7 @@ const program = Effect.gen(function* () {
           store,
           planPath,
           plan: Effect.succeed(plan),
-          system: "Implement one issue task at a time in the current repository.",
+          system: withContract("Implement one issue task at a time in the current repository."),
           reviewers: allReviewers
         })
         yield* stage(context.events, "push branch", context.git.push("origin", completed.epicId))

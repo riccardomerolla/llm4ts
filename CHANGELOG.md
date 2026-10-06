@@ -30,6 +30,18 @@ rewrite-grade loops: `docs/research/rewrite-grade-loops-plan.md`).
   told when); `sdd` and `modernize-implement` declare it for the red-tests
   task. Packs extend the test-file pattern and markers in a `## Oracle`
   section. Stories written before this release hash unchanged.
+- **One autonomy contract, three profiles.** Every built-in coder prompt
+  opens with the same paragraph from `@llm4ts/flow/AutonomyContract`
+  (ADR 0027 decision 5); a roster entry picks `"contract": "full" | "minimal"
+| "off"` per executor.
+- **Evidence, not assertion.** The coder's `## Findings` ends with
+  `verified: <command>` lines and a `confidence:` line; with transcripts on,
+  each claim is checked against the tool calls the transcript shows for that
+  task (ADR 0027 decision 6). A command that never ran is a `fabricated
+status` Warning in the story findings, an evidence note the judge reads
+  with the diff, an `EvidenceChecked` event, a profile counter per story and
+  a finding ("the coder claimed 2 verification commands that never ran"),
+  and a line in the retro digest. API coders are reported as unchecked.
 
 ## 2.30.0
 

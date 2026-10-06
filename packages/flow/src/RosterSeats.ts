@@ -44,6 +44,8 @@ export interface RosterView {
   readonly executor: Effect.Effect<string | undefined>
   /** Every executor that held this context's coder, in order (handovers). */
   readonly history: Effect.Effect<ReadonlyArray<string>>
+  /** The autonomy contract profile an executor's roster entry asks for (ADR 0027), when it does. */
+  readonly contractOf?: (executor: string) => "full" | "minimal" | "off" | undefined
 }
 
 /** A roster failure seen through an `LlmServiceShape`, whose failures are `LlmError`s. */

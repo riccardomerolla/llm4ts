@@ -15,6 +15,7 @@
   "exports": {
     "./Approval": "./dist/Approval.js",
     "./Artifacts": "./dist/Artifacts.js",
+    "./AutonomyContract": "./dist/AutonomyContract.js",
     "./package.json": "./package.json",
     "./Activity": "./dist/Activity.js",
     "./AzureDevOpsTool": "./dist/AzureDevOpsTool.js",
@@ -39,6 +40,7 @@
     "./Equiv": "./dist/Equiv.js",
     "./EquivReport": "./dist/EquivReport.js",
     "./EstimatedUsage": "./dist/EstimatedUsage.js",
+    "./Evidence": "./dist/Evidence.js",
     "./Flow": "./dist/Flow.js",
     "./FlowContext": "./dist/FlowContext.js",
     "./FlowError": "./dist/FlowError.js",

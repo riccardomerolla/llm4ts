@@ -50,6 +50,7 @@ export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean =>
     case "Aborted":
     case "CapabilityDenied":
     case "CapabilityUnenforceable":
+    case "EvidenceChecked":
       return true
     // Every git read and gate command is a capability event: useful in a
     // trace, noise on screen once several stories run.
@@ -271,6 +272,16 @@ export const terminalLine = (
       )
     case "CapabilityUnenforceable":
       return palette.fail(`capability unenforceable: ${safe(event.detail)}`)
+    case "EvidenceChecked":
+      return event.unchecked === true
+        ? palette.dim(`evidence: ${safe(event.task)} — no tool transcript, claims not checked`)
+        : event.unverified > 0
+          ? palette.fail(
+              `evidence: ${safe(event.task)} — ${event.unverified} of ${event.claimed} claimed command(s) never ran`
+            )
+          : palette.dim(
+              `evidence: ${safe(event.task)} — ${event.claimed} claimed command(s) ran${event.confidence === undefined ? "" : `, confidence ${event.confidence}`}`
+            )
     case "Declassified":
       return palette.info(`declassified: ${safe(event.label)}`)
     case "ExecutorLeased":

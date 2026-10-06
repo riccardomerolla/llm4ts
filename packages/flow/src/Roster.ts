@@ -63,7 +63,9 @@ export class ExecutorSpec extends Schema.Class<ExecutorSpec>("ExecutorSpec")({
   health: Schema.optionalKey(Schema.String),
   cooldown: Schema.optionalKey(Cooldown),
   /** In a repository roster: removes the user roster's entry with this id. */
-  disabled: Schema.optionalKey(Schema.Boolean)
+  disabled: Schema.optionalKey(Schema.Boolean),
+  /** The autonomy contract profile this executor's coder prompts carry (ADR 0027); default `full`. */
+  contract: Schema.optionalKey(Schema.Literals(["full", "minimal", "off"]))
 }) {}
 
 export class RosterDocument extends Schema.Class<RosterDocument>("RosterDocument")({

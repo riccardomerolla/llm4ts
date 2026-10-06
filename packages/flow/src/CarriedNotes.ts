@@ -4,6 +4,7 @@
 // with a short Findings section; code saves it beside the story and prepends
 // the accumulated notes to the next task. Pure helpers here, the seam in Flow.
 import type * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import type { FlowError } from "./FlowError.ts"
 
 export const notesHeading = "## Findings"
@@ -14,9 +15,43 @@ export const findingsRequest = [
   `When the task is done, end your reply with a section headed \`${notesHeading}\` of at most`,
   "ten lines: files you read or changed that matter for the rest of this story, conventions",
   "you learned (where tests live, how a feature is registered, which kit component to use),",
-  "and commands that worked. Nothing follows it — unless you must stop with BLOCKED_ON:,",
-  "which stays the last line."
+  "and commands that worked. Include one `verified: <command>` line per command you ran to check",
+  "the task (exactly as you ran it), and one `confidence: high|medium|low` line — low when you",
+  "could not run what you would have wanted to. Nothing follows it — unless you must stop with",
+  "BLOCKED_ON:, which stays the last line."
 ].join("\n")
+
+export const Confidence = Schema.Literals(["high", "medium", "low"])
+export type Confidence = typeof Confidence.Type
+
+export interface Trailer {
+  /** Commands the reply says it ran to check the task. */
+  readonly verified: ReadonlyArray<string>
+  readonly confidence: Confidence | undefined
+}
+
+const verifiedLine = /^[-*\s]*verified:\s*(.+)$/iu
+const confidenceLine = /^[-*\s]*confidence:\s*(high|medium|low)\b/iu
+
+/** The `verified:` and `confidence:` lines of a Findings section; empty when there are none. */
+export const trailerIn = (findings: string | undefined): Trailer => {
+  const verified: Array<string> = []
+  let confidence: Confidence | undefined
+  for (const raw of (findings ?? "").split(/\r?\n/u)) {
+    const line = raw.trim()
+    const command = verifiedLine.exec(line)
+    if (command?.[1] !== undefined) {
+      verified.push(command[1].trim().replace(/^[`'"]+|[`'"]+$/gu, ""))
+      continue
+    }
+    const level = confidenceLine.exec(line)
+    if (level?.[1] !== undefined) {
+      const value = level[1].toLowerCase()
+      confidence = value === "high" || value === "medium" || value === "low" ? value : confidence
+    }
+  }
+  return { verified, confidence }
+}
 
 const sectionChars = 1_500
 const headingPattern = /^#{1,3}[ \t]*findings[ \t]*:?[ \t]*$/gimu

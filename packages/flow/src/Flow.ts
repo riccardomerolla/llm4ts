@@ -8,6 +8,8 @@ import { withToolActivity } from "./Activity.ts"
 import {
   appendNote,
   findingsIn,
+  trailerIn,
+  type Trailer,
   findingsRequest,
   withNotes,
   type CarriedNotes
@@ -143,6 +145,17 @@ export interface ImplementPlanOptions {
    * appended. Omit to carry nothing.
    */
   readonly carry?: CarriedNotes
+  /**
+   * Called with every task's final reply and its parsed trailer, after the
+   * findings are kept (ADR 0027 decision 6): the caller checks the
+   * `verified:` claims against what actually ran.
+   */
+  readonly onTaskReply?: (
+    task: Task,
+    reply: string,
+    trailer: Trailer,
+    startedAt: number
+  ) => Effect.Effect<void, FlowError>
 }
 
 /** The judgment form of the empty-diff probe: one Truth question over the coder's reply. */
@@ -274,12 +287,16 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
         // details. `planSoFar`, threaded through by implementTaskLoop, is the
         // single source of truth for completion progress instead.
         const notes = options.carry === undefined ? undefined : yield* options.carry.read
+        const taskStartedAt = yield* Clock.currentTimeMillis
         /** What the task's reply learned goes to the carried notes, whichever turn did the work. */
         const keepFindings = (reply: string): Effect.Effect<void, FlowError> =>
           Effect.gen(function* () {
-            const found = options.carry === undefined ? undefined : findingsIn(reply)
+            const found = findingsIn(reply)
             if (options.carry !== undefined && found !== undefined) {
               yield* options.carry.write(appendNote(notes, task.title, found))
+            }
+            if (options.onTaskReply !== undefined) {
+              yield* options.onTaskReply(task, reply, trailerIn(found), taskStartedAt)
             }
           })
         yield* keepFindings(

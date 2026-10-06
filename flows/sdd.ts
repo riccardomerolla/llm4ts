@@ -1,6 +1,7 @@
 // Spec-driven development: write a specification, encode it as red tests, implement to green.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
+import { withContract } from "@llm4ts/flow/AutonomyContract"
 import {
   FlowAborted,
   Plan,
@@ -132,8 +133,9 @@ const program = Effect.gen(function* () {
         )
 
         const coderChat = yield* makeChat(context.coder, {
-          system:
+          system: withContract(
             "Implement one task at a time. The committed specification is the contract; do not weaken its tests."
+          )
         })
         const testGate = lintCommand(
           nodeProcessExecutor,

@@ -224,6 +224,7 @@ creates a branch, runs the agent, and commits:
 // Persistent plan: plan the task, then implement, review, and commit one task at a time.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
+import { withContract } from "@llm4ts/flow/AutonomyContract"
 import {
   coderFromEnv,
   defaultPlanPath,
@@ -256,7 +257,7 @@ const program = Effect.gen(function* () {
         store,
         planPath,
         plan: planFrom(context.reasoning, input.prompt),
-        system: "Implement one task at a time in the current repository."
+        system: withContract("Implement one task at a time in the current repository.")
       })
   )
 })
@@ -406,8 +407,9 @@ need and choose between them per task:
 <!-- prettier-ignore -->
 ```ts
 const coderChat = yield* makeChat(context.coder, {
-  system:
+  system: withContract(
     "Implement one task at a time. The committed specification is the contract; do not weaken its tests."
+  )
 })
 const testGate = lintCommand(
   nodeProcessExecutor,
@@ -457,6 +459,14 @@ for deleted test files and added skip or focus markers, and the passed-test
 count is compared with the base when both are known. `sdd` passes
 `declared: testsTask` so the task that writes the red tests may, and no later
 task may delete or skip them.
+
+Every built-in flow wraps its coder system prompt in `withContract(...)` from
+`@llm4ts/flow/AutonomyContract` (ADR 0027): the autonomy contract comes
+first, your rules after it. Do the same in a custom flow, or pass `"off"` as
+the second argument when the flow writes its own. `implementPlanFlow` also
+takes `onTaskReply(task, reply, trailer, startedAt)`, called with each task's
+parsed `verified:` and `confidence:` lines, which is where epic-stories
+checks the claims against the transcript.
 
 ### The task loop
 
