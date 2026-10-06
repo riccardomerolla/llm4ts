@@ -261,13 +261,15 @@ export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("Execut
   executor: Schema.String,
   role: Schema.String,
   label: Schema.optionalKey(Schema.String),
-  /** Took the role on its own context's coder slot: nobody independent could. */
+  /** Took the role on its own context's coder slot, no slot of its own free: nobody independent could. */
   borrowed: Schema.optionalKey(Schema.Boolean),
   /**
-   * Why it borrowed: `nobody` else takes the role (or all are out for the
-   * run); `held`: every other executor that could has its slots held by coders.
+   * Set when the executor is the context's own coder, so the call is not
+   * independent: `nobody` else takes the role (or all are out for the run);
+   * `held`: every other executor that could has its slots held by coders;
+   * `out`: every other executor that could is out of the round for now.
    */
-  because: Schema.optionalKey(Schema.Literals(["nobody", "held"]))
+  because: Schema.optionalKey(Schema.Literals(["nobody", "held", "out"]))
 }) {}
 
 export class ExecutorReleased extends Schema.TaggedClass<ExecutorReleased>()("ExecutorReleased", {
@@ -322,14 +324,21 @@ export const rosterEventMessage = (event: FlowEvent): string | undefined => {
   const forLabel = (label: string | undefined): string =>
     label === undefined ? "" : ` for ${label}`
   switch (event._tag) {
-    case "ExecutorLeased":
+    case "ExecutorLeased": {
+      const taken = `roster: ${event.executor} takes ${event.role}${forLabel(event.label)}`
+      if (event.because === undefined && event.borrowed !== true) {
+        return taken
+      }
+      const why =
+        event.because === "held"
+          ? `every other executor that takes ${event.role} is held by a coder`
+          : event.because === "out"
+            ? `every other executor that takes ${event.role} is out of the round`
+            : `no other executor can take ${event.role}`
       return event.borrowed === true
-        ? `roster: ${event.executor} takes ${event.role}${forLabel(event.label)} on its own coder's slot — not independent (${
-            event.because === "held"
-              ? `every other executor that takes ${event.role} is held by a coder`
-              : `no other executor can take ${event.role}`
-          })`
-        : `roster: ${event.executor} takes ${event.role}${forLabel(event.label)}`
+        ? `${taken} on its own coder's slot — not independent (${why})`
+        : `${taken} on its own slot — not independent (${why})`
+    }
     case "ExecutorExcluded":
       return `roster: ${event.executor} out of the round ${event.reason}`
     case "ExecutorResumed":

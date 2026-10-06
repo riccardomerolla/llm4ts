@@ -88,6 +88,31 @@ describe("UsageLimits", () => {
     }
   })
 
+  it("reads claude's session-limit line, in the zone it states", () => {
+    // 8:20am in Rome is 06:20Z in June, already past at 12:27Z: tomorrow's.
+    const error = classifyUsageLimit(
+      "claude",
+      "You've hit your session limit · resets 8:20am (Europe/Rome)",
+      now,
+      "UTC"
+    )
+    assert.strictEqual(error?._tag, "UsageLimitError")
+    if (error?._tag === "UsageLimitError") {
+      assert.strictEqual(
+        error.resetAt === undefined ? undefined : DateTime.formatIso(error.resetAt),
+        "2026-06-05T06:20:00.000Z"
+      )
+    }
+    // A limit with no readable reset is still a limit, for the default cooldown.
+    const weekly = classifyUsageLimit("claude", "You've hit your weekly limit.", now, "UTC")
+    assert.strictEqual(weekly?._tag, "UsageLimitError")
+    assert.isUndefined(weekly?._tag === "UsageLimitError" ? weekly.resetAt : "set")
+    // Anything else claude says stays a provider error.
+    assert.isUndefined(
+      classifyUsageLimit("claude", "There's an issue with the selected model.", now, "UTC")
+    )
+  })
+
   it("classifies short Gemini resets as transient rate limits", () => {
     const twoSeconds = classifyUsageLimit(
       "gemini",

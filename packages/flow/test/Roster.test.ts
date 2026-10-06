@@ -10,7 +10,8 @@ import {
   InvalidRequestError,
   ProviderError,
   RateLimitError,
-  UsageLimitError
+  UsageLimitError,
+  type LlmError
 } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { ConnectorCapabilities, LlmChunk, Message } from "@llm4ts/core/Models"
@@ -378,7 +379,7 @@ const unused = InvalidRequestError.make({ message: "unused" })
 
 /** A seat that records which executor answered, failing while `failing` says so. */
 const seatFor =
-  (log: Ref.Ref<ReadonlyArray<string>>, failing: (id: string) => ProviderError | undefined) =>
+  (log: Ref.Ref<ReadonlyArray<string>>, failing: (id: string) => LlmError | undefined) =>
   (spec: ExecutorSpec, role: string, _workDir: string): Effect.Effect<RosterSeat> => {
     const answer = (prompt: string) =>
       Stream.unwrap(
@@ -522,6 +523,58 @@ describe("Roster seats", () => {
     )
   )
 
+  // The rehearsal of 2026-10-06: codex coding, claude reviewing, claude's
+  // "You've hit your session limit · resets 8:20am (Europe/Rome)". The review
+  // must move to codex's free reasoning slot, not fail the story.
+  it.effect(
+    "a review moves to its own executor's free slot when the independent one hits its limit",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const events = yield* makeCollectingFlowEvents
+          const log = yield* Ref.make<ReadonlyArray<string>>([])
+          const roster = yield* makeRoster({ executors: [codex, claude], events })
+          const limit = UsageLimitError.make({
+            provider: "claude",
+            message:
+              "claude exited with code 1: You've hit your session limit · resets 8:20am (Europe/Rome)",
+            resetAt: DateTime.makeUnsafe("2026-10-06T06:20:00Z")
+          })
+          const source = { seatFor: seatFor(log, (id) => (id === "claude" ? limit : undefined)) }
+          const story = yield* makeHeldCoder(roster, source, "a", {
+            events,
+            eager: true,
+            label: "a"
+          })
+          assert.strictEqual(yield* story.executor, "codex")
+          const reviewer = rosterSeat(roster, source, "reviewer", "a", {
+            events,
+            avoid: Effect.map(story.executor, (id) => (id === undefined ? [] : [id])),
+            borrow: story.lease,
+            label: "a"
+          })
+          assert.strictEqual(yield* text(reviewer, "review a"), "codex ok")
+          const snapshot = yield* roster.snapshot
+          const out = snapshot.find((status) => status.executor.id === "claude")?.exclusion
+          assert.deepStrictEqual([out?.kind, out?.until], ["until", at("2026-10-06T06:20:00Z")])
+          const lines = rosterLines(yield* events.recorded)
+          assert.isTrue(lines.some((line) => line.includes("reviewer for a moves off claude")))
+          assert.isTrue(
+            lines.includes(
+              "roster: codex takes reviewer for a on its own slot — not independent (no other executor can take reviewer)"
+            ),
+            lines.join("\n")
+          )
+          // One attempt on claude, one on codex: the limit is not retried on the spot.
+          assert.deepStrictEqual(yield* Ref.get(log), [
+            "claude:reviewer:review a",
+            "codex:reviewer:review a"
+          ])
+          assert.strictEqual(yield* roster.available("reviewer"), 1)
+        })
+      )
+  )
+
   it.effect("per-call seats avoid the context's coder, and borrow it when nobody else can", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -641,6 +694,64 @@ describe("Roster seats", () => {
           event._tag === "Timed" && event.kind === "wait" ? [event.label] : []
         )
         assert.deepStrictEqual(waited, ["roster coder", "roster reviewer"])
+      })
+    )
+  )
+
+  // The rehearsal of 2026-10-06: a story coding on codex (two slots, one
+  // for coding), claude — the only other reviewer — paused by the operator
+  // for hours. The reviewer took nobody and the story sat "waiting for an
+  // executor to take reviewer: claude paused until …".
+  it.effect("a per-call seat takes its own executor's free slot when every other is out", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const roster = yield* makeRoster({ executors: [local, codex, claude], events })
+        const source = { seatFor: seatFor(log, () => undefined) }
+        yield* roster.lease("coder", { label: "pi" })
+        const story = yield* makeHeldCoder(roster, source, "a", { events, eager: true, label: "a" })
+        assert.strictEqual(yield* story.executor, "codex")
+        yield* roster.exclude(
+          Exclusion.make({
+            id: "claude",
+            kind: "manual",
+            until: at("2026-10-06T05:37:30Z"),
+            reason: "paused by the operator"
+          })
+        )
+        const reviewer = rosterSeat(roster, source, "reviewer", "a", {
+          events,
+          avoid: Effect.map(story.executor, (id) => (id === undefined ? [] : [id])),
+          borrow: story.lease,
+          label: "a"
+        })
+        assert.strictEqual(yield* roster.independenceBlocked("reviewer", ["codex"]), "out")
+        // codex's reasoning slot is free: a real lease, on its own slot, at once.
+        assert.strictEqual(yield* text(reviewer, "review a"), "codex ok")
+        const lines = rosterLines(yield* events.recorded)
+        assert.isTrue(
+          lines.includes(
+            "roster: codex takes reviewer for a on its own slot — not independent (every other executor that takes reviewer is out of the round)"
+          ),
+          lines.join("\n")
+        )
+        assert.isFalse(lines.some((line) => line.includes("waiting for an executor")))
+        assert.strictEqual(yield* roster.available("reviewer"), 1)
+        // With codex's reasoning slot taken by another call, the seat borrows instead of waiting.
+        const other = yield* roster.lease("judge", { label: "the run" })
+        assert.strictEqual(other.executor.id, "codex")
+        assert.strictEqual(yield* text(reviewer, "review a again"), "codex ok")
+        assert.isTrue(
+          (yield* events.recorded).some(
+            (event) =>
+              event._tag === "ExecutorLeased" && event.borrowed === true && event.because === "out"
+          )
+        )
+        yield* other.release
+        // Independence is per call: once claude is back, the next review goes there.
+        yield* roster.resume("claude")
+        assert.strictEqual(yield* text(reviewer, "review a once more"), "claude ok")
       })
     )
   )

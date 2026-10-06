@@ -15,6 +15,7 @@ import { describeFlowError, type FlowError } from "./FlowError.ts"
 import { ExecutorHandedOver, type FlowEventsShape } from "./FlowEvents.ts"
 import {
   describeExclusion,
+  hasRole,
   type ExecutorSpec,
   type Lease,
   type Role,
@@ -104,9 +105,10 @@ export interface RosterSeatOptions {
   /** Executors this seat must not use: the context's coder, for independence. */
   readonly avoid?: Effect.Effect<ReadonlyArray<string>>
   /**
-   * The context's coder executor, used without a slot when independence
-   * cannot be had: nobody outside `avoid` can ever serve the role, or every
-   * executor that could is held by a coder (`LeaseOptions.borrow`).
+   * The context's coder executor, taken when independence cannot be had —
+   * nobody outside `avoid` can ever serve the role, every executor that
+   * could is held by a coder, or out of the round — on a free slot of its
+   * own, or without one (`LeaseOptions.borrow`).
    */
   readonly borrow?: Effect.Effect<ExecutorSpec | undefined>
   /** Who is asking, for the events. */
@@ -150,8 +152,9 @@ export const rosterSeat = (
 
   /**
    * After a failure that took `executor` out of the round, whether another
-   * executor can still take the call: the call moves once, never twice — a
-   * second failure is the call's own, not the executor's.
+   * executor can still take the call — an independent one, or the context's
+   * own: the call moves once, never twice — a second failure is the call's
+   * own, not the executor's.
    */
   const retryElsewhere = (
     executor: ExecutorSpec,
@@ -164,7 +167,9 @@ export const rosterSeat = (
         return false
       }
       const avoid = options.avoid === undefined ? [] : yield* options.avoid
-      const other = yield* roster.canEverServe(role, [...avoid, executor.id])
+      const borrow = options.borrow === undefined ? undefined : yield* options.borrow
+      const own = borrow !== undefined && borrow.id !== executor.id && hasRole(borrow, role)
+      const other = own || (yield* roster.canEverServe(role, [...avoid, executor.id]))
       if (other) {
         yield* options.events.publish(
           ExecutorHandedOver.make({
