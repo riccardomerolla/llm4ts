@@ -42,6 +42,12 @@ status` Warning in the story findings, an evidence note the judge reads
   with the diff, an `EvidenceChecked` event, a profile counter per story and
   a finding ("the coder claimed 2 verification commands that never ran"),
   and a line in the retro digest. API coders are reported as unchecked.
+- **A light fixture to compare releases on.** `examples/seed.sh epic` seeds
+  a ten-file TypeScript repository with a fixed three-story plan and the
+  failure modes this release targets planted on purpose (an inherited red
+  test, a skipped test to restore, a story that must change an expectation);
+  `examples/epic-light.roster.json` and `docs/harness-evals/README.md` hold
+  the roster and the before/after protocol.
 
 ## 2.30.0
 

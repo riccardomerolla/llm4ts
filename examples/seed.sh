@@ -6,6 +6,7 @@
 #   examples/seed.sh sdd /path/to/project
 #   examples/seed.sh implement --run
 #   examples/seed.sh issue-pr /path/to/project --prompt "owner/repo#42" --run
+#   examples/seed.sh epic            # the light comparison epic (ADR 0027)
 #
 # The flow stays outside the seeded repository. Only the small starter project
 # is copied and committed, so coding agents do not inspect llm4ts itself.
@@ -17,7 +18,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 usage() {
   cat >&2 <<'EOF'
-usage: examples/seed.sh <implement|issue-pr|sdd|local> [dest] [--prompt <text>] [--run]
+usage: examples/seed.sh <implement|issue-pr|sdd|local|epic> [dest] [--prompt <text>] [--run]
 EOF
   exit 2
 }
@@ -86,6 +87,12 @@ case "$EXAMPLE" in
     DEFAULT_PROMPT="Add due dates: 'add <text> --due YYYY-MM-DD', mark overdue items in 'list', and a 'due' command showing items due today."
     TOOLCHAIN="JDK 21+ and Maven"
     ;;
+  epic)
+    STARTER="epic-light"
+    SCRIPT="epic-stories"
+    DEFAULT_PROMPT="--epic epic-light"
+    TOOLCHAIN="Node 22, pnpm, and the roster's coding agents"
+    ;;
   *)
     echo "unknown example: $EXAMPLE" >&2
     usage
@@ -120,6 +127,18 @@ cp -R "$STARTER_DIR/." "$DEST/"
 )
 
 PROMPT="${PROMPT_OVERRIDE:-$DEFAULT_PROMPT}"
+
+if [ "$EXAMPLE" = "epic" ]; then
+  # The fixed plan goes where epic-stories looks for an existing one (an
+  # existing plan wins over regeneration, ADR 0013), under the ignored
+  # .llm4ts/ so the epic checkout stays clean. Two releases then compare on
+  # the same three stories with no planner call.
+  mkdir -p "$DEST/.llm4ts/epics/epic-light"
+  cp "$REPO_ROOT/flows/fixtures/epic-stories/epic-light.md" "$DEST/.llm4ts/epics/epic-light/plan.md"
+  echo "Plan seeded at:       $DEST/.llm4ts/epics/epic-light/plan.md"
+  echo "Install once:         (cd $DEST && pnpm install)"
+  echo "Compare a release:    LLM4TS_ROSTER=$SCRIPT_DIR/epic-light.roster.json llm4ts run epic-stories --repo $DEST -- --epic epic-light"
+fi
 
 echo
 echo "Test project ready at: $DEST"

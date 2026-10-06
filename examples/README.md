@@ -86,6 +86,14 @@ directory and prepares it for a flow run — see
 [`flows/README.md`](../flows/README.md) for the seed workflow and the flow
 catalogue.
 
+`seed.sh epic` seeds the light comparison fixture (`starters/epic-light`):
+ten TypeScript files, a fixed three-story plan dropped at
+`.llm4ts/epics/epic-light/plan.md`, a red test on `main` nobody owns, one
+skipped test a story must restore, and one story that declares
+`testsChange: true`. `epic-light.roster.json` is the roster the comparison
+runs with. The protocol and the ledger live in
+[`docs/harness-evals/`](../docs/harness-evals/README.md).
+
 For embedded applications, return the `Effect` from `runNode` to the
 application's existing runtime. Calling `Effect.runFork` belongs only at an
 executable edge such as these scripts.

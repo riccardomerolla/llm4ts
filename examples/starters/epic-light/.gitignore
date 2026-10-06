@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.tsbuildinfo
+# llm4ts flow state: story plans, worktrees, boards, reports.
+.llm4ts/

@@ -1,0 +1,27 @@
+{
+  "executors": [
+    {
+      "id": "claude-reasoning",
+      "harness": "claude",
+      "roles": ["planner", "reviewer", "judge", "verifier"],
+      "slots": 3,
+      "priority": 1
+    },
+    {
+      "id": "pi-codex",
+      "harness": "pi",
+      "model": "openai-codex/gpt-5.3-codex",
+      "roles": ["coder"],
+      "slots": 2,
+      "priority": 1
+    },
+    {
+      "id": "claude-sonnet",
+      "harness": "claude",
+      "model": "claude-sonnet-5-5",
+      "roles": ["coder"],
+      "slots": 2,
+      "priority": 2
+    }
+  ]
+}
