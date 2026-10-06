@@ -2,8 +2,9 @@
 
 ## 2.35.2
 
-`epic-stories` says why it runs fewer stories than it could, and what a
-story is doing before its first task.
+`epic-stories` says why it runs fewer stories than it could, and every run
+shows what each story is doing right now, so running and stuck look
+different.
 
 - **Why stories wait.** When fewer stories run than the cap allows, the run
   logs one line each time the picture changes:
@@ -11,6 +12,18 @@ story is doing before its first task.
 dependencies: b ← a; c ← a, b; …`, and how many ready stories are waiting
   for a coder slot. A plan that chains its stories no longer looks like a
   stalled scheduler.
+- **Running or stuck, at a glance.** Every piece of timed work now says
+  when it starts, not only when it ends: a new `Began` event (kind and
+  label, never content) from model calls, gate and setup commands, git
+  steps, merges, and waits for the merge lock or a roster slot. The agent
+  tree shows a story's work under way with its time (`14m02s · pnpm test`,
+  `3m10s · coder call`, `waiting for merge lock`), so a long gate reads as
+  running, never idle. A story with nothing said for `LLM4TS_IDLE_AFTER` is
+  **quiet** while a model call is open (`⏸ quiet 5m00s · coder call open`)
+  and **idle** only when nothing is under way. The run's own work outside
+  any story (the epic's gates) shows on the header's `now` line; the classic
+  view prints a line when each gate or setup command starts; `llm4ts
+profile` names a gap by the work that began it.
 - **The lane names its first steps.** A story's baseline gates (the gates on
   the commit it starts from) and its task planning are now stages, so
   `watch` shows `story <id>: baseline gates` or `story <id>: plan tasks`

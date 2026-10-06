@@ -234,6 +234,19 @@ export class Timed extends Schema.TaggedClass<Timed>()("Timed", {
   executor: Schema.optionalKey(Schema.String)
 }) {}
 
+/**
+ * Something timed started: published when the work begins, so a screen can
+ * show what runs and for how long while it runs; the `Timed` of the same
+ * kind and label ends it. Names only, like `Timed`: never content.
+ */
+export class Began extends Schema.TaggedClass<Began>()("Began", {
+  kind: TimedKind,
+  /** As the matching `Timed` will name it: the seat's role, the gate command, the wait. */
+  label: Schema.String,
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
 /** One rubric dimension of a story verdict: its score out of `max`. */
 export const JudgedDimension = Schema.Struct({
   id: Schema.String,
@@ -377,7 +390,8 @@ export const FlowEvent = Schema.Union([
   ExecutorResumed,
   ExecutorHandedOver,
   StoryJudged,
-  Timed
+  Timed,
+  Began
 ])
 export type FlowEvent = typeof FlowEvent.Type
 
@@ -479,6 +493,16 @@ const stamped = (
             lane,
             ...(executor !== undefined &&
             ((event.kind === "model" && event.label === "coder") || event.kind === "tool")
+              ? { executor }
+              : {})
+          })
+    case "Began":
+      return event.lane !== undefined
+        ? event
+        : Began.make({
+            ...event,
+            lane,
+            ...(executor !== undefined && event.kind === "model" && event.label === "coder"
               ? { executor }
               : {})
           })

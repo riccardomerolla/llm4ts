@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 import {
+  Began,
   StageCompleted,
   StageFailed,
   ExecutorExcluded,
@@ -476,6 +477,57 @@ describe("agent tree", () => {
     const idle = frame(after).join("\n")
     assert.include(idle, "│ ⏸ idle 6m00s")
     assert.include(idle, "│ 6m00s · thinking")
+  })
+
+  it("shows work under way with its time, so a long gate reads as running, not idle", () => {
+    const tick = (seconds: number): TreeInput => ({ _tag: "Tick", at: t0 + seconds * 1_000 })
+    const start = fold(
+      [
+        at(0, StageStarted.make({ stage: "story home", lane: "home", executor: "gemini" })),
+        at(5, Began.make({ kind: "gate", label: "pnpm test", lane: "home" }))
+      ],
+      emptyTree({ idleAfterMs: 120_000 })
+    )
+    const gating = frame(fold([tick(5 + 14 * 60)], start)).join("\n")
+    assert.include(gating, "│ 14m00s · pnpm test")
+    assert.include(gating, "│ ◐ running")
+    assert.notInclude(gating, "idle")
+
+    // The gate ends; the coder's call opens and says nothing for a while.
+    const calling = fold(
+      [
+        at(900, Timed.make({ kind: "gate", label: "pnpm test", ms: 895_000, lane: "home" })),
+        at(901, Began.make({ kind: "model", label: "coder", lane: "home" })),
+        tick(901 + 5 * 60)
+      ],
+      start
+    )
+    const quiet = frame(calling).join("\n")
+    assert.include(quiet, "│ 5m00s · coder call")
+    assert.include(quiet, "│ ⏸ quiet 5m00s · coder call open")
+
+    // The call ends with nothing else under way: idle, as before.
+    const done = frame(
+      fold(
+        [
+          at(1300, Timed.make({ kind: "model", label: "coder", ms: 399_000, lane: "home" })),
+          tick(1300 + 3 * 60)
+        ],
+        calling
+      )
+    ).join("\n")
+    assert.include(done, "│ ⏸ idle 3m00s")
+  })
+
+  it("shows the run's own work under way outside any story", () => {
+    const tick = (seconds: number): TreeInput => ({ _tag: "Tick", at: t0 + seconds * 1_000 })
+    const state = fold([at(0, Began.make({ kind: "gate", label: "pnpm build" })), tick(75)])
+    assert.include(frame(state).join("\n"), "now    1m15s · pnpm build")
+    const ended = fold(
+      [at(80, Timed.make({ kind: "gate", label: "pnpm build", ms: 80_000 })), tick(81)],
+      state
+    )
+    assert.notInclude(frame(ended).join("\n"), "now    ")
   })
 
   it("adds up a lane's turns and gates, and splits the run's timed work", () => {

@@ -44,7 +44,9 @@ selects `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, or
 `LLM4TS_UI=tree` (what `llm4ts run --ui tree` sets) draws the full-screen
 agent tree instead of the classic view (ADR 0022). `LLM4TS_IDLE_AFTER`
 (`90s`, `5m`, `1h`; default `2m`) is how long a story may go without an
-event, and without a tool running, before the tree marks it idle.
+event before the tree marks it: **quiet** while a model call is open,
+**idle** when nothing is under way. A gate, setup command, git step, merge
+or wait the story said it began shows as running however long it takes.
 `LLM4TS_STORY_CONTEXT_CHARS` (default `40000`, `0` to turn it off) is how much
 of the code a story starts from goes into its coder's system prompt in
 `epic-stories`. `LLM4TS_ORIENTATION_CHARS` (default `8000`, `0` to turn it

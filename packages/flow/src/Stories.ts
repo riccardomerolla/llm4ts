@@ -42,6 +42,7 @@ import {
   type FlowError
 } from "./FlowError.ts"
 import {
+  Began,
   EvidenceChecked,
   Info,
   JudgedDimension,
@@ -983,52 +984,56 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   /** Merge the story branch into the epic branch and re-gate the epic head, one story at a time. */
   const integrate = (story: Story, branch: string): Effect.Effect<void, FlowError> =>
     Effect.flatMap(Clock.currentTimeMillis, (requested) =>
-      mergeLock.withPermit(
-        Effect.gen(function* () {
-          const lane = laneOf(story)
-          // Merges are one at a time: how long this story queued for its turn.
-          const turn = yield* Clock.currentTimeMillis
-          yield* lane.publish(
-            Timed.make({ kind: "wait", label: "merge lock", ms: turn - requested })
-          )
-          yield* epicCheckoutClean(story)
-          const checkpoint = yield* context.git.checkpoint
-          yield* timeEffect(
-            lane,
-            context.git.merge(branch, `${plan.epicId}: merge story ${story.id}`),
-            (ms, failed) =>
-              Timed.make({ kind: "merge", label: "merge", ms, ...(failed ? { failed } : {}) })
-          )
-          const gate = yield* options.gates(context.workDir, lane)
-          // Charged only with what the merge added: the head before it had
-          // a baseline (run start or the previous merge).
-          const before = yield* ensureBaseline(
-            checkpoint,
-            Effect.succeed(ReviewResult.make({ issues: [] })),
-            context.workDir
-          )
-          const verdict = triageGates(gate, before, rootsOf(context.workDir))
-          if (!verdict.blocking.isClean) {
-            // Never leave a red epic head for the next story to inherit.
-            yield* context.git.rollback(checkpoint)
-            return yield* failed(
-              story,
-              `epic gates failed after merging; merge undone:\n${issueLines(verdict.blocking)}`
+      Effect.andThen(
+        laneOf(story).publish(Began.make({ kind: "wait", label: "merge lock" })),
+        mergeLock.withPermit(
+          Effect.gen(function* () {
+            const lane = laneOf(story)
+            // Merges are one at a time: how long this story queued for its turn.
+            const turn = yield* Clock.currentTimeMillis
+            yield* lane.publish(
+              Timed.make({ kind: "wait", label: "merge lock", ms: turn - requested })
             )
-          }
-          if (gateCommands !== undefined) {
-            const mergedHead = yield* context.git.checkpoint
-            yield* writeBaseline(
-              files,
-              options.stateDir,
-              keyFor(mergedHead),
-              yield* baselineOf(mergedHead, gate, context.workDir)
+            yield* epicCheckoutClean(story)
+            const checkpoint = yield* context.git.checkpoint
+            yield* timeEffect(
+              lane,
+              context.git.merge(branch, `${plan.epicId}: merge story ${story.id}`),
+              (ms, failed) =>
+                Timed.make({ kind: "merge", label: "merge", ms, ...(failed ? { failed } : {}) }),
+              () => Began.make({ kind: "merge", label: "merge" })
             )
-          }
-          yield* laneOf(story).publish(
-            Info.make({ message: `story ${story.id}: merged into ${epicBranch}` })
-          )
-        })
+            const gate = yield* options.gates(context.workDir, lane)
+            // Charged only with what the merge added: the head before it had
+            // a baseline (run start or the previous merge).
+            const before = yield* ensureBaseline(
+              checkpoint,
+              Effect.succeed(ReviewResult.make({ issues: [] })),
+              context.workDir
+            )
+            const verdict = triageGates(gate, before, rootsOf(context.workDir))
+            if (!verdict.blocking.isClean) {
+              // Never leave a red epic head for the next story to inherit.
+              yield* context.git.rollback(checkpoint)
+              return yield* failed(
+                story,
+                `epic gates failed after merging; merge undone:\n${issueLines(verdict.blocking)}`
+              )
+            }
+            if (gateCommands !== undefined) {
+              const mergedHead = yield* context.git.checkpoint
+              yield* writeBaseline(
+                files,
+                options.stateDir,
+                keyFor(mergedHead),
+                yield* baselineOf(mergedHead, gate, context.workDir)
+              )
+            }
+            yield* laneOf(story).publish(
+              Info.make({ message: `story ${story.id}: merged into ${epicBranch}` })
+            )
+          })
+        )
       )
     )
 

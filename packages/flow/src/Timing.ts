@@ -13,7 +13,7 @@ import { Message, type LlmChunk, type TokenUsage } from "@llm4ts/core/Models"
 import { redactText } from "@llm4ts/core/observability/Redaction"
 import { toolCategory } from "./Activity.ts"
 import { estimateUsage, estimatedModelLabel, type EstimatedUsageOptions } from "./EstimatedUsage.ts"
-import { Timed, type FlowEventsShape } from "./FlowEvents.ts"
+import { Began, Timed, type FlowEventsShape } from "./FlowEvents.ts"
 import {
   attr,
   currentKindSpan,
@@ -192,16 +192,24 @@ const reportedMs = (chunk: LlmChunk, key: string): number | undefined => {
   return Number.isFinite(value) ? value : undefined
 }
 
-/** Times `effect`, publishing what `timed` makes of its duration whether it succeeds or fails. */
+/**
+ * Times `effect`, publishing what `timed` makes of its duration whether it
+ * succeeds or fails; with `began`, also what it makes of the start, when the
+ * effect starts, so a screen shows the work while it runs.
+ */
 export const timeEffect = <A, E, R>(
   events: FlowEventsShape,
   effect: Effect.Effect<A, E, R>,
-  timed: (ms: number, failed: boolean, role: string | undefined) => Timed
+  timed: (ms: number, failed: boolean, role: string | undefined) => Timed,
+  began?: (role: string | undefined) => Began
 ): Effect.Effect<A, E, R> =>
   Effect.flatMap(Effect.all([Clock.currentTimeMillis, TimedRole]), ([start, role]) =>
-    Effect.onExit(effect, (exit) =>
-      Effect.flatMap(Clock.currentTimeMillis, (end) =>
-        events.publish(timed(end - start, Exit.isFailure(exit), role))
+    Effect.andThen(
+      began === undefined ? Effect.void : events.publish(began(role)),
+      Effect.onExit(effect, (exit) =>
+        Effect.flatMap(Clock.currentTimeMillis, (end) =>
+          events.publish(timed(end - start, Exit.isFailure(exit), role))
+        )
       )
     )
   )
@@ -239,7 +247,7 @@ const tracedEffect = <A, E, R>(
           ...promptContent(content, [Message.make({ role: "User", content: prompt })])
         }
       },
-      timeEffect(events, effect, timed).pipe(
+      timeEffect(events, effect, timed, () => Began.make({ kind: "model", label: role })).pipe(
         Effect.onExit((exit) => {
           const known = Exit.isSuccess(exit)
             ? usageOf(exit.value)
@@ -282,6 +290,7 @@ const timedStream = <E>(
       // The call's LLM span (ADR 0026), parented to the nearest kind span and
       // ended when the stream does; each harness tool call is a TOOL child,
       // opened on `tool_use` and closed on `tool_result`.
+      yield* events.publish(Began.make({ kind: "model", label: role }))
       const parent = yield* currentKindSpan
       const span = yield* Effect.makeSpan(role, {
         kind: "client",
@@ -488,12 +497,16 @@ export const timedSeat = (
 export const timedJudgment = (judgment: JudgmentShape, events: FlowEventsShape): JudgmentShape => ({
   ...judgment,
   judge: (input) =>
-    timeEffect(events, judgment.judge(input), (ms, failed, role) =>
-      Timed.make({
-        kind: "model",
-        label: role ?? "judgment",
-        ms,
-        ...(failed ? { failed: true } : {})
-      })
+    timeEffect(
+      events,
+      judgment.judge(input),
+      (ms, failed, role) =>
+        Timed.make({
+          kind: "model",
+          label: role ?? "judgment",
+          ms,
+          ...(failed ? { failed: true } : {})
+        }),
+      (role) => Began.make({ kind: "model", label: role ?? "judgment" })
     )
 })

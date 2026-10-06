@@ -46,6 +46,15 @@ export interface TreeLane {
   /** Its coder turns' durations, and its gates' total (`Timed`). */
   readonly turns: ReadonlyArray<number>
   readonly gatesMs: number
+  /** Work it said `Began` and no `Timed` has ended yet, innermost last. */
+  readonly running: ReadonlyArray<TreeWork>
+}
+
+/** Work under way: a model call, a gate or setup command, git, a merge, a wait. */
+export interface TreeWork {
+  readonly kind: string
+  readonly label: string
+  readonly since: number
 }
 
 /** The run's timed work by kind, for the status line's split. */
@@ -133,6 +142,8 @@ export interface TreeState {
   /** The run's outcome once its trace says it ended; a live run has none. */
   readonly ended: string | undefined
   readonly time: TreeTimeSplit
+  /** Work under way outside any lane (the epic's own gates, its merges), innermost last. */
+  readonly running: ReadonlyArray<TreeWork>
   /** A lane with no event for this long, and no tool running, is marked idle. */
   readonly idleAfterMs: number
 }
@@ -179,6 +190,7 @@ export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   costUsd: 0,
   ended: undefined,
   time: { model: 0, tools: 0, gates: 0, merge: 0, wait: 0 },
+  running: [],
   idleAfterMs: options.idleAfterMs ?? defaultIdleAfterMs
 })
 
@@ -205,6 +217,19 @@ const updateLane = (
 const withoutLast = <A>(items: ReadonlyArray<A>, item: A): ReadonlyArray<A> => {
   const index = items.lastIndexOf(item)
   return index < 0 ? items : [...items.slice(0, index), ...items.slice(index + 1)]
+}
+
+/** The work a `Timed` ends: the innermost of its kind and label, if it said it began. */
+const ended = (
+  running: ReadonlyArray<TreeWork>,
+  kind: string,
+  label: string
+): ReadonlyArray<TreeWork> => {
+  let index = running.length - 1
+  while (index >= 0 && (running[index]?.kind !== kind || running[index]?.label !== label)) {
+    index -= 1
+  }
+  return index < 0 ? running : [...running.slice(0, index), ...running.slice(index + 1)]
 }
 
 const withExecutor = (state: TreeState, executor: string): TreeState =>
@@ -289,7 +314,8 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           lastEventAt: at,
           activity: undefined,
           turns: [],
-          gatesMs: 0
+          gatesMs: 0,
+          running: []
         }
         return {
           ...current,
@@ -308,7 +334,12 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
     case "StageFailed": {
       if (lane !== undefined && event.stage === `story ${lane.id}`) {
         const status: LaneStatus = event._tag === "StageFailed" ? "failed" : "done"
-        const closed = updateLane(current, lane.id, (open) => ({ ...open, stages: [], status }))
+        const closed = updateLane(current, lane.id, (open) => ({
+          ...open,
+          stages: [],
+          running: [],
+          status
+        }))
         return logged(closed, {
           at,
           source: "lane",
@@ -362,9 +393,10 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
       }
       const counted = { ...current, time: split }
       return lane === undefined
-        ? counted
+        ? { ...counted, running: ended(counted.running, event.kind, event.label) }
         : updateLane(counted, lane.id, (open) => ({
             ...open,
+            running: ended(open.running, event.kind, event.label),
             ...(event.kind === "tool"
               ? { activity: { text: "thinking", since: at, tool: false } }
               : event.kind === "model" && event.label === "coder"
@@ -372,6 +404,14 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
                 : {}),
             gatesMs: open.gatesMs + (event.kind === "gate" ? event.ms : 0)
           }))
+    }
+    case "Began": {
+      const work: TreeWork = { kind: event.kind, label: event.label, since: at }
+      return lane === undefined
+        ? event.lane === undefined
+          ? { ...current, running: [...current.running, work] }
+          : current
+        : updateLane(current, lane.id, (open) => ({ ...open, running: [...open.running, work] }))
     }
     case "StoryJudged": {
       const verdict: TreeVerdict = {
@@ -807,10 +847,7 @@ const laneBox = (
     [span(selected ? `▸ ${lane.id}` : lane.id, "bold")],
     [span(lane.executor ?? "(leasing)")],
     [span(lane.stages.at(-1) ?? "starting")],
-    lane.activity === undefined
-      ? [span(lane.lastTool ?? "", "dim")]
-      : // The duration first: a long command is cut at the box edge, never the timer.
-        [span(`${elapsed(lane.activity.since, now)} · `), span(lane.activity.text, "dim")],
+    doingLine(lane, now),
     [
       span(
         `${elapsed(lane.startedAt, now)} · ${formatCount(lane.tokens)} tok${lane.costUsd > 0 ? ` · ${dollars(lane.costUsd)}` : ""}`
@@ -829,14 +866,65 @@ const laneBox = (
             )
           ]
         ]),
-    isIdle(lane, now, idleAfterMs)
-      ? [span(`⏸ idle ${elapsed(lane.lastEventAt, now)}`, "judge")]
-      : [span("◐ running", "running")]
+    statusLine(lane, now, idleAfterMs)
   ])
 
-/** No event for `idleAfterMs` and no tool running: possibly stuck. */
-const isIdle = (lane: TreeLane, now: number | undefined, idleAfterMs: number): boolean =>
-  now !== undefined && lane.activity?.tool !== true && now - lane.lastEventAt >= idleAfterMs
+/** Work under way as a card names it: the command itself, the call, the wait. */
+export const workText = (work: TreeWork): string => {
+  switch (work.kind) {
+    case "model":
+      return `${work.label} call`
+    case "gate":
+      return work.label
+    case "wait":
+      return `waiting for ${work.label}`
+    case "merge":
+      return "merge"
+    default:
+      return `${work.kind} ${work.label}`
+  }
+}
+
+/**
+ * The card's "doing now" line, duration first (a long command is cut at the
+ * box edge, never the timer): a coder tool, else a command, git step, merge
+ * or wait under way, else the coder thinking after a tool, else a model call
+ * open, else the last tool it ran.
+ */
+const doingLine = (lane: TreeLane, now: number | undefined): Line => {
+  const work = lane.running.at(-1)
+  const timed = (since: number, text: string): Line => [
+    span(`${elapsed(since, now)} · `),
+    span(text, "dim")
+  ]
+  if (lane.activity?.tool === true) {
+    return timed(lane.activity.since, lane.activity.text)
+  }
+  if (work !== undefined && work.kind !== "model") {
+    return timed(work.since, workText(work))
+  }
+  if (lane.activity !== undefined) {
+    return timed(lane.activity.since, lane.activity.text)
+  }
+  return work === undefined ? [span(lane.lastTool ?? "", "dim")] : timed(work.since, workText(work))
+}
+
+/**
+ * Running, or why not: work the lane said began (a command, git, a merge, a
+ * wait) is running however long it takes; a model call that has said nothing
+ * for `idleAfterMs` is quiet; a lane with nothing under way and nothing said
+ * for that long is idle — possibly stuck.
+ */
+const statusLine = (lane: TreeLane, now: number | undefined, idleAfterMs: number): Line => {
+  const work = lane.running.at(-1)
+  const quiet = now !== undefined && now - lane.lastEventAt >= idleAfterMs
+  if (lane.activity?.tool === true || (work !== undefined && work.kind !== "model") || !quiet) {
+    return [span("◐ running", "running")]
+  }
+  return work === undefined
+    ? [span(`⏸ idle ${elapsed(lane.lastEventAt, now)}`, "judge")]
+    : [span(`⏸ quiet ${elapsed(lane.lastEventAt, now)} · ${workText(work)} open`, "judge")]
+}
 
 const elapsedMs = (ms: number): string => elapsed(0, ms)
 
@@ -1029,6 +1117,8 @@ const mainOf = (
   const running = state.lanes.filter((lane) => lane.status === "running")
   const orchestratorWidth = Math.min(46, width)
   const stage = state.stages.at(-1) ?? (running.length > 0 ? "implement stories" : "idle")
+  // The run's own work under way (its gates, outside any story), innermost.
+  const latest = state.running.at(-1)
   const orchestrator = box(
     orchestratorWidth,
     "orchestrator",
@@ -1037,6 +1127,15 @@ const mainOf = (
         ? []
         : [centre([span(state.action, "bold")], orchestratorWidth - 4)]),
       [span("stage  "), span(stage)],
+      ...(latest === undefined
+        ? []
+        : [
+            [
+              span("now    "),
+              span(`${elapsed(latest.since, state.now)} · `),
+              span(workText(latest), "dim")
+            ]
+          ]),
       [span(`stories ${chipsOf(state).length}  elapsed ${elapsed(state.startedAt, state.now)}`)]
     ],
     state.title

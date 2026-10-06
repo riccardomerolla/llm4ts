@@ -193,10 +193,16 @@ before 2.22 has no timings; its report is estimated from the gaps between
 events and says so.
 
 During a run, the agent tree (`--ui tree`) shows the same numbers live: each
-story's current activity and how long it has run, `turns · avg · gates`,
-an **idle** marker on a story with no event and no tool running for
-`LLM4TS_IDLE_AFTER` (default `2m`), and the run's split above the status
-line: `time [model 62% · tools 5% · gates 24% · wait 9%]`.
+story's current activity and how long it has run — a coder tool, a gate or
+setup command (`14m02s · pnpm test`), a merge, a wait for the merge lock or
+a roster slot, a model call (`3m10s · coder call`) — and `turns · avg ·
+gates`. A story with no event for `LLM4TS_IDLE_AFTER` (default `2m`) is
+marked **quiet** while a model call is open (`⏸ quiet 5m00s · coder call
+open`: the backend has said nothing) and **idle** when nothing is under way;
+a long gate is running, never idle. Work the run does outside any story (the
+epic's own gates) shows on the header's `now` line. The run's split sits
+above the status line: `time [model 62% · tools 5% · gates 24% · wait 9%]`.
+The classic view prints a line when each gate or setup command starts.
 
 ## Tailing what a seat says: `--transcript`
 
