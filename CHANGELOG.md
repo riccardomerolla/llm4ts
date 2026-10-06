@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.32.0
 
 Release B of the rewrite-grade loops (ADR 0027): review that assumes the
 code is wrong, a loop that notices when it stalls, and a retro that edits the
