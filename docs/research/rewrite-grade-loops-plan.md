@@ -136,7 +136,7 @@ findings before posting; Bun's fixers were told to skip hallucinated ones.
 Measure the effect with the existing review cache fingerprints before making
 it the default.
 
-### Phase 3 — A port flow family (R3, R4, R5, R6, R7) — needs ADR 0026
+### Phase 3 — A port flow family (R3, R4, R5, R6, R7) — needs ADR 0028
 
 The Bun run's shape is not an epic of features; it is a mechanical work
 queue over thousands of small units with a shared rulebook. llm4ts has the
@@ -290,7 +290,7 @@ stories merged with no human code edits, and the number of process edits
 | ----- | ---------------------------- | ---------------------- | ----------------- |
 | 1     | 1.1, 1.2, 1.3, 1.4, 4.1, 4.2 | one minor release      | —                 |
 | 2     | 2.1, 2.2, 2.3, 2.4, 4.3, 4.6 | one minor release      | 1.3 (diag files)  |
-| 3     | ADR 0026, 3.0, 3.3, 3.4, 3.6 | one major feature      | 2.1, 2.2          |
+| 3     | ADR 0028, 3.0, 3.3, 3.4, 3.6 | one major feature      | 2.1, 2.2          |
 | 4     | 1.5, 3.1, 3.2, 3.5           | second feature release | 3.0               |
 | 5     | 4.4, 4.5, 4.7, 4.8           | ongoing, per release   | flag verification |
 | 6     | 5.1 then 5.2                 | live runs              | 3 and 4           |
@@ -338,7 +338,7 @@ them (ADR 0004):
 - `adversarial-review-votes-and-fixer.md` (2.1, 2.2, 2.3, 2.4)
 - `stall-detection.md` (4.3)
 - `retro-rule-proposals.md` (4.6)
-- `work-queue-primitive.md` (3.0, with ADR 0026)
+- `work-queue-primitive.md` (3.0, with ADR 0028)
 - `port-flow-family.md` (3.1–3.6)
 - `differential-equivalence-tier.md` (1.5)
 - `context-hygiene-and-caching.md` (4.4)

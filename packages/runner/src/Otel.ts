@@ -7,6 +7,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import type * as HttpClient from "effect/http/HttpClient"
 import * as OtlpExporter from "effect/observability/OtlpExporter"
 import * as OtlpMetrics from "effect/observability/OtlpMetrics"
 import * as OtlpSerialization from "effect/observability/OtlpSerialization"
@@ -76,12 +77,18 @@ const resourceOf = (resource: OtelResource) => ({
  * traces and metrics from the standard variables for a generic endpoint.
  * Logs are never exported. Export errors are the exporter's to swallow; the
  * run never fails on them.
+ *
+ * Bodies are protobuf, OTLP/HTTP's default encoding and the only one Phoenix
+ * accepts: its traces endpoint answers 415 to `application/json`, and the
+ * exporter then drops every batch for a minute, at debug level.
  */
 export const otelLayer = (
   config: OtelConfig,
   resource: OtelResource,
   /** What the standard variables are read from in env mode (the run's environment). */
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  /** The HTTP client the exporter posts with; fetch by default, a fake in tests. */
+  http: Layer.Layer<HttpClient.HttpClient> = FetchHttpClient.layer
 ): Layer.Layer<OtlpExporter.Flusher> => {
   switch (config.mode) {
     case "off":
@@ -92,7 +99,7 @@ export const otelLayer = (
         url: config.tracesUrl,
         resource: resourceOf(resource),
         shutdownTimeout: flushTimeout
-      }).pipe(Layer.provide(OtlpSerialization.layerJson), Layer.provide(FetchHttpClient.layer))
+      }).pipe(Layer.provide(OtlpSerialization.layerProtobuf), Layer.provide(http))
     case "env":
       // The standard variables are read from the run's own environment, with
       // the two exporter defaults an endpoint implies; the process env is
@@ -101,8 +108,8 @@ export const otelLayer = (
         OtlpTracer.layerFromConfig({ resource: resourceOf(resource) }),
         OtlpMetrics.layerFromConfig({ resource: resourceOf(resource) })
       ).pipe(
-        Layer.provide(OtlpSerialization.layerJson),
-        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(OtlpSerialization.layerProtobuf),
+        Layer.provide(http),
         Layer.provide(
           ConfigProvider.layer(
             ConfigProvider.fromEnvRecord({
@@ -183,16 +190,32 @@ export const otelDoctorLine = (config: OtelConfig, answers: boolean | undefined)
   }
 }
 
-/** Whether anything listens at the endpoint: any HTTP answer counts, a refused connection does not. */
-export const probeOtelEndpoint = (config: OtelConfig): Effect.Effect<boolean | undefined> =>
+/** How the probe posts: `fetch` in the runner, a fake in tests. */
+export type Post = (url: string, init: RequestInit) => Promise<Response>
+
+/**
+ * Whether the endpoint takes what the exporter will send: an empty protobuf
+ * traces batch, answered 2xx. A refused connection, a 404 or a 415 (the
+ * answer Phoenix gives JSON) all count as "does not answer".
+ */
+export const probeOtelEndpoint = (
+  config: OtelConfig,
+  post: Post = (url, init) => fetch(url, init)
+): Effect.Effect<boolean | undefined> =>
   config.mode === "off"
     ? Effect.succeed(undefined)
     : Effect.tryPromise(() =>
-        fetch(config.mode === "phoenix" ? config.tracesUrl : config.endpoint, {
-          method: "OPTIONS",
+        post(config.mode === "phoenix" ? config.tracesUrl : tracesUrlOf(config.endpoint), {
+          method: "POST",
+          headers: { "content-type": "application/x-protobuf" },
+          body: new Uint8Array(0),
           signal: AbortSignal.timeout(1_500)
         })
       ).pipe(
-        Effect.as(true),
+        Effect.map((response) => response.ok),
         Effect.orElseSucceed(() => false)
       )
+
+/** The traces URL the standard variables imply: a bare endpoint gets `/v1/traces`. */
+const tracesUrlOf = (endpoint: string): string =>
+  /\/v1\/traces\/?$/u.test(endpoint) ? endpoint : `${endpoint.replace(/\/+$/u, "")}/v1/traces`
