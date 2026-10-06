@@ -178,6 +178,22 @@ const TimedRole = Context.Reference<string | undefined>("@llm4ts/flow/Timing/Tim
   defaultValue: () => undefined
 })
 
+/**
+ * What a call is for, beyond its role: a review lens, a vote. A roster
+ * lease names it (`topolino takes reviewer for home · adversarial lens`),
+ * so parallel calls of one role read as the different questions they are.
+ */
+const CallPurpose = Context.Reference<string | undefined>("@llm4ts/flow/Timing/CallPurpose", {
+  defaultValue: () => undefined
+})
+
+/** The purpose the current call is made for, when its caller named one. */
+export const callPurpose: Effect.Effect<string | undefined> = CallPurpose
+
+/** Runs `effect`'s calls under `purpose`, for the roster's lease events. */
+export const withCallPurpose = <A, E, R>(purpose: string, effect: Effect.Effect<A, E, R>) =>
+  Effect.provideService(effect, CallPurpose, purpose)
+
 /** The role the current call is made for: the caller's, or else `label`. */
 export const roleOr = (label: string): Effect.Effect<string> =>
   Effect.map(TimedRole, (role) => role ?? label)

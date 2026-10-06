@@ -407,6 +407,8 @@ export interface LeaseOptions {
   readonly prefer?: string
   /** Who is asking, for the events (a story's worktree). */
   readonly label?: string
+  /** What the call is for beyond its role (a review lens), for the events. */
+  readonly purpose?: string
   /**
    * The executor holding this context's coder, taken when independence
    * cannot be had now: no executor outside `avoid` can ever take the role,
@@ -516,6 +518,9 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
     }
   }
 
+  const purposeOf = (who: LeaseOptions): { readonly purpose?: string } =>
+    who.purpose === undefined ? {} : { purpose: who.purpose }
+
   const say = (message: string): Effect.Effect<void> =>
     events.publish(Info.make({ message: `roster: ${message}` }))
 
@@ -599,13 +604,15 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
   const leaseOf = (
     spec: ExecutorSpec,
     role: Role,
-    label: string | undefined,
+    who: LeaseOptions,
     because?: "nobody" | "held" | "out"
   ): Effect.Effect<Lease, never, Scope.Scope> =>
     Effect.gen(function* () {
-      const labelled = label === undefined ? {} : { label }
+      const labelled = who.label === undefined ? {} : { label: who.label }
       const own = because === undefined ? {} : { because }
-      yield* events.publish(ExecutorLeased.make({ executor: spec.id, role, ...labelled, ...own }))
+      yield* events.publish(
+        ExecutorLeased.make({ executor: spec.id, role, ...labelled, ...purposeOf(who), ...own })
+      )
       const done = yield* Ref.make(false)
       const free = Effect.flatMap(Ref.getAndSet(done, true), (was) =>
         was
@@ -623,13 +630,20 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
   const borrowedLease = (
     spec: ExecutorSpec,
     role: Role,
-    label: string | undefined,
+    who: LeaseOptions,
     because: "nobody" | "held" | "out"
   ): Effect.Effect<Lease, never, Scope.Scope> =>
     Effect.gen(function* () {
-      const labelled = label === undefined ? {} : { label }
+      const labelled = who.label === undefined ? {} : { label: who.label }
       yield* events.publish(
-        ExecutorLeased.make({ executor: spec.id, role, ...labelled, borrowed: true, because })
+        ExecutorLeased.make({
+          executor: spec.id,
+          role,
+          ...labelled,
+          ...purposeOf(who),
+          borrowed: true,
+          because
+        })
       )
       const done = yield* Ref.make(false)
       const free = Effect.flatMap(Ref.getAndSet(done, true), (was) =>
@@ -842,11 +856,11 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
           })
           yield* waited
           return own !== undefined && own.id === borrow.id
-            ? yield* leaseOf(own, role, leaseOptions.label, because)
+            ? yield* leaseOf(own, role, leaseOptions, because)
             : own !== undefined
               ? // Someone came back between the check and the pick: independent after all.
-                yield* leaseOf(own, role, leaseOptions.label)
-              : yield* borrowedLease(borrow, role, leaseOptions.label, because)
+                yield* leaseOf(own, role, leaseOptions)
+              : yield* borrowedLease(borrow, role, leaseOptions, because)
         })
       let announced = false
       const asked = yield* Clock.currentTimeMillis
@@ -867,7 +881,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         const spec = yield* attempt(role, leaseOptions)
         if (spec !== undefined) {
           yield* waited
-          return yield* leaseOf(spec, role, leaseOptions.label)
+          return yield* leaseOf(spec, role, leaseOptions)
         }
         if (!(yield* canEverServe(role, avoid))) {
           const own = yield* takeOwn("nobody")
@@ -906,14 +920,14 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
             })
           )
           yield* say(
-            `waiting for an executor to take ${role}${leaseOptions.label === undefined ? "" : ` for ${leaseOptions.label}`}: ${yield* waitingReport(role, avoid)}`
+            `waiting for an executor to take ${role}${leaseOptions.label === undefined ? "" : ` for ${leaseOptions.label}`}${leaseOptions.purpose === undefined ? "" : ` (${leaseOptions.purpose})`}: ${yield* waitingReport(role, avoid)}`
           )
         }
         yield* probeDue
         const recovered = yield* attempt(role, leaseOptions)
         if (recovered !== undefined) {
           yield* waited
-          return yield* leaseOf(recovered, role, leaseOptions.label)
+          return yield* leaseOf(recovered, role, leaseOptions)
         }
         yield* waitOrProbe(role)
       }
@@ -924,7 +938,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
     leaseOptions: LeaseOptions = {}
   ): Effect.Effect<Lease | undefined, never, Scope.Scope> =>
     Effect.flatMap(attempt(role, leaseOptions), (spec) =>
-      spec === undefined ? Effect.succeed(undefined) : leaseOf(spec, role, leaseOptions.label)
+      spec === undefined ? Effect.succeed(undefined) : leaseOf(spec, role, leaseOptions)
     )
 
   const exclude = (exclusion: Exclusion): Effect.Effect<void> =>

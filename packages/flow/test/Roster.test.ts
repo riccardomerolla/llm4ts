@@ -16,6 +16,7 @@ import {
 } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { ConnectorCapabilities, LlmChunk, Message } from "@llm4ts/core/Models"
+import { withCallPurpose } from "@llm4ts/flow/Timing"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 import {
   makeCollectingFlowEvents,
@@ -473,6 +474,35 @@ describe("Roster seats", () => {
         )
         // Everyone else is out now: the next hold goes straight to claude.
         assert.strictEqual(yield* text(cleared.service, "go"), "claude ok")
+      })
+    )
+  )
+
+  it.effect("a per-call lease names what the call is for, so parallel calls read apart", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const roster = yield* makeRoster({ executors: [codex, claude], events })
+        const reviewer = rosterSeat(
+          roster,
+          { seatFor: seatFor(log, () => undefined) },
+          "reviewer",
+          "/wt/a",
+          {
+            events,
+            label: "story a"
+          }
+        )
+        yield* withCallPurpose("adversarial lens", text(reviewer, "look"))
+        yield* text(reviewer, "plain")
+        const lines = rosterLines(yield* events.recorded).filter((line) =>
+          line.includes(" takes reviewer")
+        )
+        assert.deepStrictEqual(lines, [
+          "roster: claude takes reviewer for story a · adversarial lens",
+          "roster: claude takes reviewer for story a"
+        ])
       })
     )
   )

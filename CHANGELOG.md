@@ -24,6 +24,13 @@ dependencies: b ← a; c ← a, b; …`, and how many ready stories are waiting
   any story (the epic's gates) shows on the header's `now` line; the classic
   view prints a line when each gate or setup command starts; `llm4ts
 profile` names a gap by the work that began it.
+- **Parallel reviewer leases say which lens.** A task review asks its
+  lenses (adversarial, correctness, readability, tests) at once, so a roster
+  printed `topolino takes reviewer for <story>` four times over. Each lease
+  now names its purpose (`roster: topolino takes reviewer for <story> ·
+adversarial lens`, votes as `· vote 2 of 3`), the roster's waiting line
+  does too, and each round opens with one line: `review round 1 of "<task>":
+4 lenses in parallel (adversarial, code-functionality, …)`.
 - **The lane names its first steps.** A story's baseline gates (the gates on
   the commit it starts from) and its task planning are now stages, so
   `watch` shows `story <id>: baseline gates` or `story <id>: plan tasks`

@@ -39,6 +39,7 @@ import { origins, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 import type { JudgmentMode } from "@llm4ts/flow/Judgment"
 import { attr, kindAttribute } from "@llm4ts/flow/Spans"
 import { recordingTracer } from "./support/RecordingTracer.ts"
+import { callPurpose } from "@llm4ts/flow/Timing"
 
 const unused = InvalidRequestError.make({ message: "unused" })
 
@@ -1141,5 +1142,55 @@ describe("stall on an identical diff (ADR 0027)", () => {
         })
         assert.isFalse(settled.isClean)
       })
+  )
+})
+
+describe("review rounds say what runs", () => {
+  it.effect("names each lens call's purpose and frames the round in one line", () =>
+    Effect.gen(function* () {
+      const purposes = yield* Ref.make<ReadonlyArray<string>>([])
+      const service: LlmServiceShape = {
+        ...reviewerService(yield* Ref.make<ReadonlyArray<unknown>>([]), yield* Ref.make(0)),
+        executeStructuredWithUsage: <A, E, RD, RE>(
+          _prompt: string,
+          schema: Schema.ConstraintCodec<A, E, RD, RE>
+        ) =>
+          Effect.gen(function* () {
+            const purpose = yield* callPurpose
+            yield* Ref.update(purposes, (all) => [...all, purpose ?? "(none)"])
+            const value = yield* Schema.decodeUnknownEffect(schema)({ issues: [] }).pipe(
+              Effect.orDie
+            )
+            return [value, undefined, undefined] as const
+          })
+      }
+      const events = yield* makeCollectingFlowEvents
+      yield* reviewAndFixLoop({
+        reviewers: minimalReviewers,
+        reviewerService: service,
+        coder: yield* makeChat(coderService(yield* Ref.make(0))),
+        taskTitle: "add the page",
+        currentDiff: Effect.succeed("diff"),
+        events,
+        votes: 2
+      })
+      assert.sameMembers(
+        [...(yield* Ref.get(purposes))],
+        [
+          "adversarial lens · vote 1 of 2",
+          "adversarial lens · vote 2 of 2",
+          ...minimalReviewers.slice(1).map((lens) => `${lens.name} lens`)
+        ]
+      )
+      const framed = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Info" && event.message.startsWith("review round") ? [event.message] : []
+      )
+      assert.deepStrictEqual(framed, [
+        `review round 1 of "add the page": 4 lenses in parallel (adversarial ×2, ${minimalReviewers
+          .slice(1)
+          .map((lens) => lens.name)
+          .join(", ")})`
+      ])
+    })
   )
 })
