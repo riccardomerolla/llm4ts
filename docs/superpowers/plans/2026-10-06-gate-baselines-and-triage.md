@@ -1073,7 +1073,12 @@ if (options.lint !== undefined) {
   const reported = yield * Ref.make<ReadonlySet<string>>(new Set())
   const gate = yield * applyTriage(yield * options.lint, options.triage, context.events, reported)
   if (!gate.isClean) {
-    return yield * FlowAborted.make({/* unchanged message built from gate.issues */})
+    return (
+      yield *
+      FlowAborted.make({
+        /* unchanged message built from gate.issues */
+      })
+    )
   }
 }
 ```
