@@ -210,8 +210,8 @@ collector, and llm4ts defaults `OTEL_TRACES_EXPORTER` and
 `OTEL_METRICS_EXPORTER` to `otlp` when an endpoint is set. `LLM4TS_OTEL=on`
 (what `llm4ts run --otel` sets) with no endpoint exports traces only to a
 local Arize Phoenix at `http://localhost:6006`; `LLM4TS_OTEL=off` or
-`OTEL_SDK_DISABLED=true` turns everything off. `LLM4TS_OTEL_CONTENT` is `off`
-by default; `on` adds prompts, replies and tool I/O to the spans (redacted,
+`OTEL_SDK_DISABLED=true` turns everything off. `LLM4TS_OTEL_CONTENT` (what
+`llm4ts run --otel-content` sets) is `off` by default; `on` adds prompts, replies and tool I/O to the spans (redacted,
 capped), `full` adds the system prompt. `LLM4TS_FLOW` is set by the shell to
 the flow's name for the run span. Nothing is exported while the test suite
 runs.

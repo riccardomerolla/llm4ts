@@ -175,6 +175,36 @@ export const resolveFlow = Effect.fn("@llm4ts/shell/Cli.resolveFlow")(function* 
   return found.path
 })
 
+export interface RunFlags {
+  readonly verbose: boolean
+  readonly roster: Option.Option<string>
+  readonly executors: Option.Option<string>
+  readonly pack: Option.Option<string>
+  readonly ui: "classic" | "tree"
+  readonly transcript: boolean
+  readonly otel: boolean
+  readonly otelContent: Option.Option<"off" | "on" | "full">
+}
+
+/** The flow child's environment: `base` with what the `run` flags forward on top. */
+export const runEnvironmentFrom = (
+  flags: RunFlags,
+  flowPath: string,
+  base: Readonly<Record<string, string | undefined>>
+): Record<string, string | undefined> => ({
+  ...base,
+  ...(flags.verbose ? { LLM4TS_VERBOSITY: "verbose" } : {}),
+  ...(Option.isSome(flags.roster) ? { LLM4TS_ROSTER: flags.roster.value } : {}),
+  ...(Option.isSome(flags.executors) ? { LLM4TS_EXECUTORS: flags.executors.value } : {}),
+  ...(Option.isSome(flags.pack) ? { LLM4TS_PACK: flags.pack.value } : {}),
+  ...(flags.ui === "tree" ? { LLM4TS_UI: "tree" } : {}),
+  ...(flags.transcript ? { LLM4TS_TRANSCRIPT: "on" } : {}),
+  ...(flags.otel ? { LLM4TS_OTEL: "on" } : {}),
+  ...(Option.isSome(flags.otelContent) ? { LLM4TS_OTEL_CONTENT: flags.otelContent.value } : {}),
+  // The flow's name, for its spans (ADR 0026).
+  LLM4TS_FLOW: basename(flowPath, extname(flowPath))
+})
+
 const runCommand = Command.make(
   "run",
   {
@@ -230,36 +260,19 @@ const runCommand = Command.make(
       Flag.withDescription(
         "Export spans to a local Arize Phoenix (http://localhost:6006) unless OTEL_EXPORTER_OTLP_ENDPOINT points elsewhere; forwarded as LLM4TS_OTEL (ADR 0026)"
       )
+    ),
+    otelContent: Flag.Literals("otel-content", ["off", "on", "full"]).pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "What exported spans carry besides usage: `on` adds prompts, replies and tool I/O (redacted, capped), `full` the system prompt too; forwarded as LLM4TS_OTEL_CONTENT (off by default, ADR 0026)"
+      )
     )
   },
   (config) =>
     Effect.gen(function* () {
       const tiers = shellTierPaths()
       const flowPath = yield* resolveFlow(config.flow, tiers)
-      const environment: Record<string, string | undefined> = { ...process.env }
-      if (config.verbose) {
-        environment.LLM4TS_VERBOSITY = "verbose"
-      }
-      if (config.roster._tag === "Some") {
-        environment.LLM4TS_ROSTER = config.roster.value
-      }
-      if (config.executors._tag === "Some") {
-        environment.LLM4TS_EXECUTORS = config.executors.value
-      }
-      if (config.pack._tag === "Some") {
-        environment.LLM4TS_PACK = config.pack.value
-      }
-      if (config.ui === "tree") {
-        environment.LLM4TS_UI = "tree"
-      }
-      if (config.transcript) {
-        environment.LLM4TS_TRANSCRIPT = "on"
-      }
-      if (config.otel) {
-        environment.LLM4TS_OTEL = "on"
-      }
-      // The flow's name, for its spans (ADR 0026).
-      environment.LLM4TS_FLOW = basename(flowPath, extname(flowPath))
+      const environment = runEnvironmentFrom(config, flowPath, process.env)
       const exitCode = yield* launchFlow({
         flowPath,
         taskArgs: [
