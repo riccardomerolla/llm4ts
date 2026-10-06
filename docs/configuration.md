@@ -288,6 +288,16 @@ hold, and the retro digest shows it.
 | `LLM4TS_STALL_REPEATS` | Identical tool calls in a row that end the turn. Default `5`                          |
 | `LLM4TS_STALL_MINUTES` | Minutes without output that end the turn. Unset: off (a slow seat looks like silence) |
 
+The retro can edit the loop, not only the stories (ADR 0027 decision 12).
+Its digest ends with a Signatures section when a pattern repeats across
+stories (gaming the oracle guard caught, the same reviewer finding in two
+stories, fabricated status in two stories), and the seat may answer with
+`rules`: an `append-rule` line or a `replace-section` for
+`.llm4ts/review-rules.md`, a pack's `reviewers/<name>.md`, `pack.md`,
+`lessons.md` or a `patterns/pitfalls-*.md` card. The report renders each as
+a diff; the next `epic-stories` run applies approved ones from the JSON and
+marks the report, like tasks and story edits.
+
 ## Autonomy contract and evidence
 
 Every coder's system prompt opens with one paragraph from

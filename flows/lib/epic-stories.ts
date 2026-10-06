@@ -2047,7 +2047,9 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
           const applied =
             retroPlan === undefined
               ? undefined
-              : yield* applyApprovedRetros(files, retroState, retroPlan, events, Date.now())
+              : yield* applyApprovedRetros(files, retroState, retroPlan, events, Date.now(), {
+                  rulesRoot: input.workDir
+                })
           // The unit the executor works on: the epic's plan, or one refine round.
           // Same branch, seats, gates and judge; its own plan and state folder.
           let unit = {

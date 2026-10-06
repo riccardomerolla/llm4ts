@@ -22,7 +22,7 @@ import { FlowEvent, Info, type FlowEventsShape } from "./FlowEvents.ts"
 import type { TraceLine } from "./FlowRecorder.ts"
 import { Plan, Task, parsePlan } from "./Plan.ts"
 import { loadVersioned, makePlanStore, type PlainFileStoreShape } from "./Persistence.ts"
-import { ReviewResult } from "./Review.ts"
+import { ReviewResult, repoReviewRulesPath } from "./Review.ts"
 import {
   EpicReport,
   EpicReportVersion,
@@ -478,6 +478,7 @@ export const renderRetroDigest = (inputs: RetroInputs): string => {
         break
     }
   }
+  const signatures = signaturesOf(inputs, trace.events)
   const header = [
     `# Retro digest — run ${inputs.runId}, epic ${inputs.plan.epicId}`,
     "",
@@ -492,6 +493,13 @@ export const renderRetroDigest = (inputs: RetroInputs): string => {
           : "present"
     }`,
     ...(retries.length === 0 ? [] : [`- retries across the run: ${countBy(retries)}`]),
+    ...(signatures.length === 0
+      ? []
+      : [
+          "",
+          "## Signatures (patterns across stories: a rule, not a task)",
+          ...signatures.map((line) => `- ${line}`)
+        ]),
     ...(runLines.length === 0
       ? []
       : [
@@ -548,9 +556,33 @@ export const RetroStory = Schema.Struct({
 })
 export type RetroStory = typeof RetroStory.Type
 
+export const RuleEditOp = Schema.Literals(["append-rule", "replace-section"])
+export type RuleEditOp = typeof RuleEditOp.Type
+
+/**
+ * An edit to the loop rather than to a story (ADR 0027 decision 12): a line
+ * appended to a rules file, or a section replaced. Structured, never a
+ * diff; the report renders it as one for the human.
+ */
+export const RuleEdit = Schema.Struct({
+  /** Repo-relative: `.llm4ts/review-rules.md`, a pack's `reviewers/<name>.md`, `pack.md`, `lessons.md`, or a `patterns/pitfalls-*.md` card. */
+  target: Schema.String,
+  op: RuleEditOp,
+  /** `append-rule`: the rule, one line, without a leading dash. */
+  line: Schema.optionalKey(Schema.String),
+  /** `replace-section`: the `## heading` (without the hashes) and its new body. */
+  heading: Schema.optionalKey(Schema.String),
+  body: Schema.optionalKey(Schema.String),
+  /** The signature in the digest this answers. */
+  why: Schema.String
+})
+export type RuleEdit = typeof RuleEdit.Type
+
 export class RetroProposal extends Schema.Class<RetroProposal>("RetroProposal")({
   summary: Schema.String,
   stories: Schema.Array(RetroStory),
+  /** Edits to the rules the next run reviews with; absent in proposals written before ADR 0027. */
+  rules: Schema.optionalKey(Schema.Array(RuleEdit)),
   runAdvice: Schema.Array(Schema.Struct({ finding: Schema.String, evidence: Schema.String })),
   libraryAdvice: Schema.Array(
     Schema.Struct({ title: Schema.String, evidence: Schema.String, suggestion: Schema.String })
@@ -591,6 +623,21 @@ export const retroProposalJsonSchema: JsonSchema = {
           feedback: { type: "string" }
         },
         required: ["id", "diagnosis", "kind"]
+      }
+    },
+    rules: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          target: { type: "string" },
+          op: { type: "string", enum: ["append-rule", "replace-section"] },
+          line: { type: "string" },
+          heading: { type: "string" },
+          body: { type: "string" },
+          why: { type: "string" }
+        },
+        required: ["target", "op", "why"]
       }
     },
     runAdvice: {
@@ -637,6 +684,14 @@ export const retroPrompt = (digest: string, storiesWithPlan: ReadonlyArray<strin
     "- `refine`: the story needs a new planning round (a missing story, a split, a scope change",
     "  no edit covers). Give the `feedback` text a planner should take.",
     "- `none`: nothing to change (an outage, a dependency that will unblock it). Give `why`.",
+    "",
+    "`rules`: when the digest's Signatures section shows a pattern that repeats across stories",
+    "(the same reviewer finding, gaming such as stubs or skipped tests, fabricated status),",
+    "propose an edit to the loop rather than a task: `append-rule` adds one line to a rules",
+    "file, `replace-section` rewrites one `## heading` of it. Targets are repo-relative:",
+    "`.llm4ts/review-rules.md` (every run reads it as a review lens), a pack's",
+    "`reviewers/<name>.md`, `pack.md`, `lessons.md`, or a `patterns/pitfalls-*.md` card. Name",
+    "the signature in `why`. Nothing here is applied unreviewed.",
     "",
     "`runAdvice`: findings about the environment or configuration (a seat on an old CLI, Node",
     "mismatch, gates missing, transcripts off), each with its evidence line.",
@@ -757,7 +812,96 @@ export const validateRetroProposal = (
         break
     }
   }
-  return { proposal: RetroProposal.make({ ...proposal, stories }), dropped }
+  const rules: Array<RuleEdit> = []
+  for (const edit of proposal.rules ?? []) {
+    if (!allowedRuleTarget(edit.target)) {
+      dropped.push(`rule edit: ${edit.target} is not a rules file a retro may edit`)
+      continue
+    }
+    if (edit.op === "append-rule" && (edit.line ?? "").trim().length === 0) {
+      dropped.push(`rule edit: append-rule to ${edit.target} with no line`)
+      continue
+    }
+    if (
+      edit.op === "replace-section" &&
+      ((edit.heading ?? "").trim().length === 0 || (edit.body ?? "").trim().length === 0)
+    ) {
+      dropped.push(`rule edit: replace-section in ${edit.target} with no heading or body`)
+      continue
+    }
+    rules.push(edit)
+  }
+  return {
+    proposal: RetroProposal.make({
+      ...proposal,
+      stories,
+      ...(rules.length === 0 ? {} : { rules })
+    }),
+    dropped
+  }
+}
+
+/** The files a retro may edit: the repository's review rules, a pack's lenses and rules, a pitfall card. */
+export const allowedRuleTarget = (target: string): boolean =>
+  !badPath(target) &&
+  (target === repoReviewRulesPath ||
+    /(?:^|\/)reviewers\/[^/]+\.md$/u.test(target) ||
+    /(?:^|\/)pack\.md$/u.test(target) ||
+    /(?:^|\/)lessons\.md$/u.test(target) ||
+    /(?:^|\/)patterns\/pitfalls-[^/]+\.md$/u.test(target))
+
+const findingLine = /^- \[(Critical|Warning|Info)\] (.+?)(?: \(| — |: |$)/u
+
+/**
+ * Patterns across stories the digest flags for a rule (ADR 0027 decision 12):
+ * gaming (oracle-guard findings), the same reviewer finding in two or more
+ * stories, fabricated status in two or more stories.
+ */
+export const signaturesOf = (
+  inputs: RetroInputs,
+  events: ReadonlyArray<FlowEvent>
+): ReadonlyArray<string> => {
+  const gaming: Array<string> = []
+  const titles = new Map<string, Set<string>>()
+  for (const entry of inputs.stories) {
+    const text = entry.findings ?? ""
+    if (/^- \[(?:Critical|Warning)\] oracle: /mu.test(text)) {
+      gaming.push(entry.story.id)
+    }
+    for (const raw of text.split(/\r?\n/u)) {
+      const match = findingLine.exec(raw.trim())
+      const title = match?.[2]?.trim().toLowerCase()
+      if (title === undefined || title.startsWith("lint failed") || title.startsWith("oracle:")) {
+        continue
+      }
+      titles.set(title, (titles.get(title) ?? new Set()).add(entry.story.id))
+    }
+  }
+  const fabricated = new Set<string>()
+  for (const event of events) {
+    if (event._tag === "EvidenceChecked" && event.unverified > 0 && event.lane !== undefined) {
+      fabricated.add(event.lane)
+    }
+  }
+  const lines: Array<string> = []
+  if (gaming.length > 0) {
+    lines.push(
+      `gaming: the oracle guard caught deleted or skipped tests in ${gaming.length} stor${gaming.length === 1 ? "y" : "ies"} (${gaming.join(", ")})`
+    )
+  }
+  for (const [title, stories] of titles) {
+    if (stories.size >= 2) {
+      lines.push(
+        `the same reviewer finding in ${stories.size} stories (${[...stories].join(", ")}): "${title}"`
+      )
+    }
+  }
+  if (fabricated.size >= 2) {
+    lines.push(
+      `fabricated status in ${fabricated.size} stories (${[...fabricated].join(", ")}): the coder claimed commands that never ran`
+    )
+  }
+  return lines
 }
 
 // ---- Report ---------------------------------------------------------------------------------
@@ -849,6 +993,25 @@ export const renderRetroReport = (inputs: RetroReportInputs): string => {
       )
     }
   }
+  const rules = proposal.rules ?? []
+  if (rules.length > 0) {
+    lines.push("## Rule edits", "")
+    for (const edit of rules) {
+      lines.push(`### ${edit.target}`, "", `**Why.** ${edit.why.trim()}`, "", "```diff")
+      if (edit.op === "append-rule") {
+        lines.push(`+ - ${(edit.line ?? "").trim()}`)
+      } else {
+        lines.push(
+          `  ## ${(edit.heading ?? "").trim()}`,
+          ...(edit.body ?? "")
+            .trim()
+            .split(/\r?\n/u)
+            .map((row) => `+ ${row}`)
+        )
+      }
+      lines.push("```", "")
+    }
+  }
   if (proposal.runAdvice.length > 0) {
     lines.push(
       "## Run advice",
@@ -865,7 +1028,7 @@ export const renderRetroReport = (inputs: RetroReportInputs): string => {
   )
   const refines = proposal.stories.filter((entry) => entry.kind === "refine")
   lines.push("## Approval", "")
-  if (applies.length === 0) {
+  if (applies.length === 0 && rules.length === 0) {
     lines.push("Nothing here is applied by the next run; the report is for reading.", "")
   } else {
     lines.push(
@@ -875,6 +1038,11 @@ export const renderRetroReport = (inputs: RetroReportInputs): string => {
         entry.kind === "tasks"
           ? `- ${entry.id}: append ${entry.tasks?.length ?? 0} task(s) to its plan`
           : `- ${entry.id}: edit its entry and restart it from a fresh worktree`
+      ),
+      ...rules.map((edit) =>
+        edit.op === "append-rule"
+          ? `- ${edit.target}: append one rule`
+          : `- ${edit.target}: replace the "${(edit.heading ?? "").trim()}" section`
       ),
       ""
     )
@@ -963,12 +1131,49 @@ const retroTaskTitle = (runId: string, title: string): string => `Retro ${runId}
  * so the executor's hash check restarts them). Says what it did on the
  * events. Nothing here fails the run: a retro that no longer fits is skipped.
  */
+export interface ApplyRetroOptions {
+  /** The repository root rule edits resolve against; without it they are reported, not applied. */
+  readonly rulesRoot?: string
+}
+
+/** `append-rule`: the file with the rule added once; `replace-section`: with the section rewritten or appended. */
+export const applyRuleEdit = (existing: string | undefined, edit: RuleEdit): string | undefined => {
+  const current = existing ?? ""
+  if (edit.op === "append-rule") {
+    const line = `- ${(edit.line ?? "").trim()}`
+    if (current.split(/\r?\n/u).some((row) => row.trim() === line)) {
+      return undefined
+    }
+    const base =
+      current.trim().length === 0 && edit.target === repoReviewRulesPath
+        ? "# Review rules\n\nRules every review round of this repository applies (ADR 0027).\n\n"
+        : current.length === 0 || current.endsWith("\n")
+          ? current
+          : `${current}\n`
+    return `${base}${line}\n`
+  }
+  const heading = `## ${(edit.heading ?? "").trim()}`
+  const body = (edit.body ?? "").trim()
+  const sections = current.split(/^(?=## )/mu)
+  const index = sections.findIndex((section) => section.split(/\r?\n/u)[0]?.trim() === heading)
+  const replacement = `${heading}\n\n${body}\n`
+  if (index < 0) {
+    const base = current.length === 0 || current.endsWith("\n") ? current : `${current}\n`
+    return `${base}${current.trim().length === 0 ? "" : "\n"}${replacement}`
+  }
+  if (sections[index]?.trim() === replacement.trim()) {
+    return undefined
+  }
+  return [...sections.slice(0, index), replacement, ...sections.slice(index + 1)].join("")
+}
+
 export const applyApprovedRetros = Effect.fn("@llm4ts/flow/Retro.apply")(function* (
   files: PlainFileStoreShape,
   stateDir: string,
   plan: StoryPlan,
   events: FlowEventsShape,
-  now: number
+  now: number,
+  options: ApplyRetroOptions = {}
 ): Effect.fn.Return<AppliedRetros, FlowError> {
   const notes: Array<string> = []
   const say = (message: string): Effect.Effect<void> =>
@@ -1063,6 +1268,26 @@ export const applyApprovedRetros = Effect.fn("@llm4ts/flow/Retro.apply")(functio
         case "none":
           break
       }
+    }
+    for (const edit of proposal.rules ?? []) {
+      if (options.rulesRoot === undefined) {
+        yield* say(`${runId}: rule edit to ${edit.target} needs the repository root; not applied`)
+        continue
+      }
+      if (!allowedRuleTarget(edit.target)) {
+        yield* say(`${runId}: rule edit to ${edit.target} is not allowed; skipped`)
+        continue
+      }
+      const path = join(options.rulesRoot, edit.target)
+      const existing = yield* files.read(path).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const next = applyRuleEdit(existing, edit)
+      if (next === undefined) {
+        continue
+      }
+      yield* files.writeAtomic(path, next)
+      yield* say(
+        `${runId}: ${edit.target} — ${edit.op === "append-rule" ? "one rule appended" : `section "${(edit.heading ?? "").trim()}" replaced`} (${edit.why.trim()})`
+      )
     }
     if (editedIds.length > 0) {
       const valid: { readonly plan: StoryPlan; readonly problem: string | undefined } =

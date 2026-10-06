@@ -1,6 +1,6 @@
 # ADR 0023: A Run's Failures Become Proposed Fixes Behind An Approval
 
-Status: Accepted · Date: 2026-10-03
+Status: Accepted · Date: 2026-10-03 · Amended 2026-10-06 by ADR 0027 decision 12: a proposal may also carry `rules`, structured edits to rules files, applied behind the same approval.
 
 ## Context
 

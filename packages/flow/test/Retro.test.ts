@@ -8,7 +8,8 @@ import {
   StageFailed,
   StoryJudged,
   Timed,
-  makeCollectingFlowEvents
+  makeCollectingFlowEvents,
+  EvidenceChecked
 } from "@llm4ts/flow/FlowEvents"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { Plan, Task } from "@llm4ts/flow/Plan"
@@ -31,7 +32,10 @@ import {
   retroPaths,
   retroPrompt,
   validateRetroProposal,
-  writeRetro
+  writeRetro,
+  allowedRuleTarget,
+  applyRuleEdit,
+  signaturesOf
 } from "@llm4ts/flow/Retro"
 import {
   EpicReport,
@@ -508,5 +512,202 @@ describe("applying approved retros", () => {
       const taskPlan = yield* makePlanStore(files).load(`${stateDir}/stories/a.plan.md`)
       assert.strictEqual(taskPlan?.tasks.length, 3)
     })
+  )
+})
+
+describe("retro rule edits (ADR 0027 decision 12)", () => {
+  const rulesFile = ".llm4ts/review-rules.md"
+
+  it("allows only rules files: the repo rules, a pack's reviewers, pack.md, lessons, pitfall cards", () => {
+    for (const target of [
+      rulesFile,
+      "kits/j2ee-nextjs/packs/jsp-nextjs/reviewers/traceability.md",
+      "packs/p/pack.md",
+      "packs/p/lessons.md",
+      "kits/soap-ace/patterns/pitfalls-soap-rest.md"
+    ]) {
+      assert.isTrue(allowedRuleTarget(target), target)
+    }
+    for (const target of [
+      "flows/implement.ts",
+      "../x/reviewers/a.md",
+      "/etc/reviewers/a.md",
+      "src/a.md",
+      ""
+    ]) {
+      assert.isFalse(allowedRuleTarget(target), target)
+    }
+  })
+
+  it("validation keeps well-formed rule edits and drops the rest with a reason", () => {
+    const validated = validateRetroProposal(
+      RetroProposal.make({
+        summary: "s",
+        stories: [],
+        rules: [
+          {
+            target: rulesFile,
+            op: "append-rule",
+            line: "No skipped tests.",
+            why: "gaming in 2 stories"
+          },
+          { target: "flows/implement.ts", op: "append-rule", line: "x", why: "y" },
+          { target: rulesFile, op: "append-rule", why: "no line" },
+          { target: rulesFile, op: "replace-section", heading: "Tests", why: "no body" },
+          {
+            target: rulesFile,
+            op: "replace-section",
+            heading: "Tests",
+            body: "Keep them.",
+            why: "ok"
+          }
+        ],
+        runAdvice: [],
+        libraryAdvice: []
+      }),
+      plan,
+      new Set()
+    )
+    assert.strictEqual(validated.proposal.rules?.length, 2)
+    assert.strictEqual(validated.dropped.length, 3)
+    assert.include(validated.dropped[0] ?? "", "flows/implement.ts is not a rules file")
+  })
+
+  it("the digest flags gaming, a repeated reviewer finding and fabricated status across stories", () => {
+    const findings = (id: string, lines: ReadonlyArray<string>) => ({
+      story: story(id),
+      state: undefined,
+      plan: undefined,
+      findings: lines.join("\n"),
+      verdict: undefined
+    })
+    const inputs = {
+      runId: "run-1",
+      plan,
+      trace: [],
+      transcripts: undefined,
+      report: undefined,
+      board: undefined,
+      stories: [
+        findings("a", [
+          "- [Critical] oracle: skip or focus marker added: .skip(",
+          "- [Warning] unbounded loop (src/a.ts:3): x"
+        ]),
+        findings("b", [
+          "- [Warning] unbounded loop (src/b.ts:9): y",
+          "- [Critical] lint failed: pnpm test: z"
+        ]),
+        findings("c", ["- [Info] naming: z"])
+      ]
+    }
+    const lines = signaturesOf(inputs, [
+      EvidenceChecked.make({ task: "t", claimed: 1, unverified: 1, lane: "a" }),
+      EvidenceChecked.make({ task: "t", claimed: 1, unverified: 1, lane: "c" })
+    ])
+    assert.strictEqual(lines.length, 3)
+    assert.include(
+      lines[0] ?? "",
+      "gaming: the oracle guard caught deleted or skipped tests in 1 story (a)"
+    )
+    assert.include(
+      lines[1] ?? "",
+      'the same reviewer finding in 2 stories (a, b): "unbounded loop"'
+    )
+    assert.include(lines[2] ?? "", "fabricated status in 2 stories (a, c)")
+    assert.include(renderRetroDigest(inputs), "## Signatures")
+  })
+
+  it("applyRuleEdit appends a rule once and replaces or adds a section", () => {
+    const first = applyRuleEdit(undefined, {
+      target: rulesFile,
+      op: "append-rule",
+      line: "No skipped tests.",
+      why: "w"
+    })
+    assert.strictEqual(
+      first,
+      "# Review rules\n\nRules every review round of this repository applies (ADR 0027).\n\n- No skipped tests.\n"
+    )
+    assert.isUndefined(
+      applyRuleEdit(first, {
+        target: rulesFile,
+        op: "append-rule",
+        line: "No skipped tests.",
+        why: "w"
+      })
+    )
+    const replaced = applyRuleEdit("intro\n\n## Tests\n\nold body\n\n## Other\n\nkeep\n", {
+      target: rulesFile,
+      op: "replace-section",
+      heading: "Tests",
+      body: "new body",
+      why: "w"
+    })
+    assert.strictEqual(replaced, "intro\n\n## Tests\n\nnew body\n## Other\n\nkeep\n")
+    const added = applyRuleEdit("intro\n", {
+      target: rulesFile,
+      op: "replace-section",
+      heading: "Tests",
+      body: "b",
+      why: "w"
+    })
+    assert.strictEqual(added, "intro\n\n## Tests\n\nb\n")
+  })
+
+  it.effect(
+    "an approved rule edit lands in the repository's rules file once; without a root it is only reported",
+    () =>
+      Effect.gen(function* () {
+        const files = yield* seeded
+        const events = yield* makeCollectingFlowEvents
+        const validated = validateRetroProposal(
+          RetroProposal.make({
+            summary: "s",
+            stories: [],
+            rules: [
+              {
+                target: rulesFile,
+                op: "append-rule",
+                line: "Never skip a test.",
+                why: "gaming in 2 stories"
+              }
+            ],
+            runAdvice: [],
+            libraryAdvice: []
+          }),
+          plan,
+          new Set()
+        )
+        const inputs = yield* loadInputs(files)
+        const paths = yield* writeRetro(files, stateDir, {
+          runId: "run-2",
+          plan,
+          validated,
+          workDir: "/repo",
+          epicDir: "conto",
+          digest: renderRetroDigest(inputs),
+          at: 5
+        })
+        const report = (yield* files.read(paths.report)) ?? ""
+        assert.include(report, "## Rule edits")
+        assert.include(report, "+ - Never skip a test.")
+        assert.include(report, `- ${rulesFile}: append one rule`)
+        yield* files.writeAtomic(paths.report, report.replace("- [ ] Approved", "- [x] Approved"))
+
+        const reported = yield* applyApprovedRetros(files, stateDir, plan, events, 10)
+        assert.include(reported.notes.join("\n"), "needs the repository root; not applied")
+        assert.isUndefined(yield* files.read(`/repo/${rulesFile}`))
+        // The report was marked applied by that run; reset it to apply for real.
+        yield* files.writeAtomic(paths.report, report.replace("- [ ] Approved", "- [x] Approved"))
+        const applied = yield* applyApprovedRetros(files, stateDir, plan, events, 11, {
+          rulesRoot: "/repo"
+        })
+        assert.include(applied.notes.join("\n"), `${rulesFile} — one rule appended`)
+        assert.include((yield* files.read(`/repo/${rulesFile}`)) ?? "", "- Never skip a test.")
+        const again = yield* applyApprovedRetros(files, stateDir, plan, events, 12, {
+          rulesRoot: "/repo"
+        })
+        assert.deepStrictEqual(again.notes, [])
+      })
   )
 })

@@ -30,6 +30,14 @@ rules.
   task as `Stalled` with the signal in the story's reason (ADR 0027
   decision 11). `Chat.ask` fails with `FlowLlmError | Stalled`; a caller typed
   against `FlowError` is unchanged.
+- **The retro edits the loop.** The digest ends with a Signatures section when
+  a pattern repeats across stories (gaming the oracle guard caught, the same
+  reviewer finding in two stories, fabricated status in two); the seat may
+  answer with `rules`, structured `append-rule` or `replace-section` edits
+  to `.llm4ts/review-rules.md`, a pack's reviewers, `pack.md`, `lessons.md`
+  or a pitfall card. The report shows each as a diff; the next run applies
+  approved ones from the JSON and marks the report (ADR 0027 decision 12,
+  amending ADR 0023).
 
 ## 2.31.0
 
