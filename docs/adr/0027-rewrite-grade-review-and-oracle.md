@@ -81,7 +81,10 @@ Numbered as the specs implement them. Release A (2.31.0) is 1–6, release B
    working directory is the coder's whole world; it does not look for the
    tool running it (a Gemini agent was seen reading llm4ts's installed
    source to learn how it would be reviewed). Child processes no longer
-   inherit the orchestrator's `LLM4TS_*` variables or `_`.
+   inherit the orchestrator's `LLM4TS_*` variables or `_`, and a Gemini CLI
+   that takes `--admin-policy` gets an admin-tier rule denying any tool call
+   whose arguments name `node_modules/@llm4ts/`; other harnesses carry the
+   rule as prompt text only.
 6. **Evidence is cross-checked.** The task's `## Findings` trailer gains
    `verified: <command>` and `confidence: high|medium|low`. Code checks
    `verified:` against the transcript's `Tool` entries; a command that never

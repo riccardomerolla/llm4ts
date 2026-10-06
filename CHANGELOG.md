@@ -11,6 +11,12 @@ Coders stay in their working tree.
   look for the tool running it (installation, source, processes,
   environment) and reads llm4ts's files only where its instructions name
   them, such as a gate log.
+- **Gemini enforces it.** A Gemini seat whose CLI lists `--admin-policy`
+  runs every turn under an admin-tier policy that denies any tool call
+  whose arguments name `node_modules/@llm4ts/` (llm4ts's installed
+  packages), with a message telling the model why. Admin-tier rules
+  outrank the allow-all of `-y`, so it holds for a coder. `gemini --help` is
+  asked once; an older CLI runs as before.
 - **Child processes no longer inherit the orchestrator's variables.**
   Coding agents, gates and setup commands are spawned without `LLM4TS_*`
   and `_` (the llm4ts binary's path), so an agent listing its environment

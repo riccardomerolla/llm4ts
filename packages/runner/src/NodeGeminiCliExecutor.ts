@@ -8,7 +8,9 @@ import {
   GeminiCliExecutor,
   buildGeminiArgs,
   extractGeminiCliResponse,
+  geminiHarnessPolicyToml,
   geminiProcessEnv,
+  geminiSupportsAdminPolicy,
   geminiTurnLimitSettingsJson,
   parseGeminiCliStreamEvent,
   validateGeminiExitCode,
@@ -37,6 +39,40 @@ export const makeNodeGeminiCliExecutor = (
           ),
           (path) => geminiProcessEnv(context, path)
         )
+  // The harness policy (`geminiHarnessPolicyToml`) goes in with
+  // `--admin-policy` on a CLI that lists the flag: `gemini --help` is asked
+  // once, and an older CLI simply runs without it — an unknown flag would
+  // fail every turn.
+  let adminPolicy: boolean | undefined
+  const supportsAdminPolicy: Effect.Effect<boolean> = Effect.suspend(() =>
+    adminPolicy !== undefined
+      ? Effect.succeed(adminPolicy)
+      : executor.run(["gemini", "--help"], process.cwd(), {}).pipe(
+          Effect.map((result) =>
+            geminiSupportsAdminPolicy([...result.stdout, ...result.stderr].join("\n"))
+          ),
+          Effect.catch(() => Effect.succeed(false)),
+          Effect.tap((supported) =>
+            Effect.sync(() => {
+              adminPolicy = supported
+            })
+          )
+        )
+  )
+  /** The turn's arguments: the policy file, written for the turn, when the CLI takes it. */
+  const argsFor = (
+    config: Parameters<typeof buildGeminiArgs>[0],
+    context: GeminiCliExecutionContext,
+    outputFormat: string
+  ) =>
+    Effect.flatMap(supportsAdminPolicy, (supported) =>
+      supported
+        ? Effect.map(
+            temporaryFiles.write("gemini-policy-", ".toml", geminiHarnessPolicyToml),
+            (path) => buildGeminiArgs(config, context, outputFormat, path)
+          )
+        : Effect.succeed(buildGeminiArgs(config, context, outputFormat))
+    )
   return {
     checkGeminiInstalled: executor
       .run(["gemini", "--version"], process.cwd(), {})
@@ -51,8 +87,9 @@ export const makeNodeGeminiCliExecutor = (
       Effect.scoped(
         Effect.gen(function* () {
           const environment = yield* environmentFor(context)
+          const args = yield* argsFor(config, context, "json")
           const result = yield* executor.runWithStdin(
-            ["gemini", ...buildGeminiArgs(config, context, "json")],
+            ["gemini", ...args],
             context.cwd ?? process.cwd(),
             environment,
             prompt
@@ -69,15 +106,17 @@ export const makeNodeGeminiCliExecutor = (
     runGeminiProcessStream: (prompt, config, context) =>
       Stream.scoped(
         Stream.unwrap(
-          Effect.map(environmentFor(context), (environment) =>
-            executor
-              .runStreamingWithStdin(
-                ["gemini", ...buildGeminiArgs(config, context, "stream-json")],
-                context.cwd ?? process.cwd(),
-                environment,
-                prompt
-              )
-              .pipe(Stream.map(parseGeminiCliStreamEvent))
+          Effect.map(
+            Effect.all([environmentFor(context), argsFor(config, context, "stream-json")]),
+            ([environment, args]) =>
+              executor
+                .runStreamingWithStdin(
+                  ["gemini", ...args],
+                  context.cwd ?? process.cwd(),
+                  environment,
+                  prompt
+                )
+                .pipe(Stream.map(parseGeminiCliStreamEvent))
           )
         )
       )

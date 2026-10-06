@@ -179,10 +179,32 @@ export const geminiSandboxEnvValue = (sandbox: GeminiSandbox): string | undefine
   }
 }
 
+/**
+ * The policy a Gemini seat runs under (loaded with `--admin-policy`): any
+ * tool call whose arguments name llm4ts's own installed packages is denied.
+ * An admin-tier rule (5.x) outranks yolo's allow-all (default tier, 1.x), so
+ * it holds for a coder run with `-y`; `denyMessage` tells the model why. A
+ * coder was seen reading llm4ts's source to learn how it would be reviewed.
+ * Arguments are matched as JSON, so a Windows path's `\\` matches too.
+ */
+export const geminiHarnessPolicyToml = [
+  "[[rule]]",
+  'toolName = "*"',
+  "argsPattern = 'node_modules[\\\\/]+@llm4ts[\\\\/]'",
+  'decision = "deny"',
+  "priority = 999",
+  'denyMessage = "That is llm4ts, the tool running you, not part of your task. Work in your working directory; what llm4ts expects of you is in your instructions."',
+  ""
+].join("\n")
+
+/** Whether `gemini --help` lists `--admin-policy`, the flag the harness policy needs. */
+export const geminiSupportsAdminPolicy = (help: string): boolean => help.includes("--admin-policy")
+
 export const buildGeminiArgs = (
   config: LlmConfig,
   context: GeminiCliExecutionContext,
-  outputFormat: string
+  outputFormat: string,
+  adminPolicyPath?: string
 ): ReadonlyArray<string> => {
   const directories = [...new Set(context.includeDirectories)].flatMap((path) => [
     "--include-directories",
@@ -203,6 +225,7 @@ export const buildGeminiArgs = (
     "--output-format",
     outputFormat,
     ...directories,
+    ...(adminPolicyPath === undefined ? [] : ["--admin-policy", adminPolicyPath]),
     ...(context.sandbox === undefined ? [] : ["-s"])
   ]
 }
