@@ -461,6 +461,18 @@ export interface RosterShape {
   readonly available: (role: Role) => Effect.Effect<number>
   /** Configured slots for `role`. */
   readonly slots: (role: Role) => number
+  /**
+   * Slots for `role` on the executors in the round, whether held or not: what
+   * the round could serve at once. A call holding a slot for a moment does not
+   * lower it; an executor out of the round does.
+   */
+  readonly capacity: (role: Role) => Effect.Effect<number>
+  /**
+   * Waits until `capacity(role)` is no longer `from` and returns the new
+   * value: an executor resumed, its exclusion expired, its health came back,
+   * or one left the round. Returns at once when it already differs.
+   */
+  readonly capacityChanged: (role: Role, from: number) => Effect.Effect<number>
   /** Classifies a failure of `id`'s call; returns the exclusion it earned, if any. */
   readonly report: (id: string, error: LlmError) => Effect.Effect<Exclusion | undefined>
   readonly exclude: (exclusion: Exclusion) => Effect.Effect<void>
@@ -768,6 +780,17 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         : Effect.raceFirst(Deferred.await(wake), Effect.sleep(Duration.millis(soonest)))
     })
 
+  /** `waitForChange`, waking at least every probe interval while a health exclusion waits. */
+  const waitOrProbe = (role: Role): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const probing = yield* lock.withPermit(
+        Effect.sync(() => [...exclusions.values()].some((exclusion) => exclusion.kind === "health"))
+      )
+      yield* probing
+        ? Effect.raceFirst(waitForChange(role), Effect.sleep(healthProbeInterval))
+        : waitForChange(role)
+    })
+
   const waitingReport = (role: Role, avoid: ReadonlyArray<string>): Effect.Effect<string> =>
     lock.withPermit(
       Effect.sync(() =>
@@ -884,14 +907,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
           yield* waited
           return yield* leaseOf(recovered, role, leaseOptions.label)
         }
-        const probing = yield* lock.withPermit(
-          Effect.sync(() =>
-            [...exclusions.values()].some((exclusion) => exclusion.kind === "health")
-          )
-        )
-        yield* probing
-          ? Effect.raceFirst(waitForChange(role), Effect.sleep(healthProbeInterval))
-          : waitForChange(role)
+        yield* waitOrProbe(role)
       }
     })
 
@@ -977,6 +993,35 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
       .filter((spec) => hasRole(spec, role))
       .reduce((sum, spec) => sum + (role === "coder" ? coderSlotsOf(spec) : slotsOf(spec)), 0)
 
+  const capacity = (role: Role): Effect.Effect<number> =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      return yield* lock.withPermit(
+        Effect.sync(() => {
+          expire(now)
+          return eligible(role, []).reduce(
+            (sum, spec) => sum + (role === "coder" ? coderSlotsOf(spec) : slotsOf(spec)),
+            0
+          )
+        })
+      )
+    })
+
+  const capacityChanged = (role: Role, from: number): Effect.Effect<number> =>
+    Effect.gen(function* () {
+      while (true) {
+        yield* probeDue
+        // The wake is taken before the count is read, so a change between
+        // the two still ends the wait.
+        const wake = yield* Ref.get(changed)
+        const now = yield* capacity(role)
+        if (now !== from) {
+          return now
+        }
+        yield* Effect.raceFirst(Deferred.await(wake), waitOrProbe(role))
+      }
+    })
+
   const snapshot: Effect.Effect<ReadonlyArray<ExecutorStatus>> = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
     return yield* lock.withPermit(
@@ -1005,6 +1050,8 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
     independenceBlocked,
     available,
     slots,
+    capacity,
+    capacityChanged,
     report,
     exclude,
     resume,

@@ -705,6 +705,8 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         ),
       available: roster.available,
       slots: roster.slots,
+      capacity: roster.capacity,
+      capacityChanged: roster.capacityChanged,
       executor: held.executor,
       contractOf: (id) => roster.executors.find((spec) => spec.id === id)?.contract,
       history: held.history

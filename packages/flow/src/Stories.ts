@@ -7,6 +7,7 @@
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
@@ -1821,20 +1822,26 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   yield* Effect.scoped(
     Effect.gen(function* () {
       while (true) {
+        /** The roster's coder capacity when a ready story was left waiting for it. */
+        let starvedAt: number | undefined
         if (halted === undefined) {
           const current = yield* progress
           const ready = readyStories(plan, current)
-          // With a roster, never launch more stories than there are free
-          // coders; with nothing running, launch one anyway — its lease waits
-          // for the first executor to come back (ADR 0019).
-          const free =
+          // With a roster, never run more stories than the round has coder
+          // slots: each running story holds one. Capacity, not the slots free
+          // this instant — a review or judge call holding a slot for a moment
+          // must not keep a story from starting; its lease waits for that call.
+          // With nothing running, launch one anyway — its lease waits for the
+          // first executor to come back (ADR 0019).
+          const capacity =
             context.roster === undefined
               ? Number.POSITIVE_INFINITY
-              : yield* context.roster.available("coder")
-          const budget = Math.min(concurrency - current.running.size, free)
+              : yield* context.roster.capacity("coder")
+          const budget = Math.min(concurrency, capacity) - current.running.size
           const slots =
             current.running.size === 0 && ready.length > 0 ? Math.max(1, budget) : budget
-          for (const story of ready.slice(0, Math.max(0, slots))) {
+          const launching = ready.slice(0, Math.max(0, slots))
+          for (const story of launching) {
             yield* Ref.update(running, (set) => new Set([...set, story.id]))
             yield* Effect.forkScoped(
               attempt(story).pipe(
@@ -1842,11 +1849,32 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
               )
             )
           }
+          if (
+            context.roster !== undefined &&
+            ready.length > launching.length &&
+            current.running.size + launching.length < concurrency
+          ) {
+            starvedAt = capacity
+          }
         }
         if ((yield* Ref.get(running)).size === 0) {
           break
         }
-        const completion = yield* Queue.take(completions)
+        // A story waiting only for coder capacity starts as soon as the round
+        // grows (an executor back from a cooldown, a health probe, a resume),
+        // not when the next running story happens to end.
+        const roster = context.roster
+        const next: Option.Option<Completion> =
+          starvedAt === undefined || roster === undefined
+            ? Option.some(yield* Queue.take(completions))
+            : yield* Effect.raceFirst(
+                Effect.map(Queue.take(completions), Option.some),
+                Effect.as(roster.capacityChanged("coder", starvedAt), Option.none<Completion>())
+              )
+        if (Option.isNone(next)) {
+          continue
+        }
+        const completion = next.value
         yield* Ref.update(running, (set) => {
           const next = new Set(set)
           next.delete(completion.story.id)
