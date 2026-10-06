@@ -74,6 +74,7 @@
     "./ReviewCache": "./dist/ReviewCache.js",
     "./Reviewer": "./dist/Reviewer.js",
     "./SpecChecks": "./dist/SpecChecks.js",
+    "./Spans": "./dist/Spans.js",
     "./Roster": "./dist/Roster.js",
     "./RosterSeats": "./dist/RosterSeats.js",
     "./Stories": "./dist/Stories.js",
