@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.33.0
 
 Phase 3 of the rewrite-grade loops (ADR 0028): the Bun port's third shape
 of work, as a primitive and two flows.
