@@ -12,6 +12,7 @@ import {
   renderFlowList,
   renderKitList,
   resolveFlow,
+  runEnvironmentFrom,
   watchOptionsFrom
 } from "@llm4ts/shell/Cli"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
@@ -304,4 +305,38 @@ describe("profileOptionsFrom", () => {
       assert.match(both.message, /either a trace or --epic/)
     })
   )
+})
+
+describe("runEnvironmentFrom", () => {
+  const none: Parameters<typeof runEnvironmentFrom>[0] = {
+    verbose: false,
+    roster: Option.none(),
+    executors: Option.none(),
+    pack: Option.none(),
+    ui: "classic",
+    transcript: false,
+    otel: false,
+    otelContent: Option.none()
+  }
+
+  it("keeps the base environment and names the flow, forwarding nothing unasked", () => {
+    const environment = runEnvironmentFrom(none, "/flows/epic-stories.ts", {
+      HOME: "/home/me",
+      LLM4TS_OTEL_CONTENT: "full"
+    })
+    assert.deepStrictEqual(environment, {
+      HOME: "/home/me",
+      LLM4TS_OTEL_CONTENT: "full",
+      LLM4TS_FLOW: "epic-stories"
+    })
+  })
+
+  it("forwards --otel and --otel-content, the flag winning over the shell", () => {
+    const environment = runEnvironmentFrom(
+      { ...none, otel: true, otelContent: Option.some("on") },
+      "/flows/implement.ts",
+      { LLM4TS_OTEL_CONTENT: "full" }
+    )
+    assert.deepStrictEqual([environment.LLM4TS_OTEL, environment.LLM4TS_OTEL_CONTENT], ["on", "on"])
+  })
 })

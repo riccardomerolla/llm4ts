@@ -50,9 +50,14 @@ honoured as the specification says.
 ## Content
 
 By default no prompt, reply, tool argument or output leaves the machine, the
-same policy as the trace file. `LLM4TS_OTEL_CONTENT=on` adds prompts, replies
-and tool I/O (redacted, capped at the transcript limits);
-`LLM4TS_OTEL_CONTENT=full` adds the system prompt too.
+same policy as the trace file. `--otel-content on` (or
+`LLM4TS_OTEL_CONTENT=on`) adds prompts, replies and tool I/O (redacted,
+capped at the transcript limits) to every seat call, streamed or structured;
+`--otel-content full` adds the system prompt too.
+
+```bash
+llm4ts run epic-stories --otel --otel-content on --repo ~/customer/portal "…"
+```
 
 ## What you will see
 

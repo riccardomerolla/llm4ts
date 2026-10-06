@@ -98,6 +98,15 @@ const replyContent = (content: OtelContent, text: string): Record<string, unknow
         ])
       }
 
+/** A structured reply as text for `output.value`; empty when it does not serialize. */
+const rendered = (value: unknown): string => {
+  try {
+    return typeof value === "string" ? value : (JSON.stringify(value) ?? "")
+  } catch {
+    return ""
+  }
+}
+
 const count = (
   counter: Metric.Counter<number>,
   attributes: Record<string, string>,
@@ -199,22 +208,26 @@ export const timeEffect = <A, E, R>(
 
 /**
  * `timeEffect` under an LLM span named for the role; `usageOf` reads what
- * the result says about tokens and model, when it says anything.
+ * the result says about tokens and model, when it says anything, and
+ * `replyOf` what the reply was, for the span's content when it may carry any.
  */
 const tracedEffect = <A, E, R>(
   events: FlowEventsShape,
   label: string,
   options: TimedSeatOptions,
+  prompt: string,
   effect: Effect.Effect<A, E, R>,
   timed: (ms: number, failed: boolean, role: string | undefined) => Timed,
   usageOf: (value: A) => {
     readonly usage: TokenUsage | undefined
     readonly model: string | undefined
-  }
+  },
+  replyOf: (value: A) => string = rendered
 ): Effect.Effect<A, E, R> =>
   Effect.gen(function* () {
     const role = (yield* TimedRole) ?? label
     const executor = options.executor === undefined ? undefined : yield* options.executor
+    const content = options.content ?? "off"
     return yield* withKindSpan(
       role,
       {
@@ -222,7 +235,8 @@ const tracedEffect = <A, E, R>(
         attributes: {
           [attr.role]: role,
           [attr.operation]: "generate",
-          ...(executor === undefined ? {} : { [attr.executor]: executor })
+          ...(executor === undefined ? {} : { [attr.executor]: executor }),
+          ...promptContent(content, [Message.make({ role: "User", content: prompt })])
         }
       },
       timeEffect(events, effect, timed).pipe(
@@ -233,9 +247,10 @@ const tracedEffect = <A, E, R>(
           const settled = settleUsage(known.usage, known.model, 0, 0, undefined)
           return Effect.all(
             [
-              Effect.annotateCurrentSpan(
-                usageAttributes(settled.model, settled.usage, settled.estimated)
-              ),
+              Effect.annotateCurrentSpan({
+                ...usageAttributes(settled.model, settled.usage, settled.estimated),
+                ...(Exit.isSuccess(exit) ? replyContent(content, replyOf(exit.value)) : {})
+              }),
               recordCall(role, executor, settled, Exit.isFailure(exit))
             ],
             { discard: true }
@@ -427,12 +442,21 @@ export const timedSeat = (
     executeStreamWithHistory: (messages) =>
       timedStream(events, label, options, messages, service.executeStreamWithHistory(messages)),
     executeWithTools: (text, tools) =>
-      tracedEffect(events, label, options, service.executeWithTools(text, tools), model, nothing),
+      tracedEffect(
+        events,
+        label,
+        options,
+        text,
+        service.executeWithTools(text, tools),
+        model,
+        nothing
+      ),
     executeStructured: (text, schema, jsonSchema) =>
       tracedEffect(
         events,
         label,
         options,
+        text,
         service.executeStructured(text, schema, jsonSchema),
         model,
         nothing
@@ -442,17 +466,19 @@ export const timedSeat = (
         events,
         label,
         options,
+        text,
         service.executeStructuredWithUsage(text, schema, jsonSchema),
         model,
-        ([, usage, modelName]) => ({ usage, model: modelName })
+        ([, usage, modelName]) => ({ usage, model: modelName }),
+        ([value]) => rendered(value)
       ),
     scoreLabels: (text, labels) =>
-      tracedEffect(events, label, options, service.scoreLabels(text, labels), model, nothing),
+      tracedEffect(events, label, options, text, service.scoreLabels(text, labels), model, nothing),
     ...(batched === undefined
       ? {}
       : {
           scoreLabelSequence: (text: string, labelSets: ReadonlyArray<ReadonlyArray<string>>) =>
-            tracedEffect(events, label, options, batched(text, labelSets), model, nothing)
+            tracedEffect(events, label, options, text, batched(text, labelSets), model, nothing)
         }),
     isAvailable: service.isAvailable
   }
