@@ -272,4 +272,38 @@ describe("timedSeat spans", () => {
       assert.deepStrictEqual([llm?.name, llm?.attributes[attr.role]], ["judge", "judge"])
     })
   )
+  it.effect("structured calls carry the prompt and the decoded reply when content is on", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const { tracer, spans } = recordingTracer()
+      const structured = serviceOf({
+        executeStructuredWithUsage: <A, E, RD, RE>(
+          _prompt: string,
+          schema: Schema.ConstraintCodec<A, E, RD, RE>
+        ) =>
+          Effect.map(
+            Schema.decodeUnknownEffect(schema)({ verdict: "approve" }).pipe(
+              Effect.mapError(() => unused)
+            ),
+            (value) => [value, undefined, "gemini-2.5-pro"] as const
+          )
+      })
+      const Verdict = Schema.Struct({ verdict: Schema.String })
+      const quiet = timedSeat(structured, events, "reviewer")
+      yield* quiet
+        .executeStructuredWithUsage("review this diff", Verdict, {})
+        .pipe(Effect.withTracer(tracer))
+      assert.notInclude(JSON.stringify(spans()), "review this diff")
+      assert.notInclude(JSON.stringify(spans()), "approve")
+      const { tracer: shown, spans: shownSpans } = recordingTracer()
+      const seat = timedSeat(structured, events, "reviewer", { content: "on" })
+      yield* seat
+        .executeStructuredWithUsage("review this diff", Verdict, {})
+        .pipe(Effect.withTracer(shown))
+      const llm = shownSpans().find((span) => span.attributes[kindAttribute] === "LLM")
+      assert.include(String(llm?.attributes[attr.input]), "review this diff")
+      assert.strictEqual(llm?.attributes[attr.output], '{"verdict":"approve"}')
+      assert.include(String(llm?.attributes[attr.outputMessages]), "approve")
+    })
+  )
 })
