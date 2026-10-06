@@ -98,8 +98,12 @@ describe("the exporter on the wire", () => {
         HttpClient.make((request) =>
           Ref.update(seen, (all) => [
             ...all,
-            { url: request.url, contentType: request.body.contentType }
-          ]).pipe(
+            {
+              url: request.url,
+              // the body is a union; only the variants that carry bytes name a type
+              contentType: "contentType" in request.body ? request.body.contentType : undefined
+            }
+          ]).pipe
             Effect.as(HttpClientResponse.fromWeb(request, new Response(null, { status: 200 })))
           )
         )
