@@ -273,6 +273,10 @@ const describe = (event: FlowEvent): string => {
         default:
           return `the end of ${event.label}`
       }
+    case "Began":
+      return event.kind === "model"
+        ? `the start of a ${event.label} call`
+        : `the start of ${event.kind} ${event.label}`
     default:
       return "an event"
   }

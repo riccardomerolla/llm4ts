@@ -4,6 +4,7 @@ import * as Ref from "effect/Ref"
 import { TokenUsage } from "@llm4ts/core/Models"
 import {
   AssistantMessage,
+  Began,
   JudgmentObserved,
   StageCompleted,
   StageFailed,
@@ -72,6 +73,16 @@ describe("terminal rendering", () => {
     const release = ExecutorReleased.make({ executor: "codex", role: "coder", label: "home" })
     assert.isFalse(rendersEvent("Verbose", release))
     assert.strictEqual(terminalLine(release), "")
+  })
+
+  it("shows a gate or setup command starting, and no other work's start", () => {
+    const gate = Began.make({ kind: "gate", label: "pnpm test", lane: "home" })
+    assert.isTrue(rendersEvent("Normal", gate))
+    assert.isFalse(rendersEvent("Quiet", gate))
+    assert.strictEqual(terminalLine(gate), "· running pnpm test")
+    const call = Began.make({ kind: "model", label: "coder" })
+    assert.isFalse(rendersEvent("Verbose", call))
+    assert.strictEqual(terminalLine(call), "")
   })
 
   it("leaves judgment telemetry silent; advice arrives as Info", () => {

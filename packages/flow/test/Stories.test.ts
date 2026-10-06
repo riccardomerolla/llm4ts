@@ -26,6 +26,7 @@ import {
   blockedOnIn,
   blockedRebuttal,
   implementStoriesFlow,
+  launchSummary,
   setupRecoveryPrompt,
   perimeterRules,
   renderEpicReport,
@@ -2020,5 +2021,61 @@ describe("Stories executor under a roster", () => {
           assert.isTrue(report.stories.every((outcome) => outcome.status === "done"))
         })
       )
+  )
+})
+
+describe("Stories executor feedback", () => {
+  it("says why fewer stories run than the cap allows, and nothing when none waits", () => {
+    assert.isUndefined(
+      launchSummary({ epicId: "e", running: 3, concurrency: 6, readyWaiting: 0, blocked: [] })
+    )
+    assert.strictEqual(
+      launchSummary({
+        epicId: "e",
+        running: 1,
+        concurrency: 6,
+        capacity: 7,
+        readyWaiting: 0,
+        blocked: [
+          { id: "b", on: ["a"] },
+          { id: "c", on: ["a", "b"] },
+          { id: "d", on: ["c"] },
+          { id: "e", on: ["d"] }
+        ]
+      }),
+      "epic e: 1 running (concurrency 6, 7 coder slot(s)) · 4 waiting on dependencies: b ← a; c ← a, b; d ← c (+1 more)"
+    )
+    assert.strictEqual(
+      launchSummary({ epicId: "e", running: 2, concurrency: 6, readyWaiting: 3, blocked: [] }),
+      "epic e: 2 running (concurrency 6) · 3 ready, waiting for a coder slot"
+    )
+  })
+
+  it.effect(
+    "a chained plan says what waits on what, once per change, and the lane names its first steps",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const events = yield* makeCollectingFlowEvents
+        const context = { ...(yield* makeContext(harness)), events }
+        const options = yield* makeOptions(harness, diamond, context, {
+          concurrency: 6,
+          gateCommands: [["pnpm", "test"]]
+        })
+        yield* implementStoriesFlow(context, options)
+        const recorded = yield* events.recorded
+        const said = recorded.flatMap((event) =>
+          event._tag === "Info" && event.message.startsWith("epic diamond: ") ? [event.message] : []
+        )
+        assert.deepStrictEqual(said, [
+          "epic diamond: 2 running (concurrency 6) · 2 waiting on dependencies: c ← a; d ← b, c",
+          "epic diamond: 2 running (concurrency 6) · 1 waiting on dependencies: d ← b, c",
+          "epic diamond: 1 running (concurrency 6) · 1 waiting on dependencies: d ← c"
+        ])
+        const stages = recorded.flatMap((event) =>
+          event._tag === "StageStarted" && event.lane === "a" ? [event.stage] : []
+        )
+        assert.includeMembers(stages, ["story a: baseline gates", "story a: plan tasks"])
+      })
   )
 })

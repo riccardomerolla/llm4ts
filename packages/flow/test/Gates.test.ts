@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
+import { ToolError } from "@llm4ts/core/Errors"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import {
@@ -256,6 +257,46 @@ describe("gatesIn", () => {
       const events = yield* makeCollectingFlowEvents
       const result = yield* gatesIn(exits({}), events, [["pnpm", "test"]])("/wt/a")
       assert.isTrue(result.isClean)
+    })
+  )
+
+  it.effect("says each gate began before it ends, so a long one shows as running", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      yield* gatesIn(exits({}), events, [
+        ["pnpm", "test"],
+        ["pnpm", "build"]
+      ])("/wt/a")
+      const timeline = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Began" || event._tag === "Timed"
+          ? [`${event._tag} ${event.kind} ${event.label}`]
+          : []
+      )
+      assert.deepStrictEqual(timeline, [
+        "Began gate pnpm test",
+        "Timed gate pnpm test",
+        "Began gate pnpm build",
+        "Timed gate pnpm build"
+      ])
+    })
+  )
+
+  it.effect("a gate that cannot run still ends what it began", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const broken = makeProcessExecutor({
+        run: () => Effect.fail(ToolError.make({ toolName: "pnpm", detail: "spawn pnpm ENOENT" })),
+        runStreaming: () => Stream.empty
+      })
+      yield* Effect.flip(gatesIn(broken, events, [["pnpm", "test"]])("/wt/a"))
+      const timeline = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Began" || event._tag === "Timed"
+          ? [
+              `${event._tag} ${event.kind} ${event.label}${event._tag === "Timed" && event.failed === true ? " failed" : ""}`
+            ]
+          : []
+      )
+      assert.deepStrictEqual(timeline, ["Began gate pnpm test", "Timed gate pnpm test failed"])
     })
   )
 

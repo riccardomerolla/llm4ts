@@ -42,6 +42,7 @@ import {
   type FlowError
 } from "./FlowError.ts"
 import {
+  Began,
   EvidenceChecked,
   Info,
   JudgedDimension,
@@ -781,6 +782,55 @@ export const setupRecoveryPrompt = (command: string): string =>
 const failed = (story: Story, reason: string): StoryFailed =>
   StoryFailed.make({ story: story.id, reason })
 
+/** What the story scheduler can say about stories it is not starting. */
+export interface LaunchPicture {
+  readonly epicId: string
+  readonly running: number
+  readonly concurrency: number
+  /** The roster's coder capacity; absent without a roster. */
+  readonly capacity?: number
+  /** Ready stories left for a coder slot to free. */
+  readonly readyWaiting: number
+  /** Stories whose dependencies are not merged yet, with the ones they wait for. */
+  readonly blocked: ReadonlyArray<{ readonly id: string; readonly on: ReadonlyArray<string> }>
+}
+
+const shownBlocked = 3
+
+/**
+ * One line on why fewer stories run than the cap allows, or `undefined`
+ * when nothing waits: dependencies first (the common case), then capacity.
+ */
+export const launchSummary = (picture: LaunchPicture): string | undefined => {
+  if (picture.blocked.length === 0 && picture.readyWaiting === 0) {
+    return undefined
+  }
+  const cap =
+    picture.capacity === undefined
+      ? `concurrency ${picture.concurrency}`
+      : `concurrency ${picture.concurrency}, ${picture.capacity} coder slot(s)`
+  const blocked =
+    picture.blocked.length === 0
+      ? []
+      : [
+          `${picture.blocked.length} waiting on dependencies: ${picture.blocked
+            .slice(0, shownBlocked)
+            .map((story) => `${story.id} ← ${story.on.join(", ")}`)
+            .join("; ")}${
+            picture.blocked.length > shownBlocked
+              ? ` (+${picture.blocked.length - shownBlocked} more)`
+              : ""
+          }`
+        ]
+  const starved =
+    picture.readyWaiting === 0 ? [] : [`${picture.readyWaiting} ready, waiting for a coder slot`]
+  return [
+    `epic ${picture.epicId}: ${picture.running} running (${cap})`,
+    ...blocked,
+    ...starved
+  ].join(" · ")
+}
+
 // ---- The executor -------------------------------------------------------------
 
 export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(function* (
@@ -934,52 +984,56 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   /** Merge the story branch into the epic branch and re-gate the epic head, one story at a time. */
   const integrate = (story: Story, branch: string): Effect.Effect<void, FlowError> =>
     Effect.flatMap(Clock.currentTimeMillis, (requested) =>
-      mergeLock.withPermit(
-        Effect.gen(function* () {
-          const lane = laneOf(story)
-          // Merges are one at a time: how long this story queued for its turn.
-          const turn = yield* Clock.currentTimeMillis
-          yield* lane.publish(
-            Timed.make({ kind: "wait", label: "merge lock", ms: turn - requested })
-          )
-          yield* epicCheckoutClean(story)
-          const checkpoint = yield* context.git.checkpoint
-          yield* timeEffect(
-            lane,
-            context.git.merge(branch, `${plan.epicId}: merge story ${story.id}`),
-            (ms, failed) =>
-              Timed.make({ kind: "merge", label: "merge", ms, ...(failed ? { failed } : {}) })
-          )
-          const gate = yield* options.gates(context.workDir, lane)
-          // Charged only with what the merge added: the head before it had
-          // a baseline (run start or the previous merge).
-          const before = yield* ensureBaseline(
-            checkpoint,
-            Effect.succeed(ReviewResult.make({ issues: [] })),
-            context.workDir
-          )
-          const verdict = triageGates(gate, before, rootsOf(context.workDir))
-          if (!verdict.blocking.isClean) {
-            // Never leave a red epic head for the next story to inherit.
-            yield* context.git.rollback(checkpoint)
-            return yield* failed(
-              story,
-              `epic gates failed after merging; merge undone:\n${issueLines(verdict.blocking)}`
+      Effect.andThen(
+        laneOf(story).publish(Began.make({ kind: "wait", label: "merge lock" })),
+        mergeLock.withPermit(
+          Effect.gen(function* () {
+            const lane = laneOf(story)
+            // Merges are one at a time: how long this story queued for its turn.
+            const turn = yield* Clock.currentTimeMillis
+            yield* lane.publish(
+              Timed.make({ kind: "wait", label: "merge lock", ms: turn - requested })
             )
-          }
-          if (gateCommands !== undefined) {
-            const mergedHead = yield* context.git.checkpoint
-            yield* writeBaseline(
-              files,
-              options.stateDir,
-              keyFor(mergedHead),
-              yield* baselineOf(mergedHead, gate, context.workDir)
+            yield* epicCheckoutClean(story)
+            const checkpoint = yield* context.git.checkpoint
+            yield* timeEffect(
+              lane,
+              context.git.merge(branch, `${plan.epicId}: merge story ${story.id}`),
+              (ms, failed) =>
+                Timed.make({ kind: "merge", label: "merge", ms, ...(failed ? { failed } : {}) }),
+              () => Began.make({ kind: "merge", label: "merge" })
             )
-          }
-          yield* laneOf(story).publish(
-            Info.make({ message: `story ${story.id}: merged into ${epicBranch}` })
-          )
-        })
+            const gate = yield* options.gates(context.workDir, lane)
+            // Charged only with what the merge added: the head before it had
+            // a baseline (run start or the previous merge).
+            const before = yield* ensureBaseline(
+              checkpoint,
+              Effect.succeed(ReviewResult.make({ issues: [] })),
+              context.workDir
+            )
+            const verdict = triageGates(gate, before, rootsOf(context.workDir))
+            if (!verdict.blocking.isClean) {
+              // Never leave a red epic head for the next story to inherit.
+              yield* context.git.rollback(checkpoint)
+              return yield* failed(
+                story,
+                `epic gates failed after merging; merge undone:\n${issueLines(verdict.blocking)}`
+              )
+            }
+            if (gateCommands !== undefined) {
+              const mergedHead = yield* context.git.checkpoint
+              yield* writeBaseline(
+                files,
+                options.stateDir,
+                keyFor(mergedHead),
+                yield* baselineOf(mergedHead, gate, context.workDir)
+              )
+            }
+            yield* laneOf(story).publish(
+              Info.make({ message: `story ${story.id}: merged into ${epicBranch}` })
+            )
+          })
+        )
       )
     )
 
@@ -1278,7 +1332,13 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         : { rerunTest: options.testGate(state.worktree, laneOf(story)) })
     }
     if (gateCommands !== undefined) {
-      const inherited = (yield* storyBaseline)?.failingLines ?? []
+      // Recorded here, before the first task, so the lane says what the time goes to.
+      const baseline = yield* stage(
+        laneOf(story),
+        `story ${story.id}: baseline gates`,
+        storyBaseline
+      )
+      const inherited = baseline?.failingLines ?? []
       if (inherited.length > 0) {
         inheritedByStory.set(story.id, inherited)
         yield* appendFindings(
@@ -1424,7 +1484,12 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       plan: planWithinPerimeter(
         plan,
         story,
-        (text) => planTasks(watchedSeats, story, text),
+        (text) =>
+          stage(
+            laneOf(story),
+            `story ${story.id}: plan tasks`,
+            planTasks(watchedSeats, story, text)
+          ),
         prompt,
         laneOf(story)
       ),
@@ -1816,6 +1881,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
   /** Why no further story may start in this run; stories already running finish. */
   let halted: string | undefined
+  /** The last launch summary said, so a picture is told once, when it changes. */
+  let toldLaunch: string | undefined
   /** Stories retried once after the serving engine recovered. */
   const recovered = new Set<string>()
 
@@ -1856,6 +1923,34 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           ) {
             starvedAt = capacity
           }
+          // Say why fewer stories run than the cap allows: a plan that
+          // chains its stories looks exactly like a scheduler that stalled.
+          const started = new Set([...current.running, ...launching.map((story) => story.id)])
+          const said = launchSummary({
+            epicId: plan.epicId,
+            running: started.size,
+            concurrency,
+            ...(context.roster === undefined ? {} : { capacity }),
+            readyWaiting: ready.length - launching.length,
+            blocked: plan.stories.flatMap((story) =>
+              current.done.has(story.id) ||
+              current.failed.has(story.id) ||
+              current.waiting.has(story.id) ||
+              started.has(story.id) ||
+              ready.includes(story)
+                ? []
+                : [
+                    {
+                      id: story.id,
+                      on: story.dependsOn.filter((dependency) => !current.done.has(dependency))
+                    }
+                  ]
+            )
+          })
+          if (said !== undefined && said !== toldLaunch) {
+            yield* events.publish(Info.make({ message: said }))
+          }
+          toldLaunch = said
         }
         if ((yield* Ref.get(running)).size === 0) {
           break

@@ -15,6 +15,7 @@ import * as Semaphore from "effect/Semaphore"
 import type { LlmError } from "@llm4ts/core/Errors"
 import { RosterExhausted, type FlowError } from "./FlowError.ts"
 import {
+  Began,
   ExecutorExcluded,
   ExecutorLeased,
   ExecutorReleased,
@@ -897,6 +898,13 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         }
         if (!announced) {
           announced = true
+          yield* events.publish(
+            Began.make({
+              kind: "wait",
+              label: `roster ${role}`,
+              ...(leaseOptions.label === undefined ? {} : { lane: leaseOptions.label })
+            })
+          )
           yield* say(
             `waiting for an executor to take ${role}${leaseOptions.label === undefined ? "" : ` for ${leaseOptions.label}`}: ${yield* waitingReport(role, avoid)}`
           )

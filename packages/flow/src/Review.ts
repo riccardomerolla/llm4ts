@@ -29,6 +29,7 @@ import {
 } from "./OracleGuard.ts"
 import { cachedReview, fingerprintOf } from "./ReviewCache.ts"
 import {
+  Began,
   ReviewFindingDemoted,
   Info,
   JudgmentObserved,
@@ -493,6 +494,8 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
   }
   const label = command.join(" ")
   const started = yield* Clock.currentTimeMillis
+  // A gate or a setup can run for many minutes: say it started, not only when it ends.
+  yield* events.publish(Began.make({ kind: "gate", label }))
   const run = guarded(
     Capabilities.Exec(executable),
     `lint: ${label}`,
@@ -524,6 +527,13 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
     bounded.pipe(
       Effect.tap((ran) =>
         ran === undefined ? Effect.void : Effect.annotateCurrentSpan(attr.gateExit, ran.exitCode)
+      )
+    )
+  ).pipe(
+    // A command that could not run still ends what its `Began` started.
+    Effect.tapError(() =>
+      Effect.flatMap(Clock.currentTimeMillis, (now) =>
+        events.publish(Timed.make({ kind: "gate", label, ms: now - started, failed: true }))
       )
     )
   )

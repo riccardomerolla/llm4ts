@@ -272,6 +272,36 @@ describe("timedSeat spans", () => {
       assert.deepStrictEqual([llm?.name, llm?.attributes[attr.role]], ["judge", "judge"])
     })
   )
+  it.effect("a call says it began before it ends, streamed or structured", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const seat = timedSeat(
+        serviceOf({
+          executeStream: () => Stream.make(chunk("ok")),
+          executeStructured: <A, E, RD, RE>(
+            _prompt: string,
+            schema: Schema.ConstraintCodec<A, E, RD, RE>
+          ) => Schema.decodeUnknownEffect(schema)("ok").pipe(Effect.mapError(() => unused))
+        }),
+        events,
+        "coder"
+      )
+      yield* collect(seat.executeStream("hi"))
+      yield* withTimedRole("judge", seat.executeStructured("q", Schema.String, {}))
+      const timeline = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Began" || event._tag === "Timed"
+          ? [`${event._tag} ${event.kind} ${event.label}`]
+          : []
+      )
+      assert.deepStrictEqual(timeline, [
+        "Began model coder",
+        "Timed model coder",
+        "Began model judge",
+        "Timed model judge"
+      ])
+    })
+  )
+
   it.effect("structured calls carry the prompt and the decoded reply when content is on", () =>
     Effect.gen(function* () {
       const events = yield* makeFlowEventHub()

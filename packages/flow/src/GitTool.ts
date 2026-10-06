@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema"
 import { Capabilities, type Capability } from "@llm4ts/core/Capability"
 import type { ProcessExecutorShape, ProcessResult } from "@llm4ts/core/ProcessExecutor"
 import { MergeConflict, ProcessError, type FlowError } from "./FlowError.ts"
-import { Timed, type FlowEventsShape } from "./FlowEvents.ts"
+import { Began, Timed, type FlowEventsShape } from "./FlowEvents.ts"
 import { timeEffect } from "./Timing.ts"
 import { guarded } from "./CapabilityGuard.ts"
 
@@ -237,8 +237,12 @@ export const makeGitTool = (
     effect: Effect.Effect<A, FlowError>
   ): Effect.Effect<A, FlowError> =>
     // Timed by the operation's name, never its arguments.
-    timeEffect(events, guarded(capability, operation, events, effect), (ms, failed) =>
-      Timed.make({ kind: "git", label: operation, ms, ...(failed ? { failed: true } : {}) })
+    timeEffect(
+      events,
+      guarded(capability, operation, events, effect),
+      (ms, failed) =>
+        Timed.make({ kind: "git", label: operation, ms, ...(failed ? { failed: true } : {}) }),
+      () => Began.make({ kind: "git", label: operation })
     )
 
   const write = <A>(
