@@ -33,6 +33,7 @@
     "./NodeProcessExecutor": "./dist/NodeProcessExecutor.js",
     "./NodeTemporaryFiles": "./dist/NodeTemporaryFiles.js",
     "./NodeWorkspace": "./dist/NodeWorkspace.js",
+    "./Otel": "./dist/Otel.js",
     "./NodeRuntime": "./dist/NodeRuntime.js",
     "./Packs": "./dist/Packs.js",
     "./Profile": "./dist/Profile.js",

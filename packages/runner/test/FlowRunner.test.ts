@@ -40,6 +40,9 @@ import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryTranscriptSink } from "@llm4ts/flow/Transcript"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import { makeFlowRunnerContext, runWithBundle } from "@llm4ts/runner/FlowRunner"
+import { stage } from "@llm4ts/flow/PlanExecution"
+import { attr, kindAttribute } from "@llm4ts/flow/Spans"
+import { recordingTracer } from "./support/RecordingTracer.ts"
 import { plainTerminalPalette, type TerminalSurface } from "@llm4ts/runner/Terminal"
 
 const files = (state: Ref.Ref<Readonly<Record<string, string>>>): PlainFileStoreShape => ({
@@ -239,6 +242,66 @@ describe("embedded runner", () => {
           assert.isTrue(
             rendered.some((line) => /flow completed in .+ · 1 stage$/.test(line.trim()))
           )
+        })
+      )
+  )
+})
+
+describe("runner spans", () => {
+  it.effect(
+    "a run is a CHAIN root span carrying run, session and flow; its stages hang under it",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const process = yield* makeFakeProcessExecutor()
+          const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+          const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+          const registry = makeConnectorRegistry([
+            {
+              connectorId: ConnectorIds.Mock,
+              kind: "Api",
+              create: (_configuration) => Effect.succeed(mock)
+            }
+          ])
+          const surface: TerminalSurface = {
+            palette: plainTerminalPalette,
+            log: (_line) => Effect.void,
+            setStatus: (_label) => Effect.void,
+            suspend: (effect) => effect
+          }
+          const dependencies = { registry, process: process.executor, files: files(state) }
+          const options = {
+            workDir: "/repo/portal",
+            workspace: "/repo/portal",
+            userPrompt: "do it",
+            coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+            surface,
+            tracePath: "trace.jsonl",
+            runId: "run-1",
+            environment: { LLM4TS_FLOW: "epic-stories" }
+          }
+          const { tracer, spans } = recordingTracer()
+          const bundle = yield* makeFlowRunnerContext(options, dependencies)
+          yield* runWithBundle(
+            bundle,
+            options,
+            (context) => stage(context.events, "Example", Effect.succeed("done")),
+            dependencies
+          ).pipe(Effect.withTracer(tracer))
+          const run = spans().find((span) => span.name === "run")
+          assert.deepStrictEqual(
+            [
+              run?.attributes[kindAttribute],
+              run?.attributes[attr.run],
+              run?.attributes[attr.session],
+              run?.attributes[attr.flow],
+              run?.ended
+            ],
+            ["CHAIN", "run-1", "run-1", "epic-stories", true]
+          )
+          const example = spans().find((span) => span.name === "Example")
+          assert.strictEqual(example?.parentName, "run")
+          assert.strictEqual(example?.attributes[attr.run], "run-1")
         })
       )
   )

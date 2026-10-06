@@ -34,6 +34,8 @@ environment:
   LLM4TS_VERBOSITY        terminal verbosity: quiet|normal|verbose
   LLM4TS_UI               tree: the full-screen agent tree (ADR 0022; q returns to the classic view)
   LLM4TS_TRANSCRIPT       on: record each seat's input and output under .llm4ts/transcripts/
+  LLM4TS_OTEL             on: export spans over OTLP (a local Phoenix at localhost:6006 unless OTEL_* says otherwise)
+  LLM4TS_OTEL_CONTENT     on|full: prompts, replies and tool I/O travel too (off by default)
   OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY
                           credentials for API providers
 

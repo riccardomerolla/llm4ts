@@ -59,7 +59,16 @@ import {
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
 import { timedJudgment, timedSeat, withTimedRole, type TimedSeatOptions } from "@llm4ts/flow/Timing"
-import { otelContent } from "@llm4ts/flow/Spans"
+import { attr, otelContent, withKindSpan } from "@llm4ts/flow/Spans"
+import * as Tracer from "effect/Tracer"
+import { basename } from "node:path"
+import {
+  otelConfig,
+  otelEnvironmentDefaults,
+  otelLayer,
+  otelSummary,
+  runnerVersion
+} from "./Otel.ts"
 import { transcriptSeat, type TranscriptSink } from "@llm4ts/flow/Transcript"
 import { nodeTranscriptFiles, nodeTranscriptSink, transcriptsWanted } from "./Transcripts.ts"
 import { idleAfterFrom } from "./AgentTree.ts"
@@ -828,6 +837,12 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   const environment = options.environment ?? process.env
   const verbosity = options.verbosity ?? "Normal"
   const persistRun = options.persistRun ?? true
+  // OpenTelemetry export (ADR 0026): decided from the environment, built once
+  // per run, flushed when the run's scope closes.
+  const otel = otelConfig(environment)
+  for (const [key, value] of Object.entries(otelEnvironmentDefaults(otel, environment))) {
+    process.env[key] = value
+  }
   const tracePath =
     options.tracePath ??
     (persistRun ? join(options.workDir, ".llm4ts", `trace-${startedAt}.jsonl`) : undefined)
@@ -883,6 +898,10 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
           `trace ${tracePath}${options.runId === undefined ? "" : ` · run ${options.runId}`}`
         )
       )
+    }
+    const where = otelSummary(otel)
+    if (where !== undefined) {
+      yield* surface.log(palette.info(where))
     }
   }
   const recorder =
@@ -942,7 +961,28 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     tracePath === undefined
       ? bundle.context
       : { ...bundle.context, trace: { runId: bundle.runId, path: tracePath } }
-  return yield* body(context).pipe(
+  const runAttributes: Record<string, unknown> = {
+    [attr.run]: bundle.runId,
+    [attr.session]: bundle.runId,
+    ...(environment.LLM4TS_FLOW === undefined ? {} : { [attr.flow]: environment.LLM4TS_FLOW })
+  }
+  // The run is a CHAIN span every other span descends from or links to; its
+  // attributes ride on all of them. Effect's own function spans stay
+  // unsampled so an exported trace shows the flow, not the call stack.
+  const traced = withKindSpan(
+    "run",
+    { kind: "CHAIN", attributes: runAttributes },
+    Object.entries(runAttributes).reduce(
+      (acc, [key, value]) => Effect.annotateSpans(key, value)(acc),
+      body(context)
+    )
+  ).pipe(
+    Effect.provideService(Tracer.MinimumTraceLevel, otel.mode === "off" ? "All" : "None"),
+    Effect.provide(
+      otelLayer(otel, { serviceVersion: runnerVersion, project: basename(options.workDir) })
+    )
+  )
+  return yield* traced.pipe(
     Effect.provideService(FlowContext, context),
     Effect.andThen((value) => Effect.as(enforceBudget, value)),
     Effect.ensuring(

@@ -1,5 +1,5 @@
 import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { basename, extname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Console from "effect/Console"
 import * as DateTime from "effect/DateTime"
@@ -224,6 +224,12 @@ const runCommand = Command.make(
       Flag.withDescription(
         "`tree` draws the agent tree full-screen (ADR 0022; `q` returns to the classic view), forwarded as LLM4TS_UI"
       )
+    ),
+    otel: Flag.Boolean("otel").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription(
+        "Export spans to a local Arize Phoenix (http://localhost:6006) unless OTEL_EXPORTER_OTLP_ENDPOINT points elsewhere; forwarded as LLM4TS_OTEL (ADR 0026)"
+      )
     )
   },
   (config) =>
@@ -249,6 +255,11 @@ const runCommand = Command.make(
       if (config.transcript) {
         environment.LLM4TS_TRANSCRIPT = "on"
       }
+      if (config.otel) {
+        environment.LLM4TS_OTEL = "on"
+      }
+      // The flow's name, for its spans (ADR 0026).
+      environment.LLM4TS_FLOW = basename(flowPath, extname(flowPath))
       const exitCode = yield* launchFlow({
         flowPath,
         taskArgs: [
