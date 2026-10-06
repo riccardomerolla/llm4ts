@@ -103,7 +103,7 @@ describe("the exporter on the wire", () => {
               // the body is a union; only the variants that carry bytes name a type
               contentType: "contentType" in request.body ? request.body.contentType : undefined
             }
-          ]).pipe
+          ]).pipe(
             Effect.as(HttpClientResponse.fromWeb(request, new Response(null, { status: 200 })))
           )
         )
