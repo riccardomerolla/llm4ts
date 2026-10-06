@@ -4,7 +4,7 @@ import * as Ref from "effect/Ref"
 import { FlowAborted } from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { implementTaskLoop, stage } from "@llm4ts/flow/PlanExecution"
-import { kindAttribute } from "@llm4ts/flow/Spans"
+import { kindAttribute, withKindSpan } from "@llm4ts/flow/Spans"
 import { recordingTracer } from "./support/RecordingTracer.ts"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { makePlanStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
@@ -127,14 +127,15 @@ describe("stage spans", () => {
     Effect.gen(function* () {
       const events = yield* makeFlowEventHub()
       const { tracer, spans } = recordingTracer()
-      yield* Effect.withSpan(
+      yield* withKindSpan(
+        "run",
+        { kind: "CHAIN" },
         Effect.gen(function* () {
           yield* stage(events, "story plan", Effect.void)
           yield* Effect.flip(
             stage(events, "story a", Effect.fail(new Error("boom")), { kind: "AGENT", root: true })
           )
-        }),
-        "run"
+        })
       ).pipe(Effect.withTracer(tracer))
       const [, plan, story] = spans()
       assert.deepStrictEqual(

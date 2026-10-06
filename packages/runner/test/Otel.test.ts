@@ -5,6 +5,7 @@ import {
   otelDoctorLine,
   otelLayer,
   otelSummary,
+  otelWarning,
   phoenixTracesUrl
 } from "@llm4ts/runner/Otel"
 
@@ -60,6 +61,21 @@ describe("otelDoctorLine", () => {
     assert.strictEqual(
       otelDoctorLine({ mode: "env", endpoint: "http://c:4318" }, false),
       "otel: http://c:4318 — endpoint does not answer (spans will be dropped, the run is unaffected)"
+    )
+  })
+})
+
+describe("otelWarning", () => {
+  it("warns once when export is on and nothing answers at the endpoint, else says nothing", () => {
+    assert.isUndefined(otelWarning({ mode: "off" }, undefined))
+    assert.isUndefined(otelWarning({ mode: "phoenix", tracesUrl: phoenixTracesUrl }, true))
+    assert.strictEqual(
+      otelWarning({ mode: "phoenix", tracesUrl: phoenixTracesUrl }, false),
+      "⚠ otel: nothing answers at http://localhost:6006/v1/traces — spans will be dropped (the run is unaffected); start Phoenix with `docker run -p 6006:6006 arizephoenix/phoenix:latest`"
+    )
+    assert.strictEqual(
+      otelWarning({ mode: "env", endpoint: "http://c:4318" }, false),
+      "⚠ otel: nothing answers at http://c:4318 — spans will be dropped (the run is unaffected)"
     )
   })
 })

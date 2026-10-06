@@ -280,7 +280,6 @@ const timedStream = <E>(
           ...promptContent(content, messages)
         }
       })
-      const tracer = yield* Effect.tracer
       const openTools = yield* Ref.make<
         ReadonlyArray<{ readonly id: string | undefined; readonly span: Tracer.Span }>
       >([])
@@ -292,22 +291,19 @@ const timedStream = <E>(
           }
           const args = chunk.metadata.tool_input ?? chunk.metadata.toolInput ?? ""
           const category = toolCategory(tool, args)
-          const child = tracer.span({
-            name: tool,
-            parent: Option.some(span),
-            annotations: Context.empty(),
-            links: [],
-            startTime: yield* Clock.currentTimeNanos,
+          // `Effect.makeSpan`, not the tracer directly: the scope's annotations
+          // (story, epic, session) land on it like on every other span.
+          const child = yield* Effect.makeSpan(tool, {
+            parent: span,
             kind: "internal",
-            root: false,
-            sampled: true
+            sampled: true,
+            attributes: {
+              [kindAttribute]: "TOOL",
+              [attr.toolCategory]: category,
+              "tool.name": tool,
+              ...(content === "off" ? {} : { [attr.input]: clean(args, partChars) })
+            }
           })
-          child.attribute(kindAttribute, "TOOL")
-          child.attribute(attr.toolCategory, category)
-          child.attribute("tool.name", tool)
-          if (content !== "off") {
-            child.attribute(attr.input, clean(args, partChars))
-          }
           const id = chunk.metadata.tool_id ?? chunk.metadata.toolId
           yield* Ref.update(openTools, (open) => [
             ...open,

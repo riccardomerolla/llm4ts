@@ -64,7 +64,8 @@ import * as Tracer from "effect/Tracer"
 import { basename } from "node:path"
 import {
   otelConfig,
-  otelEnvironmentDefaults,
+  otelWarning,
+  probeOtelEndpoint,
   otelLayer,
   otelSummary,
   runnerVersion
@@ -840,9 +841,6 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   // OpenTelemetry export (ADR 0026): decided from the environment, built once
   // per run, flushed when the run's scope closes.
   const otel = otelConfig(environment)
-  for (const [key, value] of Object.entries(otelEnvironmentDefaults(otel, environment))) {
-    process.env[key] = value
-  }
   const tracePath =
     options.tracePath ??
     (persistRun ? join(options.workDir, ".llm4ts", `trace-${startedAt}.jsonl`) : undefined)
@@ -902,6 +900,12 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     const where = otelSummary(otel)
     if (where !== undefined) {
       yield* surface.log(palette.info(where))
+      // One warning, at the start, when nothing listens: the exporter itself
+      // drops batches quietly. The probe is bounded (1.5s) and runs once.
+      const warning = otelWarning(otel, yield* probeOtelEndpoint(otel))
+      if (warning !== undefined) {
+        yield* surface.log(palette.warn(warning))
+      }
     }
   }
   const recorder =
@@ -979,7 +983,11 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   ).pipe(
     Effect.provideService(Tracer.MinimumTraceLevel, otel.mode === "off" ? "All" : "None"),
     Effect.provide(
-      otelLayer(otel, { serviceVersion: runnerVersion, project: basename(options.workDir) })
+      otelLayer(
+        otel,
+        { serviceVersion: runnerVersion, project: basename(options.workDir) },
+        environment
+      )
     )
   )
   return yield* traced.pipe(

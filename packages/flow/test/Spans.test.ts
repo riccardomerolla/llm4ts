@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import { TokenUsage } from "@llm4ts/core/Models"
 import {
   attr,
@@ -32,6 +33,41 @@ describe("withKindSpan", () => {
       assert.isTrue(run?.ended)
       assert.isFalse(run?.failed)
     })
+  )
+
+  it.effect(
+    "with no kind parent a kind span roots a trace, whatever internal span is current",
+    () =>
+      Effect.gen(function* () {
+        const { tracer, spans } = recordingTracer()
+        yield* Effect.withSpan(
+          withKindSpan("run", { kind: "CHAIN" }, Effect.void),
+          "internal fn"
+        ).pipe(Effect.withTracer(tracer))
+        const run = spans().find((span) => span.name === "run")
+        assert.deepStrictEqual([run?.root, run?.parentName, run?.linkedTo], [true, undefined, []])
+      })
+  )
+
+  it.effect(
+    "the wrapped effect keeps the caller's scope: its finalizers run when that scope closes",
+    () =>
+      Effect.gen(function* () {
+        const { tracer } = recordingTracer()
+        const released = yield* Ref.make(false)
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* withKindSpan(
+              "stage",
+              { kind: "CHAIN" },
+              Effect.addFinalizer(() => Ref.set(released, true))
+            )
+            // still inside the caller's scope: the span ended, the resource did not
+            assert.isFalse(yield* Ref.get(released))
+          })
+        ).pipe(Effect.withTracer(tracer))
+        assert.isTrue(yield* Ref.get(released))
+      })
   )
 
   it.effect("a failing effect ends its span failed", () =>

@@ -179,6 +179,24 @@ describe("timedSeat spans", () => {
   )
 
   it.effect(
+    "a TOOL child carries the annotations of the scope it runs in, like any other span",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeFlowEventHub()
+        const { tracer, spans } = recordingTracer()
+        const seat = timedSeat(streaming, events, "coder")
+        yield* Effect.annotateSpans(
+          attr.story,
+          "a"
+        )(collect(seat.executeStreamWithHistory([user]))).pipe(Effect.withTracer(tracer))
+        const tool = spans().find((span) => span.attributes[kindAttribute] === "TOOL")
+        assert.strictEqual(tool?.attributes[attr.story], "a")
+        const llm = spans().find((span) => span.attributes[kindAttribute] === "LLM")
+        assert.strictEqual(llm?.attributes[attr.story], "a")
+      })
+  )
+
+  it.effect(
     "content on: prompt, reply, tool arguments and outputs travel; the system prompt does not",
     () =>
       Effect.gen(function* () {

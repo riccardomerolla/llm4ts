@@ -2,6 +2,7 @@
 // exporters over core's fetch client, so a run can show up in Phoenix,
 // Langfuse, SigNoz or any collector with no SDK and no new dependency.
 // The standard OTEL_* variables are the truth; `--otel` is the laptop case.
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -78,7 +79,9 @@ const resourceOf = (resource: OtelResource) => ({
  */
 export const otelLayer = (
   config: OtelConfig,
-  resource: OtelResource
+  resource: OtelResource,
+  /** What the standard variables are read from in env mode (the run's environment). */
+  environment: Readonly<Record<string, string | undefined>> = process.env
 ): Layer.Layer<OtlpExporter.Flusher> => {
   switch (config.mode) {
     case "off":
@@ -91,17 +94,32 @@ export const otelLayer = (
         shutdownTimeout: flushTimeout
       }).pipe(Layer.provide(OtlpSerialization.layerJson), Layer.provide(FetchHttpClient.layer))
     case "env":
+      // The standard variables are read from the run's own environment, with
+      // the two exporter defaults an endpoint implies; the process env is
+      // never written.
       return Layer.mergeAll(
         OtlpTracer.layerFromConfig({ resource: resourceOf(resource) }),
         OtlpMetrics.layerFromConfig({ resource: resourceOf(resource) })
-      ).pipe(Layer.provide(OtlpSerialization.layerJson), Layer.provide(FetchHttpClient.layer))
+      ).pipe(
+        Layer.provide(OtlpSerialization.layerJson),
+        Layer.provide(FetchHttpClient.layer),
+        Layer.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromEnvRecord({
+              ...environment,
+              ...otelEnvironmentDefaults(config, environment)
+            })
+          )
+        )
+      )
   }
 }
 
 /**
  * `layerFromConfig` exports nothing unless `OTEL_TRACES_EXPORTER` names
  * `otlp`; an endpoint in the environment is the operator's intent, so the
- * run supplies that default (and the metrics one) when they are unset.
+ * layer reads its variables with that default (and the metrics one) added
+ * when they are unset.
  */
 export const otelEnvironmentDefaults = (
   config: OtelConfig,
@@ -125,6 +143,27 @@ export const otelSummary = (config: OtelConfig): string | undefined => {
     case "env":
       return `otel → ${config.endpoint} (traces + metrics, OTEL_* variables)`
   }
+}
+
+/**
+ * The one warning a run prints when export is on and nothing answers at the
+ * endpoint (spec §9): the exporter itself only logs at debug level and drops
+ * the batch. Nothing when off or when the endpoint answered.
+ */
+export const otelWarning = (
+  config: OtelConfig,
+  answers: boolean | undefined
+): string | undefined => {
+  if (config.mode === "off" || answers !== false) {
+    return undefined
+  }
+  const where = config.mode === "phoenix" ? config.tracesUrl : config.endpoint
+  return (
+    `⚠ otel: nothing answers at ${where} — spans will be dropped (the run is unaffected)` +
+    (config.mode === "phoenix"
+      ? "; start Phoenix with `docker run -p 6006:6006 arizephoenix/phoenix:latest`"
+      : "")
+  )
 }
 
 /** The doctor's line: `answers` is the probe's result, undefined when export is off. */

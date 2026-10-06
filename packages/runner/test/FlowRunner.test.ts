@@ -295,9 +295,11 @@ describe("runner spans", () => {
               run?.attributes[attr.run],
               run?.attributes[attr.session],
               run?.attributes[attr.flow],
-              run?.ended
+              run?.ended,
+              run?.root,
+              run?.parentName
             ],
-            ["CHAIN", "run-1", "run-1", "epic-stories", true]
+            ["CHAIN", "run-1", "run-1", "epic-stories", true, true, undefined]
           )
           const example = spans().find((span) => span.name === "Example")
           assert.strictEqual(example?.parentName, "run")

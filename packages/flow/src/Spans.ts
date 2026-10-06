@@ -76,36 +76,37 @@ const CurrentKindSpan = Context.Reference<Option.Option<Tracer.Span>>(
 export const currentKindSpan: Effect.Effect<Option.Option<Tracer.Span>> = CurrentKindSpan
 
 /**
- * A span with the OpenInference kind set, parented to the nearest kind span
- * (or rooting a new trace, linked to it), always sampled, ended with the
- * effect's exit.
+ * A span with the OpenInference kind set, parented to the nearest kind span,
+ * always sampled, ended with the effect's exit. With no kind span above it
+ * (the run; a story asked to root) it starts a trace of its own, linked to
+ * the kind span it was started from when there is one. The wrapped effect
+ * keeps the caller's scope: only the span's lifetime is managed here.
  */
 export const withKindSpan = <A, E, R>(
   name: string,
   options: SpanOptions,
   effect: Effect.Effect<A, E, R>
 ): Effect.Effect<A, E, R> =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const parent = yield* CurrentKindSpan
-      const span = yield* Effect.makeSpanScoped(name, {
+  Effect.flatMap(CurrentKindSpan, (parent) =>
+    Effect.useSpan(
+      name,
+      {
         kind: options.kind === "LLM" ? "client" : "internal",
         sampled: true,
-        ...(options.root === true
+        ...(options.root === true || Option.isNone(parent)
           ? {
               root: true,
               ...(Option.isSome(parent) ? { links: [{ span: parent.value, attributes: {} }] } : {})
             }
-          : Option.isSome(parent)
-            ? { parent: parent.value }
-            : {}),
+          : { parent: parent.value }),
         attributes: { [kindAttribute]: options.kind, ...(options.attributes ?? {}) }
-      })
-      return yield* Effect.withParentSpan(
-        Effect.provideService(effect, CurrentKindSpan, Option.some(span)),
-        span
-      )
-    })
+      },
+      (span) =>
+        Effect.withParentSpan(
+          Effect.provideService(effect, CurrentKindSpan, Option.some(span)),
+          span
+        )
+    )
   )
 
 /** The model name a backend would price: the estimate label stripped. */
