@@ -321,12 +321,18 @@ coder keeps no tool transcript, so its claims are reported as unchecked.
 
 ## Ports
 
-`port-files` and `port-compile` (ADR 0028) port a code base file by file
-with a porting pack (`LLM4TS_PACK`, e.g. the built-in `zig-rust`): a pack
-with `target:` (the target path template), `comment:` (the `PORT STATUS`
-trailer's comment marker), `prompts/porting.md` (the rulebook), pitfall
-cards and a `## Diagnostics` command. State lives under `.llm4ts/port/`:
-`ledger.jsonl`, `report.md`, `pilot.md`, `diagnostics-<round>.md`.
+The port flows (ADR 0028) port a code base file by file with a porting pack
+(`LLM4TS_PACK`, e.g. the built-in `zig-rust` or `scala-ts`): `target:` (the
+target path template), `comment:` (the `PORT STATUS` trailer's comment
+marker), `prompts/porting.md` (the rulebook), pitfall cards, `## Diagnostics`
+(`json`, `cargo` or `tsc`), `## Ledger` (what `port-ledger` classifies),
+`## Differential` (the two test commands `port-tests` compares) and
+`## Audit` (the dimensions `port-guide` audits). In order: `port-guide`
+(`.llm4ts/port/guide-audit.md`, approved → appended to the rulebook on the
+next run), `port-ledger` (`<specs-dir>/ledger.tsv`, committed), `port-files`
+(`.llm4ts/port/ledger.jsonl`, `report.md`, `pilot.md`), `port-compile`
+(`diagnostics-<round>.md`), `port-tests` (`.llm4ts/port/tests/`: a
+`.baseline.json` and a `.diag.md` per test file, `report-<round>.md`).
 
 | Variable                     | Effect                                                                                 |
 | ---------------------------- | -------------------------------------------------------------------------------------- |
@@ -335,6 +341,9 @@ cards and a `## Diagnostics` command. State lives under `.llm4ts/port/`:
 | `LLM4TS_PORT_BATCH`          | Files per batch (6 when the batch's first file is over 2200 lines). Default `100`      |
 | `LLM4TS_PORT_SOURCE_CHARS`   | Characters of one source file in the implementer's prompt. Default `120000`            |
 | `LLM4TS_PORT_COMPILE_ROUNDS` | Rebuild rounds before `port-compile` stops with diagnostics left. Default `6`          |
+| `LLM4TS_PORT_TEST_ROUNDS`    | Differential rounds before `port-tests` stops with red files left. Default `4`         |
+| `LLM4TS_PORT_GUIDE_SAMPLE`   | Sample sources `port-guide` audits and trial-ports. Default `3`                        |
+| `LLM4TS_PORT_GUIDE_TRIAL`    | `off` skips the trial port (auditors and refuters only)                                |
 | `LLM4TS_REVIEW_VOTES`        | Adversarial votes per unit; the port flows default to `2`                              |
 
 ## Capabilities

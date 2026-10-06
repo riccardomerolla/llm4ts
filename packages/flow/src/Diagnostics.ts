@@ -12,10 +12,11 @@ export class Diagnostic extends Schema.Class<Diagnostic>("Diagnostic")({
   unit: Schema.optionalKey(Schema.String)
 }) {}
 
-export const DiagnosticsFormat = Schema.Literals(["json", "cargo"])
+export const DiagnosticsFormat = Schema.Literals(["json", "cargo", "tsc"])
 export type DiagnosticsFormat = typeof DiagnosticsFormat.Type
 
 const decodeJsonLine = Schema.decodeUnknownOption(Schema.fromJsonString(Diagnostic))
+const tscLine = /^(.+?)\((\d+),\d+\): error (TS\d+: .+)$/u
 
 const CargoMessage = Schema.fromJsonString(
   Schema.Struct({
@@ -43,13 +44,32 @@ const decodeCargo = Schema.decodeUnknownOption(CargoMessage)
 /**
  * `json`: one `{file, line?, message, unit?}` object per line. `cargo`:
  * `cargo check --message-format=json`, errors only, the crate as the unit.
- * Lines that do not parse are skipped: a build prints more than diagnostics.
+ * `tsc`: `tsc --pretty false`, the file's top folders as the unit. Lines
+ * that do not parse are skipped: a build prints more than diagnostics.
  */
 export const parseDiagnostics = (
   text: string,
   format: DiagnosticsFormat = "json"
 ): ReadonlyArray<Diagnostic> => {
   const out: Array<Diagnostic> = []
+  if (format === "tsc") {
+    // `tsc --pretty false`: `path(line,col): error TS1234: message`; the unit is the top folder.
+    for (const raw of text.split("\n")) {
+      const match = tscLine.exec(raw.trim())
+      if (match?.[1] === undefined || match[3] === undefined) continue
+      const file = match[1]
+      const top = file.split("/")
+      out.push(
+        Diagnostic.make({
+          file,
+          line: Number.parseInt(match[2] ?? "0", 10),
+          message: match[3],
+          unit: top.length > 2 ? `${top[0]}/${top[1]}` : (top[0] ?? file)
+        })
+      )
+    }
+    return out
+  }
   for (const raw of text.split("\n")) {
     const line = raw.trim()
     if (line.length === 0 || !line.startsWith("{")) continue

@@ -55,3 +55,21 @@ describe("diagnostics (ADR 0028)", () => {
     )
   })
 })
+
+describe("tsc diagnostics", () => {
+  it("reads tsc --pretty false lines, the top folders as the unit", () => {
+    const text = [
+      "packages/flow/src/A.ts(12,5): error TS2322: Type 'string' is not assignable to type 'number'.",
+      "src/B.ts(3,1): error TS2304: Cannot find name 'x'.",
+      "Found 2 errors."
+    ].join("\n")
+    const diagnostics = parseDiagnostics(text, "tsc")
+    assert.deepStrictEqual(
+      diagnostics.map((d) => [d.unit, d.file, d.line, d.message.slice(0, 6)]),
+      [
+        ["packages/flow", "packages/flow/src/A.ts", 12, "TS2322"],
+        ["src", "src/B.ts", 3, "TS2304"]
+      ]
+    )
+  })
+})

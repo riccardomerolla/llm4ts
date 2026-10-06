@@ -91,8 +91,31 @@ export interface Pack {
    * build, `- format: json | cargo` says how to read it. Present only in a
    * porting pack.
    */
+  /**
+   * `## Ledger` (ADR 0028): what `port-ledger` classifies. `- unit: <regex>`
+   * whose first capture group names a unit in a source file, `- classes: A,
+   * B, UNKNOWN`, `- question: <what to decide for each unit>`.
+   */
+  readonly ledger:
+    | { readonly unit: string; readonly classes: ReadonlyArray<string>; readonly question: string }
+    | undefined
+  /**
+   * `## Differential` (ADR 0028): what `port-tests` compares. `- tests: <regex>`
+   * over test files, `- legacy: <command with {{file}}>` run on the old
+   * build, `- target: <command with {{file}}>` on the new, `- timeout: <s>`.
+   */
+  readonly differential:
+    | {
+        readonly tests: string
+        readonly legacy: ReadonlyArray<string>
+        readonly target: ReadonlyArray<string>
+        readonly timeoutSeconds: number
+      }
+    | undefined
+  /** `## Audit` (ADR 0028): `- dimensions: a, b, c` the rulebook auditors take; default list in the flow. */
+  readonly audit: ReadonlyArray<string> | undefined
   readonly diagnostics:
-    | { readonly command: ReadonlyArray<string>; readonly format: "json" | "cargo" }
+    | { readonly command: ReadonlyArray<string>; readonly format: "json" | "cargo" | "tsc" }
     | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
@@ -329,8 +352,33 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
           format:
             diagnosticsValues.format?.toLowerCase() === "cargo"
               ? ("cargo" as const)
-              : ("json" as const)
+              : diagnosticsValues.format?.toLowerCase() === "tsc"
+                ? ("tsc" as const)
+                : ("json" as const)
         }
+  const ledgerValues = namedItems(section(manifest.sections, "Ledger"))
+  const ledger =
+    ledgerValues.unit === undefined
+      ? undefined
+      : {
+          unit: ledgerValues.unit,
+          classes: commaList(ledgerValues.classes),
+          question: ledgerValues.question ?? "Classify this unit."
+        }
+  const differentialValues = namedItems(section(manifest.sections, "Differential"))
+  const differential =
+    differentialValues.tests === undefined ||
+    differentialValues.legacy === undefined ||
+    differentialValues.target === undefined
+      ? undefined
+      : {
+          tests: differentialValues.tests,
+          legacy: differentialValues.legacy.split(/\s+/),
+          target: differentialValues.target.split(/\s+/),
+          timeoutSeconds: Number.parseInt(differentialValues.timeout ?? "", 10) || 120
+        }
+  const auditBody = section(manifest.sections, "Audit")
+  const audit = auditBody === undefined ? undefined : commaList(namedItems(auditBody).dimensions)
   const oracleValues = namedItems(section(manifest.sections, "Oracle"))
   const oracle: OracleRules | undefined =
     section(manifest.sections, "Oracle") === undefined
@@ -407,6 +455,9 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     reviewRules,
     target: fields["target"],
     comment: fields["comment"],
+    ledger,
+    differential,
+    audit,
     diagnostics,
     dir: directory,
     gate: (name) => gates[name],

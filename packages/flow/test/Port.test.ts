@@ -1,13 +1,26 @@
 import { assert, describe, it } from "@effect/vitest"
 import {
+  DiffVerdict,
+  GuideFinding,
+  LedgerRow,
   PortEntry,
   asAddedFileDiff,
   batchesOf,
+  diffVerdict,
+  ledgerRowsFor,
   linesOf,
+  parseLedger,
   portStatusIn,
+  renderDiag,
+  renderDifferentialReport,
+  renderGuideAudit,
+  renderLedger,
   renderPilotReport,
-  targetPathOf
+  standsAfterRefutes,
+  targetPathOf,
+  unitsIn
 } from "@llm4ts/flow/Port"
+import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 import { QueueOutcome } from "@llm4ts/flow/WorkQueue"
 
 describe("port helpers (ADR 0028)", () => {
@@ -97,5 +110,114 @@ describe("port helpers (ADR 0028)", () => {
     const diff = asAddedFileDiff("src/a.rs", "fn a() {}\n")
     assert.include(diff, "+++ b/src/a.rs")
     assert.include(diff, "+fn a() {}")
+  })
+})
+
+describe("port ledger, refutes, guide audit, differential (ADR 0028)", () => {
+  it("renders and parses the ledger TSV and picks one file's rows", () => {
+    const rows = [
+      LedgerRow.make({
+        file: "src/a.zig",
+        unit: "buf",
+        class: "OWNED",
+        evidence: "src/a.zig:12",
+        confidence: "high"
+      }),
+      LedgerRow.make({
+        file: "src/b.zig",
+        unit: "parent",
+        class: "BACKREF",
+        evidence: "src/b.zig:3\tweird",
+        confidence: "low"
+      })
+    ]
+    const text = renderLedger(rows)
+    assert.isTrue(text.startsWith("file\tunit\tclass\tevidence\tconfidence\n"))
+    const parsed = parseLedger(text)
+    assert.strictEqual(parsed.length, 2)
+    assert.strictEqual(parsed[1]?.evidence, "src/b.zig:3 weird")
+    assert.strictEqual(ledgerRowsFor(parsed, "src/a.zig"), "- buf: OWNED (src/a.zig:12; high)")
+    assert.isUndefined(ledgerRowsFor(parsed, "src/c.zig"))
+  })
+
+  it("names the units a ledger regex captures, each once", () => {
+    const zig =
+      "const S = struct {\n    buf: []u8,\n    parent: ?*Node,\n    count: u32,\n    buf: []u8,\n};"
+    assert.deepStrictEqual(unitsIn(zig, "^\\s+(\\w+):\\s*(?:\\?\\*|\\*|\\[\\]|\\[\\*\\])"), [
+      "buf",
+      "parent"
+    ])
+    assert.deepStrictEqual(
+      unitsIn("class A\nobject B\ntrait C", "^(?:class|object|trait)\\s+(\\w+)"),
+      ["A", "B", "C"]
+    )
+  })
+
+  it("a finding stands unless a majority refutes it", () => {
+    assert.isTrue(standsAfterRefutes([true, true, false]))
+    assert.isFalse(standsAfterRefutes([false, false, true]))
+    assert.isTrue(standsAfterRefutes([]))
+  })
+
+  it("the guide audit renders proposed rules as diffs and ends in the approval line", () => {
+    const finding = GuideFinding.make({
+      dimension: "error model",
+      finding: "no rule for anyerror",
+      evidence: "a.zig:4",
+      proposedRule: "Map anyerror!T to Result<T, Error>."
+    })
+    const report = renderGuideAudit({
+      pack: "zig-rust",
+      kept: [finding],
+      dropped: [],
+      trial: ["a.zig: native used Vec"],
+      sample: ["a.zig"]
+    })
+    assert.include(report, "+ - Map anyerror!T to Result<T, Error>.")
+    assert.include(report, "## Trial port")
+    assert.isTrue(report.trimEnd().endsWith("- [ ] Approved"))
+    assert.include(
+      renderGuideAudit({ pack: "p", kept: [], dropped: [], trial: [], sample: [] }),
+      "the rulebook stands"
+    )
+  })
+
+  it("the differential verdict compares exit and pass counts and classifies the rest", () => {
+    const green = (passed?: number) =>
+      ReviewResult.make({
+        issues: [],
+        summary: "lint passed",
+        ...(passed === undefined ? {} : { passed })
+      })
+    const red = (output: string, gateClass: "red" | "hang" | "crash" = "red", passed?: number) =>
+      ReviewResult.make({
+        issues: [
+          ReviewIssue.make({
+            severity: "Critical",
+            title: "lint failed: x",
+            description: output,
+            gateClass
+          })
+        ],
+        summary: "lint failed",
+        ...(passed === undefined ? {} : { passed })
+      })
+    assert.strictEqual(diffVerdict("t.ts", green(2), green(2)).class, "pass")
+    assert.strictEqual(diffVerdict("t.ts", green(2), green(1)).class, "diverge")
+    assert.strictEqual(diffVerdict("t.ts", green(), green()).class, "pass")
+    assert.strictEqual(diffVerdict("t.ts", green(2), red("boom", "red", 1)).class, "diverge")
+    assert.strictEqual(diffVerdict("t.ts", green(2), red("killed", "hang")).class, "hang")
+    assert.strictEqual(diffVerdict("t.ts", green(2), red("segv", "crash")).class, "crash")
+    assert.strictEqual(diffVerdict("t.ts", red("legacy broken"), red("also")).class, "legacy-red")
+    const verdict = diffVerdict("t.ts", green(2), red("/repo/src/x.ts failed", "red", 1), ["/repo"])
+    assert.include(verdict.detail, "src/x.ts failed")
+    assert.notInclude(verdict.detail, "/repo/")
+    assert.include(renderDiag(verdict), "# t.ts: diverge")
+    const report = renderDifferentialReport(1, [
+      verdict,
+      DiffVerdict.make({ file: "u.ts", class: "pass", detail: "" })
+    ])
+    assert.include(report, "pass 1, diverge 1")
+    assert.include(report, "## diverge")
   })
 })

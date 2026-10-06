@@ -20,6 +20,7 @@ import { Info } from "@llm4ts/flow/FlowEvents"
 import {
   asAddedFileDiff,
   batchesOf,
+  ledgerRowsFor,
   portStatusIn,
   renderPilotReport,
   type PortEntry
@@ -41,7 +42,9 @@ import {
   asPortingPack,
   implementerPrompt,
   implementerSystem,
+  ledgerPath,
   portEnv,
+  readLedgerRows,
   portFixerSystem,
   portManifest,
   portStateDir
@@ -132,6 +135,15 @@ const program = Effect.gen(function* () {
           yield* requireApproval(files, pilotPath)
         }
         const items = knobs.pilot > 0 ? pending.slice(0, knobs.pilot) : pending
+        // A ledger written by port-ledger rides into every implementer prompt.
+        const ledger = yield* readLedgerRows(files, input.workDir, porting)
+        if (ledger.length > 0) {
+          yield* events.publish(
+            Info.make({
+              message: `port: ${ledger.length} ledger row(s) from ${ledgerPath(porting)}`
+            })
+          )
+        }
         const batches = batchesOf(items, { files: knobs.batch })
         const started = yield* Clock.currentTimeMillis
         const outcomes: Array<QueueOutcome> = []
@@ -163,7 +175,15 @@ const program = Effect.gen(function* () {
                   agent: "coder",
                   stall: { repeats: 5 }
                 })
-                yield* chat.ask(implementerPrompt(entry, source, porting, knobs.sourceChars))
+                yield* chat.ask(
+                  implementerPrompt(
+                    entry,
+                    source,
+                    porting,
+                    knobs.sourceChars,
+                    ledgerRowsFor(ledger, entry.source)
+                  )
+                )
                 const targetPath = join(input.workDir, entry.target)
                 if ((yield* files.read(targetPath)) === undefined) {
                   return { note: `nothing written at ${entry.target}` }

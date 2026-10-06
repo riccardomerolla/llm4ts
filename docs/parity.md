@@ -619,3 +619,7 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   and `port-compile` with the `zig-rust` reference pack; llm4zio has neither
   a queue nor port flows. `Pack` gains `target:`, `comment:` and
   `## Diagnostics`; `Stalled` gains `no-progress`. Additive.
+- Rulebook audit, ledger and differential tier (ADR 0028, 2026-10-06):
+  `port-guide`, `port-ledger`, `port-tests`, the `tsc` diagnostics format and
+  the `scala-ts` pack; `Pack` gains `## Ledger`, `## Differential`,
+  `## Audit`. llm4zio has none of these. Additive.

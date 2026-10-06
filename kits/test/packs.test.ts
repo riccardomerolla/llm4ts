@@ -279,3 +279,19 @@ describe("kits/port/packs/zig-rust (ADR 0028)", () => {
       })
   )
 })
+
+describe("kits/port/packs/scala-ts (ADR 0028)", () => {
+  it.effect(
+    "is the llm4zio pilot's porting pack: tsc diagnostics, a ledger of declarations, an Effect lens",
+    () =>
+      Effect.gen(function* () {
+        const pack = yield* load("port", "scala-ts")
+        assert.strictEqual(pack.target, "{{dir}}/{{base}}.ts")
+        assert.strictEqual(pack.diagnostics?.format, "tsc")
+        assert.include(pack.ledger?.classes ?? [], "SERVICE")
+        assert.include(pack.prompt("porting") ?? "", "Effect.Effect<A, E, R>")
+        assert.isTrue(pack.lenses.some((lens) => lens.name === "effect-fidelity"))
+        assert.isTrue((pack.audit ?? []).length > 0)
+      })
+  )
+})

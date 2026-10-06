@@ -32,7 +32,7 @@ in the tree, beside its target, as it was for Bun. The clean-room wall
    (`no-progress`); every outcome is one JSON line in a ledger, with the
    confidence and todo count the unit reported; `afterRound` is where the
    flow commits. Items are lanes: `llm4ts watch` and `profile` show them.
-2. **Two port flows now, three later.** `port-files` drafts every source
+2. **Five port flows.** `port-files` drafts every source
    the pack matches at its target path (one implementer per file reading
    the rulebook, the pitfall cards and exactly one source; two adversarial
    votes; a separate fixer; a `PORT STATUS` trailer parsed by code;
@@ -41,9 +41,18 @@ in the tree, beside its target, as it was for Bun. The clean-room wall
    round, groups what is red by unit, gives each unit to one fixer that may
    edit only that unit and neither build nor touch git, reviews with two
    votes, rebuilds and commits, until dry or until a round lowers nothing.
-   `port-guide` (an audited rulebook), `port-ledger` (a precomputed
-   cross-file table) and `port-tests` (the differential tier) wait for a
-   live run of these two.
+   `port-guide` audits the rulebook (dimension auditors over sample sources,
+   three refuters per finding, a trial port by the rules and natively whose
+   differences become findings) into a patch to `prompts/porting.md` behind
+   an approval the next run applies. `port-ledger` classifies every unit the
+   pack's `## Ledger` regex names, with the line that proves it, refutes the
+   unknown and low-confidence rows plus a fifth of the rest, and writes
+   `<specs>/ledger.tsv`, whose rows `port-files` hands each implementer
+   ("trust the table over local guessing"). `port-tests` is the differential
+   tier: every test file once on the legacy build for a baseline, then on
+   the target; pass means exit 0 and the same pass count; diverge, crash and
+   hang become `.diag` files one fixer each reads as its only runtime
+   evidence; one rebuild per round until green or stalled.
 3. **The pilot is a gate.** `LLM4TS_PORT_PILOT=n` ports n files and writes
    `.llm4ts/port/pilot.md`: rates measured, totals extrapolated, ending in
    `- [ ] Approved`. A later full run refuses while that report exists
@@ -52,12 +61,16 @@ in the tree, beside its target, as it was for Bun. The clean-room wall
 4. **Language pairs are kit material.** A porting pack adds `target:` (the
    target path template: `{{dir}}`, `{{base}}`, `{{ext}}`, `{{path}}`),
    `comment:` (the trailer's comment marker), `## Diagnostics`
-   (`- command:` and `- format: json | cargo`), `prompts/porting.md` (the
-   rulebook), `reviewers/*.md` and `patterns/pitfalls-*.md`. The flows know
-   none of Zig or Rust; `kits/port/packs/zig-rust` is the reference pair,
-   distilled from the Bun rulebook and the four regressions it shipped.
-   `flow/src/Diagnostics.ts` reads two formats, JSON lines and cargo's
-   messages; a new toolchain is a format, or a wrapper that prints JSON.
+   (`- command:` and `- format: json | cargo | tsc`), `## Ledger` (`- unit:`
+   regex, `- classes:`, `- question:`), `## Differential` (`- tests:`,
+   `- legacy:`, `- target:` with `{{file}}`, `- timeout:`), `## Audit`
+   (`- dimensions:`), `prompts/porting.md` (the rulebook), `reviewers/*.md`
+   and `patterns/pitfalls-*.md`. The flows know none of Zig, Rust, Scala or
+   TypeScript; `kits/port/packs/zig-rust` is the reference pair distilled
+   from the Bun rulebook and the four regressions it shipped, and
+   `kits/port/packs/scala-ts` is the pair the llm4zio parity pilot needs.
+   `flow/src/Diagnostics.ts` reads three formats; a new toolchain is a
+   format, or a wrapper that prints JSON lines.
 5. **Not clean-room, and said so.** The port flows do not run `checkWall`;
    the source is the spec.
 
@@ -75,7 +88,7 @@ in the tree, beside its target, as it was for Bun. The clean-room wall
 
 ## Not decided here
 
-The audited rulebook flow and the lifetime-style ledger; the differential
-equivalence tier (`modernize-verify --tier differential`); a diagnostics
-format for `tsc` and `javac`; sharding across worktrees (one checkout, one
-queue, concurrency on seats is enough for a first live run).
+A `javac`/`mvn` diagnostics format; sharding across worktrees (one checkout,
+one queue, concurrency on seats is enough for a first live run); folding the
+differential tier into `modernize-verify` (it stands as `port-tests`, whose
+packs name the two commands; the clean-room flows keep their vectors).

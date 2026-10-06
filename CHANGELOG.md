@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+The rest of phase 3 (ADR 0028): the three port flows that make the
+rulebook, the cross-file table and the oracle.
+
+- **`port-guide`.** Dimension auditors (the pack's `## Audit` or a default
+  list) read the rulebook against a few sample sources and propose rules;
+  three refuters vote each finding down or let it stand; a trial port of the
+  samples by the rules and again natively yields the differences the rulebook
+  forgot. `.llm4ts/port/guide-audit.md` shows each kept rule as a diff behind
+  `- [ ] Approved`; the next run appends them to `prompts/porting.md`.
+- **`port-ledger`.** Every unit the pack's `## Ledger` regex names in a
+  source file is classified with the line that proves it; unknown and
+  low-confidence rows plus a fifth of the rest face three refuters; the
+  table lands at `<specs-dir>/ledger.tsv`, committed, and `port-files` hands
+  each implementer its own rows: trust the table over local guessing.
+- **`port-tests`, the differential tier.** Every test file the pack's
+  `## Differential` names runs once on the legacy build for a baseline, then
+  on the target; pass means exit 0 and the same pass count; diverge, crash
+  and hang become `.diag.md` files one fixer each reads as its only runtime
+  evidence, with two adversarial votes and the oracle guard on the fix; one
+  rebuild per round until green, `LLM4TS_PORT_TEST_ROUNDS`, or `Stalled`.
+- **`tsc` diagnostics** (`- format: tsc`) and the **`scala-ts` pack**: the
+  ZIO → Effect rulebook, an `effect-fidelity` lens, a pitfall card and a
+  ledger of declarations, for the llm4zio parity pilot.
+
 ## 2.33.0
 
 Phase 3 of the rewrite-grade loops (ADR 0028): the Bun port's third shape

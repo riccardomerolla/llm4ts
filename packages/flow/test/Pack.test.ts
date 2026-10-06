@@ -196,6 +196,72 @@ describe("2.0 manifest keys", () => {
       })
   )
 
+  it.effect(
+    "reads the porting sections: target, comment, Diagnostics, Ledger, Differential, Audit",
+    () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeMemoryWorkspace()
+        yield* workspace.write(
+          "packs/p/pack.md",
+          [
+            "# Pack: p",
+            "",
+            "source: zig",
+            "sources: .*\\.zig$",
+            "target: {{dir}}/{{base}}.rs",
+            "comment: //",
+            "",
+            "## Diagnostics",
+            "",
+            "- command: cargo check --message-format=json",
+            "- format: cargo",
+            "",
+            "## Ledger",
+            "",
+            "- unit: ^\\s+(\\w+):",
+            "- classes: OWNED, UNKNOWN",
+            "- question: Who owns it?",
+            "",
+            "## Differential",
+            "",
+            "- tests: ^test/.*\\.ts$",
+            "- legacy: scripts/legacy.sh {{file}}",
+            "- target: scripts/target.sh {{file}}",
+            "- timeout: 30",
+            "",
+            "## Audit",
+            "",
+            "- dimensions: error model, ownership"
+          ].join("\n")
+        )
+        const pack = yield* loadPack(workspace, "packs/p")
+        assert.strictEqual(pack.target, "{{dir}}/{{base}}.rs")
+        assert.strictEqual(pack.comment, "//")
+        assert.deepStrictEqual(pack.diagnostics, {
+          command: ["cargo", "check", "--message-format=json"],
+          format: "cargo"
+        })
+        assert.deepStrictEqual(pack.ledger, {
+          unit: "^\\s+(\\w+):",
+          classes: ["OWNED", "UNKNOWN"],
+          question: "Who owns it?"
+        })
+        assert.deepStrictEqual(pack.differential, {
+          tests: "^test/.*\\.ts$",
+          legacy: ["scripts/legacy.sh", "{{file}}"],
+          target: ["scripts/target.sh", "{{file}}"],
+          timeoutSeconds: 30
+        })
+        assert.deepStrictEqual(pack.audit, ["error model", "ownership"])
+        yield* workspace.write("packs/q/pack.md", "# Pack: q\n\nsource: cobol\nsources: .*\\.cbl\n")
+        const plain = yield* loadPack(workspace, "packs/q")
+        assert.isUndefined(plain.target)
+        assert.isUndefined(plain.ledger)
+        assert.isUndefined(plain.differential)
+        assert.isUndefined(plain.audit)
+      })
+  )
+
   it.effect("reads '## Oracle' test-file pattern and extra markers; absent means undefined", () =>
     Effect.gen(function* () {
       const workspace = yield* makeMemoryWorkspace()

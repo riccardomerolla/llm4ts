@@ -3,6 +3,7 @@
 // draft ends with, and the pilot report. Pure; the flows own the seats.
 import { basename, dirname, extname } from "node:path"
 import * as Schema from "effect/Schema"
+import type { ReviewResult } from "./Review.ts"
 import { DraftApprovalMarker } from "./Approval.ts"
 import type { QueueOutcome } from "./WorkQueue.ts"
 
@@ -174,5 +175,255 @@ export const asAddedFileDiff = (path: string, content: string): string => {
     `+++ b/${path}`,
     `@@ -0,0 +1,${lines.length} @@`,
     ...lines.map((line) => `+${line}`)
+  ].join("\n")
+}
+
+// ---- Ledger (port-ledger) --------------------------------------------------------------
+
+/** One classified unit of a source file, with the line that proves it. */
+export class LedgerRow extends Schema.Class<LedgerRow>("LedgerRow")({
+  file: Schema.String,
+  unit: Schema.String,
+  class: Schema.String,
+  /** `file:line` of the statement the classification rests on. */
+  evidence: Schema.String,
+  confidence: PortConfidence
+}) {}
+
+const tsvEscape = (value: string): string => value.replaceAll("\t", " ").replaceAll("\n", " ")
+
+/** The ledger as a TSV with a header: `file unit class evidence confidence`. */
+export const renderLedger = (rows: ReadonlyArray<LedgerRow>): string =>
+  [
+    "file\tunit\tclass\tevidence\tconfidence",
+    ...rows.map((row) =>
+      [row.file, row.unit, row.class, row.evidence, row.confidence].map(tsvEscape).join("\t")
+    )
+  ].join("\n") + "\n"
+
+export const parseLedger = (text: string): ReadonlyArray<LedgerRow> =>
+  text
+    .split(/\r?\n/u)
+    .slice(1)
+    .filter((line) => line.trim().length > 0)
+    .flatMap((line) => {
+      const [file, unit, klass, evidence, confidence] = line.split("\t")
+      return file === undefined || unit === undefined || klass === undefined
+        ? []
+        : [
+            LedgerRow.make({
+              file,
+              unit,
+              class: klass,
+              evidence: evidence ?? "",
+              confidence:
+                confidence === "high" || confidence === "medium" || confidence === "low"
+                  ? confidence
+                  : "low"
+            })
+          ]
+    })
+
+/** The rows of one source file, rendered for its implementer ("trust the table over local guessing"). */
+export const ledgerRowsFor = (rows: ReadonlyArray<LedgerRow>, file: string): string | undefined => {
+  const mine = rows.filter((row) => row.file === file)
+  return mine.length === 0
+    ? undefined
+    : mine
+        .map((row) => `- ${row.unit}: ${row.class} (${row.evidence}; ${row.confidence})`)
+        .join("\n")
+}
+
+/** The units a pack's `## Ledger` regex names in a source file, each once. */
+export const unitsIn = (text: string, unitRegex: string): ReadonlyArray<string> => {
+  const pattern = new RegExp(unitRegex, "gmu")
+  const units: Array<string> = []
+  for (let match = pattern.exec(text); match !== null; match = pattern.exec(text)) {
+    const name = match.slice(1).find((group) => group !== undefined && group.length > 0)
+    if (name !== undefined && !units.includes(name)) units.push(name)
+    if (match[0].length === 0) pattern.lastIndex += 1
+  }
+  return units
+}
+
+// ---- Refutes (port-guide, port-ledger) ----------------------------------------------------
+
+/** A claim stands unless a majority of its refuters reject it (the Bun port's 3-vote refute). */
+export const standsAfterRefutes = (votes: ReadonlyArray<boolean>): boolean => {
+  const rejected = votes.filter((holds) => !holds).length
+  return votes.length === 0 ? true : rejected * 2 < votes.length
+}
+
+// ---- Guide audit (port-guide) -------------------------------------------------------------
+
+export class GuideFinding extends Schema.Class<GuideFinding>("GuideFinding")({
+  dimension: Schema.String,
+  finding: Schema.String,
+  /** A rulebook line, a sample source line, or a draft line that shows it. */
+  evidence: Schema.String,
+  /** The rule the rulebook should gain or change, one line. */
+  proposedRule: Schema.String
+}) {}
+
+export const defaultAuditDimensions: ReadonlyArray<string> = [
+  "error model",
+  "ownership and memory",
+  "collections and strings",
+  "control flow and compile-time constructs",
+  "API shape and naming",
+  "concurrency and resources",
+  "build, test and tooling idioms",
+  "what not to translate"
+]
+
+export const renderGuideAudit = (facts: {
+  readonly pack: string
+  readonly kept: ReadonlyArray<GuideFinding>
+  readonly dropped: ReadonlyArray<GuideFinding>
+  readonly trial: ReadonlyArray<string>
+  readonly sample: ReadonlyArray<string>
+}): string =>
+  [
+    `# Rulebook audit — pack ${facts.pack}`,
+    "",
+    `- sample files: ${facts.sample.join(", ") || "none"}`,
+    `- findings kept after the refute: ${facts.kept.length}; dropped: ${facts.dropped.length}`,
+    "",
+    ...(facts.kept.length === 0
+      ? ["No finding survived: the rulebook stands as written.", ""]
+      : [
+          "## Proposed rules",
+          "",
+          "Each is an `append-rule` to `prompts/porting.md`, applied on the next run once approved.",
+          "",
+          ...facts.kept.flatMap((finding) => [
+            `### ${finding.dimension}`,
+            "",
+            `**Finding.** ${finding.finding.trim()}`,
+            "",
+            `**Evidence.** ${finding.evidence.trim()}`,
+            "",
+            "```diff",
+            `+ - ${finding.proposedRule.trim()}`,
+            "```",
+            ""
+          ])
+        ]),
+    ...(facts.trial.length === 0
+      ? []
+      : [
+          "## Trial port: where the native port and the rulebook port differ",
+          "",
+          ...facts.trial.map((line) => `- ${line}`),
+          ""
+        ]),
+    ...(facts.dropped.length === 0
+      ? []
+      : [
+          "## Dropped by the refute",
+          "",
+          ...facts.dropped.map((finding) => `- ${finding.dimension}: ${finding.finding.trim()}`),
+          ""
+        ]),
+    DraftApprovalMarker,
+    ""
+  ].join("\n")
+
+// ---- Differential (port-tests) ------------------------------------------------------------
+
+export const DiffClass = Schema.Literals(["pass", "diverge", "crash", "hang", "legacy-red"])
+export type DiffClass = typeof DiffClass.Type
+
+export class DiffVerdict extends Schema.Class<DiffVerdict>("DiffVerdict")({
+  file: Schema.String,
+  class: DiffClass,
+  legacyPassed: Schema.optionalKey(Schema.Int),
+  targetPassed: Schema.optionalKey(Schema.Int),
+  detail: Schema.String
+}) {}
+
+/**
+ * The Bun test swarm's verdict: a test file passes when the target exits 0
+ * AND its pass count equals the legacy baseline's (when both are known). A
+ * legacy run that is red itself is no evidence about the target.
+ */
+export const diffVerdict = (
+  file: string,
+  legacy: ReviewResult,
+  target: ReviewResult,
+  roots: ReadonlyArray<string> = []
+): DiffVerdict => {
+  const strip = (text: string): string =>
+    roots.reduce((acc, root) => acc.replaceAll(`${root}/`, ""), text)
+  const legacyPassed = legacy.passed
+  const targetPassed = target.passed
+  const counts = {
+    ...(legacyPassed === undefined ? {} : { legacyPassed }),
+    ...(targetPassed === undefined ? {} : { targetPassed })
+  }
+  if (!legacy.isClean) {
+    return DiffVerdict.make({
+      file,
+      class: "legacy-red",
+      ...counts,
+      detail: "the legacy build fails this file too; nothing to compare"
+    })
+  }
+  const gate = target.issues.find((issue) => issue.gateClass !== undefined)
+  if (gate?.gateClass === "hang") {
+    return DiffVerdict.make({ file, class: "hang", ...counts, detail: strip(gate.description) })
+  }
+  if (gate?.gateClass === "crash") {
+    return DiffVerdict.make({ file, class: "crash", ...counts, detail: strip(gate.description) })
+  }
+  if (!target.isClean) {
+    return DiffVerdict.make({
+      file,
+      class: "diverge",
+      ...counts,
+      detail: strip(target.issues.map((issue) => issue.description).join("\n"))
+    })
+  }
+  if (legacyPassed !== undefined && targetPassed !== undefined && targetPassed !== legacyPassed) {
+    return DiffVerdict.make({
+      file,
+      class: "diverge",
+      ...counts,
+      detail: `${targetPassed} test(s) pass on the target, ${legacyPassed} on the legacy build`
+    })
+  }
+  return DiffVerdict.make({ file, class: "pass", ...counts, detail: "" })
+}
+
+/** The `.diag` a fixer reads as its only runtime evidence. */
+export const renderDiag = (verdict: DiffVerdict, tailChars = 4_000): string =>
+  [
+    `# ${verdict.file}: ${verdict.class}`,
+    "",
+    `- legacy passed: ${verdict.legacyPassed ?? "unknown"}; target passed: ${verdict.targetPassed ?? "unknown"}`,
+    "",
+    "## Target output (tail)",
+    "",
+    "```",
+    verdict.detail.length > tailChars ? `…${verdict.detail.slice(-tailChars)}` : verdict.detail,
+    "```",
+    ""
+  ].join("\n")
+
+export const renderDifferentialReport = (
+  round: number,
+  verdicts: ReadonlyArray<DiffVerdict>
+): string => {
+  const by = (klass: DiffClass) => verdicts.filter((verdict) => verdict.class === klass)
+  return [
+    `# Differential tests, round ${round}`,
+    "",
+    `- files: ${verdicts.length}; pass ${by("pass").length}, diverge ${by("diverge").length}, crash ${by("crash").length}, hang ${by("hang").length}, legacy-red ${by("legacy-red").length}`,
+    "",
+    ...(["diverge", "crash", "hang"] as const).flatMap((klass) =>
+      by(klass).length === 0
+        ? []
+        : [`## ${klass}`, "", ...by(klass).map((verdict) => `- ${verdict.file}`), ""]
+    )
   ].join("\n")
 }

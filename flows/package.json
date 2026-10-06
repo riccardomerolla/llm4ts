@@ -22,6 +22,9 @@
     "modernize-pack-check": "node --experimental-strip-types modernize-pack-check.ts",
     "port-files": "node --experimental-strip-types port-files.ts",
     "port-compile": "node --experimental-strip-types port-compile.ts",
+    "port-guide": "node --experimental-strip-types port-guide.ts",
+    "port-ledger": "node --experimental-strip-types port-ledger.ts",
+    "port-tests": "node --experimental-strip-types port-tests.ts",
     "judge-suite": "node --experimental-strip-types judge-suite.ts",
     "local": "node --experimental-strip-types local.ts",
     "sdd": "node --experimental-strip-types sdd.ts"

@@ -2,9 +2,9 @@
 
 Status: 2026-10-06. Phases 1, 2 and 4.1/4.2/4.3/4.6 shipped as 2.31.0 and
 2.32.0 under ADR 0027; phase 3's queue primitive, `port-files`,
-`port-compile` and the `zig-rust` pack shipped under ADR 0028 (the audited
-rulebook, the ledger and the differential tier are still to come). Phases
-4.4, 4.5, 4.7, 4.8 and the pilots remain proposals.
+`port-compile` and the `zig-rust` pack shipped under ADR 0028, followed by
+`port-guide`, `port-ledger`, `port-tests` and the `scala-ts` pack. Phases
+4.4, 4.5, 4.7, 4.8 and the live pilots remain proposals.
 
 This plan distils two research notes written the same day from primary
 sources, and maps them onto llm4ts's existing seams:

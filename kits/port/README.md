@@ -18,10 +18,15 @@ kits/port/
     patterns/pitfalls-zig-rust.md   syntactically alike, semantically different
 ```
 
-Flows: `port-files` (drafts), `port-compile` (diagnostics as a queue). A
-pack for another pair copies `zig-rust` and replaces the rulebook, the
-pitfall card, `target:` and the diagnostics command.
+Flows, in the order a port runs them: `port-guide` (audit the rulebook on a
+few samples, behind an approval), `port-ledger` (classify the units the pack
+names into `ledger.tsv`), `port-files` (drafts, with a pilot), `port-compile`
+(diagnostics as a queue), `port-tests` (the differential tier). A pack for
+another pair copies one of these and replaces the rulebook, the pitfall card,
+`target:`, the diagnostics command, the ledger regex and the two test
+commands.
 
-| Pack       | Source → target | Diagnostics                         |
-| ---------- | --------------- | ----------------------------------- |
-| `zig-rust` | Zig → Rust      | `cargo check --message-format=json` |
+| Pack       | Source → target                 | Diagnostics                         | Ledger units             |
+| ---------- | ------------------------------- | ----------------------------------- | ------------------------ |
+| `zig-rust` | Zig → Rust                      | `cargo check --message-format=json` | pointer and slice fields |
+| `scala-ts` | Scala 3 / ZIO 2 → TS / Effect 4 | `tsc --pretty false`                | classes, objects, traits |

@@ -10,7 +10,14 @@ import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import type { Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards } from "@llm4ts/flow/Patterns"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { PortEntry, linesOf, portStatusInstruction, targetPathOf } from "@llm4ts/flow/Port"
+import {
+  PortEntry,
+  linesOf,
+  parseLedger,
+  portStatusInstruction,
+  targetPathOf,
+  type LedgerRow
+} from "@llm4ts/flow/Port"
 import { matchingFiles } from "@llm4ts/flow/SpecChecks"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
 import type { OpenedPack } from "@llm4ts/runner/Packs"
@@ -107,11 +114,19 @@ export const implementerPrompt = (
   entry: PortEntry,
   sourceText: string,
   porting: PortingPack,
-  sourceChars: number
+  sourceChars: number,
+  ledgerRows?: string
 ): string =>
   [
     `Port \`${entry.source}\` (${entry.loc} lines). Write the ported file at: ${entry.target}`,
     "The draft need not compile; it must capture the logic faithfully.",
+    ...(ledgerRows === undefined
+      ? []
+      : [
+          "",
+          "Precomputed classifications for this file (cross-file analysis; trust them over local guessing):",
+          ledgerRows
+        ]),
     "",
     portStatusInstruction(porting.comment),
     "",
@@ -150,6 +165,31 @@ export const compileFixerSystem = (porting: PortingPack): string =>
     "",
     "# Porting rulebook",
     porting.rulebook
+  ].join("\n")
+
+/** The ledger the pack's `port-ledger` writes, beside the specs; `undefined` when none. */
+export const ledgerPath = (porting: PortingPack): string => `${porting.pack.specsDir}/ledger.tsv`
+
+export const readLedgerRows = (
+  files: PlainFileStoreShape,
+  workDir: string,
+  porting: PortingPack
+): Effect.Effect<ReadonlyArray<LedgerRow>, FlowError> =>
+  Effect.map(files.read(join(workDir, ledgerPath(porting))), (text) =>
+    text === undefined ? [] : parseLedger(text)
+  )
+
+/** A native engineer's brief for the trial port: no rulebook, idiomatic target code. */
+export const nativeImplementerSystem = (porting: PortingPack): string =>
+  [
+    autonomyContract("minimal"),
+    "",
+    `You are a senior engineer in the target language of pack ${porting.pack.name}. Port the`,
+    "source file the way you would write it natively and idiomatically, with no rulebook: your",
+    "draft is compared with a rules-following draft to find what the rulebook forgot. Read",
+    "exactly one source file; do not run a build or any git command; write only the target file.",
+    "",
+    implementerDenials
   ].join("\n")
 
 export const portEnv = (
