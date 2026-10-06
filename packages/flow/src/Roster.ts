@@ -799,14 +799,16 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
        * one (its coder is idle while the context makes this call).
        */
       const takeOwn = (
-        because: "held" | "out"
+        because: "nobody" | "held" | "out"
       ): Effect.Effect<Lease | undefined, never, Scope.Scope> =>
         Effect.gen(function* () {
           if (borrow === undefined) {
             return undefined
           }
+          // Out of the round itself, the own executor is still taken when
+          // nobody else can ever serve (the call fails on it, as on anyone).
           const inRound = yield* lock.withPermit(Effect.sync(() => !exclusions.has(borrow.id)))
-          if (!inRound) {
+          if (!inRound && because !== "nobody") {
             return undefined
           }
           const own = yield* attempt(role, {
@@ -844,9 +846,9 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
           return yield* leaseOf(spec, role, leaseOptions.label)
         }
         if (!(yield* canEverServe(role, avoid))) {
-          if (borrow !== undefined) {
-            yield* waited
-            return yield* borrowedLease(borrow, role, leaseOptions.label, "nobody")
+          const own = yield* takeOwn("nobody")
+          if (own !== undefined) {
+            return own
           }
           const reasons = yield* lock.withPermit(
             Effect.sync(() =>

@@ -17,6 +17,16 @@
   decided per call, so the next review goes back to claude the moment it
   returns. `Lease.because`, `independenceBlocked` on the roster; ADR 0019
   amended.
+- **claude's session limit takes it out of the round.** "You've hit your
+  session limit · resets 8:20am (Europe/Rome)" was read as a plain provider
+  error: retried three times on claude, then it failed the story. It is now
+  a typed usage limit — any claude "… limit" line with a reset time, read in
+  the zone claude states, or without one for the default cooldown — so the
+  roster excludes claude until the reset and the call moves at once to the
+  next executor that takes the role: another one, or the story's own on a
+  free slot of its own, else a wait for the first to return. Nothing is
+  retried on an executor that is out of quota.
+
 ## 2.31.0
 
 Release A of the rewrite-grade loops (ADR 0027,

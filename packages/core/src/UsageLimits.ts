@@ -3,7 +3,17 @@ import * as Duration from "effect/Duration"
 import { RateLimitError, UsageLimitError, type LlmError } from "./Errors.ts"
 
 const codexAt = /try again at\s+(\d{1,2}:\d{2}\s*[AP]M)/i
-const claudeAt = /usage limit.*?(?:resets?|try again) at\s+(\d{1,2}(?::\d{2})?\s*[ap]m)/i
+// claude: "You have reached your usage limit; resets at 3 PM", and since
+// 2.1 "You've hit your session limit · resets 8:20am (Europe/Rome)" — the
+// zone in parentheses is the one the time is in, when given.
+const claudeAt =
+  /\blimit\b.*?(?:resets?|try again)(?:\s+at)?\s+(\d{1,2}(?::\d{2})?\s*[ap]m)(?:\s*\(([A-Za-z_]+(?:\/[A-Za-z_+-]+)+)\))?/i
+const claudeLimitSignals: ReadonlyArray<string> = [
+  "usage limit",
+  "session limit",
+  "weekly limit",
+  "hit your"
+]
 const geminiReset = /reset after\s+((?:\d+(?:ms|[dhms]))+)/i
 const resetComponent = /(\d+)(ms|[dhms])/gi
 const shortResetLimit = Duration.seconds(120)
@@ -47,6 +57,9 @@ export const isGeminiQuota = (text: string): boolean => includesSignal(text, gem
 const isGenericQuota = (text: string): boolean => includesSignal(text, genericQuotaSignals)
 
 const isRelayedQuota = (text: string): boolean => includesSignal(text, relayedQuotaSignals)
+
+const isClaudeLimit = (text: string): boolean =>
+  includesSignal(text, claudeLimitSignals) && /\blimit\b/i.test(text)
 
 const resetDuration = (specification: string): Duration.Duration => {
   let milliseconds = 0
@@ -213,14 +226,14 @@ export const classifyUsageLimit = (
           })
     }
     case "claude": {
-      const resetAt = wallClockReset(text, claudeAt, now, timeZone)
-      return resetAt === undefined
-        ? undefined
-        : UsageLimitError.make({
-            resetAt,
-            provider,
-            message: text
-          })
+      const statedZone = text.match(claudeAt)?.[2]
+      const resetAt = wallClockReset(text, claudeAt, now, statedZone ?? timeZone)
+      if (resetAt !== undefined) {
+        return UsageLimitError.make({ resetAt, provider, message: text })
+      }
+      // A limit without a readable reset time still takes claude out of the
+      // round, for the roster's default cooldown.
+      return isClaudeLimit(text) ? UsageLimitError.make({ provider, message: text }) : undefined
     }
     case "gemini": {
       const resetSpecification = text.match(geminiReset)?.[1]

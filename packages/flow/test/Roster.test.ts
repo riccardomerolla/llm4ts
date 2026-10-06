@@ -10,7 +10,8 @@ import {
   InvalidRequestError,
   ProviderError,
   RateLimitError,
-  UsageLimitError
+  UsageLimitError,
+  type LlmError
 } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { ConnectorCapabilities, LlmChunk, Message } from "@llm4ts/core/Models"
@@ -378,7 +379,7 @@ const unused = InvalidRequestError.make({ message: "unused" })
 
 /** A seat that records which executor answered, failing while `failing` says so. */
 const seatFor =
-  (log: Ref.Ref<ReadonlyArray<string>>, failing: (id: string) => ProviderError | undefined) =>
+  (log: Ref.Ref<ReadonlyArray<string>>, failing: (id: string) => LlmError | undefined) =>
   (spec: ExecutorSpec, role: string, _workDir: string): Effect.Effect<RosterSeat> => {
     const answer = (prompt: string) =>
       Stream.unwrap(
@@ -520,6 +521,58 @@ describe("Roster seats", () => {
         assert.include(String(yield* Effect.flip(text(flaky, "judge again"))), "bad JSON")
       })
     )
+  )
+
+  // The rehearsal of 2026-10-06: codex coding, claude reviewing, claude's
+  // "You've hit your session limit · resets 8:20am (Europe/Rome)". The review
+  // must move to codex's free reasoning slot, not fail the story.
+  it.effect(
+    "a review moves to its own executor's free slot when the independent one hits its limit",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const events = yield* makeCollectingFlowEvents
+          const log = yield* Ref.make<ReadonlyArray<string>>([])
+          const roster = yield* makeRoster({ executors: [codex, claude], events })
+          const limit = UsageLimitError.make({
+            provider: "claude",
+            message:
+              "claude exited with code 1: You've hit your session limit · resets 8:20am (Europe/Rome)",
+            resetAt: DateTime.makeUnsafe("2026-10-06T06:20:00Z")
+          })
+          const source = { seatFor: seatFor(log, (id) => (id === "claude" ? limit : undefined)) }
+          const story = yield* makeHeldCoder(roster, source, "a", {
+            events,
+            eager: true,
+            label: "a"
+          })
+          assert.strictEqual(yield* story.executor, "codex")
+          const reviewer = rosterSeat(roster, source, "reviewer", "a", {
+            events,
+            avoid: Effect.map(story.executor, (id) => (id === undefined ? [] : [id])),
+            borrow: story.lease,
+            label: "a"
+          })
+          assert.strictEqual(yield* text(reviewer, "review a"), "codex ok")
+          const snapshot = yield* roster.snapshot
+          const out = snapshot.find((status) => status.executor.id === "claude")?.exclusion
+          assert.deepStrictEqual([out?.kind, out?.until], ["until", at("2026-10-06T06:20:00Z")])
+          const lines = rosterLines(yield* events.recorded)
+          assert.isTrue(lines.some((line) => line.includes("reviewer for a moves off claude")))
+          assert.isTrue(
+            lines.includes(
+              "roster: codex takes reviewer for a on its own slot — not independent (no other executor can take reviewer)"
+            ),
+            lines.join("\n")
+          )
+          // One attempt on claude, one on codex: the limit is not retried on the spot.
+          assert.deepStrictEqual(yield* Ref.get(log), [
+            "claude:reviewer:review a",
+            "codex:reviewer:review a"
+          ])
+          assert.strictEqual(yield* roster.available("reviewer"), 1)
+        })
+      )
   )
 
   it.effect("per-call seats avoid the context's coder, and borrow it when nobody else can", () =>
