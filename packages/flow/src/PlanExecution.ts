@@ -1,25 +1,36 @@
 import * as Effect from "effect/Effect"
 import { StageCompleted, StageFailed, StageStarted, type FlowEventsShape } from "./FlowEvents.ts"
+import { withKindSpan, type SpanOptions } from "./Spans.ts"
 import { describeFlowError, type FlowError } from "./FlowError.ts"
 import type { Plan, Task } from "./Plan.ts"
 import type { PlanStoreShape } from "./Persistence.ts"
 
 const errorMessage = describeFlowError
 
+/**
+ * A named step of a flow: published as StageStarted/Completed/Failed for the
+ * terminal, the trace and the profile, and a span of `span.kind` (CHAIN by
+ * default) for OpenTelemetry (ADR 0026).
+ */
 export const stage = <A, E, R>(
   events: FlowEventsShape,
   name: string,
-  effect: Effect.Effect<A, E, R>
+  effect: Effect.Effect<A, E, R>,
+  span: SpanOptions = { kind: "CHAIN" }
 ): Effect.Effect<A, E, R> =>
-  events.publish(StageStarted.make({ stage: name })).pipe(
-    Effect.andThen(effect),
-    Effect.tap(() => events.publish(StageCompleted.make({ stage: name }))),
-    Effect.tapError((error) =>
-      events.publish(
-        StageFailed.make({
-          stage: name,
-          message: errorMessage(error)
-        })
+  withKindSpan(
+    name,
+    span,
+    events.publish(StageStarted.make({ stage: name })).pipe(
+      Effect.andThen(effect),
+      Effect.tap(() => events.publish(StageCompleted.make({ stage: name }))),
+      Effect.tapError((error) =>
+        events.publish(
+          StageFailed.make({
+            stage: name,
+            message: errorMessage(error)
+          })
+        )
       )
     )
   )

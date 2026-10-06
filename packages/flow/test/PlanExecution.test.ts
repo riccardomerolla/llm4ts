@@ -2,8 +2,10 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import { FlowAborted } from "@llm4ts/flow/FlowError"
-import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
-import { implementTaskLoop } from "@llm4ts/flow/PlanExecution"
+import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
+import { implementTaskLoop, stage } from "@llm4ts/flow/PlanExecution"
+import { kindAttribute } from "@llm4ts/flow/Spans"
+import { recordingTracer } from "./support/RecordingTracer.ts"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { makePlanStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 
@@ -116,6 +118,33 @@ describe("implementTaskLoop", () => {
       assert.isTrue(disk?.tasks[0]?.completed)
       assert.isFalse(disk?.tasks[1]?.completed)
       assert.strictEqual(recorded.at(-1)?._tag, "StageFailed")
+    })
+  )
+})
+
+describe("stage spans", () => {
+  it.effect("every stage is a CHAIN span unless told otherwise, failed when the stage fails", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const { tracer, spans } = recordingTracer()
+      yield* Effect.withSpan(
+        Effect.gen(function* () {
+          yield* stage(events, "story plan", Effect.void)
+          yield* Effect.flip(
+            stage(events, "story a", Effect.fail(new Error("boom")), { kind: "AGENT", root: true })
+          )
+        }),
+        "run"
+      ).pipe(Effect.withTracer(tracer))
+      const [, plan, story] = spans()
+      assert.deepStrictEqual(
+        [plan?.name, plan?.attributes[kindAttribute], plan?.root, plan?.failed],
+        ["story plan", "CHAIN", false, false]
+      )
+      assert.deepStrictEqual(
+        [story?.name, story?.attributes[kindAttribute], story?.root, story?.failed],
+        ["story a", "AGENT", true, true]
+      )
     })
   )
 })

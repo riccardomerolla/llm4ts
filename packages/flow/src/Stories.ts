@@ -74,6 +74,7 @@ import {
   type StoryRelation
 } from "./StoryPlan.ts"
 import { isOutageMessage } from "./TransientRetry.ts"
+import { attr, withKindSpan } from "./Spans.ts"
 
 const join = (root: string, path: string): string =>
   `${root.replace(/[\\/]+$/, "")}/${path.replace(/^[\\/]+/, "")}`
@@ -1243,40 +1244,68 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         // rerun that finds the same diff gets the same answer without a
         // model call, and the last verdict is on disk to read. Only the
         // first round reuses it; a later round follows a revision and asks.
-        const judged =
-          empty && subject.trim().length === 0
-            ? // Nothing to judge is decided here, not asked of a model.
-              {
-                value: ReviewResult.make({
-                  issues: [
-                    ReviewIssue.make({
-                      severity: "Critical",
-                      title: `nothing exists yet under ${story.owned.join(", ")}`,
-                      description: "The story's owned paths are empty on the epic branch."
+        // The round is an EVALUATOR span (ADR 0026): the verdict's scores and
+        // findings land on it, so a trace shows why a story was sent back.
+        const judged = yield* withKindSpan(
+          `story ${story.id}: judge ${round}`,
+          { kind: "EVALUATOR" },
+          Effect.gen(function* () {
+            const outcome =
+              empty && subject.trim().length === 0
+                ? // Nothing to judge is decided here, not asked of a model.
+                  {
+                    value: ReviewResult.make({
+                      issues: [
+                        ReviewIssue.make({
+                          severity: "Critical",
+                          title: `nothing exists yet under ${story.owned.join(", ")}`,
+                          description: "The story's owned paths are empty on the epic branch."
+                        })
+                      ],
+                      summary: `judge:${story.id}`
+                    }),
+                    reused: false
+                  }
+                : yield* cachedValue(
+                    files,
+                    judgePath(story),
+                    Verdict,
+                    fingerprintOf([
+                      empty ? "code" : "diff",
+                      subject,
+                      story.id,
+                      story.title,
+                      story.description,
+                      story.provides.join("\n")
+                    ]),
+                    withTimedRole(
+                      "judge",
+                      judge(story, subject, watchedSeats, empty ? "code" : "diff")
+                    ),
+                    { reuse: round === 1 }
+                  )
+            const scored = outcome.value instanceof StoryVerdict ? outcome.value.dimensions : []
+            yield* Effect.annotateCurrentSpan({
+              "llm4ts.judge.cleared": outcome.value.isClean,
+              "llm4ts.judge.reused": outcome.reused,
+              ...Object.fromEntries(scored.map((d) => [`llm4ts.judge.${d.id}`, d.score]))
+            })
+            const now = yield* Clock.currentTimeNanos
+            yield* Effect.option(Effect.currentSpan).pipe(
+              Effect.map((span) => {
+                if (span._tag === "Some") {
+                  for (const issue of outcome.value.issues) {
+                    span.value.event("judge finding", now, {
+                      title: issue.title,
+                      severity: issue.severity
                     })
-                  ],
-                  summary: `judge:${story.id}`
-                }),
-                reused: false
-              }
-            : yield* cachedValue(
-                files,
-                judgePath(story),
-                Verdict,
-                fingerprintOf([
-                  empty ? "code" : "diff",
-                  subject,
-                  story.id,
-                  story.title,
-                  story.description,
-                  story.provides.join("\n")
-                ]),
-                withTimedRole(
-                  "judge",
-                  judge(story, subject, watchedSeats, empty ? "code" : "diff")
-                ),
-                { reuse: round === 1 }
-              )
+                  }
+                }
+              })
+            )
+            return outcome
+          })
+        )
         const verdict = judged.value
         if (judged.reused) {
           yield* laneOf(story).publish(
@@ -1390,8 +1419,33 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   })
 
   /** A story's run as a completion — failures become outcomes, never fiber deaths. */
+  // One trace per story (ADR 0026): the story span roots it, linked to the
+  // run's span, and every span under it — tasks, model calls, tools, gates —
+  // carries the story, the epic and the run's session.
+  const storySpanAttributes = (story: Story): Readonly<Record<string, unknown>> => ({
+    [attr.story]: story.id,
+    [attr.epic]: plan.epicId,
+    ...(context.trace === undefined
+      ? {}
+      : { [attr.session]: context.trace.runId, [attr.run]: context.trace.runId })
+  })
+  const annotated = <A, E, R>(
+    story: Story,
+    effect: Effect.Effect<A, E, R>
+  ): Effect.Effect<A, E, R> =>
+    Object.entries(storySpanAttributes(story)).reduce(
+      (acc, [key, value]) => Effect.annotateSpans(key, value)(acc),
+      effect
+    )
   const attempt = (story: Story): Effect.Effect<Completion> =>
-    stage(laneOf(story), `story ${story.id}`, runStory(story)).pipe(
+    annotated(
+      story,
+      stage(laneOf(story), `story ${story.id}`, runStory(story), {
+        kind: "AGENT",
+        root: true,
+        attributes: storySpanAttributes(story)
+      })
+    ).pipe(
       Effect.map((outcome): Completion => ({ story, outcome })),
       Effect.catch((error) =>
         Effect.gen(function* () {

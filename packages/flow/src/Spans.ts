@@ -3,8 +3,10 @@
 // Phoenix of any version renders the LLM views, and llm4ts's own keys for
 // what no convention names (role, story, epic, estimated usage). Pure: the
 // exporter is the runner's, the seams only call `withKindSpan`.
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import type * as Tracer from "effect/Tracer"
 import type { TokenUsage } from "@llm4ts/core/Models"
 import { isEstimatedModel } from "./EstimatedUsage.ts"
 
@@ -59,21 +61,52 @@ export interface SpanOptions {
   readonly attributes?: Readonly<Record<string, unknown>>
 }
 
-/** `Effect.withSpan` with the OpenInference kind set, and a link back when the span roots a trace. */
+/**
+ * The nearest span `withKindSpan` opened. Effect names a span for every
+ * `Effect.fn`, so the fiber's current span is usually an internal one; kind
+ * spans chain to each other instead, and the runner leaves the internal ones
+ * unsampled, so an exported trace shows the flow, not the call stack.
+ */
+const CurrentKindSpan = Context.Reference<Option.Option<Tracer.Span>>(
+  "@llm4ts/flow/Spans/CurrentKindSpan",
+  { defaultValue: () => Option.none() }
+)
+
+/** The kind span the current code runs under, when there is one. */
+export const currentKindSpan: Effect.Effect<Option.Option<Tracer.Span>> = CurrentKindSpan
+
+/**
+ * A span with the OpenInference kind set, parented to the nearest kind span
+ * (or rooting a new trace, linked to it), always sampled, ended with the
+ * effect's exit.
+ */
 export const withKindSpan = <A, E, R>(
   name: string,
   options: SpanOptions,
   effect: Effect.Effect<A, E, R>
 ): Effect.Effect<A, E, R> =>
-  Effect.gen(function* () {
-    const parent = options.root === true ? yield* Effect.option(Effect.currentSpan) : Option.none()
-    return yield* Effect.withSpan(effect, name, {
-      kind: options.kind === "LLM" ? "client" : "internal",
-      ...(options.root === true ? { root: true } : {}),
-      ...(Option.isSome(parent) ? { links: [{ span: parent.value, attributes: {} }] } : {}),
-      attributes: { [kindAttribute]: options.kind, ...(options.attributes ?? {}) }
+  Effect.scoped(
+    Effect.gen(function* () {
+      const parent = yield* CurrentKindSpan
+      const span = yield* Effect.makeSpanScoped(name, {
+        kind: options.kind === "LLM" ? "client" : "internal",
+        sampled: true,
+        ...(options.root === true
+          ? {
+              root: true,
+              ...(Option.isSome(parent) ? { links: [{ span: parent.value, attributes: {} }] } : {})
+            }
+          : Option.isSome(parent)
+            ? { parent: parent.value }
+            : {}),
+        attributes: { [kindAttribute]: options.kind, ...(options.attributes ?? {}) }
+      })
+      return yield* Effect.withParentSpan(
+        Effect.provideService(effect, CurrentKindSpan, Option.some(span)),
+        span
+      )
     })
-  })
+  )
 
 /** The model name a backend would price: the estimate label stripped. */
 export const modelNameOf = (model: string | undefined): string | undefined =>

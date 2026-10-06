@@ -37,6 +37,8 @@ import {
 import { Story, StoryPlan, storyHash } from "@llm4ts/flow/StoryPlan"
 import { timedSeat } from "@llm4ts/flow/Timing"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
+import { attr, kindAttribute } from "@llm4ts/flow/Spans"
+import { recordingTracer } from "./support/RecordingTracer.ts"
 
 // ---- Fakes -------------------------------------------------------------------
 
@@ -1643,5 +1645,55 @@ describe("startingCodeOf", () => {
       assert.include(text ?? "", "### src/features/a/index.ts")
       assert.include(text ?? "", "export const a = 1")
     })
+  )
+})
+
+describe("story spans", () => {
+  it.effect(
+    "each story is its own AGENT trace carrying story, epic and session; the judge round is an EVALUATOR with scores",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const context: FlowContextShape = {
+          ...(yield* makeContext(harness)),
+          trace: { runId: "run-7", path: "/repo/.llm4ts/trace.jsonl" }
+        }
+        const { tracer, spans } = recordingTracer()
+        const options = yield* makeOptions(harness, single, context, {
+          concurrency: 1,
+          judge: () =>
+            Effect.succeed(
+              StoryVerdict.make({
+                issues: [],
+                summary: "judge:a",
+                dimensions: [
+                  { id: "provides", score: 2, max: 2 },
+                  { id: "tests", score: 1, max: 2 }
+                ]
+              })
+            )
+        })
+        yield* implementStoriesFlow(context, options).pipe(Effect.withTracer(tracer))
+        const story = spans().find((span) => span.name === "story a")
+        assert.deepStrictEqual(
+          [
+            story?.attributes[kindAttribute],
+            story?.root,
+            story?.attributes[attr.story],
+            story?.attributes[attr.epic],
+            story?.attributes[attr.session]
+          ],
+          ["AGENT", true, "a", "single", "run-7"]
+        )
+        const task = spans().find(
+          (span) => span.parentName === "story a" && span.attributes[kindAttribute] === "CHAIN"
+        )
+        assert.strictEqual(task?.attributes[attr.story], "a")
+        const judge = spans().find((span) => span.attributes[kindAttribute] === "EVALUATOR")
+        assert.strictEqual(judge?.name, "story a: judge 1")
+        assert.strictEqual(judge?.attributes["llm4ts.judge.provides"], 2)
+        assert.strictEqual(judge?.attributes["llm4ts.judge.tests"], 1)
+        assert.strictEqual(judge?.attributes["llm4ts.judge.cleared"], true)
+      })
   )
 })
