@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.35.1
+
+`epic-stories` under a roster runs as many stories as asked again.
+
+- **Stories fill the roster's coder capacity.** The scheduler sized each
+  launch by the coder slots free that instant, which running stories' review,
+  judge and verifier calls hold for a moment, and looked again only when a
+  story ended. With `--concurrency 6` and a large roster, one story ran and
+  the rest of the roster idled. Launches are now sized by the round's coder
+  capacity (slots on executors not out of the round, held or not), capped by
+  `--concurrency`; a story launched while a call holds its slot waits in its
+  lease for that call.
+- **More stories start when the round grows.** A ready story waiting only
+  for capacity starts as soon as an executor comes back from a cooldown, a
+  health outage or a resume, not when the next running story ends. The
+  roster gains `capacity(role)` and `capacityChanged(role, from)`, and
+  `RosterView` carries both.
+
 ## 2.35.0
 
 LLM spans that show what was asked and answered, on every seat.
