@@ -2,11 +2,12 @@ import { assert, describe, it } from "@effect/vitest"
 import { autonomyContract, withContract } from "@llm4ts/flow/AutonomyContract"
 
 describe("autonomyContract", () => {
-  it("the full profile carries every rule: unattended, scope, minimal change, no gaming, evidence", () => {
+  it("the full profile carries every rule: unattended, scope, workspace, minimal change, no gaming, evidence", () => {
     const text = autonomyContract("full")
     for (const phrase of [
       "Nobody is watching",
       "whole scope",
+      "The tool that runs you is not part of the",
       "smallest change",
       "Never edit, skip, delete or weaken a test",
       "Finish with evidence"
@@ -15,9 +16,10 @@ describe("autonomyContract", () => {
     }
   })
 
-  it("the minimal profile keeps scope and the no-gaming rule only", () => {
+  it("the minimal profile keeps scope, the workspace rule and the no-gaming rule only", () => {
     const text = autonomyContract("minimal")
     assert.include(text, "whole scope")
+    assert.include(text, "do not look for its installation, source code, processes or environment")
     assert.include(text, "Never edit, skip, delete or weaken a test")
     assert.notInclude(text, "Nobody is watching")
     assert.notInclude(text, "Finish with evidence")

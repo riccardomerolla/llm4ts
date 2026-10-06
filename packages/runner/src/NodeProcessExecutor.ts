@@ -32,6 +32,32 @@ const processFailure = (argv: ReadonlyArray<string>, detail: string): ProviderEr
       : `${commandName(argv)} failed: ${detail}`
   })
 
+/**
+ * The orchestrator's own variables: its `LLM4TS_*` knobs and `_`, the path
+ * of the binary the shell started. The standard `OTEL_*` variables stay:
+ * other OpenTelemetry-aware tools (a CLI's own telemetry) read them too.
+ */
+const orchestratorOwn = (name: string): boolean => name === "_" || name.startsWith("LLM4TS_")
+
+/**
+ * What a child process inherits: this process's environment without the
+ * orchestrator's own variables, then `envVars`. A coding agent, a gate or a
+ * setup command has no use for llm4ts's knobs, and an agent that lists its
+ * environment should not be pointed at the tool running it.
+ */
+export const childEnvironment = (
+  parent: Readonly<Record<string, string | undefined>>,
+  envVars: Readonly<Record<string, string>>
+): Record<string, string> => {
+  const inherited: Record<string, string> = {}
+  for (const [name, value] of Object.entries(parent)) {
+    if (value !== undefined && !orchestratorOwn(name)) {
+      inherited[name] = value
+    }
+  }
+  return { ...inherited, ...envVars }
+}
+
 const spawnChild = (
   argv: ReadonlyArray<string>,
   cwd: string,
@@ -58,10 +84,7 @@ const spawnChild = (
     try: () =>
       spawn(file, spawnArgs, {
         cwd,
-        env: {
-          ...process.env,
-          ...envVars
-        },
+        env: childEnvironment(process.env, envVars),
         stdio: "pipe",
         ...(windows === undefined ? {} : { windowsVerbatimArguments: windows.verbatim })
       }),

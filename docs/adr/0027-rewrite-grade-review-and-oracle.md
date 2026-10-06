@@ -77,6 +77,11 @@ Numbered as the specs implement them. Release A (2.31.0) is 1–6, release B
    do not become tests; never edit or skip a test to pass; end with evidence,
    not a claim. Flows stop writing their own. A roster entry picks a profile
    (`full`, `minimal`, `off`) per executor.
+   Since 2.35.4 both `full` and `minimal` also carry a workspace rule: the
+   working directory is the coder's whole world; it does not look for the
+   tool running it (a Gemini agent was seen reading llm4ts's installed
+   source to learn how it would be reviewed). Child processes no longer
+   inherit the orchestrator's `LLM4TS_*` variables or `_`.
 6. **Evidence is cross-checked.** The task's `## Findings` trailer gains
    `verified: <command>` and `confidence: high|medium|low`. Code checks
    `verified:` against the transcript's `Tool` entries; a command that never
