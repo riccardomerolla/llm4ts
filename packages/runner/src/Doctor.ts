@@ -11,6 +11,7 @@ import {
   geminiBridgePort as bridgePort,
   piModelsConfig as parsePiModels
 } from "./PiModels.ts"
+import { otelConfig, otelDoctorLine, probeOtelEndpoint, type OtelConfig } from "./Otel.ts"
 
 const credentialKeys = [
   "OPENAI_API_KEY",
@@ -220,65 +221,75 @@ export const makeDoctorProgram = (
     nodePlainFileStore,
     process.cwd(),
     environment
-  )
-): Effect.Effect<string> =>
-  Effect.map(Effect.all([registry.healthCheckAll, nodeCheck]), ([statuses, node]) => {
-    const lines: Array<string> = []
-    lines.push("llm4ts doctor")
-    lines.push("")
-    lines.push("connectors:")
-    const sorted = Array.from(statuses.entries()).sort(([a], [b]) => a.value.localeCompare(b.value))
-    for (const [id, status] of sorted) {
-      lines.push(statusLine(id.value, status))
-    }
-    lines.push("")
-    lines.push("credentials:")
-    for (const key of credentialKeys) {
-      const value = environment[key]
-      lines.push(`  ${value === undefined || value.length === 0 ? "✖" : "✔"} ${key}`)
-    }
-    lines.push("")
-    lines.push("gates:")
-    lines.push(
-      ...wrap(
-        `${node._tag === "Mismatch" || node._tag === "NoNode" ? "✖" : "✔"} ${node.summary}`,
-        78,
-        "  "
-      )
-    )
-
-    // Connector prerequisites the environment must carry BEFORE a run: shown
-    // when the connector is selected or the machine has its CLI, because that
-    // is exactly when a missing one turns into a confusing mid-run failure.
-    const coder = selectedCoder(environment)
-    const geminiRelevant =
-      coder.startsWith("gemini") ||
-      Array.from(statuses.keys()).some(
-        (id) =>
-          id.value === ConnectorIds.GeminiCli.value || id.value === ConnectorIds.GeminiApi.value
-      )
-    const bridge = geminiBridgePrerequisites(environment, readPiModelsJson())
-    if (geminiRelevant || bridge !== undefined) {
+  ),
+  /** Whether the OTLP endpoint answers (ADR 0026); the network probe by default. */
+  probeOtel: (config: OtelConfig) => Effect.Effect<boolean | undefined> = probeOtelEndpoint
+): Effect.Effect<string> => {
+  const otel = otelConfig(environment)
+  return Effect.map(
+    Effect.all([registry.healthCheckAll, nodeCheck, probeOtel(otel)]),
+    ([statuses, node, otelAnswers]) => {
+      const lines: Array<string> = []
+      lines.push("llm4ts doctor")
       lines.push("")
-      lines.push("prerequisites:")
-      const pushReport = (label: string, report: PrerequisiteReport): void => {
-        lines.push(`  ${report.satisfied ? "✔" : "?"} ${label}: ${report.summary}`)
-        if (report.hint !== undefined) {
-          lines.push(...wrap(report.hint, 78, "      "))
-        }
-        for (const line of report.detail ?? []) {
-          lines.push(`      ${line}`)
-        }
+      lines.push("connectors:")
+      const sorted = Array.from(statuses.entries()).sort(([a], [b]) =>
+        a.value.localeCompare(b.value)
+      )
+      for (const [id, status] of sorted) {
+        lines.push(statusLine(id.value, status))
       }
-      if (geminiRelevant) {
-        pushReport("gemini", geminiPrerequisites(environment))
+      lines.push("")
+      lines.push("credentials:")
+      for (const key of credentialKeys) {
+        const value = environment[key]
+        lines.push(`  ${value === undefined || value.length === 0 ? "✖" : "✔"} ${key}`)
       }
-      if (bridge !== undefined) {
-        pushReport("pi-gemini-bridge", bridge)
-      }
-    }
+      lines.push("")
+      lines.push("gates:")
+      lines.push(
+        ...wrap(
+          `${node._tag === "Mismatch" || node._tag === "NoNode" ? "✖" : "✔"} ${node.summary}`,
+          78,
+          "  "
+        )
+      )
 
-    lines.push("")
-    lines.push(`coder: ${coder}`)
-    return `${lines.join("\n")}\n`
-  })
+      // Connector prerequisites the environment must carry BEFORE a run: shown
+      // when the connector is selected or the machine has its CLI, because that
+      // is exactly when a missing one turns into a confusing mid-run failure.
+      const coder = selectedCoder(environment)
+      const geminiRelevant =
+        coder.startsWith("gemini") ||
+        Array.from(statuses.keys()).some(
+          (id) =>
+            id.value === ConnectorIds.GeminiCli.value || id.value === ConnectorIds.GeminiApi.value
+        )
+      const bridge = geminiBridgePrerequisites(environment, readPiModelsJson())
+      if (geminiRelevant || bridge !== undefined) {
+        lines.push("")
+        lines.push("prerequisites:")
+        const pushReport = (label: string, report: PrerequisiteReport): void => {
+          lines.push(`  ${report.satisfied ? "✔" : "?"} ${label}: ${report.summary}`)
+          if (report.hint !== undefined) {
+            lines.push(...wrap(report.hint, 78, "      "))
+          }
+          for (const line of report.detail ?? []) {
+            lines.push(`      ${line}`)
+          }
+        }
+        if (geminiRelevant) {
+          pushReport("gemini", geminiPrerequisites(environment))
+        }
+        if (bridge !== undefined) {
+          pushReport("pi-gemini-bridge", bridge)
+        }
+      }
+
+      lines.push("")
+      lines.push(otelDoctorLine(otel, otelAnswers))
+      lines.push(`coder: ${coder}`)
+      return `${lines.join("\n")}\n`
+    }
+  )
+}

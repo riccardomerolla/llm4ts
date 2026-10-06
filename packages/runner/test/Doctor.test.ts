@@ -65,6 +65,23 @@ describe("doctor", () => {
       assert.include(report, "✔ ANTHROPIC_API_KEY")
       assert.include(report, "✖ OPENAI_API_KEY")
       assert.include(report, "coder: codex")
+      assert.include(report, "otel: off")
+    })
+  )
+
+  it.effect("says where spans go and whether the endpoint answered", () =>
+    Effect.gen(function* () {
+      const report = yield* makeDoctorProgram(
+        fakeRegistry,
+        { OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector:4318" },
+        undefined,
+        noNode,
+        () => Effect.succeed(false)
+      )
+      assert.include(
+        report,
+        "otel: http://collector:4318 — endpoint does not answer (spans will be dropped, the run is unaffected)"
+      )
     })
   )
 

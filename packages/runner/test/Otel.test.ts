@@ -1,6 +1,12 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as OtlpExporter from "effect/observability/OtlpExporter"
-import { otelConfig, otelLayer, otelSummary, phoenixTracesUrl } from "@llm4ts/runner/Otel"
+import {
+  otelConfig,
+  otelDoctorLine,
+  otelLayer,
+  otelSummary,
+  phoenixTracesUrl
+} from "@llm4ts/runner/Otel"
 
 describe("otelConfig", () => {
   it("is off without a switch, Phoenix with --otel alone, env when an endpoint is set", () => {
@@ -38,5 +44,22 @@ describe("otelConfig", () => {
   it("builds no exporter when off: only the shared no-op flusher", () => {
     const layer = otelLayer({ mode: "off" }, { serviceVersion: "0.0.0", project: "repo" })
     assert.strictEqual(layer, OtlpExporter.layerFlusher)
+  })
+})
+
+describe("otelDoctorLine", () => {
+  it("says off, or where it points and whether the endpoint answered", () => {
+    assert.strictEqual(
+      otelDoctorLine({ mode: "off" }, undefined),
+      "otel: off (LLM4TS_OTEL=on for a local Phoenix, or OTEL_EXPORTER_OTLP_ENDPOINT)"
+    )
+    assert.strictEqual(
+      otelDoctorLine({ mode: "phoenix", tracesUrl: phoenixTracesUrl }, true),
+      "otel: Phoenix at http://localhost:6006/v1/traces — endpoint answers"
+    )
+    assert.strictEqual(
+      otelDoctorLine({ mode: "env", endpoint: "http://c:4318" }, false),
+      "otel: http://c:4318 — endpoint does not answer (spans will be dropped, the run is unaffected)"
+    )
   })
 })
