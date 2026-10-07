@@ -383,6 +383,66 @@ describe("reviewAndFixLoop", () => {
     })
   )
 
+  it.effect("settle blocking stops at a round whose findings are all non-blocking", () =>
+    Effect.gen(function* () {
+      const warning = {
+        issues: [{ severity: "Warning", title: "naming", description: "", confidence: 1 }],
+        summary: "one warning"
+      }
+      const critical = {
+        issues: [{ severity: "Critical", title: "crash", description: "", confidence: 1 }],
+        summary: "one critical"
+      }
+      const run = (settle: "clean" | "blocking", first: unknown) =>
+        Effect.gen(function* () {
+          const values = yield* Ref.make<ReadonlyArray<unknown>>([first, warning, warning])
+          const asks = yield* Ref.make(0)
+          const coder = yield* makeChat(coderService(asks))
+          const result = yield* reviewAndFixLoop({
+            reviewers: [lens()],
+            reviewerService: reviewerService(values, yield* Ref.make(0)),
+            coder,
+            taskTitle: "task",
+            currentDiff: Effect.succeed("diff"),
+            events: yield* makeCollectingFlowEvents,
+            settle
+          })
+          return { asks: yield* Ref.get(asks), left: result.issues.map((issue) => issue.title) }
+        })
+      // A Warning alone settles at once; "clean" keeps fixing it.
+      assert.deepStrictEqual(yield* run("blocking", warning), { asks: 0, left: ["naming"] })
+      assert.deepStrictEqual(yield* run("clean", warning), { asks: 2, left: ["naming"] })
+      // A Critical is still fixed, then the Warning it leaves settles.
+      assert.deepStrictEqual(yield* run("blocking", critical), { asks: 1, left: ["naming"] })
+    })
+  )
+
+  it.effect("settle blocking keeps fixing a red gate whatever its severities", () =>
+    Effect.gen(function* () {
+      const asks = yield* Ref.make(0)
+      const coder = yield* makeChat(coderService(asks))
+      const gate = ReviewResult.make({
+        issues: [ReviewIssue.make({ severity: "Warning", title: "lint warning as error" })]
+      })
+      const result = yield* reviewAndFixLoop({
+        reviewers: [lens()],
+        reviewerService: reviewerService(
+          yield* Ref.make<ReadonlyArray<unknown>>([]),
+          yield* Ref.make(0)
+        ),
+        coder,
+        taskTitle: "task",
+        currentDiff: Effect.succeed("diff"),
+        events: yield* makeCollectingFlowEvents,
+        lint: Effect.succeed(gate),
+        maxRounds: 2,
+        settle: "blocking"
+      })
+      assert.isFalse(result.isClean)
+      assert.strictEqual(yield* Ref.get(asks), 1)
+    })
+  )
+
   it.effect("reuses a lens's answer for an unchanged diff, and reports each round", () =>
     Effect.gen(function* () {
       const memory = yield* makeMemoryPlainFileStore()

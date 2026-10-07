@@ -40,7 +40,8 @@ import {
   type GateTriageOptions,
   type OracleGateOptions,
   type ReviewResult,
-  type ReviewCacheLocation
+  type ReviewCacheLocation,
+  type SettleRule
 } from "./Review.ts"
 import type { OracleRules } from "./OracleGuard.ts"
 import type { Reviewer } from "./Reviewer.ts"
@@ -89,6 +90,8 @@ export interface ImplementPlanOptions {
   readonly commitMessage?: (plan: Plan, task: Task) => string
   readonly checkoutBranch?: boolean
   readonly maxRounds?: number
+  /** When a task's review settles before `maxRounds` (ADR 0031); default "clean". */
+  readonly settle?: SettleRule
   readonly lint?: Effect.Effect<ReviewResult, FlowError>
   readonly format?: Effect.Effect<void, FlowError>
   /** Charge the lint gate only with failures the task caused (ADR 0027). */
@@ -417,6 +420,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           currentDiff: context.git.diffAll,
           events: context.events,
           ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
+          ...(options.settle === undefined ? {} : { settle: options.settle }),
           ...(options.lint === undefined ? {} : { lint: options.lint }),
           ...(options.format === undefined ? {} : { format: options.format }),
           ...(triage === undefined ? {} : { triage }),

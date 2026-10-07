@@ -218,6 +218,19 @@ pnpm --filter @llm4ts/flows epic-stories -- \
 - `--concurrency <n>` (default 3) caps the stories implemented at once;
   `--fail-fast` stops at the first failed story instead of putting its
   dependents on hold (`waiting` on the board until it is fixed and rerun).
+- `--judge-rounds <n>` (or `LLM4TS_JUDGE_ROUNDS`; the flag wins; default 2)
+  sets the judge attempts per story. Each attempt the judge does not clear,
+  except the last, becomes a revision task the coder runs before the next
+  judgment; after `n` attempts the story fails with the judge's findings.
+  The default of 2 is one revision, so `--judge-rounds 4` allows three.
+- `--defer-findings` (or `LLM4TS_DEFER_FINDINGS=1`) unblocks the critical
+  path (ADR 0031): only Critical findings are fixed in place. A task's
+  review settles once nothing Critical is left (a red gate still loops). The
+  judge clears a story whose findings are all Warnings: `provides` short of
+  full or any dimension at 0 is Critical, and a partial score elsewhere is a
+  Warning. The rest goes to `stories/<id>.deferred.md`. When every story is
+  merged, the run plans those findings as one refine round and runs it.
+  Findings deferred inside that round are only listed.
 - `LLM4TS_REASONER` (default `claude`, or `gemini`) splits, reviews every
   task and judges every story; `LLM4TS_CODER` (default `pi`) implements.
   `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi

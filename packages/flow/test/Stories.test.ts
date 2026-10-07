@@ -25,6 +25,7 @@ import {
   StoryStateVersion,
   blockedOnIn,
   blockedRebuttal,
+  deferredPath,
   implementStoriesFlow,
   launchSummary,
   setupRecoveryPrompt,
@@ -875,6 +876,47 @@ describe("Stories executor", () => {
         "commit:/repo/.llm4ts/worktrees/a:a: Revision 1: close the judge's findings"
       )
     })
+  )
+
+  it.effect(
+    "deferring, a judge with only Warnings clears and the findings are kept for later",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const context = yield* makeContext(harness)
+        const warned = ReviewResult.make({
+          issues: [
+            ReviewIssue.make({
+              severity: "Warning",
+              title: "judge[a]: tests scored 1",
+              description: "thin"
+            })
+          ],
+          summary: "judge:a"
+        })
+        const options = yield* makeOptions(harness, diamond, context, {
+          concurrency: 1,
+          deferNonBlocking: true,
+          judge: (item) =>
+            Effect.succeed(
+              item.id === "a" ? warned : item.id === "b" ? red("missing route") : clean
+            )
+        })
+        const report = yield* implementStoriesFlow(context, options)
+        const a = report.stories.find((outcome) => outcome.id === "a")
+        assert.strictEqual(a?.status, "done")
+        assert.strictEqual(a?.judge, "judge cleared (round 1, 1 finding(s) deferred)")
+        // No revision for a Warning: the dependents start from the merged story.
+        const log = yield* Ref.get(harness.log)
+        assert.notInclude(log, "a: Revision 1")
+        const deferred = yield* options.files.read(deferredPath(options.stateDir, "a"))
+        assert.include(deferred ?? "", "- [Warning] judge round 1 — judge[a]: tests scored 1: thin")
+        // A Critical still blocks, deferring or not.
+        const b = report.stories.find((outcome) => outcome.id === "b")
+        assert.strictEqual(b?.status, "failed")
+        assert.isUndefined(yield* options.files.read(deferredPath(options.stateDir, "b")))
+        assert.isUndefined(yield* options.files.read(deferredPath(options.stateDir, "c")))
+      })
   )
 
   it.effect(

@@ -74,7 +74,9 @@ import {
   ReviewIssue,
   ReviewResult,
   applyTriage,
+  isBlocking,
   loadRepoReviewRules,
+  nonBlockingIssues,
   type FixPromptOptions,
   type GateTriageOptions
 } from "./Review.ts"
@@ -723,6 +725,14 @@ export interface StoriesOptions {
   readonly reviewers?: ReadonlyArray<Reviewer>
   readonly maxRounds?: number
   /**
+   * Defer what does not block (ADR 0031): a task's review settles once its
+   * findings are all non-blocking, the judge clears a story whose findings
+   * are all non-blocking, and what is left is written to
+   * `stories/<id>.deferred.md` (`deferredPath`) when the story finishes,
+   * for a follow-up round. Default false: every finding is fixed or fails.
+   */
+  readonly deferNonBlocking?: boolean
+  /**
    * Second opinion on a BLOCKED_ON claim the plan cannot settle (a path no
    * story owns, or a parallel story's). `real: false` sends the coder back
    * once with the reason. Omit to accept every such claim.
@@ -761,6 +771,24 @@ const combined = (first: ReviewResult, second: ReviewResult): ReviewResult =>
         issues: [...first.issues, ...second.issues],
         summary: [first.summary, second.summary].filter((part) => part.length > 0).join("; ")
       })
+
+/**
+ * Where a finished story's deferred findings are kept (ADR 0031): one
+ * Markdown list per story under the executor's state directory, absent when
+ * nothing was deferred.
+ */
+export const deferredPath = (stateDir: string, storyId: string): string =>
+  join(stateDir, `stories/${storyId}.deferred.md`)
+
+/** A deferred finding as one Markdown bullet, prefixed with where it was found. */
+export const deferredLine = (source: string, issue: ReviewIssue): string => {
+  const where =
+    issue.file === undefined
+      ? ""
+      : ` (${issue.file}${issue.line === undefined ? "" : `:${issue.line}`})`
+  const detail = issue.description.trim().length === 0 ? "" : `: ${issue.description.trim()}`
+  return `- [${issue.severity}] ${source} — ${issue.title}${where}${detail}`
+}
 
 const issueLines = (result: ReviewResult): string =>
   result.issues.map((issue) => `- ${issue.title}: ${issue.description}`).join("\n")
@@ -843,6 +871,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const epicBranch = options.epicBranch ?? `epic/${plan.epicId}`
   const concurrency = Math.max(1, options.concurrency ?? 3)
   const judgeRounds = Math.max(1, options.judgeRounds ?? 2)
+  const deferring = options.deferNonBlocking === true
   const statePath = (story: Story): string => join(options.stateDir, `stories/${story.id}.json`)
   const planPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.plan.md`)
   /** The judge's last verdict beside a fingerprint of what it judged. */
@@ -1196,6 +1225,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     )
     /** What the coder claimed to have run and did not, task by task, for the judge. */
     const evidenceNotes: Array<string> = []
+    /** Findings left for a follow-up round (ADR 0031), written when the story finishes. */
+    const deferred: Array<string> = []
     const checkEvidence = (
       task: Task,
       trailer: Trailer,
@@ -1513,13 +1544,21 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       // the story's findings log for people to read.
       reviewCache: { files, dir: reviewCacheDir(story) },
       onReview: (task, round, result, settled) =>
-        appendFindings(
-          story,
-          `review "${task.title}" round ${round} — ${
-            result.isClean ? "clean" : `${result.issues.length} issue(s)`
-          }${settled ? "" : ", fixing"}`,
-          result
-        ),
+        Effect.gen(function* () {
+          // A settled round's leftovers are deferred, not dropped: when the
+          // rounds ran out, blocking ones too, since the task commits anyway.
+          const left = settled && deferring ? result.issues : []
+          for (const issue of left) {
+            deferred.push(deferredLine(`review "${task.title}"`, issue))
+          }
+          yield* appendFindings(
+            story,
+            `review "${task.title}" round ${round} — ${
+              result.isClean ? "clean" : `${result.issues.length} issue(s)`
+            }${settled ? (left.length === 0 ? "" : ", deferred") : ", fixing"}`,
+            result
+          )
+        }),
       onTaskReply: (task, _reply, trailer, startedAt) => checkEvidence(task, trailer, startedAt),
       // The repository's own review rules ride along as one extra lens
       // (ADR 0027 decision 9), read from the epic checkout.
@@ -1528,7 +1567,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       ...(options.fixer === undefined ? {} : { fixer: options.fixer }),
       ...(options.stall === undefined ? {} : { stall: options.stall }),
       ...(options.reviewers === undefined ? {} : { reviewers: options.reviewers }),
-      ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds })
+      ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
+      ...(deferring ? { settle: "blocking" as const } : {})
     })
     yield* guarded(implementTasks, implementTasks)
 
@@ -1684,11 +1724,17 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             dimensions: verdict instanceof StoryVerdict ? verdict.dimensions : []
           })
         )
-        if (verdict.isClean) {
+        // Deferring, a verdict with nothing blocking clears: what it found
+        // waits for the follow-up round instead of another revision.
+        if (verdict.isClean || (deferring && !verdict.issues.some(isBlocking))) {
+          const waiting = nonBlockingIssues(verdict)
+          for (const issue of waiting) {
+            deferred.push(deferredLine(`judge round ${round}`, issue))
+          }
           inPlace = empty
-          judgeNote = empty
-            ? `verified already in place (round ${round})`
-            : `judge cleared (round ${round})`
+          judgeNote = `${empty ? "verified already in place" : "judge cleared"} (round ${round}${
+            waiting.length === 0 ? "" : `, ${waiting.length} finding(s) deferred`
+          })`
           break
         }
         if (round >= judgeRounds) {
@@ -1709,6 +1755,14 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
     const changed = yield* git.changedFilesVsBase(epicBranch)
     yield* enforcePerimeter(changed, story)
+    if (deferring) {
+      yield* deferred.length === 0
+        ? files.remove(deferredPath(options.stateDir, story.id))
+        : files.writeAtomic(
+            deferredPath(options.stateDir, story.id),
+            [`# Deferred from ${story.id}: ${story.title}`, "", ...deferred, ""].join("\n")
+          )
+    }
     const totals = seats.totals === undefined ? undefined : yield* seats.totals
     const history = roster === undefined ? [] : yield* roster.history
     return {

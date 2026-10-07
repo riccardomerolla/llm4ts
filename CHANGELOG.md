@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.39.0
+
+epic-stories spends less time on the critical path: bounded judge revisions,
+and non-blocking findings deferred to a follow-up round (ADR 0031).
+
+- **`epic-stories --judge-rounds <n>`** (or `LLM4TS_JUDGE_ROUNDS`): bounds how
+  many times a story the judge did not clear is revised and rejudged before
+  it fails. Default unchanged (2: one revision).
+- **`epic-stories --defer-findings`** (or `LLM4TS_DEFER_FINDINGS=1`, ADR 0031):
+  lighter review so dependents start sooner. Only Critical findings are fixed
+  in place. The judge grades its dimensions: a partial non-`provides` score
+  is a Warning. Everything else is deferred to `stories/<id>.deferred.md` and,
+  once every story is merged, planned and run as one refine round.
+  `reviewAndFixLoop` gains `settle: "clean" | "blocking"`, and
+  `implementStoriesFlow` gains `deferNonBlocking`.
+
 ## 2.38.0
 
 The survey graph becomes a code graph (ADR 0030).

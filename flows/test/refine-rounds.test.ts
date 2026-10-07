@@ -537,9 +537,10 @@ describe("refine rounds: the run", () => {
     assert.isAbove(checkout, 0)
     assert.isAbove(program.indexOf("planRound("), checkout)
     // The executor, its board, judge and verifier all work on the chosen unit.
-    assert.include(program, "plan: unit.plan")
-    assert.include(program, "stateDir: unit.stateDir")
-    assert.include(program, "makeLocalBoardSync(files, unit.stateDir, unit.label)")
+    assert.include(program, "plan: work.plan")
+    assert.include(program, "stateDir: work.stateDir")
+    assert.include(program, "makeLocalBoardSync(files, work.stateDir, work.label)")
+    assert.include(program, "yield* runUnit(unit)")
     assert.notInclude(
       program.slice(program.indexOf("implementStoriesFlow(")),
       "              plan,\n"
