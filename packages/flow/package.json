@@ -52,6 +52,7 @@
     "./GitHubTool": "./dist/GitHubTool.js",
     "./GitTool": "./dist/GitTool.js",
     "./GraphCache": "./dist/GraphCache.js",
+    "./GraphQuery": "./dist/GraphQuery.js",
     "./GraphRules": "./dist/GraphRules.js",
     "./GraphWorklist": "./dist/GraphWorklist.js",
     "./Landing": "./dist/Landing.js",
