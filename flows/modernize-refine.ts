@@ -68,7 +68,8 @@ import { FlowEvents } from "@llm4ts/flow/FlowEvents"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { Task } from "@llm4ts/flow/Plan"
 import { coverageUnits, matchingFiles } from "@llm4ts/flow/SpecChecks"
-import { SurveyGraph, closureFor, surveyGraph } from "@llm4ts/flow/Survey"
+import { SurveyGraph, closureFor } from "@llm4ts/flow/Survey"
+import { freshGraph, graphCachePath } from "@llm4ts/flow/GraphCache"
 import { withDraftApproval } from "@llm4ts/flow/Approval"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import {
@@ -200,11 +201,11 @@ const program = Effect.gen(function* () {
         const graph = yield* stage(
           context.events,
           "graph",
-          pack.survey.length === 0
+          pack.graph.edges.length === 0 && pack.graph.joins.length === 0
             ? Effect.succeed(SurveyGraph.make({ nodes: [], edges: [] }))
-            : surveyGraph(repo, pack.sources ?? ".*", pack.coverage, pack.survey, {
-                ...(pack.exclude === undefined ? {} : { exclude: pack.exclude })
-              })
+            : freshGraph(files, graphCachePath(input.workDir, pack.name), pack, repo).pipe(
+                Effect.map((fresh) => fresh.graph)
+              )
         )
         const system = analystSystem(pack)
         const limit = budget()

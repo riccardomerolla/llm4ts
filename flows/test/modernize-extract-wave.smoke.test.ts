@@ -108,6 +108,11 @@ describe("modernize-extract scoped to one wave (model stubbed)", { timeout: smok
     assert.include(log, "spec FEECALC")
     assert.notInclude(log, "spec ACCTXFR")
     assert.include(readFile(join(fixture.legacy, "docs/modernization/README.md")), "PASSED")
+    // Every spec opens with the program's dependency closure (ADR 0030); a
+    // leaf program says so instead of drawing an empty diagram.
+    const spec = readFile(join(fixture.legacy, "docs/modernization/specs/FEECALC.md"))
+    assert.match(spec, /^## Dependency closure/)
+    assert.include(spec, "(no resolved dependencies)")
   })
 })
 

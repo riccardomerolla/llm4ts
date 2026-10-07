@@ -12,8 +12,11 @@ import { capped, withShrink } from "@llm4ts/flow/Context"
 import { type FlowError } from "@llm4ts/flow/FlowError"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { FlowEvents } from "@llm4ts/flow/FlowEvents"
+import { closureView } from "@llm4ts/flow/GraphQuery"
+import { renderGraphMermaid } from "@llm4ts/flow/GraphRender"
 import type { Pack } from "@llm4ts/flow/Pack"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import type { SurveyGraph } from "@llm4ts/flow/Survey"
 import { ReviewIssue } from "@llm4ts/flow/Review"
 import { cachedReview } from "@llm4ts/flow/ReviewCache"
 import { FlowLlmError, Info, ReviewResult, makeChat, reviewFingerprint } from "@llm4ts/runner"
@@ -34,6 +37,14 @@ export const analystTurns = (): number => positiveEnvInt("LLM4TS_ANALYST_TURNS",
  * than this gets a bounded, visible subset rather than an unbounded read.
  */
 export const maxClosureFiles = (): number => positiveEnvInt("LLM4TS_MAX_CLOSURE_FILES", 40)
+
+/** The program's bounded closure as a diagram, placed above the analyst's spec (ADR 0030). */
+export const closureSection = (graph: SurveyGraph, program: string): string => {
+  const view = closureView(graph, program, maxClosureFiles())
+  return view.edges.length === 0
+    ? "## Dependency closure\n\n(no resolved dependencies)"
+    : `## Dependency closure\n\n\`\`\`mermaid\n${renderGraphMermaid(view, graph)}\n\`\`\``
+}
 
 /** `cobol/ACCTXFR.cbl` → `ACCTXFR`: the program name keying every per-program artifact. */
 export const programName = (relativePath: string): string => {

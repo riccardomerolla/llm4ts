@@ -47,7 +47,8 @@ import { loadPatternCards, matchingPatternCards, type PatternCard } from "@llm4t
 import { type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { Task } from "@llm4ts/flow/Plan"
 import { judgeAllPrograms } from "@llm4ts/flow/ProgramJudge"
-import { closureFor, surveyGraph } from "@llm4ts/flow/Survey"
+import { closureFor } from "@llm4ts/flow/Survey"
+import { freshGraph, graphCachePath } from "@llm4ts/flow/GraphCache"
 import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
 import {
   legacySourceWorkspaceLimits,
@@ -312,12 +313,12 @@ const legacyEvidence = Effect.fn("convert.legacyEvidence")(function* (
     sourcePath === undefined
       ? ""
       : yield* deps.legacy.read(sourcePath).pipe(Effect.orElseSucceed(() => ""))
-  const graph = yield* surveyGraph(
-    deps.legacy,
-    deps.pack.sources ?? ".*",
-    deps.pack.coverage,
-    deps.pack.survey
-  )
+  const graph = (yield* freshGraph(
+    deps.files,
+    graphCachePath(deps.legacyDir, deps.pack.name),
+    deps.pack,
+    deps.legacy
+  )).graph
   const closure = closureFor(
     graph,
     page,
@@ -668,12 +669,12 @@ export const convertFeature = Effect.fn("convert.feature")(function* (
   for (const page of pages) {
     specs.set(page, yield* readSpec(deps, page))
   }
-  const graph = yield* surveyGraph(
-    deps.legacy,
-    deps.pack.sources ?? ".*",
-    deps.pack.coverage,
-    deps.pack.survey
-  )
+  const graph = (yield* freshGraph(
+    deps.files,
+    graphCachePath(deps.legacyDir, deps.pack.name),
+    deps.pack,
+    deps.legacy
+  )).graph
   const order = navigationOrder(
     { ...feature, programs: pages },
     graph,

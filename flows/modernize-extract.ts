@@ -63,7 +63,8 @@ import {
   matchingFiles,
   specSchemaIssues
 } from "@llm4ts/flow/SpecChecks"
-import { SurveyGraph, closureFor, surveyGraph } from "@llm4ts/flow/Survey"
+import { SurveyGraph, closureFor } from "@llm4ts/flow/Survey"
+import { freshGraph, graphCachePath } from "@llm4ts/flow/GraphCache"
 import { withDraftApproval, requireApproval } from "@llm4ts/flow/Approval"
 import {
   ProgramArtifacts,
@@ -86,7 +87,8 @@ import {
   programFixAsk,
   programName,
   readmeFor,
-  wavePrograms
+  wavePrograms,
+  closureSection
 } from "./lib/modernize-extract.ts"
 
 const MaxRounds = 3
@@ -190,22 +192,31 @@ const program = Effect.gen(function* () {
         ]
 
         // The dependency graph the analysts' include closures are resolved
-        // from — walked over the pack's `## Survey:` edge regexes.
+        // from: the cached code graph (ADR 0030), rebuilt from the pack's rules
+        // when a file changed, with the survey's LLM edges carried along.
         const graph = yield* stage(
           context.events,
           "graph",
-          pack.survey.length === 0
+          pack.graph.edges.length === 0 && pack.graph.joins.length === 0
             ? context.events
                 .publish(
                   Info.make({
-                    message:
-                      "pack has no '## Survey:' edge regexes — the analyst gets no resolved closure"
+                    message: "pack has no graph rules — the analyst gets no resolved closure"
                   })
                 )
                 .pipe(Effect.as(SurveyGraph.make({ nodes: [], edges: [] })))
-            : surveyGraph(repo, pack.sources ?? ".*", pack.coverage, pack.survey, {
-                ...(pack.exclude === undefined ? {} : { exclude: pack.exclude })
-              })
+            : freshGraph(files, graphCachePath(input.workDir, pack.name), pack, repo).pipe(
+                Effect.tap((fresh) =>
+                  context.events.publish(
+                    Info.make({
+                      message: fresh.reused
+                        ? "graph cache reused"
+                        : "graph rebuilt (scanner layer); LLM edges carried where their evidence is unchanged"
+                    })
+                  )
+                ),
+                Effect.map((fresh) => fresh.graph)
+              )
         )
 
         // One structured analyst call per program, resumable per program: a rerun
@@ -249,6 +260,13 @@ const program = Effect.gen(function* () {
                     programArtifactsJsonSchema,
                     "coder"
                   ).pipe(
+                    // The spec opens with the program's closure diagram (ADR 0030).
+                    Effect.map((artifacts) =>
+                      ProgramArtifacts.make({
+                        ...artifacts,
+                        spec: `${closureSection(graph, target.name)}\n\n${artifacts.spec}`
+                      })
+                    ),
                     // A turn-limit trip is the wedged-agent tail, not a
                     // failure: keep whatever the analyst already produced.
                     Effect.catchIf(
