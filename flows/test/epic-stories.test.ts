@@ -31,6 +31,7 @@ import { ReviewResult } from "@llm4ts/flow/Review"
 import {
   StoryState,
   StoryStateVersion,
+  deferredPath,
   implementStoriesFlow,
   type StorySeats
 } from "@llm4ts/flow/Stories"
@@ -72,7 +73,10 @@ import {
   rubricStoryJudge,
   storiesEnvironment,
   storyContextChars,
+  deferFindingsEnabled,
+  deferredFeedback,
   judgeRoundsOption,
+  judgeSeverity,
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
@@ -191,6 +195,37 @@ const gitOver = (log: Ref.Ref<ReadonlyArray<string>>, prefix: string): GitToolSh
 
 const parsedFixture = Effect.runSync(parseStoryPlan(fixture))
 
+describe("epic-stories deferred findings (ADR 0031)", () => {
+  it("grades a judge dimension below the bar: provides and zeros block, partials wait", () => {
+    assert.strictEqual(judgeSeverity("provides", 1), "Critical")
+    assert.strictEqual(judgeSeverity("tests", 0), "Critical")
+    assert.strictEqual(judgeSeverity("tests", 1), "Warning")
+    assert.strictEqual(judgeSeverity("house-style", 1), "Warning")
+  })
+
+  it.effect("collects every story's deferred findings, in plan order, as round feedback", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      assert.isUndefined(yield* deferredFeedback(memory.store, "/s", parsedFixture))
+      const [first, second] = parsedFixture.stories
+      if (first === undefined || second === undefined) {
+        return assert.fail("the fixture has two stories")
+      }
+      yield* memory.store.writeAtomic(
+        deferredPath("/s", second.id),
+        "# Deferred from two\n\n- [Warning] judge round 1 — later\n"
+      )
+      yield* memory.store.writeAtomic(
+        deferredPath("/s", first.id),
+        "# Deferred from one\n\n- [Info] review — sooner\n"
+      )
+      const feedback = (yield* deferredFeedback(memory.store, "/s", parsedFixture)) ?? ""
+      assert.include(feedback, "non-blocking")
+      assert.isBelow(feedback.indexOf("sooner"), feedback.indexOf("later"))
+    })
+  )
+})
+
 describe("epic-stories flags and seats", () => {
   it.effect("parses its own flags and leaves the rest for the shared parser", () =>
     Effect.gen(function* () {
@@ -225,6 +260,11 @@ describe("epic-stories flags and seats", () => {
       })
       assert.deepStrictEqual(judgeRoundsOption(undefined, { LLM4TS_JUDGE_ROUNDS: "x" }), {})
       assert.deepStrictEqual(judgeRoundsOption(undefined, {}), {})
+      assert.isFalse(flags.deferFindings)
+      assert.isTrue((yield* parseEpicArgs(["--defer-findings"])).deferFindings)
+      assert.isTrue(deferFindingsEnabled(true, {}))
+      assert.isTrue(deferFindingsEnabled(false, { LLM4TS_DEFER_FINDINGS: "on" }))
+      assert.isFalse(deferFindingsEnabled(false, { LLM4TS_DEFER_FINDINGS: "0" }))
       assert.isUndefined(flags.land)
       // `--land` lands on main; the epic text after it is not a branch name.
       const land = yield* parseEpicArgs(["--land", "Add Conto"])

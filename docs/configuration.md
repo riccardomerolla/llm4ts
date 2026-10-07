@@ -284,6 +284,14 @@ Info, each as a `ReviewFindingDemoted` event.
 | `LLM4TS_REVIEW_VOTES` | Independent votes of the adversarial lens per round; any Critical blocks. Default `1`                                 |
 | `LLM4TS_REVIEW_FIXER` | `separate`: findings go to a fresh fixer chat briefed to apply them and nothing else. Default: the implementer's chat |
 
+`epic-stories --defer-findings` (or `LLM4TS_DEFER_FINDINGS=1`) makes review
+lighter (ADR 0031). A task's review settles once only non-Critical findings
+are left (a red gate still loops). The judge clears a story whose findings
+are all Warnings: a partial `scope`, `house-style` or `tests`, while
+`provides` short of full or any 0 stays Critical. What is left is written to
+`stories/<id>.deferred.md`. Once every story of the epic is merged, those
+lists are planned and run as one refine round.
+
 Votes multiply only the adversarial lens; the concern lenses run once. With a
 roster, consecutive votes take turns across executors (ADR 0019), so two
 votes usually come from two models.

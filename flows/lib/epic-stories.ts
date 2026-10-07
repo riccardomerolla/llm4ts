@@ -81,7 +81,12 @@ import { budget } from "@llm4ts/flow/Context"
 import { makeLocalBoardSync } from "@llm4ts/flow/BoardSync"
 import { estimatedUsageOptionsFromEnv, makeEstimatedUsageMeter } from "@llm4ts/flow/EstimatedUsage"
 import { landEpic } from "@llm4ts/flow/Landing"
-import { implementStoriesFlow, type StoriesOptions, type StorySeats } from "@llm4ts/flow/Stories"
+import {
+  deferredPath,
+  implementStoriesFlow,
+  type StoriesOptions,
+  type StorySeats
+} from "@llm4ts/flow/Stories"
 import { validateStoryPlan } from "@llm4ts/flow/StoryPlan"
 import {
   asReadOnly,
@@ -110,6 +115,8 @@ export interface EpicArgs {
   readonly concurrency: number | undefined
   /** `--judge-rounds <n>`: judge attempts per story, each but the last followed by a revision. */
   readonly judgeRounds: number | undefined
+  /** `--defer-findings`: non-blocking findings wait for a follow-up round (ADR 0031). */
+  readonly deferFindings: boolean
   /** `--land[=branch]`: land the finished epic on that branch (default main) and stop. */
   readonly land: string | undefined
   /** `--keep-worktrees`: after landing, keep the story worktrees and branches. */
@@ -141,6 +148,10 @@ export const epicUsage = [
   "  --fail-fast         stop the epic at the first failed story",
   "  --judge-rounds <n>  judge attempts per story (default 2 = one revision); a story the judge",
   "                      has not cleared after n attempts fails. LLM4TS_JUDGE_ROUNDS sets it too",
+  "  --defer-findings    lighter review: only Critical findings are fixed in place (reviews",
+  "                      settle, the judge clears without them); the rest are deferred and, once",
+  "                      every story is merged, planned and run as one refine round.",
+  "                      LLM4TS_DEFER_FINDINGS=1 sets it too",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
   "       LLM4TS_CODER (default pi) implements; LLM4TS_REASONING_MODEL / LLM4TS_CODER_MODEL",
   "       pick their models (pi: provider/model); LLM4TS_CODER_FLAGS / LLM4TS_REASONING_FLAGS",
@@ -161,6 +172,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
     let failFast = false
     let concurrency: number | undefined
     let judgeRounds: number | undefined
+    let deferFindings = false
     let land: string | undefined
     let keepWorktrees = false
     let list = false
@@ -173,6 +185,8 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
         planOnly = true
       } else if (argument === "--fail-fast") {
         failFast = true
+      } else if (argument === "--defer-findings") {
+        deferFindings = true
       } else if (argument === "--keep-worktrees") {
         keepWorktrees = true
       } else if (argument === "--list") {
@@ -232,6 +246,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
       failFast,
       concurrency,
       judgeRounds,
+      deferFindings,
       land,
       keepWorktrees,
       list,
@@ -240,6 +255,39 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
       rest
     }
   })
+
+/** `--defer-findings`, or `LLM4TS_DEFER_FINDINGS` set to 1/true/on/yes (ADR 0031). */
+export const deferFindingsEnabled = (
+  flag: boolean,
+  environment: Readonly<Record<string, string | undefined>>
+): boolean => flag || /^(1|true|on|yes)$/i.test(environment.LLM4TS_DEFER_FINDINGS?.trim() ?? "")
+
+/**
+ * The feedback a follow-up round is planned from (ADR 0031): every story's
+ * deferred findings, in plan order. `undefined` when nothing was deferred.
+ */
+export const deferredFeedback = (
+  files: PlainFileStoreShape,
+  stateDir: string,
+  plan: StoryPlan
+): Effect.Effect<string | undefined, FlowError> =>
+  Effect.map(
+    Effect.forEach(plan.stories, (story) => files.read(deferredPath(stateDir, story.id))),
+    (texts) => {
+      const kept = texts.flatMap((text) =>
+        text === undefined || text.trim().length === 0 ? [] : [text.trim()]
+      )
+      return kept.length === 0
+        ? undefined
+        : [
+            "Findings the review and the judge deferred while the epic's stories ran (non-blocking:",
+            "each story was merged with them open). Close the ones that still apply; a finding the",
+            "code already answers, or that would undo a deliberate choice, goes to not-planned.",
+            "",
+            ...kept.flatMap((text) => [text, ""])
+          ].join("\n")
+    }
+  )
 
 /**
  * Judge attempts per story: `--judge-rounds`, else `LLM4TS_JUDGE_ROUNDS`, else
@@ -1312,6 +1360,14 @@ export const storyDimensions: ReadonlyArray<Dimension> = [
   })
 ]
 
+/**
+ * How much a dimension below the bar blocks (ADR 0031): `provides` short of
+ * full always does, since dependents build on it; any dimension at 0 does;
+ * a partial score elsewhere is a Warning a follow-up round can close.
+ */
+export const judgeSeverity = (name: string, score: number): "Critical" | "Warning" =>
+  name === "provides" || score <= 0 ? "Critical" : "Warning"
+
 const subBar = (scored: EvalResult, story: Story): ReviewResult =>
   ReviewResult.make({
     issues: scored.scores
@@ -1322,7 +1378,7 @@ const subBar = (scored: EvalResult, story: Story): ReviewResult =>
       )
       .map((score) =>
         ReviewIssue.make({
-          severity: "Critical",
+          severity: judgeSeverity(score.name, score.score),
           title: `judge[${story.id}]: ${score.name} scored ${score.score}`,
           description: score.reasoning
         })
@@ -2261,6 +2317,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             )
             return
           }
+          const deferring = deferFindingsEnabled(flags.deferFindings, process.env)
           // With a roster, the default is every coder slot it has; the flag caps it.
           const concurrency = flags.concurrency ?? context.roster?.slots("coder") ?? 3
           if (context.roster === undefined && localServer !== undefined && concurrency > 1) {
@@ -2294,127 +2351,228 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
           const testCommand = testGateCommand(commands)
           const setupCommand = worktreeSetupCommand(process.env)
           const healthUrl = serverHealthUrl(localServer, process.env)
-          const report = yield* implementStoriesFlow(
-            { ...context, reasoning: reasoningMeter.service },
-            {
-              plan: unit.plan,
-              files,
-              stateDir: unit.stateDir,
-              epicBranch,
-              worktreeRoot: worktreeRootFor(input.workDir, plan.epicId, process.env),
-              board: makeLocalBoardSync(files, unit.stateDir, unit.label),
-              contextFor: (workDir, contextOptions) =>
-                Effect.gen(function* () {
-                  const rebound = yield* contextFor(workDir, contextOptions)
-                  const coderMeter = yield* makeEstimatedUsageMeter(rebound.coder, estimateOptions)
-                  const reviewMeter = yield* makeEstimatedUsageMeter(
-                    rebound.reasoning,
-                    estimateOptions
-                  )
-                  const seats: StorySeats = {
-                    context: {
-                      ...rebound,
-                      coder: coderMeter.service,
-                      reasoning: reviewMeter.service
-                    },
-                    totals: combineTotals(coderMeter.totals, reviewMeter.totals)
-                  }
-                  return seats
-                }),
-              ...(setupCommand === undefined
-                ? {}
-                : {
-                    setup: inAppDir(appDir, setupIn(nodeProcessExecutor, events, setupCommand)),
-                    setupAgent: setupAgentEnabled(process.env)
-                  }),
-              gates,
-              // Gates with a memory (ADR 0027): a story is charged only with
-              // the failing lines it added to the epic head it started from.
-              gateCommands: commands,
-              appDir,
-              ...(testCommand === undefined
-                ? {}
-                : {
-                    testGate: inAppDir(
-                      appDir,
-                      gatesIn(
-                        nodeProcessExecutor,
-                        events,
-                        [testCommand],
-                        gateRunOptions(process.env)
-                      )
-                    )
-                  }),
-              fix: fixPromptOptions(process.env),
-              ...reviewVotes(process.env),
-              ...reviewFixer(process.env),
-              stall: stallOptions(process.env),
-              // A task's `verified:` claims are checked against the tool calls
-              // its transcript shows (ADR 0027 decision 6); no transcript, no check.
-              toolCalls: (story, since) =>
-                context.trace === undefined
-                  ? Effect.succeed(undefined)
-                  : Effect.map(
-                      loadTranscript(
-                        nodeTranscriptFiles,
-                        join(input.workDir, ".llm4ts", "transcripts", context.trace.runId),
-                        { lane: story.id }
-                      ),
-                      (entries) =>
-                        entries === undefined
-                          ? undefined
-                          : entries.flatMap((entry) =>
-                              entry._tag === "Tool" && entry.at >= since ? [entry.args] : []
-                            )
-                    ),
-              // With a roster, the judge and the verifier are leased per story,
-              // away from the executor coding it (ADR 0019).
-              ...storyContextChars(process.env),
-              judge: options.storyJudge({
-                plan: unit.plan,
-                budget: contextBudget,
-                reasoning: reasoningMeter.service,
-                events,
+          // The executor over one unit: the epic's plan or one refine round.
+          const runUnit = (work: {
+            readonly plan: StoryPlan
+            readonly stateDir: string
+            readonly label: string
+          }) =>
+            implementStoriesFlow(
+              { ...context, reasoning: reasoningMeter.service },
+              {
+                plan: work.plan,
                 files,
-                houseRules: guidance
-              }),
-              verifyBlocked: (story, need, workDir, seats) =>
-                verifyBlockedOn(
-                  seats.context.roster?.forRole("verifier") ?? seats.context.reasoning,
+                stateDir: work.stateDir,
+                epicBranch,
+                worktreeRoot: worktreeRootFor(input.workDir, plan.epicId, process.env),
+                board: makeLocalBoardSync(files, work.stateDir, work.label),
+                contextFor: (workDir, contextOptions) =>
+                  Effect.gen(function* () {
+                    const rebound = yield* contextFor(workDir, contextOptions)
+                    const coderMeter = yield* makeEstimatedUsageMeter(
+                      rebound.coder,
+                      estimateOptions
+                    )
+                    const reviewMeter = yield* makeEstimatedUsageMeter(
+                      rebound.reasoning,
+                      estimateOptions
+                    )
+                    const seats: StorySeats = {
+                      context: {
+                        ...rebound,
+                        coder: coderMeter.service,
+                        reasoning: reviewMeter.service
+                      },
+                      totals: combineTotals(coderMeter.totals, reviewMeter.totals)
+                    }
+                    return seats
+                  }),
+                ...(setupCommand === undefined
+                  ? {}
+                  : {
+                      setup: inAppDir(appDir, setupIn(nodeProcessExecutor, events, setupCommand)),
+                      setupAgent: setupAgentEnabled(process.env)
+                    }),
+                gates,
+                // Gates with a memory (ADR 0027): a story is charged only with
+                // the failing lines it added to the epic head it started from.
+                gateCommands: commands,
+                appDir,
+                ...(testCommand === undefined
+                  ? {}
+                  : {
+                      testGate: inAppDir(
+                        appDir,
+                        gatesIn(
+                          nodeProcessExecutor,
+                          events,
+                          [testCommand],
+                          gateRunOptions(process.env)
+                        )
+                      )
+                    }),
+                fix: fixPromptOptions(process.env),
+                ...reviewVotes(process.env),
+                ...reviewFixer(process.env),
+                stall: stallOptions(process.env),
+                // A task's `verified:` claims are checked against the tool calls
+                // its transcript shows (ADR 0027 decision 6); no transcript, no check.
+                toolCalls: (story, since) =>
+                  context.trace === undefined
+                    ? Effect.succeed(undefined)
+                    : Effect.map(
+                        loadTranscript(
+                          nodeTranscriptFiles,
+                          join(input.workDir, ".llm4ts", "transcripts", context.trace.runId),
+                          { lane: story.id }
+                        ),
+                        (entries) =>
+                          entries === undefined
+                            ? undefined
+                            : entries.flatMap((entry) =>
+                                entry._tag === "Tool" && entry.at >= since ? [entry.args] : []
+                              )
+                      ),
+                // With a roster, the judge and the verifier are leased per story,
+                // away from the executor coding it (ADR 0019).
+                ...storyContextChars(process.env),
+                judge: options.storyJudge({
+                  plan: work.plan,
+                  budget: contextBudget,
+                  reasoning: reasoningMeter.service,
                   events,
                   files,
-                  unit.plan
-                )(story, need, workDir),
-              // A roster waits for its own executors (the story's next lease
-              // does); without one, poll the single coder's engine.
-              awaitRecovery:
-                context.roster === undefined
-                  ? awaitServer(healthUrl === undefined ? undefined : httpProbe(healthUrl), events)
-                  : () => Effect.void,
-              system: (story) =>
-                Effect.succeed(
-                  [
-                    "House rules of the target repository (CONTRIBUTING.md):",
-                    guidance,
-                    "",
-                    `Imitate the exemplar feature before inventing anything. Story id: ${story.id}.`,
-                    ...appDirNote,
-                    ...(orientation === undefined ? [] : ["", orientation])
-                  ].join("\n")
-                ),
-              ...judgeRoundsOption(flags.judgeRounds, process.env),
-              concurrency,
-              failFast: flags.failFast
-            }
-          )
-          yield* events.publish(
-            Info.make({
-              message: `${unit.label.replace("Epic: ", "epic ")}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("waiting")} waiting — report at ${join(unit.stateDir, "report.md")} (usage figures estimated)`
-            })
-          )
+                  houseRules: guidance
+                }),
+                verifyBlocked: (story, need, workDir, seats) =>
+                  verifyBlockedOn(
+                    seats.context.roster?.forRole("verifier") ?? seats.context.reasoning,
+                    events,
+                    files,
+                    work.plan
+                  )(story, need, workDir),
+                // A roster waits for its own executors (the story's next lease
+                // does); without one, poll the single coder's engine.
+                awaitRecovery:
+                  context.roster === undefined
+                    ? awaitServer(
+                        healthUrl === undefined ? undefined : httpProbe(healthUrl),
+                        events
+                      )
+                    : () => Effect.void,
+                system: (story) =>
+                  Effect.succeed(
+                    [
+                      "House rules of the target repository (CONTRIBUTING.md):",
+                      guidance,
+                      "",
+                      `Imitate the exemplar feature before inventing anything. Story id: ${story.id}.`,
+                      ...appDirNote,
+                      ...(orientation === undefined ? [] : ["", orientation])
+                    ].join("\n")
+                  ),
+                ...judgeRoundsOption(flags.judgeRounds, process.env),
+                concurrency,
+                ...(deferring ? { deferNonBlocking: true } : {}),
+                failFast: flags.failFast
+              }
+            )
+          const summarize = (
+            work: { readonly stateDir: string; readonly label: string },
+            report: EpicReport
+          ) =>
+            events.publish(
+              Info.make({
+                message: `${work.label.replace("Epic: ", "epic ")}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("waiting")} waiting — report at ${join(work.stateDir, "report.md")} (usage figures estimated)`
+              })
+            )
+          const report = yield* runUnit(unit)
+          yield* summarize(unit, report)
           const hint = retroHint(report, input.workDir, epicId)
           if (hint !== undefined) {
             yield* events.publish(Info.make({ message: hint }))
+          }
+          if (!deferring) {
+            return
+          }
+          // Deferred findings (ADR 0031) become one refine round once the
+          // epic's own stories are all merged. A round's own deferrals are
+          // listed, never planned again, so the follow-up cannot loop.
+          const feedbackText = yield* deferredFeedback(files, unit.stateDir, unit.plan)
+          if (feedbackText === undefined) {
+            return
+          }
+          const settledPlan = report.count("failed") === 0 && report.count("waiting") === 0
+          if (unit.stateDir !== stateDir || !settledPlan) {
+            yield* events.publish(
+              Info.make({
+                message: `${unit.label.replace("Epic: ", "epic ")}: findings deferred in ${join(unit.stateDir, "stories")}/*.deferred.md${
+                  unit.stateDir === stateDir
+                    ? "; they become a refine round once every story is merged"
+                    : "; pass them to --refine if they still matter"
+                }`
+              })
+            )
+            return
+          }
+          const stray = statusPaths(yield* context.git.status)
+          if (stray.length > 0) {
+            yield* events.publish(
+              Info.make({
+                message: `deferred findings not planned: the epic checkout has uncommitted changes (${stray.join(", ")}); commit or discard them, then pass ${join(stateDir, "stories")}/*.deferred.md to --refine`
+              })
+            )
+            return
+          }
+          yield* stage(events, "epic branch", context.git.checkoutOrCreate(epicBranch))
+          const followUp = rounds.length + 1
+          const roundBrief = yield* files.read(join(stateDir, "brief.md"))
+          const planned = yield* stage(
+            events,
+            `refine round ${followUp} plan (deferred findings)`,
+            planRound({
+              files,
+              reasoning: reasoningMeter.service,
+              events,
+              stateDir,
+              epicId: plan.epicId,
+              round: followUp,
+              feedback: feedbackText,
+              guidance,
+              plans: [unit.plan],
+              ...(roundBrief === undefined ? {} : { brief: roundBrief }),
+              ...(orientation === undefined ? {} : { orientation }),
+              git: context.git
+            })
+          )
+          for (const left of planned.notPlanned) {
+            yield* events.publish(
+              Info.make({ message: `not planned: ${left.item} — ${left.reason}` })
+            )
+          }
+          if (planned.plan === undefined) {
+            yield* events.publish(
+              Info.make({
+                message: `refine round ${followUp}: no deferred finding needed a story; nothing to run`
+              })
+            )
+            return
+          }
+          const roundUnit = {
+            plan: planned.plan,
+            stateDir: roundDir(stateDir, followUp),
+            label: `Epic: ${plan.epicId} · round ${followUp}`
+          }
+          yield* events.publish(
+            Info.make({
+              message: `refine round ${followUp}: ${planned.plan.stories.length} follow-up stories from deferred findings at ${join(roundUnit.stateDir, "plan.md")}`
+            })
+          )
+          const roundReport = yield* runUnit(roundUnit)
+          yield* summarize(roundUnit, roundReport)
+          const roundHint = retroHint(roundReport, input.workDir, epicId)
+          if (roundHint !== undefined) {
+            yield* events.publish(Info.make({ message: roundHint }))
           }
         })
     )

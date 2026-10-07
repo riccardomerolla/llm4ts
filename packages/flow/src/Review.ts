@@ -735,7 +735,23 @@ export interface ReviewAndFixOptions {
   readonly fixWith?: (prompt: string) => Effect.Effect<string, FlowError>
   /** End the task, typed `Stalled`, when a fix round leaves the diff byte-identical (ADR 0027 decision 11). */
   readonly stallOnIdenticalDiff?: boolean
+  /**
+   * When a round settles before `maxRounds` (ADR 0031): "clean" (default)
+   * when it has no findings; "blocking" also when its findings are all
+   * non-blocking. A red gate is always blocking.
+   */
+  readonly settle?: SettleRule
 }
+
+/** When a review round stops sending findings back to the coder (ADR 0031). */
+export type SettleRule = "clean" | "blocking"
+
+/** A finding that must be fixed before the work moves on: Critical (ADR 0031). */
+export const isBlocking = (issue: ReviewIssue): boolean => issue.severity === "Critical"
+
+/** The findings that may wait: everything not blocking (ADR 0031). */
+export const nonBlockingIssues = (result: ReviewResult): ReadonlyArray<ReviewIssue> =>
+  result.issues.filter((issue) => !isBlocking(issue))
 
 export interface ReviewCacheLocation {
   readonly files: PlainFileStoreShape
@@ -881,6 +897,10 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
   const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
   const oracleNoted = yield* Ref.make(false)
 
+  const settle = options.settle ?? "clean"
+  // A red gate is never settled early, whatever its findings' severities.
+  const gateRed = yield* Ref.make(false)
+
   const reviewOnce = (
     round: number,
     previous: ReviewResult | undefined
@@ -893,6 +913,7 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
         options.events,
         oracleNoted
       )
+      yield* Ref.set(gateRed, !lint.isClean)
       if (!lint.isClean) {
         return lint
       }
@@ -1017,7 +1038,10 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       }
       yield* Ref.set(lastDiff, diffNow)
       const result = yield* reviewOnce(round, previous)
-      const settled = result.isClean || round >= maxRounds
+      const settled =
+        result.isClean ||
+        round >= maxRounds ||
+        (settle === "blocking" && !(yield* Ref.get(gateRed)) && !result.issues.some(isBlocking))
       yield* options.events.publish(
         ReviewFindings.make({
           round,
