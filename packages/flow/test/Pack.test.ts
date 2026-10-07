@@ -316,7 +316,7 @@ ${consolidate}
       const unknown = yield* loadPack(workspace, "pack").pipe(Effect.flip)
       assert.include(
         unknown.message,
-        "names edge kinds no '## Survey:' rule produces: servlet-class"
+        "names edge kinds no '## Survey:', '## Edge:' or '## Join:' rule produces: servlet-class"
       )
 
       yield* workspace.write(
@@ -360,6 +360,46 @@ ${consolidate}
       yield* workspace.write("pack/pack.md", "# Pack: bad\n\nsource: jsp\nfeature-files: (<NAME>\n")
       const failure = yield* loadPack(workspace, "pack").pipe(Effect.flip)
       assert.include(failure.message, "'feature-files:' is not a valid regex template")
+    })
+  )
+})
+
+describe("pack graph rules (ADR 0030)", () => {
+  it.effect("exposes graph rules and lets Consolidate name Edge and Join kinds", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "pack/pack.md",
+        [
+          "# Pack: web",
+          "",
+          "source: jsp",
+          "sources: .*",
+          "",
+          "## Node: form",
+          "files: .*\\.jsp",
+          'pattern: action="(?<name>[^"]+)"',
+          "attrs: url=name",
+          "",
+          "## Node: mapping",
+          "files: .*web\\.xml",
+          "pattern: <url-pattern>(?<name>[^<]+)</url-pattern>",
+          "attrs: url=name",
+          "descriptor: yes",
+          "",
+          "## Join: jsp-form-action",
+          "from: form.url",
+          "to: mapping.url",
+          "match: url",
+          "",
+          "## Consolidate",
+          "- cluster: jsp-form-action",
+          ""
+        ].join("\n")
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      assert.strictEqual(pack.graph.joins.length, 1)
+      assert.deepStrictEqual(pack.consolidate?.cluster, ["jsp-form-action"])
     })
   )
 })

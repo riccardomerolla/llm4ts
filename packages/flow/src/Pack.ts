@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import { Dimension } from "@llm4ts/core/eval/Eval"
 import type { ConsolidateRules } from "./Domains.ts"
 import { PlanParseError } from "./FlowError.ts"
+import { edgeKindsOf, parseGraphRules, type GraphRules } from "./GraphRules.ts"
 import { oracleRulesFrom, type OracleRules } from "./OracleGuard.ts"
 import { Reviewer, parseReviewer } from "./Reviewer.ts"
 import { CoverageRule } from "./SpecChecks.ts"
@@ -37,6 +38,12 @@ export interface Pack {
   readonly judgeDimensions: ReadonlyArray<Dimension>
   readonly coverage: ReadonlyArray<CoverageRule>
   readonly survey: ReadonlyArray<CoverageRule>
+  /**
+   * The graph vocabulary (ADR 0030): `## Node:`, `## Edge:` (with every
+   * `## Survey:` folded in as a file-to-file edge), `## Join:`, `## Probe:`
+   * and the `## Graph` budgets.
+   */
+  readonly graph: GraphRules
   readonly prompts: Readonly<Record<string, string>>
   readonly lenses: ReadonlyArray<Reviewer>
   readonly lessons: string | undefined
@@ -391,16 +398,18 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
           cluster: commaList(consolidateValues.cluster),
           context: commaList(consolidateValues.context)
         }
+  const survey = rules(manifest.sections, "## Survey: ")
+  const graph = yield* parseGraphRules(manifest.sections, survey)
   if (consolidate !== undefined) {
-    const surveyNames = new Set(rules(manifest.sections, "## Survey: ").map((rule) => rule.name))
+    const knownKinds = new Set([...survey.map((rule) => rule.name), ...edgeKindsOf(graph)])
     const unknown = [...consolidate.cluster, ...consolidate.context].filter(
-      (kind) => !surveyNames.has(kind) && !kind.startsWith("llm-") && !kind.endsWith("*")
+      (kind) => !knownKinds.has(kind) && !kind.startsWith("llm-") && !kind.endsWith("*")
     )
     if (unknown.length > 0) {
       return yield* PlanParseError.make({
         message:
-          `pack manifest '## Consolidate' names edge kinds no '## Survey:' rule produces: ${unknown.join(", ")} ` +
-          `(known: ${[...surveyNames].join(", ") || "none"}; 'llm-*' matches refined edges)`
+          `pack manifest '## Consolidate' names edge kinds no '## Survey:', '## Edge:' or '## Join:' rule produces: ${unknown.join(", ")} ` +
+          `(known: ${[...knownKinds].join(", ") || "none"}; 'llm-*' matches refined edges)`
       })
     }
     const both = consolidate.cluster.filter((kind) => consolidate.context.includes(kind))
@@ -438,7 +447,8 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     }),
     judgeDimensions: dimensions(section(manifest.sections, "Judge")),
     coverage: rules(manifest.sections, "## Coverage: "),
-    survey: rules(manifest.sections, "## Survey: "),
+    survey,
+    graph,
     prompts,
     lenses,
     lessons: lessons === undefined || lessons.length === 0 ? undefined : lessons,
