@@ -51,6 +51,7 @@
     "./Gates": "./dist/Gates.js",
     "./GitHubTool": "./dist/GitHubTool.js",
     "./GitTool": "./dist/GitTool.js",
+    "./GraphCache": "./dist/GraphCache.js",
     "./GraphRules": "./dist/GraphRules.js",
     "./Landing": "./dist/Landing.js",
     "./Interaction": "./dist/Interaction.js",
