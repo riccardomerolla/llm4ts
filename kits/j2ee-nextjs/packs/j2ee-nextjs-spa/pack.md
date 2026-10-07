@@ -49,15 +49,48 @@ unit: <jsp:include page="([^"]+)"
 files: .*web\.xml
 unit: <servlet-class>[a-z.]*\.([A-Za-z0-9]+)</servlet-class>
 
-## Survey: jsp-form-action
+## Node: ajax-call
+
+files: .*\.(jsp|js)
+pattern: (?:url:\s*|\$\.(?:get|post|getJSON)\(\s*)['"](?<name>[^'"]+)['"]
+attrs: url=name
+
+## Node: form
 
 files: .*\.jsp
-unit: action="([^"]+)"
+pattern: <form[^>]*\baction="(?<name>[^"]+)"
+attrs: url=name
 
-## Survey: jsp-ajax-target
+## Node: servlet-mapping
 
-files: .*\.jsp
-unit: url:\s*['"]([^'"?]+)
+files: .*web\.xml
+pattern: <servlet-mapping>\s*<servlet-name>(?<name>[^<]+)</servlet-name>\s*<url-pattern>(?<url>[^<]+)</url-pattern>
+descriptor: yes
+
+## Node: servlet-decl
+
+files: .*web\.xml
+pattern: <servlet>\s*<servlet-name>(?<name>[^<]+)</servlet-name>(?:(?!</servlet>)[\s\S])*?<servlet-class>(?:[a-z0-9_]+\.)*(?<class>[A-Za-z0-9_]+)</servlet-class>
+descriptor: yes
+anchor: class
+
+## Join: jsp-ajax-target
+
+from: ajax-call.url
+to: servlet-mapping.url
+match: url
+
+## Join: jsp-form-action
+
+from: form.url
+to: servlet-mapping.url
+match: url
+
+## Join: servlet-wiring
+
+from: servlet-mapping.name
+to: servlet-decl.name
+scope: file
 
 ## Consolidate
 

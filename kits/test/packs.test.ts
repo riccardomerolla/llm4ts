@@ -32,6 +32,12 @@ const packs = [
     featuresDir: "src/test/resources/features",
     coverage: ["cobol-paragraph", "jcl-step"],
     survey: ["calls", "copies", "exec-pgm"],
+    graph: {
+      nodes: ["cobol-section", "cobol-paragraph"],
+      edges: ["performs", "goes-to"],
+      joins: [],
+      probes: []
+    },
     replay: true
   },
   {
@@ -42,6 +48,12 @@ const packs = [
     featuresDir: "src/test/resources/features",
     coverage: ["cobol-paragraph", "jcl-step"],
     survey: ["calls", "copies", "exec-pgm"],
+    graph: {
+      nodes: ["cobol-section", "cobol-paragraph"],
+      edges: ["performs", "goes-to"],
+      joins: [],
+      probes: []
+    },
     replay: true
   },
   {
@@ -83,7 +95,13 @@ const packs = [
     specsDir: "docs/modernization/specs",
     featuresDir: "docs/modernization/features",
     coverage: ["servlet-url", "jsp-form", "jsp-ajax"],
-    survey: ["jsp-include", "servlet-class", "jsp-form-action", "jsp-ajax-target"],
+    survey: ["jsp-include", "servlet-class"],
+    graph: {
+      nodes: ["ajax-call", "form", "servlet-mapping", "servlet-decl"],
+      edges: [],
+      joins: ["jsp-ajax-target", "jsp-form-action", "servlet-wiring"],
+      probes: []
+    },
     replay: false
   }
 ] as const
@@ -154,6 +172,25 @@ describe.each(packs)("kits/$kit/packs/$name", (expected) => {
           pack.coverage.map((rule) => rule.name),
           [...expected.coverage]
         )
+      }
+      if ("graph" in expected) {
+        assert.deepStrictEqual(
+          pack.graph.nodes.map((rule) => rule.kind),
+          [...expected.graph.nodes]
+        )
+        assert.deepStrictEqual(
+          pack.graph.joins.map((rule) => rule.kind),
+          [...expected.graph.joins]
+        )
+        assert.deepStrictEqual(
+          pack.graph.edges
+            .filter((rule) => rule.fromKind !== "file" || rule.toKind !== "file")
+            .map((rule) => rule.kind),
+          [...expected.graph.edges]
+        )
+        for (const rule of [...pack.graph.nodes, ...pack.graph.edges]) {
+          assert.doesNotThrow(() => new RegExp(rule.pattern, "gm"), `${rule.kind} pattern`)
+        }
       }
       if ("survey" in expected) {
         assert.deepStrictEqual(

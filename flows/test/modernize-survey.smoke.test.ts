@@ -386,13 +386,16 @@ describe("modernize-survey over a J2EE estate (model stubbed)", { timeout: smoke
       assert.deepStrictEqual(
         graph.edges.map((edge) => `${edge.from}->${edge.to} (${edge.kind})`).sort(),
         [
-          // The form target `/login` resolves onto the unit whose file name
-          // matches — the page itself here; a target no file matches stays as
-          // captured, which is what clusters two pages posting to one servlet
-          // into a domain feature (ADR 0015).
+          // The form target `/login` joins the web.xml mapping, which wires to
+          // the LoginServlet declaration; the file projection contracts both
+          // descriptors (ADR 0030), so the page reaches the servlet directly —
+          // which is what clusters two pages posting to one servlet into a
+          // domain feature (ADR 0015).
+          // Until the flow reads the pack's Node/Join rules (freshGraph), the
+          // form's join is not in graph.json; the next commit adds
+          // "login->LoginServlet (jsp-form-action)" here.
           "login->footer (jsp-include)",
           "login->header (jsp-include)",
-          "login->login (jsp-form-action)",
           "web->LoginServlet (servlet-class)"
         ]
       )
@@ -411,7 +414,7 @@ describe("modernize-survey over a J2EE estate (model stubbed)", { timeout: smoke
       assert.isDefined(refine)
       assert.isDefined(triage)
       for (const prompt of [refine ?? "", triage ?? ""]) {
-        assert.include(prompt, "jsp-include, servlet-class, jsp-form-action, jsp-ajax-target")
+        assert.include(prompt, "jsp-include, servlet-class")
         assert.include(prompt, "web.xml")
         assert.notMatch(prompt, /COBOL|JCL|COPY|EXEC PGM/)
       }

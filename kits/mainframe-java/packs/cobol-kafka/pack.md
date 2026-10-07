@@ -49,3 +49,27 @@ unit: ^ {6}[ ]*COPY +([A-Z0-9]+)
 
 files: .*\.(jcl|JCL)
 unit: EXEC +PGM=([A-Z0-9]+)
+
+## Node: cobol-section
+
+files: .*\.(cbl|CBL)
+pattern: ^ {7}(?<name>[A-Z0-9][A-Z0-9-]*) +SECTION\.
+
+## Node: cobol-paragraph
+
+files: .*\.(cbl|CBL)
+pattern: ^ {7}(?<name>\d{4}-[A-Z0-9-]+)\.
+
+## Edge: performs
+
+files: .*\.(cbl|CBL)
+pattern: PERFORM +(?<to>\d{4}-[A-Z0-9-]+)(?: +THRU +(?<thru>\d{4}-[A-Z0-9-]+))?
+from: cobol-paragraph
+to: cobol-paragraph
+
+## Edge: goes-to
+
+files: .*\.(cbl|CBL)
+pattern: GO +TO +(?<to>\d{4}-[A-Z0-9-]+)
+from: cobol-paragraph
+to: cobol-paragraph

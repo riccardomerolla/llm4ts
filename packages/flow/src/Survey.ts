@@ -848,7 +848,10 @@ export const mergeSurveyEdges = (
   })
 }
 
-export const renderSurveyInventory = (graph: SurveyGraph): string => {
+export const renderSurveyInventory = (full: SurveyGraph): string => {
+  // The inventory is a table of UNITS (files); sub-file nodes and descriptors
+  // fold onto their files first (ADR 0030).
+  const graph = projectToFiles(full)
   const rows = [...graph.nodes]
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((node) => {
@@ -857,7 +860,9 @@ export const renderSurveyInventory = (graph: SurveyGraph): string => {
       const flags = incoming === 0 && outgoing === 0 ? "unreferenced — retire candidate?" : ""
       return `| ${node.name} | ${node.path} | ${node.lines} | ${node.units} | ${incoming} | ${outgoing} | ${flags} |`
     })
-  const refined = graph.edges.filter((edge) => edge.kind.startsWith("llm-")).length
+  const refined = full.edges.filter(
+    (edge) => edge.kind.startsWith("llm-") || edgeOrigin(edge) === "llm"
+  ).length
   return [
     "# Estate inventory",
     "",
@@ -928,8 +933,8 @@ export const surveyRefinePrompt = (graph: SurveyGraph, context: SurveyPromptCont
     '- "notes": references you could not resolve to a unit — indirect targets whose value you',
     "  could not trace, external systems. Empty if none.",
     "",
-    `Units: ${graph.nodes
-      .map((node) => node.name)
+    `Units: ${projectToFiles(graph)
+      .nodes.map((node) => node.name)
       .sort()
       .join(", ")}`,
     "",
