@@ -9,6 +9,7 @@ import {
   applyFillsAndJoins,
   buildCodeGraph,
   edgeOrigin,
+  nodeAttrs,
   nodeId,
   type CodeGraphBuild
 } from "./Survey.ts"
@@ -82,19 +83,34 @@ export const carryContributions = (
 ): SurveyGraph => {
   const unchanged = (file: string): boolean =>
     previous.meta.files[file] !== undefined && previous.meta.files[file] === next.files[file]
-  const ids = new Set(next.graph.nodes.map(nodeId))
+  const nodes = new Map(next.graph.nodes.map((node) => [nodeId(node), node]))
+  // A node id is positional within its file (`~2`, `~3`), so an endpoint is
+  // only the same node when its own file is byte-identical too.
+  const stable = (id: string): boolean => {
+    const node = nodes.get(id)
+    return node !== undefined && unchanged(node.path)
+  }
+  const scanned = new Set(next.graph.edges.map((edge) => `${edge.from}\u0000${edge.to}`))
   const carriedEdges = previous.graph.edges.filter(
     (edge) =>
       edgeOrigin(edge) !== "scanner" &&
       !(edge.mechanism ?? "").startsWith("join:") &&
       edge.evidence !== undefined &&
       unchanged(edge.evidence.file) &&
-      ids.has(edge.from) &&
-      ids.has(edge.to)
+      stable(edge.from) &&
+      stable(edge.to) &&
+      // The scanner now sees this link itself: its exact edge wins.
+      !scanned.has(`${edge.from}\u0000${edge.to}`)
   )
-  const carriedFills = previous.graph.fills.filter(
-    (fill) => unchanged(fill.evidence.file) && ids.has(fill.node)
-  )
+  const carriedFills = previous.graph.fills.filter((fill) => {
+    const node = nodes.get(fill.node)
+    return (
+      node !== undefined &&
+      unchanged(fill.evidence.file) &&
+      unchanged(node.path) &&
+      nodeAttrs(node)[fill.key] === undefined
+    )
+  })
   const seeded = SurveyGraph.make({
     nodes: next.graph.nodes,
     edges: [...next.graph.edges, ...carriedEdges],

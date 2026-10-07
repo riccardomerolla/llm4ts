@@ -111,3 +111,66 @@ describe("graph cache", () => {
     })
   )
 })
+
+describe("carry-over guard rails", () => {
+  it.effect(
+    "drops a carried edge when an endpoint's own file changed, even if the evidence file did not",
+    () =>
+      Effect.gen(function* () {
+        const { workspace, pack, files, path } = yield* setup
+        const first = yield* freshGraph(files, path, pack, workspace)
+        const crossFile = SurveyEdge.make({
+          from: "cobol-paragraph:cobol/ACCTXFR.cbl#0300-POST",
+          to: "FEECALC",
+          kind: "dynamic-call",
+          origin: "llm",
+          confidence: "inferred",
+          mechanism: "llm",
+          // Evidence cited in a file that will NOT change.
+          evidence: { file: "web/js/invoice.js", line: 6, snippet: "$.post(base + '/dynamic');" }
+        })
+        yield* updateGraphCache(
+          files,
+          path,
+          first.cache,
+          SurveyGraph.make({ ...first.graph, edges: [...first.graph.edges, crossFile] })
+        )
+        // Renumbering risk: the paragraph's file changes, the evidence file does not.
+        yield* workspace.write("cobol/ACCTXFR.cbl", "       0100-MAIN.\n       0300-POST.\n")
+        const after = yield* freshGraph(files, path, pack, workspace)
+        assert.isFalse(after.graph.edges.some((edge) => edge.kind === "dynamic-call"))
+      })
+  )
+
+  it.effect("does not carry an LLM edge the scanner now produces itself", () =>
+    Effect.gen(function* () {
+      const { workspace, pack, files, path } = yield* setup
+      const first = yield* freshGraph(files, path, pack, workspace)
+      const duplicate = SurveyEdge.make({
+        from: "fattura",
+        to: "header",
+        kind: "guess",
+        origin: "llm",
+        confidence: "inferred",
+        mechanism: "llm",
+        evidence: {
+          file: "web/fattura.jsp",
+          line: 2,
+          snippet: '<jsp:include page="/web/header.jsp"/>'
+        }
+      })
+      yield* updateGraphCache(
+        files,
+        path,
+        first.cache,
+        SurveyGraph.make({ ...first.graph, edges: [...first.graph.edges, duplicate] })
+      )
+      yield* workspace.write("cobol/FEECALC.cbl", "       0100-COMPUTE-FEE.\n")
+      const after = yield* freshGraph(files, path, pack, workspace)
+      assert.strictEqual(
+        after.graph.edges.filter((edge) => edge.from === "fattura" && edge.to === "header").length,
+        1
+      )
+    })
+  )
+})
