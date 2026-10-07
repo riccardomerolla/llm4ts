@@ -424,3 +424,46 @@ describe("survey rules keep positional captures (pre-0030 packs)", () => {
       })
   )
 })
+
+describe("projection on descriptor cycles", () => {
+  it("contracts a descriptor cycle with fan-out without multiplying edges", () => {
+    const page = SurveyNode.make({ path: "web/p.jsp", name: "p", lines: 1, units: 0 })
+    const target = SurveyNode.make({ path: "src/T.java", name: "T", lines: 1, units: 0 })
+    const descriptors = ["a", "b", "c"].map((name) =>
+      SurveyNode.make({
+        path: "web/WEB-INF/web.xml",
+        name,
+        lines: 1,
+        units: 0,
+        id: `d:web/WEB-INF/web.xml#${name}`,
+        kind: "d",
+        descriptor: true
+      })
+    )
+    const d = (name: string) => `d:web/WEB-INF/web.xml#${name}`
+    const graph = SurveyGraph.make({
+      nodes: [
+        page,
+        target,
+        SurveyNode.make({ path: "web/WEB-INF/web.xml", name: "web", lines: 1, units: 0 }),
+        ...descriptors
+      ],
+      edges: [
+        SurveyEdge.make({ from: "p", to: d("a"), kind: "k" }),
+        // a → b, a → c, b → a, c → a: a cycle with fan-out 2 at every descriptor
+        SurveyEdge.make({ from: d("a"), to: d("b"), kind: "k" }),
+        SurveyEdge.make({ from: d("a"), to: d("c"), kind: "k" }),
+        SurveyEdge.make({ from: d("b"), to: d("a"), kind: "k" }),
+        SurveyEdge.make({ from: d("c"), to: d("a"), kind: "k" }),
+        SurveyEdge.make({ from: d("b"), to: "T", kind: "k" })
+      ]
+    })
+    const started = Date.now()
+    const projected = projectToFiles(graph)
+    assert.isBelow(Date.now() - started, 2_000)
+    assert.deepStrictEqual(
+      projected.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`),
+      ["p->T:k"]
+    )
+  })
+})

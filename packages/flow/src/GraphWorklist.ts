@@ -105,25 +105,23 @@ export const worklistOf = (
   rules?: GraphRules
 ): ReadonlyArray<WorklistItem> => {
   const degree = (id: string): number => graph.incoming(id).length + graph.outgoing(id).length
-  return [...graph.unresolved]
-    .sort(
-      (left, right) => degree(right.node) - degree(left.node) || left.node.localeCompare(right.node)
-    )
+  // Rank and cut first; reading context and scoring candidates is paid only
+  // for the items actually offered.
+  const ranked = graph.unresolved
     .flatMap((item) => {
       const node = graph.node(item.node)
-      if (node === undefined) {
-        return []
-      }
-      return [
-        {
-          unresolved: item,
-          node,
-          context: numbered(contents(item.file) ?? "", item.line),
-          candidates: candidatesFor(graph, item, node, rules)
-        }
-      ]
+      return node === undefined ? [] : [{ item, node, degree: degree(item.node) }]
     })
+    .sort(
+      (left, right) => right.degree - left.degree || left.item.node.localeCompare(right.item.node)
+    )
     .slice(0, max)
+  return ranked.map(({ item, node }) => ({
+    unresolved: item,
+    node,
+    context: numbered(contents(item.file) ?? "", item.line),
+    candidates: candidatesFor(graph, item, node, rules)
+  }))
 }
 
 export const worklistBatches = <A>(

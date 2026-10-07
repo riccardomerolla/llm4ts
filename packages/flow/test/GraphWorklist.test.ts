@@ -229,3 +229,19 @@ describe("worklist guard rails", () => {
     })
   )
 })
+
+describe("worklist enrichment is bounded by max", () => {
+  it.effect("reads source context only for the items it offers", () =>
+    Effect.gen(function* () {
+      const { graph, pack } = yield* built
+      const asked: Array<string> = []
+      const counting = (path: string): string | undefined => {
+        asked.push(path)
+        return legacyMiniFiles[path]
+      }
+      const items = worklistOf(graph, counting, 2, pack.graph)
+      assert.strictEqual(items.length, 2)
+      assert.isAtMost(asked.length, 2)
+    })
+  )
+})

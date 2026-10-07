@@ -113,16 +113,62 @@ export class SurveyGraph extends Schema.Class<SurveyGraph>("SurveyGraph")({
   )
 }) {
   incoming(id: string): ReadonlyArray<SurveyEdge> {
-    return this.edges.filter((edge) => edge.to === id)
+    return indexOf(this).incoming.get(id) ?? []
   }
 
   outgoing(id: string): ReadonlyArray<SurveyEdge> {
-    return this.edges.filter((edge) => edge.from === id)
+    return indexOf(this).outgoing.get(id) ?? []
   }
 
   node(id: string): SurveyNode | undefined {
-    return this.nodes.find((node) => nodeId(node) === id)
+    return indexOf(this).byId.get(id)
   }
+}
+
+interface GraphIndex {
+  readonly byId: ReadonlyMap<string, SurveyNode>
+  readonly incoming: ReadonlyMap<string, ReadonlyArray<SurveyEdge>>
+  readonly outgoing: ReadonlyMap<string, ReadonlyArray<SurveyEdge>>
+}
+
+/**
+ * Adjacency, built once per graph instance and kept in a WeakMap: a graph is
+ * immutable (every change constructs a new one), so the index never goes
+ * stale, and walks over an estate-sized graph stay linear instead of V × E.
+ */
+const indexes = new WeakMap<SurveyGraph, GraphIndex>()
+
+const indexOf = (graph: SurveyGraph): GraphIndex => {
+  const cached = indexes.get(graph)
+  if (cached !== undefined) {
+    return cached
+  }
+  const byId = new Map<string, SurveyNode>()
+  for (const node of graph.nodes) {
+    const id = nodeId(node)
+    if (!byId.has(id)) {
+      byId.set(id, node)
+    }
+  }
+  const incoming = new Map<string, Array<SurveyEdge>>()
+  const outgoing = new Map<string, Array<SurveyEdge>>()
+  for (const edge of graph.edges) {
+    const into = incoming.get(edge.to)
+    if (into === undefined) {
+      incoming.set(edge.to, [edge])
+    } else {
+      into.push(edge)
+    }
+    const from = outgoing.get(edge.from)
+    if (from === undefined) {
+      outgoing.set(edge.from, [edge])
+    } else {
+      from.push(edge)
+    }
+  }
+  const index: GraphIndex = { byId, incoming, outgoing }
+  indexes.set(graph, index)
+  return index
 }
 
 export const nodeId = (node: SurveyNode): string => node.id ?? node.name
@@ -170,30 +216,53 @@ export const projectToFiles = (graph: SurveyGraph): SurveyGraph => {
       .filter((node) => isDescriptor(node) && graph.outgoing(nodeId(node)).length > 0)
       .map(nodeId)
   )
+  const edgeKey = (edge: SurveyEdge): string =>
+    `${edge.from}\u0000${edge.to}\u0000${edge.kind}\u0000${edgeConfidence(edge)}`
   let edges: ReadonlyArray<SurveyEdge> = graph.edges
   for (let round = 0; round <= graph.nodes.length; round += 1) {
     if (!edges.some((edge) => contractible.has(edge.to))) {
       break
     }
-    edges = edges.flatMap((edge) =>
-      !contractible.has(edge.to)
-        ? [edge]
-        : graph.outgoing(edge.to).map(
-            (next) =>
-              new SurveyEdge({
-                ...edge,
-                to: next.to,
-                mechanism: "contraction",
-                ...(edgeConfidence(edge) === "inferred" || edgeConfidence(next) === "inferred"
-                  ? { confidence: inferred }
-                  : {})
-              })
-          )
-    )
+    const next: Array<SurveyEdge> = []
+    const keys = new Set<string>()
+    const push = (edge: SurveyEdge): void => {
+      const key = edgeKey(edge)
+      if (!keys.has(key)) {
+        keys.add(key)
+        next.push(edge)
+      }
+    }
+    for (const edge of edges) {
+      if (!contractible.has(edge.to)) {
+        push(edge)
+        continue
+      }
+      for (const hop of graph.outgoing(edge.to)) {
+        push(
+          new SurveyEdge({
+            ...edge,
+            to: hop.to,
+            mechanism: "contraction",
+            ...(edgeConfidence(edge) === "inferred" || edgeConfidence(hop) === "inferred"
+              ? { confidence: inferred }
+              : {})
+          })
+        )
+      }
+    }
+    // A descriptor cycle re-derives the same edges forever: stop when a round
+    // adds nothing new; what still ends on a descriptor is cycle residue.
+    if (
+      next.length === edges.length &&
+      next.every((edge, index) => edgeKey(edge) === edgeKey(edges[index]!))
+    ) {
+      break
+    }
+    edges = next
   }
   const seen = new Set<string>()
   const projected = edges.flatMap((edge) => {
-    if (contractible.has(edge.from)) {
+    if (contractible.has(edge.from) || contractible.has(edge.to)) {
       return []
     }
     const from = unitOf(edge.from)
@@ -335,8 +404,6 @@ const lineLocator = (text: string): ((offset: number) => number) => {
   }
 }
 
-const lineText = (text: string, line: number): string => text.split(/\r?\n/)[line - 1] ?? ""
-
 interface Capture {
   readonly line: number
   readonly groups: Readonly<Record<string, string>>
@@ -440,35 +507,87 @@ const scanNodes = (
   return nodes
 }
 
+/** Lookups the edge pass needs per capture, built once per scan instead of scanning every node. */
+interface NodeLookup {
+  /** path → kind → nodes of that kind in the file, in line order. */
+  readonly inFile: ReadonlyMap<string, ReadonlyMap<string, ReadonlyArray<SurveyNode>>>
+  /** `kind\0name` → first node anywhere. */
+  readonly byKindName: ReadonlyMap<string, SurveyNode>
+  /** `path\0kind\0name` → node. */
+  readonly byPathKindName: ReadonlyMap<string, SurveyNode>
+  readonly known: ReadonlySet<string>
+}
+
+const lookupOf = (nodes: ReadonlyArray<SurveyNode>): NodeLookup => {
+  const inFile = new Map<string, Map<string, Array<SurveyNode>>>()
+  const byKindName = new Map<string, SurveyNode>()
+  const byPathKindName = new Map<string, SurveyNode>()
+  const known = new Set<string>()
+  for (const node of nodes) {
+    const kind = nodeKind(node)
+    if (kind === "file") {
+      known.add(node.name)
+    }
+    const kinds = inFile.get(node.path) ?? new Map<string, Array<SurveyNode>>()
+    const list = kinds.get(kind) ?? []
+    list.push(node)
+    kinds.set(kind, list)
+    inFile.set(node.path, kinds)
+    const kindKey = `${kind}\u0000${node.name}`
+    if (!byKindName.has(kindKey)) {
+      byKindName.set(kindKey, node)
+    }
+    const pathKey = `${node.path}\u0000${kind}\u0000${node.name}`
+    if (!byPathKindName.has(pathKey)) {
+      byPathKindName.set(pathKey, node)
+    }
+  }
+  for (const kinds of inFile.values()) {
+    for (const list of kinds.values()) {
+      list.sort((left, right) => nodeLineStart(left) - nodeLineStart(right))
+    }
+  }
+  return { inFile, byKindName, byPathKindName, known }
+}
+
+/** The last node of `kind` in `path` starting at or before `line` (binary search over the file's list). */
 const enclosing = (
-  nodes: ReadonlyArray<SurveyNode>,
+  lookup: NodeLookup,
   path: string,
   kind: string,
   line: number
-): SurveyNode | undefined =>
-  nodes
-    .filter((node) => node.path === path && nodeKind(node) === kind && nodeLineStart(node) <= line)
-    .sort((left, right) => nodeLineStart(right) - nodeLineStart(left))[0]
+): SurveyNode | undefined => {
+  const list = lookup.inFile.get(path)?.get(kind) ?? []
+  let low = 0
+  let high = list.length - 1
+  let found: SurveyNode | undefined
+  while (low <= high) {
+    const mid = (low + high) >> 1
+    const candidate = list[mid]!
+    if (nodeLineStart(candidate) <= line) {
+      found = candidate
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+  return found
+}
 
 const resolveTarget = (
-  nodes: ReadonlyArray<SurveyNode>,
-  known: ReadonlySet<string>,
+  lookup: NodeLookup,
   path: string,
   kind: string,
   reference: string
 ): { readonly id: string; readonly found: boolean } => {
   if (kind === "file") {
-    const unit = resolveUnit(reference, known)
-    return { id: unit, found: known.has(unit) }
+    const unit = resolveUnit(reference, lookup.known)
+    return { id: unit, found: lookup.known.has(unit) }
   }
-  const sameFile = nodes.find(
-    (node) => node.path === path && nodeKind(node) === kind && node.name === reference
-  )
-  const anywhere =
-    sameFile ?? nodes.find((node) => nodeKind(node) === kind && node.name === reference)
-  return anywhere === undefined
-    ? { id: reference, found: false }
-    : { id: nodeId(anywhere), found: true }
+  const node =
+    lookup.byPathKindName.get(`${path}\u0000${kind}\u0000${reference}`) ??
+    lookup.byKindName.get(`${kind}\u0000${reference}`)
+  return node === undefined ? { id: reference, found: false } : { id: nodeId(node), found: true }
 }
 
 const scanEdges = (
@@ -480,7 +599,7 @@ const scanEdges = (
   readonly edges: ReadonlyArray<SurveyEdge>
   readonly unresolved: ReadonlyArray<Unresolved>
 } => {
-  const known = new Set(nodes.filter((node) => nodeKind(node) === "file").map((node) => node.name))
+  const lookup = lookupOf(nodes)
   const lineOf = new Map(nodes.map((node) => [nodeId(node), nodeLineStart(node)]))
   const edges: Array<SurveyEdge> = []
   const unresolved: Array<Unresolved> = []
@@ -497,28 +616,28 @@ const scanEdges = (
     for (const path of paths.filter((path) => filePattern.test(path))) {
       const text = contents.get(path) ?? ""
       const locate = lineLocator(text)
+      const lines = text.split(/\r?\n/)
       for (const hit of captures(rule.pattern, text, locate)) {
         const reference = rule.positional === true ? hit.first : hit.groups.to
         if (reference === undefined) {
           continue
         }
         const fromNode =
-          rule.fromKind === "file" ? undefined : enclosing(nodes, path, rule.fromKind, hit.line)
+          rule.fromKind === "file" ? undefined : enclosing(lookup, path, rule.fromKind, hit.line)
         const from = fromNode === undefined ? unitName(path) : nodeId(fromNode)
         const evidence = GraphEvidence.make({
           file: path,
           line: hit.line,
-          snippet: lineText(text, hit.line).trim()
+          snippet: (lines[hit.line - 1] ?? "").trim()
         })
-        const target = resolveTarget(nodes, known, path, rule.toKind, reference)
+        const target = resolveTarget(lookup, path, rule.toKind, reference)
         const targets: Array<string> = []
         if (target.found && hit.groups.thru !== undefined && rule.toKind !== "file") {
-          const end = resolveTarget(nodes, known, path, rule.toKind, hit.groups.thru)
+          const end = resolveTarget(lookup, path, rule.toKind, hit.groups.thru)
           const startLine = lineOf.get(target.id) ?? 0
           const endLine = end.found ? (lineOf.get(end.id) ?? startLine) : startLine
           targets.push(
-            ...nodes
-              .filter((node) => node.path === path && nodeKind(node) === rule.toKind)
+            ...(lookup.inFile.get(path)?.get(rule.toKind) ?? [])
               .filter((node) => nodeLineStart(node) >= startLine && nodeLineStart(node) <= endLine)
               .map(nodeId)
           )

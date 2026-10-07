@@ -10,7 +10,7 @@ import {
   searchNodes,
   shortestPath
 } from "@llm4ts/flow/GraphQuery"
-import { buildCodeGraph, nodeId } from "@llm4ts/flow/Survey"
+import { SurveyEdge, SurveyGraph, SurveyNode, buildCodeGraph, nodeId } from "@llm4ts/flow/Survey"
 import { makeMemoryWorkspace } from "@llm4ts/flow/Workspace"
 import { loadLegacyMiniPack, writeLegacyMini } from "./support/legacyMini.ts"
 
@@ -114,4 +114,21 @@ describe("graph queries", () => {
       assert.strictEqual(stats.unresolved["edge-target"], 2)
     })
   )
+})
+
+describe("graph queries scale with indexes", () => {
+  it("neighbourhood, shortest path and closure stay fast on a 20 000-node chain", () => {
+    const nodes = Array.from({ length: 20_000 }, (_, index) =>
+      SurveyNode.make({ path: `src/N${index}.cbl`, name: `N${index}`, lines: 1, units: 0 })
+    )
+    const edges = nodes
+      .slice(1)
+      .map((node, index) => SurveyEdge.make({ from: `N${index}`, to: node.name, kind: "calls" }))
+    const graph = SurveyGraph.make({ nodes, edges })
+    const started = Date.now()
+    assert.strictEqual(shortestPath(graph, "N0", "N19999", 25_000)?.length, 19_999)
+    assert.strictEqual(neighborhood(graph, ["N10000"], 3).nodes.length, 7)
+    assert.strictEqual(closureView(graph, "N19990", 50).nodes.length, 10)
+    assert.isBelow(Date.now() - started, 5_000, "linear-scan adjacency would take minutes here")
+  })
 })
