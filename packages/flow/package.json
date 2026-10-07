@@ -53,6 +53,7 @@
     "./GitTool": "./dist/GitTool.js",
     "./GraphCache": "./dist/GraphCache.js",
     "./GraphRules": "./dist/GraphRules.js",
+    "./GraphWorklist": "./dist/GraphWorklist.js",
     "./Landing": "./dist/Landing.js",
     "./Interaction": "./dist/Interaction.js",
     "./McpServer": "./dist/McpServer.js",
