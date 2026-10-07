@@ -303,3 +303,11 @@ Bank pack, after `modernize-survey`: probes for the hand-extracted flows
 pass in pack-check at or above 80 percent after the scanner pass; the nodes
 those flows name exist at or above 95 percent after the LLM pass. Fixture
 tests and smoke tests gate CI.
+
+## Spine-first measurement
+
+Not measured in the 2.38.0 session: no legacy estate was available to run
+`modernize-extract` against, so the spine-first closure (plan Task 16) is
+deferred by its own Step 0. It is taken up when an extract on a real estate
+shows closures truncated at `LLM4TS_MAX_CLOSURE_FILES`, with `llm4ts profile
+--against` before and after.
