@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **`epic-stories --judge-rounds <n>`** (or `LLM4TS_JUDGE_ROUNDS`): bounds how
+  many times a story the judge did not clear is revised and rejudged before
+  it fails. Default unchanged (2: one revision).
+
 ## 2.38.0
 
 The survey graph becomes a code graph (ADR 0030).

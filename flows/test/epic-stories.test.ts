@@ -72,6 +72,7 @@ import {
   rubricStoryJudge,
   storiesEnvironment,
   storyContextChars,
+  judgeRoundsOption,
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
@@ -208,6 +209,22 @@ describe("epic-stories flags and seats", () => {
       assert.deepStrictEqual(flags.rest, ["--repo", "/repo", "Add Conto"])
       const bad = yield* Effect.flip(parseEpicArgs(["--concurrency", "zero"]))
       assert.strictEqual(bad._tag, "ScriptUsage")
+      assert.isUndefined(flags.judgeRounds)
+      assert.strictEqual((yield* parseEpicArgs(["--judge-rounds", "4"])).judgeRounds, 4)
+      assert.strictEqual((yield* parseEpicArgs(["--judge-rounds=3"])).judgeRounds, 3)
+      assert.strictEqual(
+        (yield* Effect.flip(parseEpicArgs(["--judge-rounds", "0"])))._tag,
+        "ScriptUsage"
+      )
+      // The flag wins over the environment; a bad environment value is ignored.
+      assert.deepStrictEqual(judgeRoundsOption(5, { LLM4TS_JUDGE_ROUNDS: "3" }), {
+        judgeRounds: 5
+      })
+      assert.deepStrictEqual(judgeRoundsOption(undefined, { LLM4TS_JUDGE_ROUNDS: "3" }), {
+        judgeRounds: 3
+      })
+      assert.deepStrictEqual(judgeRoundsOption(undefined, { LLM4TS_JUDGE_ROUNDS: "x" }), {})
+      assert.deepStrictEqual(judgeRoundsOption(undefined, {}), {})
       assert.isUndefined(flags.land)
       // `--land` lands on main; the epic text after it is not a branch name.
       const land = yield* parseEpicArgs(["--land", "Add Conto"])

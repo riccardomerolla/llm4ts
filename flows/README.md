@@ -218,6 +218,11 @@ pnpm --filter @llm4ts/flows epic-stories -- \
 - `--concurrency <n>` (default 3) caps the stories implemented at once;
   `--fail-fast` stops at the first failed story instead of putting its
   dependents on hold (`waiting` on the board until it is fixed and rerun).
+- `--judge-rounds <n>` (or `LLM4TS_JUDGE_ROUNDS`; the flag wins; default 2)
+  sets the judge attempts per story. Each attempt the judge does not clear,
+  except the last, becomes a revision task the coder runs before the next
+  judgment; after `n` attempts the story fails with the judge's findings.
+  The default of 2 is one revision, so `--judge-rounds 4` allows three.
 - `LLM4TS_REASONER` (default `claude`, or `gemini`) splits, reviews every
   task and judges every story; `LLM4TS_CODER` (default `pi`) implements.
   `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi

@@ -108,6 +108,8 @@ export interface EpicArgs {
   readonly planOnly: boolean
   readonly failFast: boolean
   readonly concurrency: number | undefined
+  /** `--judge-rounds <n>`: judge attempts per story, each but the last followed by a revision. */
+  readonly judgeRounds: number | undefined
   /** `--land[=branch]`: land the finished epic on that branch (default main) and stop. */
   readonly land: string | undefined
   /** `--keep-worktrees`: after landing, keep the story worktrees and branches. */
@@ -137,6 +139,8 @@ export const epicUsage = [
   "                      A plain rerun finishes an open round; --plan-only stops after planning",
   "  --concurrency <n>   stories implemented at once (default 3)",
   "  --fail-fast         stop the epic at the first failed story",
+  "  --judge-rounds <n>  judge attempts per story (default 2 = one revision); a story the judge",
+  "                      has not cleared after n attempts fails. LLM4TS_JUDGE_ROUNDS sets it too",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
   "       LLM4TS_CODER (default pi) implements; LLM4TS_REASONING_MODEL / LLM4TS_CODER_MODEL",
   "       pick their models (pi: provider/model); LLM4TS_CODER_FLAGS / LLM4TS_REASONING_FLAGS",
@@ -156,6 +160,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
     let planOnly = false
     let failFast = false
     let concurrency: number | undefined
+    let judgeRounds: number | undefined
     let land: string | undefined
     let keepWorktrees = false
     let list = false
@@ -204,12 +209,52 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
           })
         }
         concurrency = parsed
+      } else if (argument === "--judge-rounds" || argument.startsWith("--judge-rounds=")) {
+        const raw = argument.includes("=")
+          ? argument.slice("--judge-rounds=".length)
+          : argv[index + 1]
+        if (!argument.includes("=")) {
+          index += 1
+        }
+        const parsed = Number.parseInt(raw ?? "", 10)
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          return yield* ScriptUsage.make({
+            message: `--judge-rounds requires a positive integer\n${epicUsage}`
+          })
+        }
+        judgeRounds = parsed
       } else {
         rest.push(argument)
       }
     }
-    return { planOnly, failFast, concurrency, land, keepWorktrees, list, epic, refine, rest }
+    return {
+      planOnly,
+      failFast,
+      concurrency,
+      judgeRounds,
+      land,
+      keepWorktrees,
+      list,
+      epic,
+      refine,
+      rest
+    }
   })
+
+/**
+ * Judge attempts per story: `--judge-rounds`, else `LLM4TS_JUDGE_ROUNDS`, else
+ * the flow's default. An unusable environment value falls back, never fails.
+ */
+export const judgeRoundsOption = (
+  flag: number | undefined,
+  environment: Readonly<Record<string, string | undefined>>
+): { readonly judgeRounds?: number } => {
+  if (flag !== undefined) {
+    return { judgeRounds: flag }
+  }
+  const raw = Number.parseInt(environment.LLM4TS_JUDGE_ROUNDS ?? "", 10)
+  return Number.isInteger(raw) && raw > 0 ? { judgeRounds: raw } : {}
+}
 
 // ---- Epics in a repository ---------------------------------------------------------
 
@@ -2357,6 +2402,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                     ...(orientation === undefined ? [] : ["", orientation])
                   ].join("\n")
                 ),
+              ...judgeRoundsOption(flags.judgeRounds, process.env),
               concurrency,
               failFast: flags.failFast
             }
