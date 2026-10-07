@@ -24,6 +24,7 @@
     "./ExecutorRoster": "./dist/ExecutorRoster.js",
     "./FlowArgs": "./dist/FlowArgs.js",
     "./FlowRunner": "./dist/FlowRunner.js",
+    "./Graph": "./dist/Graph.js",
     "./Kits": "./dist/Kits.js",
     "./McpStdio": "./dist/McpStdio.js",
     "./NodeGeminiAcpBridge": "./dist/NodeGeminiAcpBridge.js",
