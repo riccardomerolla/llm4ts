@@ -10,12 +10,14 @@
 //   2. estate — the files `sources:` selects (minus `exclude:`), the files
 //      `programs:` selects, and for every `## Coverage:` and `## Survey:` rule
 //      the units it captures, with a sample of each so a regex typo is
-//      visible at a glance.
+//      visible at a glance; then the code graph (ADR 0030): what every
+//      `## Node:`, `## Edge:` and `## Join:` rule produced, the unresolved
+//      items by reason, and one verdict line per `## Probe:`.
 //   3. verdict — hard failures (the pack does not load, `sources:` or
-//      `programs:` match nothing) abort with exit code 1; likely mistakes (a
-//      rule capturing no unit, a missing phase prompt, a scaffold path that
-//      does not exist, no reviewer lens, no judge dimension) are listed as
-//      warnings and the flow exits 0.
+//      `programs:` match nothing, a probe is broken or names an unknown node)
+//      abort with exit code 1; likely mistakes (a rule capturing no unit, a
+//      missing phase prompt, a scaffold path that does not exist, no reviewer
+//      lens, no judge dimension) are listed as warnings and the flow exits 0.
 //
 // Run: LLM4TS_PACK=packs/my-pack modernize-pack-check --repo ~/estates/legacy
 import { existsSync } from "node:fs"
@@ -32,8 +34,10 @@ import {
   runNode,
   stage
 } from "@llm4ts/runner"
+import { graphStats, probeResults } from "@llm4ts/flow/GraphQuery"
 import { coverageUnits, matchingFiles } from "@llm4ts/flow/SpecChecks"
 import type { CoverageRule } from "@llm4ts/flow/SpecChecks"
+import { buildCodeGraph, nodeId, nodeKind, type SurveyEdge } from "@llm4ts/flow/Survey"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 
 /** Prompt sidecars the modernization phases read, with the phase that reads each. */
@@ -59,6 +63,9 @@ const sample = (units: ReadonlyArray<string>): string =>
 
 const plural = (count: number, noun: string, many = `${noun}s`): string =>
   `${count} ${count === 1 ? noun : many}`
+
+const probeFrom = (path: ReadonlyArray<SurveyEdge>): string => path[0]?.from ?? ""
+const probeTo = (path: ReadonlyArray<SurveyEdge>): string => path.at(-1)?.to ?? ""
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Check the pack against the estate")
@@ -207,6 +214,76 @@ const program = Effect.gen(function* () {
             })
             yield* report("coverage", pack.coverage)
             yield* report("survey", pack.survey)
+
+            // The code graph (ADR 0030): rule by rule, then the holes, then the probes.
+            const build = yield* buildCodeGraph(repo, {
+              sources: sourcesRegex,
+              ...(pack.exclude === undefined ? {} : { exclude: pack.exclude }),
+              coverage: pack.coverage,
+              rules: pack.graph
+            })
+            const stats = graphStats(build.graph)
+            for (const rule of pack.graph.nodes) {
+              const count = stats.nodes[rule.kind] ?? 0
+              const samples = build.graph.nodes
+                .filter((node) => nodeKind(node) === rule.kind)
+                .map((node) => node.name)
+              yield* say(`node '${rule.kind}': ${plural(count, "node")} — ${sample(samples)}`)
+              if (count === 0) {
+                warnings.push(
+                  `node rule '${rule.kind}' matched nothing: files '${rule.files}', pattern '${rule.pattern}'`
+                )
+              }
+            }
+            const duplicates = build.graph.nodes.filter((node) => nodeId(node).includes("~"))
+            if (duplicates.length > 0) {
+              warnings.push(
+                `${plural(duplicates.length, "node")} share a name within one file (ids with '~n'): ${sample(duplicates.map(nodeId))}`
+              )
+            }
+            for (const rule of pack.graph.edges.filter(
+              (rule) => rule.fromKind !== "file" || rule.toKind !== "file"
+            )) {
+              const count = stats.edges[rule.kind] ?? 0
+              yield* say(`edge '${rule.kind}': ${plural(count, "edge")}`)
+              if (count === 0) {
+                warnings.push(`edge rule '${rule.kind}' produced no edge`)
+              }
+            }
+            for (const rule of pack.graph.joins) {
+              const count = build.graph.edges.filter(
+                (edge) => edge.kind === rule.kind && (edge.mechanism ?? "").startsWith("join:")
+              ).length
+              yield* say(
+                `join '${rule.kind}' (${rule.fromKind}.${rule.fromAttr} → ${rule.toKind}.${rule.toAttr}, ${rule.match}, scope ${rule.scope}): ${plural(count, "edge")}`
+              )
+              if (count === 0) {
+                warnings.push(`join '${rule.kind}' produced no edge`)
+              }
+            }
+            const byReason = Object.entries(stats.unresolved)
+              .map(([reason, count]) => `${reason} ${count}`)
+              .join(", ")
+            yield* say(`unresolved: ${build.graph.unresolved.length === 0 ? "none" : byReason}`)
+            for (const item of build.graph.unresolved.slice(0, 20)) {
+              yield* say(
+                `  ${item.reason} [${item.rule}] ${item.node}${item.reference === undefined ? "" : ` → ${item.reference}`} (${item.file}:${item.line})`
+              )
+            }
+            for (const result of probeResults(build.graph, pack.graph.probes)) {
+              const via =
+                result.path === undefined
+                  ? ""
+                  : result.path.length === 0
+                    ? " (same node)"
+                    : ` (${probeFrom(result.path)} → ${probeTo(result.path)} via ${result.path.map((edge) => edge.kind).join(" → ")})`
+              yield* say(`probe '${result.probe.name}': ${result.status}${via}`)
+              if (result.status !== "ok") {
+                failures.push(
+                  `probe '${result.probe.name}' is ${result.status} (${result.probe.from} → ${result.probe.to})`
+                )
+              }
+            }
           })
         )
 

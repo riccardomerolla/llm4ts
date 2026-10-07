@@ -94,6 +94,55 @@ describe("modernize-pack-check", () => {
     assert.include(output, "check passed with 11 warnings")
   })
 
+  it("reports node, edge and join rules, the unresolved list and probe verdicts; a broken probe fails", () => {
+    const fixture = makeFixture()
+    cobolEstate(fixture.legacy)
+    write(
+      fixture.root,
+      "packs/graph/pack.md",
+      [
+        "# Pack: graph",
+        "",
+        "source: cobol",
+        "sources: .*\\.(cbl|jcl)",
+        "",
+        "## Survey: calls",
+        "files: .*\\.cbl",
+        "unit: CALL '([A-Z0-9]+)'",
+        "",
+        "## Node: cobol-paragraph",
+        "files: .*\\.cbl",
+        "pattern: ^ {7}(?<name>\\d{4}-[A-Z0-9-]+)\\.",
+        "",
+        "## Edge: performs",
+        "files: .*\\.cbl",
+        "pattern: PERFORM +(?<to>\\d{4}-[A-Z0-9-]+)",
+        "from: cobol-paragraph",
+        "to: cobol-paragraph",
+        "",
+        "## Probe: transfer",
+        "from: ACCTXFR",
+        "to: FEECALC",
+        "",
+        "## Probe: ghost",
+        "from: ACCTXFR",
+        "to: NOWHERE",
+        ""
+      ].join("\n")
+    )
+    const result = runFlow(fixture, "modernize-pack-check", fixture.legacy, {
+      LLM4TS_PACK: "packs/graph"
+    })
+    const output = `${result.stdout}${result.stderr}`
+    assert.notStrictEqual(result.status, 0, "a broken probe must fail the check")
+    assert.include(output, "node 'cobol-paragraph': 3 nodes")
+    assert.include(output, "edge 'performs': 0 edges")
+    assert.include(output, "unresolved: ")
+    assert.include(output, "edge-target")
+    assert.include(output, "probe 'transfer': ok (ACCTXFR → FEECALC via calls)")
+    assert.include(output, "probe 'ghost': unknown-to")
+  })
+
   it("fails when the sources regex matches nothing in the estate", () => {
     const fixture = makeFixture()
     const empty = join(mkdtempSync(join(tmpdir(), "llm4ts-pack-check-")), "estate")
