@@ -1,33 +1,220 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { PlanParseError } from "./FlowError.ts"
 import type { CoverageRule } from "./SpecChecks.ts"
 import type { WorkspaceError, WorkspaceShape } from "./Workspace.ts"
 
+export const GraphOrigin = Schema.Literals(["scanner", "llm", "external"])
+export type GraphOrigin = typeof GraphOrigin.Type
+export const GraphConfidence = Schema.Literals(["exact", "inferred"])
+export type GraphConfidence = typeof GraphConfidence.Type
+export const GraphMechanism = Schema.Literals([
+  "capture",
+  "join:exact",
+  "join:url",
+  "contraction",
+  "llm",
+  "codegraph"
+])
+export type GraphMechanism = typeof GraphMechanism.Type
+export const JoinMatch = Schema.Literals(["exact", "prefix", "extension"])
+export type JoinMatch = typeof JoinMatch.Type
+
+export class GraphEvidence extends Schema.Class<GraphEvidence>("GraphEvidence")({
+  file: Schema.String,
+  line: Schema.Int,
+  snippet: Schema.String
+}) {}
+
+/**
+ * A node of the estate graph. The four original fields describe a FILE node;
+ * the ADR 0030 fields are optional on the wire so a pre-0030 `graph.json`
+ * decodes and the four-field constructor keeps compiling — read them through
+ * `nodeId`, `nodeKind` and the other helpers below, never directly.
+ */
 export class SurveyNode extends Schema.Class<SurveyNode>("SurveyNode")({
   path: Schema.String,
   name: Schema.String,
   lines: Schema.Int,
-  units: Schema.Int
+  units: Schema.Int,
+  id: Schema.optionalKey(Schema.String),
+  kind: Schema.optionalKey(Schema.String),
+  label: Schema.optionalKey(Schema.String),
+  lineStart: Schema.optionalKey(Schema.Int),
+  lineEnd: Schema.optionalKey(Schema.Int),
+  attrs: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  origin: Schema.optionalKey(GraphOrigin),
+  /** A wiring record (a `web.xml` mapping), not a unit: contracted by the file projection. */
+  descriptor: Schema.optionalKey(Schema.Boolean),
+  /** The attr naming the unit this node stands for (a declaration's class). */
+  anchor: Schema.optionalKey(Schema.String)
 }) {}
 
 export class SurveyEdge extends Schema.Class<SurveyEdge>("SurveyEdge")({
   from: Schema.String,
   to: Schema.String,
-  kind: Schema.String
+  kind: Schema.String,
+  origin: Schema.optionalKey(GraphOrigin),
+  confidence: Schema.optionalKey(GraphConfidence),
+  /** The pack section that produced the edge. */
+  rule: Schema.optionalKey(Schema.String),
+  mechanism: Schema.optionalKey(GraphMechanism),
+  join: Schema.optionalKey(JoinMatch),
+  evidence: Schema.optionalKey(GraphEvidence)
+}) {}
+
+export const UnresolvedReason = Schema.Literals([
+  "edge-target",
+  "missing-attr",
+  "join-from",
+  "join-to",
+  "isolated"
+])
+export type UnresolvedReason = typeof UnresolvedReason.Type
+
+export class Unresolved extends Schema.Class<Unresolved>("Unresolved")({
+  reason: UnresolvedReason,
+  rule: Schema.String,
+  node: Schema.String,
+  reference: Schema.optionalKey(Schema.String),
+  file: Schema.String,
+  line: Schema.Int
+}) {}
+
+/** An attr the LLM pass filled on an existing node, with the line that justifies it. */
+export class Fill extends Schema.Class<Fill>("Fill")({
+  node: Schema.String,
+  key: Schema.String,
+  value: Schema.String,
+  evidence: GraphEvidence
 }) {}
 
 export class SurveyGraph extends Schema.Class<SurveyGraph>("SurveyGraph")({
   nodes: Schema.Array(SurveyNode),
-  edges: Schema.Array(SurveyEdge)
+  edges: Schema.Array(SurveyEdge),
+  unresolved: Schema.Array(Unresolved).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([]))
+  ),
+  fills: Schema.Array(Fill).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+    Schema.withConstructorDefault(Effect.succeed([]))
+  )
 }) {
-  incoming(name: string): ReadonlyArray<SurveyEdge> {
-    return this.edges.filter((edge) => edge.to === name)
+  incoming(id: string): ReadonlyArray<SurveyEdge> {
+    return this.edges.filter((edge) => edge.to === id)
   }
 
-  outgoing(name: string): ReadonlyArray<SurveyEdge> {
-    return this.edges.filter((edge) => edge.from === name)
+  outgoing(id: string): ReadonlyArray<SurveyEdge> {
+    return this.edges.filter((edge) => edge.from === id)
+  }
+
+  node(id: string): SurveyNode | undefined {
+    return this.nodes.find((node) => nodeId(node) === id)
   }
 }
+
+export const nodeId = (node: SurveyNode): string => node.id ?? node.name
+export const nodeKind = (node: SurveyNode): string => node.kind ?? "file"
+export const nodeLabel = (node: SurveyNode): string => node.label ?? node.name
+export const nodeAttrs = (node: SurveyNode): Readonly<Record<string, string>> => node.attrs ?? {}
+export const nodeLineStart = (node: SurveyNode): number => node.lineStart ?? 1
+export const nodeLineEnd = (node: SurveyNode): number => node.lineEnd ?? node.lines
+export const isDescriptor = (node: SurveyNode): boolean => node.descriptor === true
+export const edgeOrigin = (edge: SurveyEdge): GraphOrigin => edge.origin ?? "scanner"
+export const edgeConfidence = (edge: SurveyEdge): GraphConfidence => edge.confidence ?? "exact"
+
+const inferred: GraphConfidence = "inferred"
+
+/**
+ * The file-level view every pre-ADR-0030 consumer expects. Each node folds onto
+ * a unit (its `anchor` attr when that names a known unit, else its file's
+ * unit); descriptor nodes with outgoing edges are contracted (`a → d → b`
+ * becomes `a → b` under `a → d`'s kind); self loops drop; duplicates by
+ * (from, to, kind) drop. On a file-only graph this is the identity.
+ */
+export const projectToFiles = (graph: SurveyGraph): SurveyGraph => {
+  const files = graph.nodes.filter((node) => nodeKind(node) === "file")
+  const known = new Set(files.map((node) => node.name))
+  const byId = new Map(graph.nodes.map((node) => [nodeId(node), node]))
+  const unitOf = (id: string): string => {
+    const node = byId.get(id)
+    if (node === undefined) {
+      return id
+    }
+    if (nodeKind(node) === "file") {
+      return node.name
+    }
+    const anchored = node.anchor === undefined ? undefined : nodeAttrs(node)[node.anchor]
+    if (anchored !== undefined) {
+      const resolved = resolveUnit(anchored, known)
+      if (known.has(resolved)) {
+        return resolved
+      }
+    }
+    return unitName(node.path)
+  }
+  const contractible = new Set(
+    graph.nodes
+      .filter((node) => isDescriptor(node) && graph.outgoing(nodeId(node)).length > 0)
+      .map(nodeId)
+  )
+  let edges: ReadonlyArray<SurveyEdge> = graph.edges
+  for (let round = 0; round <= graph.nodes.length; round += 1) {
+    if (!edges.some((edge) => contractible.has(edge.to))) {
+      break
+    }
+    edges = edges.flatMap((edge) =>
+      !contractible.has(edge.to)
+        ? [edge]
+        : graph.outgoing(edge.to).map(
+            (next) =>
+              new SurveyEdge({
+                ...edge,
+                to: next.to,
+                mechanism: "contraction",
+                ...(edgeConfidence(edge) === "inferred" || edgeConfidence(next) === "inferred"
+                  ? { confidence: inferred }
+                  : {})
+              })
+          )
+    )
+  }
+  const seen = new Set<string>()
+  const projected = edges.flatMap((edge) => {
+    if (contractible.has(edge.from)) {
+      return []
+    }
+    const from = unitOf(edge.from)
+    const to = unitOf(edge.to)
+    const key = `${from}\u0000${to}\u0000${edge.kind}`
+    if (from === to || seen.has(key)) {
+      return []
+    }
+    seen.add(key)
+    return [new SurveyEdge({ ...edge, from, to })]
+  })
+  return new SurveyGraph({
+    nodes: files,
+    edges: projected,
+    unresolved: graph.unresolved,
+    fills: graph.fills
+  })
+}
+
+export const graphFromJson = (text: string): Effect.Effect<SurveyGraph, PlanParseError> =>
+  Effect.try({
+    try: (): unknown => JSON.parse(text),
+    catch: (error) => PlanParseError.make({ message: `graph.json is not JSON: ${String(error)}` })
+  }).pipe(
+    Effect.flatMap((json) =>
+      Schema.decodeUnknownEffect(SurveyGraph)(json).pipe(
+        Effect.mapError((error) =>
+          PlanParseError.make({ message: `graph.json does not decode: ${String(error)}` })
+        )
+      )
+    )
+  )
 
 /**
  * The transitive dependency closure of `program` as repo-relative paths,
@@ -43,7 +230,8 @@ export const closureFor = (
   program: string,
   maxFiles: number
 ): ReadonlyArray<string> => {
-  const pathOf = new Map(graph.nodes.map((node) => [node.name, node.path]))
+  const projected = projectToFiles(graph)
+  const pathOf = new Map(projected.nodes.map((node) => [node.name, node.path]))
   const walk = (
     frontier: ReadonlyArray<string>,
     seen: ReadonlySet<string>,
@@ -53,7 +241,7 @@ export const closureFor = (
       return acc.slice(0, maxFiles)
     }
     const next = [
-      ...new Set(frontier.flatMap((from) => graph.outgoing(from).map((edge) => edge.to)))
+      ...new Set(frontier.flatMap((from) => projected.outgoing(from).map((edge) => edge.to)))
     ].filter((name) => !seen.has(name))
     return walk(next, new Set([...seen, ...next]), [
       ...acc,
