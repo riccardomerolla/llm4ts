@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 2.39.0
+
+epic-stories spends less time on the critical path: bounded judge revisions,
+and non-blocking findings deferred to a follow-up round (ADR 0031).
 
 - **`epic-stories --judge-rounds <n>`** (or `LLM4TS_JUDGE_ROUNDS`): bounds how
   many times a story the judge did not clear is revised and rejudged before
