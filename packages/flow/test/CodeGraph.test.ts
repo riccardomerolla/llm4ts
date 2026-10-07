@@ -5,12 +5,20 @@ import {
   SurveyEdge,
   SurveyGraph,
   SurveyNode,
+  buildCodeGraph,
   closureFor,
   graphFromJson,
+  nodeAttrs,
   nodeId,
   nodeKind,
-  projectToFiles
+  nodeLineEnd,
+  nodeLineStart,
+  projectToFiles,
+  surveyGraph
 } from "@llm4ts/flow/Survey"
+import { CoverageRule } from "@llm4ts/flow/SpecChecks"
+import { makeMemoryWorkspace } from "@llm4ts/flow/Workspace"
+import { loadLegacyMiniPack, writeLegacyMini } from "./support/legacyMini.ts"
 
 const fileNode = (name: string, path = `src/${name}.jsp`): SurveyNode =>
   SurveyNode.make({ path, name, lines: 10, units: 1 })
@@ -122,4 +130,109 @@ describe("code graph schema", () => {
     assert.strictEqual(decoded.origin, "llm")
     assert.strictEqual(decoded.evidence?.line, 4)
   })
+})
+
+const built = Effect.gen(function* () {
+  const workspace = yield* makeMemoryWorkspace()
+  yield* writeLegacyMini(workspace)
+  const pack = yield* loadLegacyMiniPack(workspace)
+  const build = yield* buildCodeGraph(workspace, {
+    sources: pack.sources ?? ".*",
+    coverage: pack.coverage,
+    rules: pack.graph
+  })
+  return { workspace, pack, build, graph: build.graph }
+})
+
+describe("scanner pass", () => {
+  it.effect("creates file nodes and sub-file nodes with stable ids, attrs and spans", () =>
+    Effect.gen(function* () {
+      const { graph, build } = yield* built
+      const ids = graph.nodes.map(nodeId)
+      assert.include(ids, "fattura")
+      assert.include(ids, "ajax-call:web/js/invoice.js#${ctx}/salvaFattura?id=")
+      assert.include(ids, "ajax-call:web/js/invoice.js#/api/report/monthly")
+      assert.include(ids, "ajax-dynamic:web/js/invoice.js#base + '/dynamic'")
+      assert.include(ids, "form:web/fattura.jsp#salvaFattura.do")
+      assert.include(ids, "servlet-mapping:web/WEB-INF/web.xml#invoice")
+      assert.include(ids, "servlet-mapping:web/WEB-INF/web.xml#invoice~2")
+      assert.include(ids, "servlet-decl:web/WEB-INF/web.xml#orphan")
+      assert.include(ids, "esb-call:src/com/legacy/InvoiceServlet.java#SalvaFattura")
+      assert.include(ids, "cobol-section:cobol/ACCTXFR.cbl#MAIN-LOGIC")
+      assert.include(ids, "cobol-paragraph:cobol/ACCTXFR.cbl#0100-MAIN")
+      const decl = graph.node("servlet-decl:web/WEB-INF/web.xml#invoice")!
+      assert.deepStrictEqual(nodeAttrs(decl), { class: "InvoiceServlet" })
+      assert.strictEqual(decl.descriptor, true)
+      assert.strictEqual(decl.anchor, "class")
+      const esb = graph.node("esb-call:src/com/legacy/InvoiceServlet.java#SalvaFattura")!
+      assert.deepStrictEqual(nodeAttrs(esb), { service: "InvoiceService" })
+      const main = graph.node("cobol-paragraph:cobol/ACCTXFR.cbl#0100-MAIN")!
+      assert.strictEqual(nodeLineStart(main), 5)
+      assert.strictEqual(nodeLineEnd(main), 7)
+      const file = graph.node("ACCTXFR")!
+      assert.strictEqual(file.units, 4)
+      assert.strictEqual(Object.keys(build.files).length, 10)
+    })
+  )
+
+  it.effect(
+    "captures edges from the enclosing node, resolves targets same-file first, expands THRU, keeps file literals",
+    () =>
+      Effect.gen(function* () {
+        const { graph } = yield* built
+        const captured = graph.edges
+          .filter((edge) => edge.mechanism === "capture")
+          .map((edge) => `${edge.kind}:${edge.from}->${edge.to}`)
+          .sort()
+        assert.deepStrictEqual(captured, [
+          "calls:cobol-paragraph:cobol/ACCTXFR.cbl#0100-MAIN->FEECALC",
+          "calls:cobol-paragraph:cobol/ACCTXFR.cbl#0300-POST->AUDITLOG",
+          "goes-to:cobol-paragraph:cobol/ACCTXFR.cbl#0250-CHECK->cobol-paragraph:cobol/ACCTXFR.cbl#0300-POST",
+          "invokes-esb:InvoiceServlet->esb-call:src/com/legacy/InvoiceServlet.java#SalvaFattura",
+          "jsp-include:fattura->header",
+          "performs:cobol-paragraph:cobol/ACCTXFR.cbl#0100-MAIN->cobol-paragraph:cobol/ACCTXFR.cbl#0200-VALIDATE",
+          "performs:cobol-paragraph:cobol/ACCTXFR.cbl#0100-MAIN->cobol-paragraph:cobol/ACCTXFR.cbl#0250-CHECK",
+          "performs:cobol-paragraph:cobol/ACCTXFR.cbl#0100-MAIN->cobol-paragraph:cobol/ACCTXFR.cbl#0300-POST"
+        ])
+        const performs = graph.edges.find((edge) => edge.kind === "performs")!
+        assert.strictEqual(performs.rule, "performs")
+        assert.strictEqual(performs.origin, "scanner")
+        assert.strictEqual(performs.confidence, "exact")
+        assert.strictEqual(performs.evidence?.line, 6)
+        assert.include(performs.evidence?.snippet, "PERFORM 0200-VALIDATE THRU 0300-POST")
+        const missing = graph.unresolved.filter((item) => item.reason === "edge-target")
+        assert.deepStrictEqual(missing.map((item) => `${item.rule}:${item.reference}`).sort(), [
+          "calls:AUDITLOG",
+          "performs:9999-MISSING"
+        ])
+      })
+  )
+
+  it.effect("surveyGraph on Survey-only rules is unchanged", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "legacy/A.cbl",
+        "       0100-A.\n           CALL 'B'.\n           COPY CPY1.\n"
+      )
+      yield* workspace.write("legacy/B.cbl", "       0100-B.\n")
+      const graph = yield* surveyGraph(
+        workspace,
+        "\\.cbl$",
+        [],
+        [
+          CoverageRule.make({ name: "calls", files: "\\.cbl$", unit: "CALL '([A-Z0-9]+)'" }),
+          CoverageRule.make({ name: "copies", files: "\\.cbl$", unit: "COPY +([A-Z0-9]+)" })
+        ]
+      )
+      assert.deepStrictEqual(
+        graph.nodes.map((node) => node.name),
+        ["A", "B"]
+      )
+      assert.deepStrictEqual(
+        graph.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`),
+        ["A->B:calls", "A->CPY1:copies"]
+      )
+    })
+  )
 })

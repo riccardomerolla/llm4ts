@@ -1,6 +1,14 @@
+import { createHash } from "node:crypto"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { PlanParseError } from "./FlowError.ts"
+import {
+  edgeRuleOfSurvey,
+  emptyGraphRules,
+  type EdgeRule,
+  type GraphRules,
+  type NodeRule
+} from "./GraphRules.ts"
 import type { CoverageRule } from "./SpecChecks.ts"
 import type { WorkspaceError, WorkspaceShape } from "./Workspace.ts"
 
@@ -281,16 +289,312 @@ export const resolveUnit = (reference: string, known: ReadonlySet<string>): stri
   return known.has(folded) ? folded : reference
 }
 
-const matches = (regex: string, contents: string): ReadonlyArray<string> => {
-  const expression = new RegExp(regex, "g")
-  return [...contents.matchAll(expression)].map((match) => match[1] ?? match[0])
-}
-
 export interface SurveyGraphOptions {
   /** Regex over repo-relative paths to leave out even when `sources` matches. */
   readonly exclude?: string
 }
 
+export interface CodeGraphOptions {
+  readonly sources: string
+  readonly exclude?: string
+  readonly coverage: ReadonlyArray<CoverageRule>
+  readonly rules: GraphRules
+}
+
+export interface CodeGraphBuild {
+  readonly graph: SurveyGraph
+  /** path → sha256 of the scanned contents; the cache's staleness key. */
+  readonly files: Readonly<Record<string, string>>
+}
+
+const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex")
+
+/** 0-based offset → 1-based line, via a precomputed table of line starts. */
+const lineLocator = (text: string): ((offset: number) => number) => {
+  const starts = [0]
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) === 10) {
+      starts.push(index + 1)
+    }
+  }
+  return (offset) => {
+    let low = 0
+    let high = starts.length - 1
+    while (low < high) {
+      const mid = (low + high + 1) >> 1
+      if ((starts[mid] ?? 0) <= offset) {
+        low = mid
+      } else {
+        high = mid - 1
+      }
+    }
+    return low + 1
+  }
+}
+
+const lineText = (text: string, line: number): string => text.split(/\r?\n/)[line - 1] ?? ""
+
+interface Capture {
+  readonly line: number
+  readonly groups: Readonly<Record<string, string>>
+}
+
+/** Every match of `pattern` (flags `gm`) with its line and defined named groups. */
+const captures = (
+  pattern: string,
+  text: string,
+  locate: (offset: number) => number
+): ReadonlyArray<Capture> =>
+  [...text.matchAll(new RegExp(pattern, "gm"))].map((match) => ({
+    line: locate(match.index ?? 0),
+    groups: Object.fromEntries(
+      Object.entries(match.groups ?? {}).flatMap(([key, value]) =>
+        value === undefined ? [] : [[key, value]]
+      )
+    )
+  }))
+
+const scanner: GraphOrigin = "scanner"
+const exact: GraphConfidence = "exact"
+
+/** Node ids: `<kind>:<path>#<name>`, `~n` for a repeated name within one file. */
+const scanNodes = (
+  paths: ReadonlyArray<string>,
+  contents: ReadonlyMap<string, string>,
+  units: ReadonlyArray<CoverageRule>,
+  rules: ReadonlyArray<NodeRule>
+): ReadonlyArray<SurveyNode> => {
+  const nodes: Array<SurveyNode> = []
+  for (const path of paths) {
+    const text = contents.get(path) ?? ""
+    const lines = text.split(/\r?\n/).length
+    const locate = lineLocator(text)
+    nodes.push(
+      SurveyNode.make({
+        path,
+        name: unitName(path),
+        lines,
+        units: units
+          .filter((rule) => new RegExp(rule.files).test(path))
+          .reduce((count, rule) => count + captures(rule.unit, text, locate).length, 0),
+        id: unitName(path),
+        kind: "file",
+        lineStart: 1,
+        lineEnd: lines
+      })
+    )
+    for (const rule of rules.filter((rule) => new RegExp(rule.files).test(path))) {
+      const seen = new Map<string, number>()
+      const own: Array<SurveyNode> = []
+      for (const hit of captures(rule.pattern, text, locate)) {
+        const name = hit.groups.name ?? `L${hit.line}`
+        const count = (seen.get(name) ?? 0) + 1
+        seen.set(name, count)
+        const attrs: Record<string, string> = Object.fromEntries(
+          Object.entries(hit.groups).filter(([key]) => key !== "name")
+        )
+        for (const [attr, group] of Object.entries(rule.attrs)) {
+          const value = hit.groups[group]
+          if (value !== undefined) {
+            attrs[attr] = value
+          }
+        }
+        own.push(
+          SurveyNode.make({
+            path,
+            name,
+            lines: 0,
+            units: 0,
+            id: `${rule.kind}:${path}#${name}${count > 1 ? `~${count}` : ""}`,
+            kind: rule.kind,
+            label: name,
+            lineStart: hit.line,
+            lineEnd: lines,
+            attrs,
+            origin: scanner,
+            descriptor: rule.descriptor,
+            ...(rule.anchor === undefined ? {} : { anchor: rule.anchor })
+          })
+        )
+      }
+      // A node spans to the line before the next node of the same kind in the file.
+      own.forEach((node, index) => {
+        const next = own[index + 1]
+        nodes.push(
+          next === undefined
+            ? node
+            : new SurveyNode({
+                ...node,
+                lineEnd: Math.max(nodeLineStart(node), nodeLineStart(next) - 1)
+              })
+        )
+      })
+    }
+  }
+  return nodes
+}
+
+const enclosing = (
+  nodes: ReadonlyArray<SurveyNode>,
+  path: string,
+  kind: string,
+  line: number
+): SurveyNode | undefined =>
+  nodes
+    .filter((node) => node.path === path && nodeKind(node) === kind && nodeLineStart(node) <= line)
+    .sort((left, right) => nodeLineStart(right) - nodeLineStart(left))[0]
+
+const resolveTarget = (
+  nodes: ReadonlyArray<SurveyNode>,
+  known: ReadonlySet<string>,
+  path: string,
+  kind: string,
+  reference: string
+): { readonly id: string; readonly found: boolean } => {
+  if (kind === "file") {
+    const unit = resolveUnit(reference, known)
+    return { id: unit, found: known.has(unit) }
+  }
+  const sameFile = nodes.find(
+    (node) => node.path === path && nodeKind(node) === kind && node.name === reference
+  )
+  const anywhere =
+    sameFile ?? nodes.find((node) => nodeKind(node) === kind && node.name === reference)
+  return anywhere === undefined
+    ? { id: reference, found: false }
+    : { id: nodeId(anywhere), found: true }
+}
+
+const scanEdges = (
+  paths: ReadonlyArray<string>,
+  contents: ReadonlyMap<string, string>,
+  nodes: ReadonlyArray<SurveyNode>,
+  rules: ReadonlyArray<EdgeRule>
+): {
+  readonly edges: ReadonlyArray<SurveyEdge>
+  readonly unresolved: ReadonlyArray<Unresolved>
+} => {
+  const known = new Set(nodes.filter((node) => nodeKind(node) === "file").map((node) => node.name))
+  const lineOf = new Map(nodes.map((node) => [nodeId(node), nodeLineStart(node)]))
+  const edges: Array<SurveyEdge> = []
+  const unresolved: Array<Unresolved> = []
+  const seen = new Set<string>()
+  const push = (edge: SurveyEdge): void => {
+    const key = `${edge.from}\u0000${edge.to}\u0000${edge.kind}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      edges.push(edge)
+    }
+  }
+  for (const rule of rules) {
+    const filePattern = new RegExp(rule.files)
+    for (const path of paths.filter((path) => filePattern.test(path))) {
+      const text = contents.get(path) ?? ""
+      const locate = lineLocator(text)
+      for (const hit of captures(rule.pattern, text, locate)) {
+        const reference = hit.groups.to
+        if (reference === undefined) {
+          continue
+        }
+        const fromNode =
+          rule.fromKind === "file" ? undefined : enclosing(nodes, path, rule.fromKind, hit.line)
+        const from = fromNode === undefined ? unitName(path) : nodeId(fromNode)
+        const evidence = GraphEvidence.make({
+          file: path,
+          line: hit.line,
+          snippet: lineText(text, hit.line).trim()
+        })
+        const target = resolveTarget(nodes, known, path, rule.toKind, reference)
+        const targets: Array<string> = []
+        if (target.found && hit.groups.thru !== undefined && rule.toKind !== "file") {
+          const end = resolveTarget(nodes, known, path, rule.toKind, hit.groups.thru)
+          const startLine = lineOf.get(target.id) ?? 0
+          const endLine = end.found ? (lineOf.get(end.id) ?? startLine) : startLine
+          targets.push(
+            ...nodes
+              .filter((node) => node.path === path && nodeKind(node) === rule.toKind)
+              .filter((node) => nodeLineStart(node) >= startLine && nodeLineStart(node) <= endLine)
+              .map(nodeId)
+          )
+        } else if (target.found || rule.toKind === "file") {
+          targets.push(target.id)
+        }
+        if (!target.found) {
+          unresolved.push(
+            Unresolved.make({
+              reason: "edge-target",
+              rule: rule.kind,
+              node: from,
+              reference,
+              file: path,
+              line: hit.line
+            })
+          )
+        }
+        for (const to of targets) {
+          push(
+            SurveyEdge.make({
+              from,
+              to,
+              kind: rule.kind,
+              origin: scanner,
+              confidence: exact,
+              rule: rule.kind,
+              mechanism: "capture",
+              evidence
+            })
+          )
+        }
+      }
+    }
+  }
+  return { edges, unresolved }
+}
+
+/** Nodes and captured edges only; joins and the unresolved summary come from `applyFillsAndJoins`. */
+export const scanGraph = (
+  paths: ReadonlyArray<string>,
+  contents: ReadonlyMap<string, string>,
+  options: CodeGraphOptions
+): SurveyGraph => {
+  const nodes = scanNodes(paths, contents, options.coverage, options.rules.nodes)
+  const { edges, unresolved } = scanEdges(paths, contents, nodes, options.rules.edges)
+  return SurveyGraph.make({ nodes, edges, unresolved, fills: [] })
+}
+
+// Task 4 replaces this body with the join pass and the unresolved summary.
+export const applyFillsAndJoins = (
+  graph: SurveyGraph,
+  _fills: ReadonlyArray<Fill>,
+  _rules: GraphRules,
+  _paths: ReadonlyArray<string> = graph.nodes.map((node) => node.path)
+): SurveyGraph => graph
+
+export const buildCodeGraph = Effect.fn("@llm4ts/flow/Survey.buildCodeGraph")(function* (
+  workspace: WorkspaceShape,
+  options: CodeGraphOptions
+): Effect.fn.Return<CodeGraphBuild, WorkspaceError> {
+  // The source regex narrows discovery itself, so the workspace's result cap
+  // counts candidate units rather than every jar, image, and generated file
+  // sharing the tree with them.
+  const paths = [
+    ...(yield* workspace.discover("**/*", {
+      matching: new RegExp(options.sources),
+      ...(options.exclude === undefined ? {} : { excluding: new RegExp(options.exclude) })
+    }))
+  ].sort()
+  const contents = new Map<string, string>()
+  const files: Record<string, string> = {}
+  for (const path of paths) {
+    const text = yield* workspace.read(path)
+    contents.set(path, text)
+    files[path] = sha256(text)
+  }
+  const scanned = scanGraph(paths, contents, options)
+  return { graph: applyFillsAndJoins(scanned, [], options.rules, paths), files }
+})
+
+/** The pre-ADR-0030 entry: Survey rules only, file nodes only. Delegates to `buildCodeGraph`. */
 export const surveyGraph = Effect.fn("@llm4ts/flow/Survey.graph")(function* (
   workspace: WorkspaceShape,
   sources: string,
@@ -298,54 +602,13 @@ export const surveyGraph = Effect.fn("@llm4ts/flow/Survey.graph")(function* (
   edgeRules: ReadonlyArray<CoverageRule>,
   options: SurveyGraphOptions = {}
 ): Effect.fn.Return<SurveyGraph, WorkspaceError> {
-  // The source regex narrows discovery itself, so the workspace's result cap
-  // counts candidate units rather than every jar, image, and generated file
-  // sharing the tree with them.
-  const paths = [
-    ...(yield* workspace.discover("**/*", {
-      matching: new RegExp(sources),
-      ...(options.exclude === undefined ? {} : { excluding: new RegExp(options.exclude) })
-    }))
-  ].sort()
-  const nodes: Array<SurveyNode> = []
-  const contents = new Map<string, string>()
-  for (const path of paths) {
-    const text = yield* workspace.read(path)
-    contents.set(path, text)
-    nodes.push(
-      SurveyNode.make({
-        path,
-        name: unitName(path),
-        lines: text.split(/\r?\n/).length,
-        units: units
-          .filter((rule) => new RegExp(rule.files).test(path))
-          .reduce((count, rule) => count + matches(rule.unit, text).length, 0)
-      })
-    )
-  }
-  const known = new Set(nodes.map((node) => node.name))
-  const edges: Array<SurveyEdge> = []
-  for (const rule of edgeRules) {
-    const filePattern = new RegExp(rule.files)
-    for (const path of paths.filter((path) => filePattern.test(path))) {
-      for (const target of new Set(matches(rule.unit, contents.get(path) ?? ""))) {
-        const edge = SurveyEdge.make({
-          from: unitName(path),
-          to: resolveUnit(target, known),
-          kind: rule.name
-        })
-        if (
-          !edges.some(
-            (current) =>
-              current.from === edge.from && current.to === edge.to && current.kind === edge.kind
-          )
-        ) {
-          edges.push(edge)
-        }
-      }
-    }
-  }
-  return SurveyGraph.make({ nodes, edges })
+  const build = yield* buildCodeGraph(workspace, {
+    sources,
+    ...(options.exclude === undefined ? {} : { exclude: options.exclude }),
+    coverage: units,
+    rules: { ...emptyGraphRules, edges: edgeRules.map(edgeRuleOfSurvey) }
+  })
+  return build.graph
 })
 
 export const mergeSurveyEdges = (
