@@ -27,7 +27,9 @@ export class EdgeRule extends Schema.Class<EdgeRule>("EdgeRule")({
   files: Schema.String,
   pattern: Schema.String,
   fromKind: Schema.String,
-  toKind: Schema.String
+  toKind: Schema.String,
+  /** A folded `## Survey:` rule: the target is the first positional group (or the whole match), as before ADR 0030. */
+  positional: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 export const JoinMatchMode = Schema.Literals(["exact", "url"])
@@ -69,14 +71,19 @@ export const emptyGraphRules: GraphRules = {
   batchSize: 20
 }
 
-/** `## Survey:` is an Edge rule between files whose first capture is the target. */
+/**
+ * `## Survey:` is an Edge rule between files whose first positional capture
+ * (or the whole match) is the target. The pattern is kept verbatim: rewriting
+ * its first `(` would break `(?:…)`, lookbehinds and escaped parens.
+ */
 export const edgeRuleOfSurvey = (rule: CoverageRule): EdgeRule =>
   EdgeRule.make({
     kind: rule.name,
     files: rule.files,
-    pattern: rule.unit.includes("(?<to>") ? rule.unit : rule.unit.replace("(", "(?<to>"),
+    pattern: rule.unit,
     fromKind: "file",
-    toKind: "file"
+    toKind: "file",
+    positional: true
   })
 
 const fail = (message: string): Effect.Effect<never, PlanParseError> =>

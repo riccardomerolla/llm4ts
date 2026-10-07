@@ -67,7 +67,9 @@ describe("graph rules", () => {
         rules.edges.map((rule) => `${rule.kind}:${rule.fromKind}>${rule.toKind}`),
         ["calls:file>file", "performs:cobol-paragraph>cobol-paragraph"]
       )
-      assert.strictEqual(rules.edges[0]?.pattern, "CALL '(?<to>[A-Z0-9]+)'")
+      assert.strictEqual(rules.edges[0]?.pattern, "CALL '([A-Z0-9]+)'")
+      assert.strictEqual(rules.edges[0]?.positional, true)
+      assert.isUndefined(rules.edges[1]?.positional)
       assert.deepStrictEqual(
         { ...rules.joins[0] },
         {

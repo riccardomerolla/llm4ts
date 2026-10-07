@@ -340,6 +340,8 @@ const lineText = (text: string, line: number): string => text.split(/\r?\n/)[lin
 interface Capture {
   readonly line: number
   readonly groups: Readonly<Record<string, string>>
+  /** The first positional group, else the whole match: what a `## Survey:` rule targets. */
+  readonly first: string
 }
 
 /** Every match of `pattern` (flags `gm`) with its line and defined named groups. */
@@ -354,7 +356,8 @@ const captures = (
       Object.entries(match.groups ?? {}).flatMap(([key, value]) =>
         value === undefined ? [] : [[key, value]]
       )
-    )
+    ),
+    first: match[1] ?? match[0]
   }))
 
 const scanner: GraphOrigin = "scanner"
@@ -495,7 +498,7 @@ const scanEdges = (
       const text = contents.get(path) ?? ""
       const locate = lineLocator(text)
       for (const hit of captures(rule.pattern, text, locate)) {
-        const reference = hit.groups.to
+        const reference = rule.positional === true ? hit.first : hit.groups.to
         if (reference === undefined) {
           continue
         }

@@ -379,3 +379,48 @@ describe("joins", () => {
       })
   )
 })
+
+describe("survey rules keep positional captures (pre-0030 packs)", () => {
+  it.effect(
+    "a Survey unit regex with a non-capturing or escaped paren before its group still yields edges",
+    () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeMemoryWorkspace()
+        yield* workspace.write(
+          "legacy/A.cbl",
+          [
+            "       0100-A.",
+            "           LINK 'B'.",
+            "           EXEC CICS LINK PROGRAM('C') END-EXEC.",
+            "           COPY CPY1.",
+            ""
+          ].join("\n")
+        )
+        yield* workspace.write("legacy/B.cbl", "       0100-B.\n")
+        yield* workspace.write("legacy/C.cbl", "       0100-C.\n")
+        const graph = yield* surveyGraph(
+          workspace,
+          "\\.cbl$",
+          [],
+          [
+            CoverageRule.make({
+              name: "calls",
+              files: "\\.cbl$",
+              unit: "(?:CALL|LINK) +'([A-Z0-9]+)'"
+            }),
+            CoverageRule.make({
+              name: "cics-link",
+              files: "\\.cbl$",
+              unit: "EXEC CICS LINK PROGRAM\\('([A-Z0-9]+)'\\)"
+            }),
+            // No capture group at all: the whole match is the target, as before.
+            CoverageRule.make({ name: "copies", files: "\\.cbl$", unit: "CPY[0-9]+" })
+          ]
+        )
+        assert.deepStrictEqual(
+          graph.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`).sort(),
+          ["A->B:calls", "A->C:cics-link", "A->CPY1:copies"]
+        )
+      })
+  )
+})
