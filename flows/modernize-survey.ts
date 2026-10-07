@@ -1,11 +1,13 @@
 // Legacy modernization phase 0: inventory the estate, refine its dependency graph, triage, and propose a human-approved wave plan.
 //
 // Runs rooted at the LEGACY repository (`--repo <legacy>`). Deterministic first:
-// the graph comes from the pack's `sources:` regex and `## Survey:` edge rules
-// (no LLM), then a read-only reasoning pass proposes the edges the regexes
-// missed (each with source evidence; `mergeSurveyEdges` validates and tags them
-// `llm-…`), and finally triage classifies every unit rewrite | retire | wrap
-// and slices the rewrites into dependency-coherent waves. The wave plan lands
+// the graph comes from the pack's `sources:` regex and its `## Survey:` /
+// `## Node:` / `## Edge:` / `## Join:` rules (no LLM; ADR 0030), cached under
+// `.llm4ts/graph/<pack>.json` by file hash. What the scanner could not resolve
+// becomes a bounded worklist for a read-only reasoning pass (attr fills and
+// edges between EXISTING nodes, each verified against the cited source line),
+// and finally triage classifies every unit rewrite | retire | wrap and slices
+// the rewrites into dependency-coherent waves. The wave plan lands
 // at docs/modernization/wave-plan.md with an UNCHECKED approval marker — a
 // human reviews, flips `- [x] Approved`, and only then does modernize-extract
 // start (LLM4TS_WAVE=<name> scopes extraction to one wave).
@@ -41,21 +43,34 @@ import { FlowEvents } from "@llm4ts/flow/FlowEvents"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
 import { loadBenchRecords, renderBenchReport } from "@llm4ts/flow/BenchReport"
 import {
-  SurveyEdge,
   type SurveyGraph,
-  mergeSurveyEdges,
+  nodeKind,
   renderSurveyGraphJson,
   renderSurveyInventory,
-  surveyGraph,
-  surveyRefinePrompt,
   surveyTriagePrompt
 } from "@llm4ts/flow/Survey"
 import {
   discoveryOverflowAdvice,
   legacySourceWorkspaceLimits,
-  workspaceLimitsFromEnv
+  workspaceLimitsFromEnv,
+  type WorkspaceShape
 } from "@llm4ts/flow/Workspace"
 import { withDraftApproval } from "@llm4ts/flow/Approval"
+import { freshGraph, graphCachePath, updateGraphCache } from "@llm4ts/flow/GraphCache"
+import {
+  WorklistAnswer,
+  mergeWorklist,
+  renderWorklistReport,
+  verifyWorklistAnswer,
+  worklistAnswerJsonSchema,
+  worklistBatches,
+  worklistOf,
+  worklistPrompt,
+  type VerifiedWorklist
+} from "@llm4ts/flow/GraphWorklist"
+import { wholeView } from "@llm4ts/flow/GraphQuery"
+import { renderClusterDiagrams, renderEntryPaths, renderGraphDot } from "@llm4ts/flow/GraphRender"
+import type { Pack } from "@llm4ts/flow/Pack"
 
 const ModDir = "docs/modernization"
 
@@ -109,68 +124,27 @@ const surveyOutcomeJsonSchema: JsonSchema = {
   required: ["triage", "waves", "notes"]
 }
 
-class RefinedEdge extends Schema.Class<RefinedEdge>("RefinedEdge")({
-  from: Schema.String,
-  to: Schema.String,
-  kind: Schema.String,
-  evidence: Schema.String
-}) {}
-
-class GraphRefinement extends Schema.Class<GraphRefinement>("GraphRefinement")({
-  edges: Schema.Array(RefinedEdge),
-  notes: Schema.Array(Schema.String)
-}) {}
-
-const graphRefinementJsonSchema: JsonSchema = {
-  type: "object",
-  properties: {
-    edges: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          from: { type: "string" },
-          to: { type: "string" },
-          kind: { type: "string" },
-          evidence: { type: "string" }
-        },
-        required: ["from", "to", "kind", "evidence"]
-      }
-    },
-    notes: { type: "array", items: { type: "string" } }
-  },
-  required: ["edges", "notes"]
-}
-
 const tableCell = (text: string): string => text.split(/\r?\n/).join(" ").replaceAll("|", "\\|")
 
-const renderRefine = (refinement: GraphRefinement, kept: ReadonlyArray<SurveyEdge>): string => {
-  const keptKeys = new Set(kept.map((edge) => `${edge.from}${edge.to}`))
-  const rows = refinement.edges.map((edge) => {
-    const status = keptKeys.has(`${edge.from}${edge.to}`)
-      ? "added"
-      : "dropped — duplicate, self-loop, or unknown unit"
-    return `| ${edge.from} | ${edge.to} | ${edge.kind} | ${status} | ${tableCell(edge.evidence)} |`
+/** inventory.md (units, cluster diagrams, entry paths), graph.json and graph.dot. */
+const writeGraphArtifacts = (
+  repo: WorkspaceShape,
+  pack: Pack,
+  graph: SurveyGraph
+): Effect.Effect<void, unknown> =>
+  Effect.gen(function* () {
+    const programs = graph.nodes
+      .filter((node) => nodeKind(node) === "file")
+      .map((node) => node.name)
+    const inventory = [
+      renderSurveyInventory(graph),
+      renderClusterDiagrams(graph, pack.consolidate ?? { cluster: [], context: [] }, programs),
+      renderEntryPaths(graph)
+    ].join("\n")
+    yield* repo.write(join(ModDir, "inventory.md"), inventory)
+    yield* repo.write(join(ModDir, "graph.json"), renderSurveyGraphJson(graph))
+    yield* repo.write(join(ModDir, "graph.dot"), renderGraphDot(wholeView(graph), graph))
   })
-  const notes =
-    refinement.notes.length === 0
-      ? []
-      : ["## Unresolved", "", ...refinement.notes.map((note) => `- ${tableCell(note)}`)]
-  return (
-    [
-      "# Graph refine (LLM)",
-      "",
-      `${kept.length} of ${refinement.edges.length} proposed edge(s) merged into \`graph.json\` (kind prefixed \`llm-\`).`,
-      "Each carries the source statement that establishes it — verify before trusting a wave built on it.",
-      "",
-      "| From | To | Kind | Status | Evidence |",
-      "| ---- | -- | ---- | ------ | -------- |",
-      ...rows,
-      "",
-      ...notes
-    ].join("\n") + "\n"
-  )
-}
 
 const renderWavePlan = (
   outcome: SurveyOutcome,
@@ -241,27 +215,20 @@ const program = Effect.gen(function* () {
             flowDir: import.meta.dirname
           })
         )
-        if (pack.survey.length === 0) {
+        if (pack.graph.edges.length === 0 && pack.graph.joins.length === 0) {
           return yield* FlowAborted.make({
             message:
-              `pack '${pack.name}' has no '## Survey:' sections — add the dependency-edge ` +
-              "regexes (CALL/COPY/EXEC PGM…) the graph should be built from"
+              `pack '${pack.name}' has no '## Survey:', '## Edge:' or '## Join:' sections — add the ` +
+              "dependency-edge rules (CALL/COPY/EXEC PGM, ajax → servlet…) the graph should be built from"
           })
         }
+        const cachePath = graphCachePath(input.workDir, pack.name)
 
-        const graph = yield* stage(
+        const fresh = yield* stage(
           context.events,
           "graph",
           Effect.gen(function* () {
-            const built = yield* surveyGraph(
-              repo,
-              pack.sources ?? ".*",
-              pack.coverage,
-              pack.survey,
-              {
-                ...(pack.exclude === undefined ? {} : { exclude: pack.exclude })
-              }
-            ).pipe(
+            const built = yield* freshGraph(nodePlainFileStore, cachePath, pack, repo).pipe(
               // The cap is a guard against runaway trees, not a verdict on the
               // estate: name the three knobs instead of a bare limit number.
               Effect.catchTag("WorkspaceLimit", (error) =>
@@ -274,14 +241,19 @@ const program = Effect.gen(function* () {
                 )
               )
             )
-            yield* repo.write(join(ModDir, "inventory.md"), renderSurveyInventory(built))
-            yield* repo.write(join(ModDir, "graph.json"), renderSurveyGraphJson(built))
+            yield* writeGraphArtifacts(repo, pack, built.graph)
             yield* context.events.publish(
-              Info.make({ message: `${built.nodes.length} unit(s), ${built.edges.length} edge(s)` })
+              Info.make({
+                message:
+                  `${built.graph.nodes.length} node(s), ${built.graph.edges.length} edge(s), ` +
+                  `${built.graph.unresolved.length} unresolved` +
+                  (built.reused ? " (graph cache reused)" : "")
+              })
             )
             return built
           })
         )
+        const graph = fresh.graph
 
         const refined = yield* stage(
           context.events,
@@ -293,42 +265,72 @@ const program = Effect.gen(function* () {
                 )
                 .pipe(Effect.as(graph))
             : Effect.gen(function* () {
-                const refinement = yield* withShrink("survey refine", (cap) =>
-                  Effect.gen(function* () {
-                    const prompt = yield* capped(
-                      "graph",
-                      surveyRefinePrompt(graph, {
-                        rules: pack.survey,
-                        guidance: pack.prompt("survey-refine")
-                      }),
-                      cap
-                    )
-                    return yield* structuredAndPublish(
-                      context.reasoning,
-                      context.events,
-                      prompt,
-                      GraphRefinement,
-                      graphRefinementJsonSchema
-                    )
-                  })
-                ).pipe(Effect.provideService(FlowEvents, context.events))
-                const merged = mergeSurveyEdges(
-                  graph,
-                  refinement.edges.map((edge) =>
-                    SurveyEdge.make({ from: edge.from, to: edge.to, kind: edge.kind })
-                  )
-                )
-                const kept = merged.edges.filter((edge) => edge.kind.startsWith("llm-"))
-                yield* repo.write(join(ModDir, "graph-refine.md"), renderRefine(refinement, kept))
-                if (kept.length > 0) {
-                  yield* repo.write(join(ModDir, "inventory.md"), renderSurveyInventory(merged))
-                  yield* repo.write(join(ModDir, "graph.json"), renderSurveyGraphJson(merged))
+                const contents = new Map<string, string>()
+                const load = (path: string) =>
+                  contents.has(path)
+                    ? Effect.void
+                    : repo.read(path).pipe(
+                        Effect.orElseSucceed(() => ""),
+                        Effect.map((text) => void contents.set(path, text))
+                      )
+                const read = (path: string): string | undefined => contents.get(path)
+                for (const file of new Set(graph.unresolved.map((item) => item.file))) {
+                  yield* load(file)
                 }
+                const items = worklistOf(graph, read, pack.graph.worklistMax, pack.graph)
+                if (items.length === 0) {
+                  yield* context.events.publish(
+                    Info.make({ message: "nothing unresolved — no LLM pass needed" })
+                  )
+                  return graph
+                }
+                let merged = graph
+                const accepted: Array<VerifiedWorklist> = []
+                const notes: Array<string> = []
+                for (const batch of worklistBatches(items, pack.graph.batchSize)) {
+                  const answer = yield* withShrink("graph worklist", (cap) =>
+                    Effect.gen(function* () {
+                      const prompt = yield* capped(
+                        "worklist",
+                        worklistPrompt(batch, pack.prompt("survey-refine")),
+                        cap
+                      )
+                      return yield* structuredAndPublish(
+                        context.reasoning,
+                        context.events,
+                        prompt,
+                        WorklistAnswer,
+                        worklistAnswerJsonSchema
+                      )
+                    })
+                  ).pipe(Effect.provideService(FlowEvents, context.events))
+                  for (const file of new Set([
+                    ...answer.edges.map((edge) => edge.evidence.file),
+                    ...answer.attrs.map((attr) => attr.evidence.file)
+                  ])) {
+                    yield* load(file)
+                  }
+                  const verified = verifyWorklistAnswer(answer, merged, read)
+                  merged = mergeWorklist(merged, verified, pack.graph)
+                  accepted.push(verified)
+                  notes.push(...answer.notes)
+                }
+                const all: VerifiedWorklist = {
+                  edges: accepted.flatMap((verified) => verified.edges),
+                  fills: accepted.flatMap((verified) => verified.fills),
+                  dropped: accepted.flatMap((verified) => verified.dropped)
+                }
+                yield* repo.write(
+                  join(ModDir, "graph-refine.md"),
+                  renderWorklistReport(items, all, notes)
+                )
+                yield* updateGraphCache(nodePlainFileStore, cachePath, fresh.cache, merged)
+                yield* writeGraphArtifacts(repo, pack, merged)
                 yield* context.events.publish(
                   Info.make({
                     message:
-                      `${kept.length} regex-missed edge(s) merged ` +
-                      `(${refinement.edges.length} proposed by the LLM)`
+                      `${all.edges.length} edge(s) and ${all.fills.length} fill(s) accepted from ` +
+                      `${items.length} unresolved item(s); ${all.dropped.length} dropped`
                   })
                 )
                 return merged

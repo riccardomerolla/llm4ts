@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from "node:child_process"
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -32,14 +40,14 @@ process.stdin.on("end", () => {
     require("node:path").join(__dirname, "prompts.log"),
     prompt + "\\n=== END PROMPT ===\\n"
   )
-  // Only the refine prompt lists units on one line; the triage prompt carries
-  // the inventory table instead — so the estate is recognised by a unit name.
+  // The worklist prompt names the unresolved node; the triage prompt carries
+  // the inventory table — so the estate is recognised by a unit name.
   const cobol = prompt.includes("ACCTXFR")
   // The survey makes exactly two structured calls; both are answered from the
   // prompt's own vocabulary so the stub never has to guess an order. The
   // COBOL estate gets the canned answers below; any other estate gets a
   // derived one — every unit rewritten in a single wave.
-  const reply = prompt.includes("refining the dependency graph")
+  const reply = prompt.includes("resolving holes in the dependency graph")
     ? cobol
       ? {
           edges: [
@@ -47,12 +55,13 @@ process.stdin.on("end", () => {
               from: "RUNJOB",
               to: "ACCTXFR",
               kind: "dynamic-call",
-              evidence: "RUNJOB.JCL:2 //STEP1 EXEC PGM=&PGM  (PGM set to ACCTXFR)"
+              evidence: { file: "jcl/RUNJOB.JCL", line: 3, snippet: "//STEP1    EXEC PGM=&PGM" }
             }
           ],
+          attrs: [],
           notes: ["CEE3ABD is a system service, not an estate unit"]
         }
-      : { edges: [], notes: [] }
+      : { edges: [], attrs: [], notes: [] }
     : cobol
       ? {
           triage: [
@@ -268,12 +277,18 @@ describe("modernize-survey end to end (model stubbed)", { timeout: smokeTimeout 
       //    edges. Decoding with the real schema also proves the flow wrote a
       //    graph.json a later phase can read back.
       const graph = Schema.decodeUnknownSync(SurveyGraph)(JSON.parse(read("graph.json")))
-      assert.deepStrictEqual(graph.nodes.map((node) => node.name).sort(), [
-        "ACCTXFR",
-        "BIGCOPY",
-        "FEECALC",
-        "RUNJOB"
-      ])
+      assert.deepStrictEqual(
+        graph.nodes
+          .filter((node) => (node.kind ?? "file") === "file")
+          .map((node) => node.name)
+          .sort(),
+        ["ACCTXFR", "BIGCOPY", "FEECALC", "RUNJOB"]
+      )
+      // The cobol pack's paragraph nodes ride along as sub-file nodes.
+      assert.include(
+        graph.nodes.map((node) => node.id),
+        "cobol-paragraph:cobol/ACCTXFR.cbl#0100-VALIDATE-INPUT"
+      )
       // CALL 'FEECALC' in ACCTXFR.cbl is a regex-derived edge.
       assert.deepStrictEqual(
         graph.edges
@@ -286,18 +301,27 @@ describe("modernize-survey end to end (model stubbed)", { timeout: smokeTimeout 
       //    from the regex-derived edges.
       assert.deepStrictEqual(
         graph.edges
-          .filter((edge) => edge.kind.startsWith("llm-"))
+          .filter((edge) => edge.origin === "llm")
           .map((edge) => `${edge.from}->${edge.to} (${edge.kind})`),
-        ["RUNJOB->ACCTXFR (llm-dynamic-call)"]
+        ["RUNJOB->ACCTXFR (dynamic-call)"]
       )
       const refine = read("graph-refine.md")
-      assert.include(refine, "1 of 1 proposed edge(s) merged")
+      assert.include(refine, "1 edge(s) and 0 attr fill(s) accepted")
       assert.include(
         refine,
         "EXEC PGM=&PGM",
         "the evidence citation should survive into the audit trail"
       )
       assert.include(refine, "CEE3ABD", "unresolved references belong in the notes section")
+      assert.include(read("inventory.md"), "## Entry paths")
+      assert.isTrue(
+        existsSync(join(modDir, "graph.dot")),
+        "graph.dot is exported beside graph.json"
+      )
+      assert.isTrue(
+        existsSync(join(estate.root, "estate", ".llm4ts", "graph", "cobol-springboot.json")),
+        "the graph cache is written under .llm4ts/graph"
+      )
 
       // 3. The inventory is human-readable and lists the estate.
       const inventory = read("inventory.md")
@@ -372,13 +396,17 @@ describe("modernize-survey over a J2EE estate (model stubbed)", { timeout: smoke
       // 1. Discovery counted sources, not the 1 200 class files, the git
       //    object store, or the stale copies under target/.
       const graph = Schema.decodeUnknownSync(SurveyGraph)(JSON.parse(read("graph.json")))
-      assert.deepStrictEqual(graph.nodes.map((node) => node.name).sort(), [
-        "LoginServlet",
-        "footer",
-        "header",
-        "login",
-        "web"
-      ])
+      assert.deepStrictEqual(
+        graph.nodes
+          .filter((node) => (node.kind ?? "file") === "file")
+          .map((node) => node.name)
+          .sort(),
+        ["LoginServlet", "footer", "header", "login", "web"]
+      )
+      assert.include(
+        graph.nodes.map((node) => node.id),
+        "servlet-decl:src/main/webapp/WEB-INF/web.xml#login"
+      )
       assert.isFalse(graph.nodes.some((node) => node.path.startsWith("target/")))
 
       // 2. Path-shaped includes resolved onto the fragment units, so the
@@ -391,11 +419,10 @@ describe("modernize-survey over a J2EE estate (model stubbed)", { timeout: smoke
           // descriptors (ADR 0030), so the page reaches the servlet directly —
           // which is what clusters two pages posting to one servlet into a
           // domain feature (ADR 0015).
-          // Until the flow reads the pack's Node/Join rules (freshGraph), the
-          // form's join is not in graph.json; the next commit adds
-          // "login->LoginServlet (jsp-form-action)" here.
+          "form:src/main/webapp/login.jsp#/login->servlet-mapping:src/main/webapp/WEB-INF/web.xml#login (jsp-form-action)",
           "login->footer (jsp-include)",
           "login->header (jsp-include)",
+          "servlet-mapping:src/main/webapp/WEB-INF/web.xml#login->servlet-decl:src/main/webapp/WEB-INF/web.xml#login (servlet-wiring)",
           "web->LoginServlet (servlet-class)"
         ]
       )
@@ -409,16 +436,21 @@ describe("modernize-survey over a J2EE estate (model stubbed)", { timeout: smoke
       const prompts = readFileSync(join(estate.binDir, "prompts.log"), "utf8").split(
         "=== END PROMPT ==="
       )
-      const refine = prompts.find((prompt) => prompt.includes("refining the dependency graph"))
+      // Every link of this estate resolves deterministically, so the worklist
+      // is empty and no LLM pass is paid for; only the triage prompt is sent.
+      const refine = prompts.find((prompt) =>
+        prompt.includes("resolving holes in the dependency graph")
+      )
       const triage = prompts.find((prompt) => prompt.includes("triaging a legacy estate"))
-      assert.isDefined(refine)
+      assert.isUndefined(refine)
       assert.isDefined(triage)
-      for (const prompt of [refine ?? "", triage ?? ""]) {
+      assert.include(`${result.stdout}${result.stderr}`, "nothing unresolved")
+      for (const prompt of [triage ?? ""]) {
         assert.include(prompt, "jsp-include, servlet-class")
         assert.include(prompt, "web.xml")
         assert.notMatch(prompt, /COBOL|JCL|COPY|EXEC PGM/)
       }
-      assert.include(refine ?? "", "Units: LoginServlet, footer, header, login, web")
+      assert.include(inventory, "| login |")
 
       // 4. The plan is there, unapproved, and committed under the pack's name.
       const plan = read("wave-plan.md")
