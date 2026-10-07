@@ -9,7 +9,7 @@ import {
 } from "./Decisions.ts"
 import { DecisionsInvalid } from "./FlowError.ts"
 import { stableHash } from "./Plan.ts"
-import type { SurveyGraph } from "./Survey.ts"
+import { projectToFiles, type SurveyGraph } from "./Survey.ts"
 
 export { DecisionsInvalid } from "./FlowError.ts"
 
@@ -83,8 +83,11 @@ export const clusterPrograms = (
   programs: ReadonlyArray<string>,
   rules: ConsolidateRules
 ): ReadonlyArray<Cluster> => {
+  // Sub-file nodes and descriptors (ADR 0030) fold onto their files first, so
+  // a page that posts to a servlet through a web.xml mapping clusters with it.
+  const projected = projectToFiles(graph)
   const programSet = new Set(programs)
-  const contextEdges = graph.edges.filter((edge) => kindMatches(edge.kind, rules.context))
+  const contextEdges = projected.edges.filter((edge) => kindMatches(edge.kind, rules.context))
   const fragments = new Set(
     contextEdges.map((edge) => edge.to).filter((name) => programSet.has(name))
   )
@@ -92,7 +95,7 @@ export const clusterPrograms = (
   for (const program of programs) {
     pages.find(program)
   }
-  for (const edge of graph.edges) {
+  for (const edge of projected.edges) {
     if (
       kindMatches(edge.kind, rules.cluster) &&
       !fragments.has(edge.from) &&
@@ -614,7 +617,7 @@ export const navigationOrder = (
   rules: ConsolidateRules
 ): ReadonlyArray<string> => {
   const pages = new Set(feature.programs)
-  const edges = graph.edges.filter(
+  const edges = projectToFiles(graph).edges.filter(
     (edge) =>
       kindMatches(edge.kind, rules.cluster) &&
       pages.has(edge.from) &&

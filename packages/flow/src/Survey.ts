@@ -5,8 +5,11 @@ import { PlanParseError } from "./FlowError.ts"
 import {
   edgeRuleOfSurvey,
   emptyGraphRules,
+  matchUrl,
+  normalizeUrl,
   type EdgeRule,
   type GraphRules,
+  type JoinRule,
   type NodeRule
 } from "./GraphRules.ts"
 import type { CoverageRule } from "./SpecChecks.ts"
@@ -562,13 +565,215 @@ export const scanGraph = (
   return SurveyGraph.make({ nodes, edges, unresolved, fills: [] })
 }
 
-// Task 4 replaces this body with the join pass and the unresolved summary.
+/** Directories `D` with some scanned path under `D/WEB-INF/`, sorted; the per-app scope of url joins. */
+export const appRoots = (paths: ReadonlyArray<string>): ReadonlyArray<string> =>
+  [
+    ...new Set(
+      paths.flatMap((path) => {
+        const index = path.indexOf("/WEB-INF/")
+        return index < 0 ? [] : [path.slice(0, index)]
+      })
+    )
+  ].sort()
+
+/** The longest app root that prefixes `path`, or "" for the estate scope. */
+export const appOf = (path: string, roots: ReadonlyArray<string>): string =>
+  [...roots]
+    .filter((root) => path === root || path.startsWith(`${root}/`))
+    .sort((left, right) => right.length - left.length)[0] ?? ""
+
+const withFills = (
+  nodes: ReadonlyArray<SurveyNode>,
+  fills: ReadonlyArray<Fill>
+): ReadonlyArray<SurveyNode> =>
+  nodes.map((node) => {
+    const own = fills.filter((fill) => fill.node === nodeId(node))
+    return own.length === 0
+      ? node
+      : new SurveyNode({
+          ...node,
+          attrs: {
+            ...nodeAttrs(node),
+            ...Object.fromEntries(own.map((fill) => [fill.key, fill.value]))
+          }
+        })
+  })
+
+const joinRank: Readonly<Record<JoinMatch, number>> = { exact: 0, prefix: 1, extension: 2 }
+
+/** A join attr: a named group copied into attrs, or the node's own name for `name`. */
+const attrOf = (node: SurveyNode, attr: string): string | undefined =>
+  attr === "name" ? node.name : nodeAttrs(node)[attr]
+const llm: GraphOrigin = "llm"
+
+const joinEdges = (
+  nodes: ReadonlyArray<SurveyNode>,
+  fills: ReadonlyArray<Fill>,
+  rules: ReadonlyArray<JoinRule>,
+  roots: ReadonlyArray<string>
+): {
+  readonly edges: ReadonlyArray<SurveyEdge>
+  readonly unresolved: ReadonlyArray<Unresolved>
+} => {
+  const filled = new Set(fills.map((fill) => `${fill.node}\u0000${fill.key}`))
+  const edges: Array<SurveyEdge> = []
+  const unresolved: Array<Unresolved> = []
+  const seen = new Set<string>()
+  for (const rule of rules) {
+    const sources = nodes.filter((node) => nodeKind(node) === rule.fromKind)
+    const targets = nodes.filter((node) => nodeKind(node) === rule.toKind)
+    for (const source of sources) {
+      const raw = attrOf(source, rule.fromAttr)
+      if (raw === undefined) {
+        unresolved.push(
+          Unresolved.make({
+            reason: "missing-attr",
+            rule: rule.kind,
+            node: nodeId(source),
+            file: source.path,
+            line: nodeLineStart(source)
+          })
+        )
+        continue
+      }
+      const request = rule.match === "url" ? normalizeUrl(raw) : raw.trim()
+      const inScope = targets.filter((target) =>
+        rule.scope === "file"
+          ? target.path === source.path
+          : rule.scope === "app"
+            ? appOf(target.path, roots) === appOf(source.path, roots)
+            : true
+      )
+      const matched = inScope.flatMap((target) => {
+        const value = attrOf(target, rule.toAttr)
+        if (value === undefined) {
+          return []
+        }
+        const how: JoinMatch | undefined =
+          rule.match === "url"
+            ? matchUrl(request, value)
+            : value.trim() === request
+              ? "exact"
+              : undefined
+        return how === undefined ? [] : [{ target, how, value }]
+      })
+      // Servlet-spec order: exact beats the longest prefix beats an extension.
+      const best = matched.sort(
+        (left, right) =>
+          joinRank[left.how] - joinRank[right.how] || right.value.length - left.value.length
+      )[0]
+      if (best === undefined) {
+        unresolved.push(
+          Unresolved.make({
+            reason: "join-from",
+            rule: rule.kind,
+            node: nodeId(source),
+            reference: raw,
+            file: source.path,
+            line: nodeLineStart(source)
+          })
+        )
+        continue
+      }
+      const inferred =
+        filled.has(`${nodeId(source)}\u0000${rule.fromAttr}`) ||
+        filled.has(`${nodeId(best.target)}\u0000${rule.toAttr}`)
+      const key = `${nodeId(source)}\u0000${nodeId(best.target)}\u0000${rule.kind}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        edges.push(
+          SurveyEdge.make({
+            from: nodeId(source),
+            to: nodeId(best.target),
+            kind: rule.kind,
+            origin: inferred ? llm : scanner,
+            confidence: inferred ? "inferred" : exact,
+            rule: rule.kind,
+            mechanism: rule.match === "url" ? "join:url" : "join:exact",
+            join: best.how,
+            evidence: GraphEvidence.make({
+              file: source.path,
+              line: nodeLineStart(source),
+              snippet: raw
+            })
+          })
+        )
+      }
+    }
+  }
+  // A join target nothing reaches, reported once per node whatever the kind:
+  // a mapping hit by a form but by no ajax call is wired, not a hole.
+  const reached = new Set(edges.map((edge) => edge.to))
+  const reportedKinds = new Set<string>()
+  for (const rule of rules) {
+    if (reportedKinds.has(rule.toKind)) {
+      continue
+    }
+    reportedKinds.add(rule.toKind)
+    for (const target of nodes.filter((node) => nodeKind(node) === rule.toKind)) {
+      if (!reached.has(nodeId(target))) {
+        unresolved.push(
+          Unresolved.make({
+            reason: "join-to",
+            rule: rule.kind,
+            node: nodeId(target),
+            file: target.path,
+            line: nodeLineStart(target)
+          })
+        )
+      }
+    }
+  }
+  return { edges, unresolved }
+}
+
+/**
+ * Pure re-derivation: every `join:*` edge is dropped and rebuilt from the
+ * current attrs plus `fills`; `unresolved` is recomputed from scratch except
+ * for `edge-target` entries, which only the scanner knows. `paths` defaults
+ * to the node paths; pass the scanned list to compute app roots precisely.
+ */
 export const applyFillsAndJoins = (
   graph: SurveyGraph,
-  _fills: ReadonlyArray<Fill>,
-  _rules: GraphRules,
-  _paths: ReadonlyArray<string> = graph.nodes.map((node) => node.path)
-): SurveyGraph => graph
+  fills: ReadonlyArray<Fill>,
+  rules: GraphRules,
+  paths: ReadonlyArray<string> = graph.nodes.map((node) => node.path)
+): SurveyGraph => {
+  const nodes = withFills(graph.nodes, fills)
+  const kept = graph.edges.filter((edge) => !(edge.mechanism ?? "").startsWith("join:"))
+  const joined = joinEdges(nodes, fills, rules.joins, appRoots(paths))
+  const edges = [...kept, ...joined.edges]
+  const projected = projectToFiles(SurveyGraph.make({ nodes, edges, unresolved: [], fills }))
+  // A file that only holds wiring records (web.xml) is a descriptor file, not
+  // a unit nothing references: it never counts as isolated.
+  const wiringFiles = new Set(nodes.filter(isDescriptor).map((node) => node.path))
+  const isolated = projected.nodes
+    .filter(
+      (node) =>
+        !wiringFiles.has(node.path) &&
+        projected.incoming(node.name).length === 0 &&
+        projected.outgoing(node.name).length === 0
+    )
+    .map((node) =>
+      Unresolved.make({
+        reason: "isolated",
+        rule: "file",
+        node: node.name,
+        file: node.path,
+        line: 1
+      })
+    )
+  return SurveyGraph.make({
+    nodes,
+    edges,
+    unresolved: [
+      ...graph.unresolved.filter((item) => item.reason === "edge-target"),
+      ...joined.unresolved,
+      ...isolated
+    ],
+    fills
+  })
+}
 
 export const buildCodeGraph = Effect.fn("@llm4ts/flow/Survey.buildCodeGraph")(function* (
   workspace: WorkspaceShape,

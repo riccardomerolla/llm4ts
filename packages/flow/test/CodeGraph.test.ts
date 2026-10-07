@@ -2,9 +2,13 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import {
+  Fill,
   SurveyEdge,
   SurveyGraph,
   SurveyNode,
+  appOf,
+  appRoots,
+  applyFillsAndJoins,
   buildCodeGraph,
   closureFor,
   graphFromJson,
@@ -234,5 +238,144 @@ describe("scanner pass", () => {
         ["A->B:calls", "A->CPY1:copies"]
       )
     })
+  )
+})
+
+describe("joins", () => {
+  it.effect(
+    "joins ajax, form and mapping nodes in servlet-spec order within the app, and wires mappings to declarations",
+    () =>
+      Effect.gen(function* () {
+        const { graph } = yield* built
+        const joins = graph.edges
+          .filter((edge) => edge.mechanism?.startsWith("join:"))
+          .map((edge) => `${edge.kind}:${edge.from}->${edge.to}[${edge.join ?? "-"}]`)
+          .sort()
+        assert.deepStrictEqual(joins, [
+          "jsp-ajax-target:ajax-call:web/js/invoice.js#${ctx}/salvaFattura?id=->servlet-mapping:web/WEB-INF/web.xml#invoice[exact]",
+          "jsp-ajax-target:ajax-call:web/js/invoice.js#/api/report/monthly->servlet-mapping:web/WEB-INF/web.xml#report[prefix]",
+          "jsp-form-action:form:web/fattura.jsp#salvaFattura.do->servlet-mapping:web/WEB-INF/web.xml#invoice~2[extension]",
+          "servlet-wiring:servlet-mapping:web/WEB-INF/web.xml#invoice->servlet-decl:web/WEB-INF/web.xml#invoice[exact]",
+          "servlet-wiring:servlet-mapping:web/WEB-INF/web.xml#invoice~2->servlet-decl:web/WEB-INF/web.xml#invoice[exact]",
+          "servlet-wiring:servlet-mapping:web/WEB-INF/web.xml#report->servlet-decl:web/WEB-INF/web.xml#report[exact]"
+        ])
+        const wiring = graph.edges.find((edge) => edge.kind === "servlet-wiring")!
+        assert.strictEqual(wiring.rule, "servlet-wiring")
+        assert.strictEqual(wiring.origin, "scanner")
+      })
+  )
+
+  it.effect("lists what the scanner could not resolve, by reason", () =>
+    Effect.gen(function* () {
+      const { graph } = yield* built
+      const summary = graph.unresolved
+        .map((item) => `${item.reason}:${item.rule}:${item.node}`)
+        .sort()
+      assert.deepStrictEqual(summary, [
+        "edge-target:calls:cobol-paragraph:cobol/ACCTXFR.cbl#0300-POST",
+        "edge-target:performs:cobol-paragraph:cobol/ACCTXFR.cbl#0200-VALIDATE",
+        "isolated:file:EsbInvoiceService",
+        "isolated:file:OrphanServlet",
+        "join-to:servlet-wiring:servlet-decl:web/WEB-INF/web.xml#orphan",
+        "missing-attr:jsp-ajax-target:ajax-dynamic:web/js/invoice.js#base + '/dynamic'"
+      ])
+    })
+  )
+
+  it.effect("projects through descriptors so the file graph has page → servlet edges", () =>
+    Effect.gen(function* () {
+      const { graph } = yield* built
+      const projected = projectToFiles(graph)
+      assert.deepStrictEqual(
+        projected.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`).sort(),
+        [
+          "ACCTXFR->AUDITLOG:calls",
+          "ACCTXFR->FEECALC:calls",
+          "fattura->InvoiceServlet:jsp-form-action",
+          "fattura->header:jsp-include",
+          "invoice->InvoiceServlet:jsp-ajax-target",
+          "invoice->ReportServlet:jsp-ajax-target"
+        ]
+      )
+      assert.deepStrictEqual([...closureFor(graph, "fattura", 10)].sort(), [
+        "src/com/legacy/InvoiceServlet.java",
+        "web/header.jsp"
+      ])
+    })
+  )
+
+  it.effect("re-derives joins after a fill and scopes url joins per app", () =>
+    Effect.gen(function* () {
+      const { graph, pack, build } = yield* built
+      const filled = applyFillsAndJoins(
+        graph,
+        [
+          Fill.make({
+            node: "ajax-dynamic:web/js/invoice.js#base + '/dynamic'",
+            key: "url",
+            value: "/api/dynamic",
+            evidence: { file: "web/js/invoice.js", line: 6, snippet: "$.post(base + '/dynamic');" }
+          })
+        ],
+        pack.graph,
+        Object.keys(build.files)
+      )
+      const edge = filled.edges.find(
+        (e) => e.from === "ajax-dynamic:web/js/invoice.js#base + '/dynamic'"
+      )!
+      assert.strictEqual(edge.to, "servlet-mapping:web/WEB-INF/web.xml#report")
+      assert.strictEqual(edge.origin, "llm")
+      assert.strictEqual(edge.confidence, "inferred")
+      assert.isFalse(filled.unresolved.some((item) => item.reason === "missing-attr"))
+      assert.deepStrictEqual(
+        appRoots(["web/WEB-INF/web.xml", "web/js/a.js", "other/WEB-INF/web.xml", "lib/x.java"]),
+        ["other", "web"]
+      )
+      assert.strictEqual(appOf("web/js/a.js", ["other", "web"]), "web")
+      assert.strictEqual(appOf("lib/x.java", ["other", "web"]), "")
+    })
+  )
+
+  it.effect(
+    "a second url-pattern in one mapping is not captured and leaves the ajax side unresolved, never mis-joined",
+    () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeMemoryWorkspace()
+        yield* writeLegacyMini(workspace)
+        yield* workspace.write(
+          "web/WEB-INF/web.xml",
+          [
+            "<web-app>",
+            "  <servlet><servlet-name>r</servlet-name><servlet-class>com.legacy.ReportServlet</servlet-class></servlet>",
+            "  <servlet-mapping>",
+            "    <servlet-name>r</servlet-name>",
+            "    <url-pattern>/first</url-pattern>",
+            "    <url-pattern>/api/*</url-pattern>",
+            "  </servlet-mapping>",
+            "</web-app>",
+            ""
+          ].join("\n")
+        )
+        const pack = yield* loadLegacyMiniPack(workspace)
+        const { graph } = yield* buildCodeGraph(workspace, {
+          sources: pack.sources ?? ".*",
+          coverage: pack.coverage,
+          rules: pack.graph
+        })
+        assert.isUndefined(
+          graph.edges.find(
+            (edge) =>
+              edge.from === "ajax-call:web/js/invoice.js#/api/report/monthly" &&
+              edge.kind === "jsp-ajax-target"
+          )
+        )
+        assert.isTrue(
+          graph.unresolved.some(
+            (item) =>
+              item.reason === "join-from" &&
+              item.node === "ajax-call:web/js/invoice.js#/api/report/monthly"
+          )
+        )
+      })
   )
 })

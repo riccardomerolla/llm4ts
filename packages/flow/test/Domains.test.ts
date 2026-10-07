@@ -336,3 +336,64 @@ describe("navigation order inside a feature", () => {
     )
   })
 })
+
+describe("clustering through descriptor nodes (ADR 0030)", () => {
+  it("clusters through descriptor nodes using the file projection", () => {
+    const mapping = SurveyNode.make({
+      path: "web/WEB-INF/web.xml",
+      name: "m",
+      lines: 1,
+      units: 0,
+      id: "servlet-mapping:web/WEB-INF/web.xml#m",
+      kind: "servlet-mapping",
+      attrs: { url: "/x" },
+      descriptor: true
+    })
+    const decl = SurveyNode.make({
+      path: "web/WEB-INF/web.xml",
+      name: "m",
+      lines: 1,
+      units: 0,
+      id: "servlet-decl:web/WEB-INF/web.xml#m",
+      kind: "servlet-decl",
+      attrs: { class: "X" },
+      descriptor: true,
+      anchor: "class"
+    })
+    const ajax = SurveyNode.make({
+      path: "src/a.jsp",
+      name: "/x",
+      lines: 1,
+      units: 0,
+      id: "ajax-call:src/a.jsp#/x",
+      kind: "ajax-call",
+      attrs: { url: "/x" }
+    })
+    const graph = SurveyGraph.make({
+      nodes: [
+        node("a"),
+        node("X", "src/X.java"),
+        node("web", "web/WEB-INF/web.xml"),
+        mapping,
+        decl,
+        ajax
+      ],
+      edges: [
+        edge("ajax-call:src/a.jsp#/x", "servlet-mapping:web/WEB-INF/web.xml#m", "jsp-ajax-target"),
+        edge(
+          "servlet-mapping:web/WEB-INF/web.xml#m",
+          "servlet-decl:web/WEB-INF/web.xml#m",
+          "servlet-wiring"
+        )
+      ]
+    })
+    const clusters = clusterPrograms(graph, ["a", "X"], {
+      cluster: ["jsp-ajax-target"],
+      context: []
+    })
+    assert.deepStrictEqual(
+      clusters.map((cluster) => [...cluster.programs].sort()),
+      [["X", "a"]]
+    )
+  })
+})
