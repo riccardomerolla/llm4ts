@@ -30,6 +30,12 @@ import {
   type WatchOptions
 } from "@llm4ts/runner/Watch"
 import { makeProfileProgram, type ProfileOptions } from "@llm4ts/runner/Profile"
+import {
+  makeGraphProgram,
+  nodeGraphDependencies,
+  type GraphCommand,
+  type GraphFormat
+} from "@llm4ts/runner/Graph"
 import { idleAfterFrom } from "@llm4ts/runner/AgentTree"
 import { describeExclusion } from "@llm4ts/flow/Roster"
 import { builtinKitsDir, discoverKits, kitTierPaths, type DiscoveredKit } from "@llm4ts/runner/Kits"
@@ -721,6 +727,182 @@ const rosterCommand = Command.make("roster", { repo: rosterRepo }, (config) =>
   Command.withSubcommands([rosterPauseCommand, rosterResumeCommand])
 )
 
+// ---- graph (ADR 0030) -------------------------------------------------------
+
+const graphFormats: ReadonlyArray<GraphFormat> = ["text", "json", "mermaid", "dot"]
+
+type GraphSubcommand = "build" | "query" | "path" | "closure" | "stats" | "probe"
+
+interface GraphFlags {
+  readonly repo: Option.Option<string>
+  readonly pack: Option.Option<string>
+  readonly format: string
+  readonly kind: Option.Option<string>
+  readonly hops: string
+  readonly max: string
+  readonly all: boolean
+  readonly force: boolean
+  readonly text?: string
+  readonly from?: string
+  readonly to?: string
+  readonly program?: string
+}
+
+const positiveInt = (name: string, raw: string): Effect.Effect<number, ShellUsageError> => {
+  const value = Number.parseInt(raw, 10)
+  return Number.isInteger(value) && value > 0
+    ? Effect.succeed(value)
+    : Effect.fail(
+        new ShellUsageError({ message: `${name} must be a positive integer, got '${raw}'` })
+      )
+}
+
+export const graphCommandFrom = (
+  sub: GraphSubcommand,
+  flags: GraphFlags,
+  cwd: string = process.cwd()
+): Effect.Effect<GraphCommand, ShellUsageError> =>
+  Effect.gen(function* () {
+    const repo = resolve(
+      cwd,
+      Option.getOrElse(flags.repo, () => ".")
+    )
+    const pack = Option.isSome(flags.pack) ? { pack: flags.pack.value } : {}
+    const format = graphFormats.find((candidate) => candidate === flags.format)
+    if (format === undefined) {
+      return yield* new ShellUsageError({
+        message: `format must be one of ${graphFormats.join(", ")}, got '${flags.format}'`
+      })
+    }
+    switch (sub) {
+      case "build":
+        return { _tag: "build", repo, ...pack }
+      case "stats":
+        return { _tag: "stats", repo, ...pack, format }
+      case "probe":
+        return { _tag: "probe", repo, ...pack, format }
+      case "query":
+        return {
+          _tag: "query",
+          repo,
+          ...pack,
+          text: flags.text ?? "",
+          ...(Option.isSome(flags.kind) ? { kind: flags.kind.value } : {}),
+          hops: yield* positiveInt("hops", flags.hops),
+          format,
+          all: flags.all,
+          force: flags.force
+        }
+      case "path":
+        return {
+          _tag: "path",
+          repo,
+          ...pack,
+          from: flags.from ?? "",
+          to: flags.to ?? "",
+          max: yield* positiveInt("max", flags.max),
+          format,
+          force: flags.force
+        }
+      case "closure":
+        return {
+          _tag: "closure",
+          repo,
+          ...pack,
+          program: flags.program ?? "",
+          max: yield* positiveInt("max", flags.max),
+          format,
+          force: flags.force
+        }
+    }
+  })
+
+const graphFlags = {
+  repo: Flag.String("repo").pipe(
+    Flag.optional,
+    Flag.withDescription("The legacy repository (defaults to the current directory)")
+  ),
+  pack: Flag.String("pack").pipe(
+    Flag.optional,
+    Flag.withDescription("Pack name or directory (defaults to LLM4TS_PACK, then cobol-springboot)")
+  ),
+  format: Flag.String("format").pipe(
+    Flag.withDefault("text"),
+    Flag.withDescription("text | json | mermaid | dot")
+  ),
+  kind: Flag.String("kind").pipe(
+    Flag.optional,
+    Flag.withDescription("Only nodes of this kind (query)")
+  ),
+  hops: Flag.String("hops").pipe(
+    Flag.withDefault("1"),
+    Flag.withDescription("Neighbourhood radius (query)")
+  ),
+  max: Flag.String("max").pipe(
+    Flag.withDefault("12"),
+    Flag.withDescription("Max hops (path) or files (closure)")
+  ),
+  all: Flag.Boolean("all").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Render the whole estate instead of the neighbourhood")
+  ),
+  force: Flag.Boolean("force").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Render mermaid above the 150-node cap")
+  )
+}
+
+const runGraph = (sub: GraphSubcommand, flags: GraphFlags) =>
+  Effect.gen(function* () {
+    const command = yield* graphCommandFrom(sub, flags)
+    yield* Console.log(
+      yield* makeGraphProgram(command, nodeGraphDependencies(process.env, shellTierPaths()))
+    )
+  })
+
+const graphBuildCommand = Command.make("build", graphFlags, (flags) =>
+  runGraph("build", flags)
+).pipe(
+  Command.withDescription(
+    "Scan the estate with the pack's rules and write .llm4ts/graph/<pack>.json"
+  )
+)
+const graphQueryCommand = Command.make(
+  "query",
+  { text: Argument.String("text"), ...graphFlags },
+  (flags) => runGraph("query", flags)
+).pipe(Command.withDescription("Nodes matching a text and their neighbourhood"))
+const graphPathCommand = Command.make(
+  "path",
+  { from: Argument.String("from"), to: Argument.String("to"), ...graphFlags },
+  (flags) => runGraph("path", flags)
+).pipe(Command.withDescription("Shortest path between two node references, either direction"))
+const graphClosureCommand = Command.make(
+  "closure",
+  { program: Argument.String("program"), ...graphFlags },
+  (flags) => runGraph("closure", flags)
+).pipe(Command.withDescription("A program's dependency closure as the analyst sees it"))
+const graphStatsCommand = Command.make("stats", graphFlags, (flags) =>
+  runGraph("stats", flags)
+).pipe(Command.withDescription("Nodes, edges, mechanisms, origins and unresolved items by kind"))
+const graphProbeCommand = Command.make("probe", graphFlags, (flags) =>
+  runGraph("probe", flags)
+).pipe(Command.withDescription("Evaluate the pack's '## Probe:' flows"))
+
+const graphCommand = Command.make("graph", {}, () =>
+  Console.log("llm4ts graph <build|query|path|closure|stats|probe> --repo <legacy> [--pack <name>]")
+).pipe(
+  Command.withDescription("The legacy estate's code graph (ADR 0030): build it, query it, draw it"),
+  Command.withSubcommands([
+    graphBuildCommand,
+    graphQueryCommand,
+    graphPathCommand,
+    graphClosureCommand,
+    graphStatsCommand,
+    graphProbeCommand
+  ])
+)
+
 const doctorCommand = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const report = yield* makeDoctorProgram()
@@ -751,6 +933,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     costsCommand,
     watchCommand,
     profileCommand,
+    graphCommand,
     rosterCommand,
     doctorCommand
   ])

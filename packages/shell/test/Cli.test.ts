@@ -8,6 +8,7 @@ import type { FileSystem } from "effect/FileSystem"
 import * as Option from "effect/Option"
 import {
   costsOptionsFrom,
+  graphCommandFrom,
   profileOptionsFrom,
   renderFlowList,
   renderKitList,
@@ -349,4 +350,64 @@ describe("runEnvironmentFrom", () => {
     )
     assert.deepStrictEqual([environment.LLM4TS_OTEL, environment.LLM4TS_OTEL_CONTENT], ["on", "on"])
   })
+})
+
+describe("graphCommandFrom", () => {
+  const base = {
+    repo: Option.none(),
+    pack: Option.none(),
+    format: "text",
+    kind: Option.none(),
+    hops: "1",
+    max: "12",
+    all: false,
+    force: false
+  }
+
+  it.effect("resolves the repo, parses numbers and validates the format", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* graphCommandFrom("build", base, "/work"), {
+        _tag: "build",
+        repo: "/work"
+      })
+      assert.deepStrictEqual(
+        yield* graphCommandFrom(
+          "query",
+          {
+            ...base,
+            repo: Option.some("../estate"),
+            text: "salva",
+            format: "mermaid",
+            hops: "2",
+            kind: Option.some("form")
+          },
+          "/work/llm4ts"
+        ),
+        {
+          _tag: "query",
+          repo: "/work/estate",
+          text: "salva",
+          kind: "form",
+          hops: 2,
+          format: "mermaid",
+          all: false,
+          force: false
+        }
+      )
+      assert.deepStrictEqual(
+        yield* graphCommandFrom(
+          "path",
+          { ...base, from: "a", to: "b", max: "6", format: "dot" },
+          "/w"
+        ),
+        { _tag: "path", repo: "/w", from: "a", to: "b", max: 6, format: "dot", force: false }
+      )
+      const bad = yield* Effect.flip(graphCommandFrom("stats", { ...base, format: "svg" }, "/w"))
+      assert.match(bad.message, /format must be one of text, json, mermaid, dot/)
+      const nan = yield* Effect.flip(
+        graphCommandFrom("query", { ...base, text: "x", hops: "many" }, "/w")
+      )
+      assert.match(nan.message, /hops must be a positive integer/)
+    })
+  )
 })
