@@ -52,13 +52,13 @@ unit: <servlet-class>[a-z.]*\.([A-Za-z0-9]+)</servlet-class>
 ## Node: ajax-call
 
 files: .*\.(jsp|js)
-pattern: (?:url:\s*|\$\.(?:get|post|getJSON)\(\s*)['"](?<name>[^'"]+)['"]
+pattern: (?:["']?url["']?\s*:\s*|\$\.(?:get|post|getJSON)\(\s*)['"](?<name>[^'"]+)['"]
 attrs: url=name
 
 ## Node: form
 
 files: .*\.jsp
-pattern: <form[^>]*\baction="(?<name>[^"]+)"
+pattern: <(?:[a-z]+:)?[Ff][Oo][Rr][Mm]\b[^>]*\b[Aa][Cc][Tt][Ii][Oo][Nn]=["'](?<name>[^"']+)["']
 attrs: url=name
 
 ## Node: servlet-mapping
@@ -70,7 +70,7 @@ descriptor: yes
 ## Node: servlet-decl
 
 files: .*web\.xml
-pattern: <servlet>\s*<servlet-name>(?<name>[^<]+)</servlet-name>(?:(?!</servlet>)[\s\S])*?<servlet-class>(?:[a-z0-9_]+\.)*(?<class>[A-Za-z0-9_]+)</servlet-class>
+pattern: <servlet>(?:(?!</servlet>)[\s\S])*?<servlet-name>(?<name>[^<]+)</servlet-name>(?:(?!</servlet>)[\s\S])*?<servlet-class>(?:[a-z0-9_]+\.)*(?<class>[A-Za-z0-9_]+)</servlet-class>
 descriptor: yes
 anchor: class
 
