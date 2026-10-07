@@ -332,10 +332,17 @@ export const verifyWorklistAnswer = (
       })
     )
   }
+  const nodesById = new Map(graph.nodes.map((node) => [nodeId(node), node]))
   for (const attr of answer.attrs) {
     const what = `${attr.node}.${attr.key} = ${attr.value}`
-    if (!ids.has(attr.node)) {
+    const node = nodesById.get(attr.node)
+    if (node === undefined) {
       dropped.push({ what, reason: `unknown node: ${attr.node}` })
+      continue
+    }
+    // The seat fills holes; it never overrides what the scanner read.
+    if (nodeAttrs(node)[attr.key] !== undefined) {
+      dropped.push({ what, reason: `attr '${attr.key}' already set by the scanner` })
       continue
     }
     const evidence = verified(attr.evidence)

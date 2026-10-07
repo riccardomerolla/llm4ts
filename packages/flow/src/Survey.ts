@@ -766,11 +766,22 @@ export const applyFillsAndJoins = (
         line: 1
       })
     )
+  // An edge-target hole retires once a non-scanner edge leaves the same node
+  // from the same line: the seat (or an external index) answered it.
+  const answered = new Set(
+    edges
+      .filter((edge) => edgeOrigin(edge) !== "scanner" && edge.evidence !== undefined)
+      .map((edge) => `${edge.from}\u0000${edge.evidence?.file}\u0000${edge.evidence?.line}`)
+  )
   return SurveyGraph.make({
     nodes,
     edges,
     unresolved: [
-      ...graph.unresolved.filter((item) => item.reason === "edge-target"),
+      ...graph.unresolved.filter(
+        (item) =>
+          item.reason === "edge-target" &&
+          !answered.has(`${item.node}\u0000${item.file}\u0000${item.line}`)
+      ),
       ...joined.unresolved,
       ...isolated
     ],

@@ -161,3 +161,71 @@ describe("graph worklist", () => {
       })
   )
 })
+
+describe("worklist guard rails", () => {
+  it.effect("a fill on an attr the scanner already set is dropped, never overwritten", () =>
+    Effect.gen(function* () {
+      const { graph } = yield* built
+      const answer = WorklistAnswer.make({
+        edges: [],
+        attrs: [
+          {
+            node: "ajax-call:web/js/invoice.js#/api/report/monthly",
+            key: "url",
+            value: "/somewhere/else",
+            evidence: {
+              file: "web/js/invoice.js",
+              line: 5,
+              snippet: "$.get('/api/report/monthly');"
+            }
+          }
+        ],
+        notes: []
+      })
+      const verified = verifyWorklistAnswer(answer, graph, contents)
+      assert.strictEqual(verified.fills.length, 0)
+      assert.deepStrictEqual(
+        verified.dropped.map((drop) => drop.reason),
+        ["attr 'url' already set by the scanner"]
+      )
+    })
+  )
+
+  it.effect("an edge-target hole retires once an LLM edge answers it from the same line", () =>
+    Effect.gen(function* () {
+      const { graph, pack } = yield* built
+      const before = graph.unresolved.filter(
+        (item) => item.reason === "edge-target" && item.reference === "AUDITLOG"
+      )
+      assert.strictEqual(before.length, 1)
+      const answer = WorklistAnswer.make({
+        edges: [
+          {
+            from: "cobol-paragraph:cobol/ACCTXFR.cbl#0300-POST",
+            to: "FEECALC",
+            kind: "audit-call",
+            evidence: {
+              file: "cobol/ACCTXFR.cbl",
+              line: 13,
+              snippet: "CALL 'AUDITLOG' USING WS-RECORD."
+            }
+          }
+        ],
+        attrs: [],
+        notes: []
+      })
+      const merged = mergeWorklist(graph, verifyWorklistAnswer(answer, graph, contents), pack.graph)
+      assert.isFalse(
+        merged.unresolved.some(
+          (item) => item.reason === "edge-target" && item.reference === "AUDITLOG"
+        )
+      )
+      // The other hole (9999-MISSING) is untouched.
+      assert.isTrue(
+        merged.unresolved.some(
+          (item) => item.reason === "edge-target" && item.reference === "9999-MISSING"
+        )
+      )
+    })
+  )
+})
