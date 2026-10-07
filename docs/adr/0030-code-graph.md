@@ -1,6 +1,6 @@
 # ADR 0030: Code Graph — Sub-File Nodes, Declarative Joins, Probes, a Distilled Cache
 
-Status: Proposed · Date: 2026-10-07
+Status: Accepted · Date: 2026-10-07
 
 ## Context
 

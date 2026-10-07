@@ -43,8 +43,8 @@ const responder = [
   "    })",
   "  }",
   // Survey calls: graph refine, then triage.
-  '  if (prompt.includes("refining the dependency graph")) {',
-  "    return JSON.stringify({ edges: [], notes: [] })",
+  '  if (prompt.includes("resolving holes in the dependency graph")) {',
+  "    return JSON.stringify({ edges: [], attrs: [], notes: [] })",
   "  }",
   '  if (prompt.includes("triaging a legacy estate")) {',
   "    return JSON.stringify({",

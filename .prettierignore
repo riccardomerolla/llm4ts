@@ -21,3 +21,6 @@ packages/shell/kits
 # Internet-banking portal fixture: a standalone Vite/React toolchain with its
 # own style, seeded into a working copy by the epic-stories runbook.
 examples/internet-banking/portal
+
+# Executing-plans scratch workspace (git-ignored); not source.
+.superpowers

@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.38.0
+
+The survey graph becomes a code graph (ADR 0030).
+
+- **Sub-file nodes and declarative joins.** Packs declare `## Node:`,
+  `## Edge:` and `## Join:` sections beside `## Survey:`; an ajax call or a
+  form joins the servlet `web.xml` maps its URL to (servlet-spec matching,
+  per web app), COBOL paragraphs and sections carry `PERFORM`, `PERFORM …
+THRU` and `GO TO` edges. Every edge records its rule and mechanism.
+- **Probes.** `## Probe:` names a flow that must be connected; pack-check
+  fails on a broken one, and `llm4ts graph probe` reruns them.
+- **Bounded LLM pass.** `modernize-survey` offers the scanner's unresolved
+  items to the read-only seat in batches; an answer is kept only when its
+  quoted line is found in the file, and may fill an attribute or add an edge
+  between existing nodes, never a node.
+- **A cache the flows read.** `.llm4ts/graph/<pack>.json`, fresh while file
+  hashes and rules match; extract, refine and convert read it, so LLM edges
+  reach the analyst's closure instead of being rebuilt away. Specs open with
+  the program's closure as a mermaid diagram; the inventory gains cluster
+  diagrams and entry paths; `graph.dot` sits beside `graph.json`.
+- **`llm4ts graph build | query | path | closure | stats | probe`**, each
+  with `--format text|json|mermaid|dot`.
+- Shipped packs: `j2ee-nextjs-spa` joins ajax and forms through `web.xml`
+  (its `jsp-form-action`/`jsp-ajax-target` cluster kinds are unchanged);
+  `cobol-springboot` and `cobol-kafka` gain section and paragraph nodes.
+
 ## 2.37.0
 
 A third porting pack: `cobol-springboot-port`.

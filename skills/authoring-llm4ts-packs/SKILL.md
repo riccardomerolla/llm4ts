@@ -32,8 +32,19 @@ part:
   removes some; `programs:` selects the units extract writes one spec for.
 - `## Coverage: <name>` and `## Survey: <name>` each carry a `files:` regex
   and a `unit:` regex whose first capture group is the unit name. Coverage
-  units must all appear in the traceability matrix; survey units are the
-  edges of the dependency graph.
+  units must all appear in the traceability matrix; survey units are
+  file-to-file edges of the dependency graph.
+- `## Node: <kind>` (`files:`, `pattern:` with a `(?<name>…)` group; other
+  named groups become attrs; `descriptor: yes` for wiring records such as a
+  `web.xml` mapping; `anchor: <attr>` when the node stands for another unit),
+  `## Edge: <kind>` (`pattern:` with `(?<to>…)`, optional `(?<thru>…)`,
+  `from:`/`to:` node kinds, default `file`) and `## Join: <kind>` (`from:
+<kind>.<attr>`, `to: <kind>.<attr>`, `match: exact | url`, `scope: estate
+| app | file`) describe sub-file nodes and the links a single regex cannot
+  see, such as an ajax URL to the servlet `web.xml` maps it to (ADR 0030).
+- `## Probe: <name>` (`from:`, `to:` node references) names a flow that must
+  be connected end to end. Pack-check fails when a probe is broken: write one
+  per flow you know the estate has before you trust the graph.
 
 ## Step 2: add the sidecars
 
@@ -69,6 +80,13 @@ until they capture real unit names. Exit 1 with `matched no file` means
 capturing nothing, a missing prompt sidecar, or a scaffold path that does
 not exist. Run it after every edit; it costs nothing.
 
+The check also builds the graph: one line per Node, Edge and Join rule with
+counts and samples, the unresolved items by reason (`edge-target`,
+`missing-attr`, `join-from`, `join-to`, `isolated`), and one line per probe.
+`llm4ts graph query "<text>" --repo <estate>` and `llm4ts graph path <from>
+<to> --format mermaid` show what a rule produced; `llm4ts graph probe` reruns
+the probes alone.
+
 When the check passes, the last line names the next command
 (`modernize-survey --repo <estate>`). Report it to the user rather than
 launching a paid phase yourself.
@@ -76,8 +94,10 @@ launching a paid phase yourself.
 ## Rules
 
 - Regexes are JavaScript `RegExp` source, matched against forward-slash
-  repo-relative paths (`files:`, `sources:`) or single lines (`unit:`).
-  Anchor `unit:` patterns to avoid capturing markup fragments such as `#`.
+  repo-relative paths (`files:`, `sources:`) or file contents with flags
+  `gm` (`unit:`, `pattern:`), so `^` anchors a line and `[\s\S]*?` spans
+  lines. Anchor `unit:` patterns to avoid capturing markup fragments such
+  as `#`.
 - Keep `sources:` narrow: discovery is capped (20 000 files) and version
   control, dependency, and build directories are never entered.
 - Gates are `- name: command` lines under `## Gates`; implement and verify

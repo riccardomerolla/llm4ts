@@ -29,8 +29,25 @@ as `key: value` lines until the first `## ` section.
 - `## Coverage: <name>`: `files: <regex>` and `unit: <regex>` (first capture
   group is the unit). Every captured unit must appear in the traceability
   matrix or the extract gate reports it uncovered.
-- `## Survey: <name>`: same shape; captured units are dependency-graph edges
-  for the survey phase.
+- `## Survey: <name>`: same shape; captured units are file-to-file
+  dependency-graph edges for the survey phase.
+- `## Node: <kind>` (ADR 0030): `files:` regex over paths, `pattern:` regex
+  over file contents (flags `gm`) whose `(?<name>…)` group names a sub-file
+  node; every other named group becomes an attr; `attrs: a=b` copies group
+  `b` into attr `a`; `descriptor: yes` marks a wiring record (contracted by
+  the file projection); `anchor: <attr>` names the unit the node stands for.
+- `## Edge: <kind>`: `files:`, `pattern:` with a `(?<to>…)` group and an
+  optional `(?<thru>…)` range, `from:` the enclosing node kind (default
+  `file`), `to:` the target node kind (default `file`, resolved same-file
+  first).
+- `## Join: <kind>`: `from: <kind>.<attr>`, `to: <kind>.<attr>`, `match:
+exact | url` (servlet-spec order: exact, `/*` prefix, `*.ext`), `scope:
+estate | app | file` (`url` defaults to `app`, the directory containing
+  `WEB-INF`).
+- `## Probe: <name>`: `from:` and `to:` node references (an id, `<kind>:<name>`
+  or a file unit) that pack-check requires to be connected.
+- `## Graph`: `- worklist-max: 200` and `- batch-size: 20` bound the survey's
+  LLM pass over unresolved items.
 
 ## Sidecars
 

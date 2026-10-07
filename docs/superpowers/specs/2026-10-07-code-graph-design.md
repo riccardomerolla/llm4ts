@@ -1,6 +1,6 @@
 # Code graph: sub-file nodes, declarative joins, probes, a distilled cache
 
-Date: 2026-10-07 · Status: designed (ADR 0030), not yet implemented
+Date: 2026-10-07 · Status: implemented in 2.38.0 (ADR 0030)
 
 ## The problem as observed
 
