@@ -15,6 +15,13 @@ and non-blocking findings deferred to a follow-up round (ADR 0031).
   once every story is merged, planned and run as one refine round.
   `reviewAndFixLoop` gains `settle: "clean" | "blocking"`, and
   `implementStoriesFlow` gains `deferNonBlocking`.
+- **The epic gates after a merge triage like the worktree's.** A new failing
+  line that is green on one rerun of the test gate is flaky and not charged.
+  The full output goes to `stories/<id>/gates/merge/`, and the failure reason
+  names that log, since the failing lines alone hide the assertion's values.
+- Gate failures are titled `gate failed: <command>` instead of
+  `lint failed: <command>`: the test and build gates are not lint. The old
+  titles are still recognized in stored results.
 
 ## 2.38.0
 

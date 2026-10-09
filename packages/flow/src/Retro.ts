@@ -871,7 +871,12 @@ export const signaturesOf = (
     for (const raw of text.split(/\r?\n/u)) {
       const match = findingLine.exec(raw.trim())
       const title = match?.[2]?.trim().toLowerCase()
-      if (title === undefined || title.startsWith("lint failed") || title.startsWith("oracle:")) {
+      if (
+        title === undefined ||
+        title.startsWith("gate failed") ||
+        title.startsWith("lint failed") ||
+        title.startsWith("oracle:")
+      ) {
         continue
       }
       titles.set(title, (titles.get(title) ?? new Set()).add(entry.story.id))

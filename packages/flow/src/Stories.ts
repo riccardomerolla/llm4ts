@@ -27,7 +27,7 @@ import {
   ensureBaseline as ensureStoredBaseline,
   failingLinesOf,
   storyGateLogDir,
-  triageGates,
+  mergeGateLogDir,
   writeBaseline,
   type GateLogDir
 } from "./Gates.ts"
@@ -1032,21 +1032,43 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
                 Timed.make({ kind: "merge", label: "merge", ms, ...(failed ? { failed } : {}) }),
               () => Began.make({ kind: "merge", label: "merge" })
             )
-            const gate = yield* options.gates(context.workDir, lane)
+            // The whole output is kept: the reason below names only the
+            // failing lines, which is not enough to tell why.
+            const gate = yield* options.gates(context.workDir, lane, {
+              files,
+              dir: mergeGateLogDir(options.stateDir, story.id)
+            })
             // Charged only with what the merge added: the head before it had
-            // a baseline (run start or the previous merge).
+            // a baseline (run start or the previous merge). A new line green
+            // on one rerun of the test gate is flaky, as in the worktree.
             const before = yield* ensureBaseline(
               checkpoint,
               Effect.succeed(ReviewResult.make({ issues: [] })),
               context.workDir
             )
-            const verdict = triageGates(gate, before, rootsOf(context.workDir))
-            if (!verdict.blocking.isClean) {
+            const blocking = yield* applyTriage(
+              gate,
+              {
+                baseline: Effect.succeed(before),
+                roots: rootsOf(context.workDir),
+                ...(options.testGate === undefined
+                  ? {}
+                  : { rerunTest: options.testGate(context.workDir, lane) })
+              },
+              lane,
+              yield* Ref.make<ReadonlySet<string>>(new Set())
+            )
+            if (!blocking.isClean) {
               // Never leave a red epic head for the next story to inherit.
               yield* context.git.rollback(checkpoint)
+              const logs = blocking.issues.flatMap((issue) =>
+                issue.logPath === undefined ? [] : [issue.logPath]
+              )
               return yield* failed(
                 story,
-                `epic gates failed after merging; merge undone:\n${issueLines(verdict.blocking)}`
+                `epic gates failed after merging; merge undone:\n${issueLines(blocking)}${
+                  logs.length === 0 ? "" : `\nfull output: ${logs.join(", ")}`
+                }`
               )
             }
             if (gateCommands !== undefined) {

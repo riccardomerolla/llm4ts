@@ -597,6 +597,64 @@ describe("Stories executor", () => {
       })
     )
 
+    for (const rerun of ["green", "red"] as const) {
+      it.effect(
+        `a new red line after the merge is rerun once: ${rerun} on rerun ${rerun === "green" ? "merges" : "fails, naming the log"}`,
+        () =>
+          Effect.gen(function* () {
+            const harness = yield* makeHarness()
+            const context = yield* makeContext(harness)
+            const epicRuns = yield* Ref.make(0)
+            const reruns = yield* Ref.make(0)
+            const options = yield* makeOptions(harness, single, context, {
+              gateCommands: [["pnpm", "test"]],
+              // The epic head is green at the start; the gate after the merge is red.
+              gates: (workDir, _events, log) =>
+                workDir !== "/repo"
+                  ? Effect.succeed(clean)
+                  : Effect.map(
+                      Ref.getAndUpdate(epicRuns, (n) => n + 1),
+                      (n) =>
+                        n === 0
+                          ? clean
+                          : ReviewResult.make({
+                              issues: [
+                                ReviewIssue.make({
+                                  severity: "Critical",
+                                  title: "gate failed: pnpm test",
+                                  description: "FAIL box.test.tsx > keeps the attribute",
+                                  ...(log === undefined
+                                    ? {}
+                                    : { logPath: `${log.dir}/0-pnpm-test.log` })
+                                })
+                              ],
+                              summary: "gate failed"
+                            })
+                    ),
+              testGate: (workDir) =>
+                Effect.map(
+                  Ref.updateAndGet(reruns, (n) => (workDir === "/repo" ? n + 1 : n)),
+                  () =>
+                    rerun === "green" ? clean : redLint("FAIL box.test.tsx > keeps the attribute")
+                )
+            })
+
+            const report = yield* implementStoriesFlow(context, options)
+
+            assert.strictEqual(yield* Ref.get(reruns), 1)
+            if (rerun === "green") {
+              assert.strictEqual(report.stories[0]?.status, "done")
+            } else {
+              assert.strictEqual(report.stories[0]?.status, "failed")
+              assert.include(
+                report.stories[0]?.reason ?? "",
+                `full output: ${options.stateDir}/stories/a/gates/merge/0-pnpm-test.log`
+              )
+            }
+          })
+      )
+    }
+
     const deletesTest = [
       "diff --git a/src/features/a/a.test.ts b/src/features/a/a.test.ts",
       "deleted file mode 100644",

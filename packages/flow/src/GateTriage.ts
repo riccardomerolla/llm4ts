@@ -79,9 +79,13 @@ export const normalizeGateOutput = (
 }
 
 /** The title prefix `lintCommand` gives every gate issue; nothing else is a gate. */
-export const gateIssuePrefix = "lint failed: "
+export const gateIssuePrefix = "gate failed: "
 
-export const isGateIssue = (issue: ReviewIssue): boolean => issue.title.startsWith(gateIssuePrefix)
+/** What gate issues were titled before every gate, not only lint, was named for what it is. */
+const legacyGateIssuePrefix = "lint failed: "
+
+export const isGateIssue = (issue: ReviewIssue): boolean =>
+  issue.title.startsWith(gateIssuePrefix) || issue.title.startsWith(legacyGateIssuePrefix)
 
 /** Every gate issue's normalized failing lines, in order, each once. */
 export const failingLinesOf = (

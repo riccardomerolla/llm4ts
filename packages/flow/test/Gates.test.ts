@@ -243,7 +243,7 @@ describe("gatesIn", () => {
         dir: "/state/stories/a/gates"
       })
       assert.strictEqual(result.issues.length, 1)
-      assert.strictEqual(result.issues[0]?.title, "lint failed: pnpm lint")
+      assert.strictEqual(result.issues[0]?.title, "gate failed: pnpm lint")
       assert.strictEqual(result.issues[0]?.logPath, "/state/stories/a/gates/1-pnpm-lint.log")
       assert.deepStrictEqual(Object.keys(yield* memory.files).sort(), [
         "/state/stories/a/gates/0-pnpm-typecheck.log",
