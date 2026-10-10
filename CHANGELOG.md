@@ -19,6 +19,12 @@ and non-blocking findings deferred to a follow-up round (ADR 0031).
   line that is green on one rerun of the test gate is flaky and not charged.
   The full output goes to `stories/<id>/gates/merge/`, and the failure reason
   names that log, since the failing lines alone hide the assertion's values.
+- **A story red after merging gets a revision instead of failing** (ADR 0032).
+  The merge is undone, the story catches up with the epic, runs a revision
+  task with the epic gates' failures, and merges again. This happens
+  `--merge-revisions <n>` times (or `LLM4TS_MERGE_REVISIONS`, default 1,
+  `0` for the old behavior). It covers two stories that each pass alone but
+  break together.
 - Gate failures are titled `gate failed: <command>` instead of
   `lint failed: <command>`: the test and build gates are not lint. The old
   titles are still recognized in stored results.

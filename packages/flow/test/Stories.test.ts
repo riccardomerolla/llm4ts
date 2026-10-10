@@ -608,6 +608,7 @@ describe("Stories executor", () => {
             const reruns = yield* Ref.make(0)
             const options = yield* makeOptions(harness, single, context, {
               gateCommands: [["pnpm", "test"]],
+              mergeRevisions: 0,
               // The epic head is green at the start; the gate after the merge is red.
               gates: (workDir, _events, log) =>
                 workDir !== "/repo"
@@ -835,6 +836,7 @@ describe("Stories executor", () => {
       const context = yield* makeContext(harness)
       const options = yield* makeOptions(harness, diamond, context, {
         concurrency: 1,
+        mergeRevisions: 0,
         gates: (workDir) =>
           workDir === "/repo"
             ? Effect.map(Ref.get(harness.log), (log) =>
@@ -852,6 +854,66 @@ describe("Stories executor", () => {
       assert.include(log, "rollback:checkpoint")
       // b merged fine afterwards: the epic head was restored.
       assert.strictEqual(report.stories.find((outcome) => outcome.id === "b")?.status, "done")
+    })
+  )
+
+  it.effect(
+    "red epic gates after a merge send the story back once: it catches up, revises, merges",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness()
+        const context = yield* makeContext(harness)
+        const options = yield* makeOptions(harness, diamond, context, {
+          concurrency: 1,
+          // The epic head is red after a's first merge only.
+          gates: (workDir) =>
+            workDir === "/repo"
+              ? Effect.map(Ref.get(harness.log), (log) =>
+                  log.filter((line) => line === "merge:story/diamond/a").length === 1 &&
+                  !log.includes("rollback:checkpoint")
+                    ? red("FAIL box.test.tsx > keeps the attribute")
+                    : clean
+                )
+              : Effect.succeed(clean)
+        })
+        const report = yield* implementStoriesFlow(context, options)
+        const a = report.stories.find((outcome) => outcome.id === "a")
+        assert.strictEqual(a?.status, "done")
+        const log = yield* Ref.get(harness.log)
+        assert.include(log, "rollback:checkpoint")
+        assert.include(
+          log,
+          "commit:/repo/.llm4ts/worktrees/a:a: Revision 1: make the epic gates green after merging"
+        )
+        assert.strictEqual(log.filter((line) => line === "merge:story/diamond/a").length, 2)
+        const plan = yield* options.files.read(`${options.stateDir}/stories/a.plan.md`)
+        assert.include(plan ?? "", "box.test.tsx")
+        const findings = yield* options.files.read(`${options.stateDir}/stories/a.findings.md`)
+        assert.include(findings ?? "", "epic gates after merging — red, merge undone; revising")
+      })
+  )
+
+  it.effect("a story still red after its merge revisions fails, saying how many it had", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const options = yield* makeOptions(harness, single, context, {
+        mergeRevisions: 2,
+        gates: (workDir) =>
+          Effect.map(Ref.get(harness.log), (log) =>
+            workDir === "/repo" && log.includes("merge:story/single/a")
+              ? red("FAIL box.test.tsx > keeps the attribute")
+              : clean
+          )
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "failed")
+      assert.include(
+        report.stories[0]?.reason ?? "",
+        "epic gates failed after merging (after 2 merge revisions); merge undone"
+      )
+      const log = yield* Ref.get(harness.log)
+      assert.strictEqual(log.filter((line) => line === "merge:story/single/a").length, 3)
     })
   )
 

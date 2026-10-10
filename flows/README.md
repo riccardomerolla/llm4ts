@@ -223,6 +223,13 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   except the last, becomes a revision task the coder runs before the next
   judgment; after `n` attempts the story fails with the judge's findings.
   The default of 2 is one revision, so `--judge-rounds 4` allows three.
+- `--merge-revisions <n>` (or `LLM4TS_MERGE_REVISIONS`; default 1, ADR 0032):
+  when the epic gates go red after a story merges, the merge is undone and
+  the story goes back to its worktree. It catches up with the epic, so its
+  gates see the combination that broke, and runs a revision task with the
+  failures. Then it merges again. After `n` such revisions the story fails.
+  `0` fails it at once, as before. The full gate output is in
+  `stories/<id>/gates/merge/`.
 - `--defer-findings` (or `LLM4TS_DEFER_FINDINGS=1`) unblocks the critical
   path (ADR 0031): only Critical findings are fixed in place. A task's
   review settles once nothing Critical is left (a red gate still loops). The

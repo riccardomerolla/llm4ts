@@ -117,6 +117,8 @@ export interface EpicArgs {
   readonly judgeRounds: number | undefined
   /** `--defer-findings`: non-blocking findings wait for a follow-up round (ADR 0031). */
   readonly deferFindings: boolean
+  /** `--merge-revisions <n>`: times a story red after merging goes back to fix it. */
+  readonly mergeRevisions: number | undefined
   /** `--land[=branch]`: land the finished epic on that branch (default main) and stop. */
   readonly land: string | undefined
   /** `--keep-worktrees`: after landing, keep the story worktrees and branches. */
@@ -148,6 +150,9 @@ export const epicUsage = [
   "  --fail-fast         stop the epic at the first failed story",
   "  --judge-rounds <n>  judge attempts per story (default 2 = one revision); a story the judge",
   "                      has not cleared after n attempts fails. LLM4TS_JUDGE_ROUNDS sets it too",
+  "  --merge-revisions <n> times a story whose merge turns the epic gates red goes back to",
+  "                      catch up and fix it before failing (default 1; 0 fails at once).",
+  "                      LLM4TS_MERGE_REVISIONS sets it too",
   "  --defer-findings    lighter review: only Critical findings are fixed in place (reviews",
   "                      settle, the judge clears without them); the rest are deferred and, once",
   "                      every story is merged, planned and run as one refine round.",
@@ -173,6 +178,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
     let concurrency: number | undefined
     let judgeRounds: number | undefined
     let deferFindings = false
+    let mergeRevisions: number | undefined
     let land: string | undefined
     let keepWorktrees = false
     let list = false
@@ -223,6 +229,20 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
           })
         }
         concurrency = parsed
+      } else if (argument === "--merge-revisions" || argument.startsWith("--merge-revisions=")) {
+        const raw = argument.includes("=")
+          ? argument.slice("--merge-revisions=".length)
+          : argv[index + 1]
+        if (!argument.includes("=")) {
+          index += 1
+        }
+        const parsed = Number.parseInt(raw ?? "", 10)
+        if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== (raw ?? "").trim()) {
+          return yield* ScriptUsage.make({
+            message: `--merge-revisions requires a non-negative integer\n${epicUsage}`
+          })
+        }
+        mergeRevisions = parsed
       } else if (argument === "--judge-rounds" || argument.startsWith("--judge-rounds=")) {
         const raw = argument.includes("=")
           ? argument.slice("--judge-rounds=".length)
@@ -247,6 +267,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
       concurrency,
       judgeRounds,
       deferFindings,
+      mergeRevisions,
       land,
       keepWorktrees,
       list,
@@ -255,6 +276,21 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
       rest
     }
   })
+
+/**
+ * Merge revisions per story: `--merge-revisions`, else `LLM4TS_MERGE_REVISIONS`,
+ * else the executor's default. An unusable environment value falls back.
+ */
+export const mergeRevisionsOption = (
+  flag: number | undefined,
+  environment: Readonly<Record<string, string | undefined>>
+): { readonly mergeRevisions?: number } => {
+  if (flag !== undefined) {
+    return { mergeRevisions: flag }
+  }
+  const raw = environment.LLM4TS_MERGE_REVISIONS?.trim() ?? ""
+  return /^\d+$/u.test(raw) ? { mergeRevisions: Number.parseInt(raw, 10) } : {}
+}
 
 /** `--defer-findings`, or `LLM4TS_DEFER_FINDINGS` set to 1/true/on/yes (ADR 0031). */
 export const deferFindingsEnabled = (
@@ -2472,6 +2508,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                     ].join("\n")
                   ),
                 ...judgeRoundsOption(flags.judgeRounds, process.env),
+                ...mergeRevisionsOption(flags.mergeRevisions, process.env),
                 concurrency,
                 ...(deferring ? { deferNonBlocking: true } : {}),
                 failFast: flags.failFast
