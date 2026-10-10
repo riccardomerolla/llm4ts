@@ -119,6 +119,8 @@ export interface EpicArgs {
   readonly deferFindings: boolean
   /** `--merge-revisions <n>`: times a story red after merging goes back to fix it. */
   readonly mergeRevisions: number | undefined
+  /** `--task-concurrency <n>`: coders one story may hold at once (ADR 0034). */
+  readonly taskConcurrency: number | undefined
   /** `--land[=branch]`: land the finished epic on that branch (default main) and stop. */
   readonly land: string | undefined
   /** `--keep-worktrees`: after landing, keep the story worktrees and branches. */
@@ -150,6 +152,9 @@ export const epicUsage = [
   "  --fail-fast         stop the epic at the first failed story",
   "  --judge-rounds <n>  judge attempts per story (default 2 = one revision); a story the judge",
   "                      has not cleared after n attempts fails. LLM4TS_JUDGE_ROUNDS sets it too",
+  "  --task-concurrency <n> coders one story may hold at once (default 2): a task the plan",
+  "                      says needs nothing still running goes to a free coder in its own",
+  "                      worktree; 1 runs every task in order. LLM4TS_TASK_CONCURRENCY sets it too",
   "  --merge-revisions <n> times a story whose merge turns the epic gates red goes back to",
   "                      catch up and fix it before failing (default 1; 0 fails at once).",
   "                      LLM4TS_MERGE_REVISIONS sets it too",
@@ -179,6 +184,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
     let judgeRounds: number | undefined
     let deferFindings = false
     let mergeRevisions: number | undefined
+    let taskConcurrency: number | undefined
     let land: string | undefined
     let keepWorktrees = false
     let list = false
@@ -229,6 +235,20 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
           })
         }
         concurrency = parsed
+      } else if (argument === "--task-concurrency" || argument.startsWith("--task-concurrency=")) {
+        const raw = argument.includes("=")
+          ? argument.slice("--task-concurrency=".length)
+          : argv[index + 1]
+        if (!argument.includes("=")) {
+          index += 1
+        }
+        const parsed = Number.parseInt(raw ?? "", 10)
+        if (!Number.isInteger(parsed) || parsed < 1 || String(parsed) !== (raw ?? "").trim()) {
+          return yield* ScriptUsage.make({
+            message: `--task-concurrency requires a positive integer\n${epicUsage}`
+          })
+        }
+        taskConcurrency = parsed
       } else if (argument === "--merge-revisions" || argument.startsWith("--merge-revisions=")) {
         const raw = argument.includes("=")
           ? argument.slice("--merge-revisions=".length)
@@ -268,6 +288,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
       judgeRounds,
       deferFindings,
       mergeRevisions,
+      taskConcurrency,
       land,
       keepWorktrees,
       list,
@@ -290,6 +311,22 @@ export const mergeRevisionsOption = (
   }
   const raw = environment.LLM4TS_MERGE_REVISIONS?.trim() ?? ""
   return /^\d+$/u.test(raw) ? { mergeRevisions: Number.parseInt(raw, 10) } : {}
+}
+
+/**
+ * Coders per story (ADR 0034): `--task-concurrency`, else
+ * `LLM4TS_TASK_CONCURRENCY`, else the executor's default. An unusable
+ * environment value falls back.
+ */
+export const taskConcurrencyOption = (
+  flag: number | undefined,
+  environment: Readonly<Record<string, string | undefined>>
+): { readonly taskConcurrency?: number } => {
+  if (flag !== undefined) {
+    return { taskConcurrency: flag }
+  }
+  const raw = environment.LLM4TS_TASK_CONCURRENCY?.trim() ?? ""
+  return /^[1-9]\d*$/u.test(raw) ? { taskConcurrency: Number.parseInt(raw, 10) } : {}
 }
 
 /** `--defer-findings`, or `LLM4TS_DEFER_FINDINGS` set to 1/true/on/yes (ADR 0031). */
@@ -2509,6 +2546,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                   ),
                 ...judgeRoundsOption(flags.judgeRounds, process.env),
                 ...mergeRevisionsOption(flags.mergeRevisions, process.env),
+                ...taskConcurrencyOption(flags.taskConcurrency, process.env),
                 concurrency,
                 ...(deferring ? { deferNonBlocking: true } : {}),
                 failFast: flags.failFast
