@@ -164,6 +164,13 @@ time [model 0% · tools 0% · gates 100% · wait 0%]
 tokens [48.0k]  cost [~$0.44]  run [live]
 ```
 
+A story whose task plan says two tasks need nothing from each other runs
+the second beside the first on another coder that is free (`--task-concurrency`,
+default 2, `1` runs every task in order): it shows as a `└ task coder
+claude#2 · 3/5 …` line under its story and as `[▶] … ← claude#2` in the
+checklist, works in its own worktree, and merges into the story branch
+when its gates pass.
+
 The detail box follows the story that moved last until you pick one.
 Keys: `↑`/`↓` or `1`–`9` select a story, `enter` expands its detail (every
 stage and tool call), `b` opens the boards — the epic's stories by column

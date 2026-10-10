@@ -1424,3 +1424,72 @@ describe("Flow gate and diff safety", () => {
     })
   )
 })
+
+describe("implementPlanFlow with tasks aside (ADR 0034)", () => {
+  it.effect("runs a ready task's whole body in the context the aside runner gives it", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const homeAsked = yield* Ref.make<ReadonlyArray<string>>([])
+      const asideAsked = yield* Ref.make<ReadonlyArray<string>>([])
+      const homeLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const asideLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const memory = yield* makeMemoryPlainFileStore()
+      const store = makePlanStore(memory.store)
+      const plan = Plan.make({
+        epicId: "S01",
+        tasks: [
+          Task.make({ title: "a", description: "do a" }),
+          Task.make({ title: "b", description: "do b. Depends on: 1" }),
+          Task.make({ title: "c", description: "do c. Depends on: 1" })
+        ]
+      })
+      const base = {
+        reasoning: cleanReviewer,
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement the plan"
+      }
+      const context: FlowContextShape = {
+        ...base,
+        coder: coderService(homeAsked),
+        git: makeFakeGit(homeLog),
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+      const aside: FlowContextShape = {
+        ...base,
+        coder: coderService(asideAsked),
+        git: makeFakeGit(asideLog),
+        workDir: "/repo-task-3",
+        workspace: "/repo-task-3"
+      }
+      const result = yield* implementPlanFlow(context, {
+        store,
+        planPath: ".llm4ts/plan-aside.md",
+        plan: Effect.succeed(plan),
+        chatPerTask: true,
+        parallel: {
+          concurrency: 2,
+          aside: (request, run) =>
+            Effect.gen(function* () {
+              yield* request.announce({ executor: "codex", clone: 2 })
+              yield* run(aside, { lint: undefined })
+              return yield* request.exclusive(Effect.succeed("merged" as const))
+            })
+        }
+      })
+      assert.isTrue(result.tasks.every((task) => task.completed))
+      const home = (yield* Ref.get(homeAsked)).join("\n")
+      const away = (yield* Ref.get(asideAsked)).join("\n")
+      assert.include(home, "do a")
+      // Task b is ready with c: b goes home, c aside.
+      assert.include(home, "do b")
+      assert.include(away, "do c")
+      assert.notInclude(home, "do c")
+      assert.strictEqual((yield* Ref.get(asideLog)).commits.length, 1)
+      assert.strictEqual((yield* Ref.get(homeLog)).commits.length, 2)
+    })
+  )
+})

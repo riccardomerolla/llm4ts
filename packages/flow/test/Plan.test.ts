@@ -1,6 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { Plan, Task, defaultPlanPath, parsePlan } from "@llm4ts/flow/Plan"
+import {
+  Plan,
+  Task,
+  defaultPlanPath,
+  parsePlan,
+  dependsOnOf,
+  ownsOf,
+  taskGraph,
+  hasParallelTasks
+} from "@llm4ts/flow/Plan"
 import { llm4tsDirectory, repoId } from "@llm4ts/flow/WorkspaceLayout"
 
 describe("Plan", () => {
@@ -58,5 +67,61 @@ describe("Plan", () => {
     assert.notStrictEqual(repoId("/control", "/a/calc"), repoId("/control", "/b/calc"))
     assert.strictEqual(llm4tsDirectory("/control", "/control"), "/control/.llm4ts")
     assert.match(llm4tsDirectory("/control", "/projects/calc"), /^\/control\/\.llm4ts\/calc-/)
+  })
+})
+
+describe("task graph (ADR 0034)", () => {
+  const task = (title: string, description: string, completed = false): Task =>
+    Task.make({ title, description, completed })
+
+  it("reads Depends on and Owns lines, one-line or not", () => {
+    assert.deepStrictEqual(dependsOnOf("Wire it.\nDepends on: 1, 3", 4), [1, 3])
+    assert.deepStrictEqual(dependsOnOf("Wire it. Depends on: 2. Satisfies: 1", 4), [2])
+    assert.deepStrictEqual(dependsOnOf("Depends on: none", 3), [])
+    // No line: every earlier task, so an old plan runs in order.
+    assert.deepStrictEqual(dependsOnOf("Wire it.", 3), [1, 2])
+    assert.deepStrictEqual(dependsOnOf("Wire it.", 1), [])
+    // Only earlier tasks count: a forward or self reference is dropped, and a
+    // line left with none of them is read as no line.
+    assert.deepStrictEqual(dependsOnOf("Depends on: 1, 3, 5", 3), [1])
+    assert.deepStrictEqual(dependsOnOf("Depends on: 4", 3), [1, 2])
+    assert.deepStrictEqual(ownsOf("Owns: src/session/*, test/session.test.ts\nSatisfies: 2"), [
+      "src/session/*",
+      "test/session.test.ts"
+    ])
+    assert.deepStrictEqual(ownsOf("Add it."), [])
+    // The planner writes one-line JSON: the line ends at a period or the next label.
+    assert.deepStrictEqual(ownsOf("Add it. Depends on: none. Owns: src/a.ts, `src/b.ts`."), [
+      "src/a.ts",
+      "src/b.ts"
+    ])
+    assert.deepStrictEqual(ownsOf("Owns: src/a.ts Depends on: 1 Satisfies: 2"), ["src/a.ts"])
+  })
+
+  it("builds the graph of a plan and says whether any task can run beside another", () => {
+    const chain = Plan.make({
+      epicId: "S01",
+      tasks: [task("a", ""), task("b", ""), task("c", "")]
+    })
+    assert.deepStrictEqual(
+      taskGraph(chain).map((node) => [node.index, node.dependsOn]),
+      [
+        [1, []],
+        [2, [1]],
+        [3, [1, 2]]
+      ]
+    )
+    assert.isFalse(hasParallelTasks(chain))
+    const fan = Plan.make({
+      epicId: "S01",
+      tasks: [task("a", ""), task("b", "Depends on: 1"), task("c", "Depends on: 1")]
+    })
+    assert.isTrue(hasParallelTasks(fan))
+    // A task without the line after a `none` one still waits for every task before it.
+    const mixed = Plan.make({
+      epicId: "S01",
+      tasks: [task("a", ""), task("b", "Depends on: none"), task("c", "")]
+    })
+    assert.deepStrictEqual(taskGraph(mixed)[2]?.dependsOn, [1, 2])
   })
 })

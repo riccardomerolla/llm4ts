@@ -66,6 +66,18 @@ export interface TreeLane {
   readonly children: ReadonlyArray<TreeChild>
   /** A harness pause under way: `pi retry`, `pi compaction`. */
   readonly pause: { readonly label: string; readonly since: number } | undefined
+  /** Tasks running beside the lane's coder, each on a coder of its own (ADR 0034). */
+  readonly taskCoders: ReadonlyArray<TreeTaskCoder>
+}
+
+/** A task running beside a story's coder, in its own worktree (ADR 0034). */
+export interface TreeTaskCoder {
+  readonly index: number
+  readonly count: number
+  readonly title: string
+  readonly executor: string | undefined
+  readonly clone: number | undefined
+  readonly since: number
 }
 
 /** One task of a lane's plan, as the checklist shows it. */
@@ -410,7 +422,8 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           tasks: [],
           task: undefined,
           children: [],
-          pause: undefined
+          pause: undefined,
+          taskCoders: []
         }
         return {
           ...current,
@@ -424,7 +437,10 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           stages: [...open.stages, event.stage]
         }))
       }
-      return { ...current, stages: [...current.stages, event.stage] }
+      // A lane that is not a story's (a task run aside, ADR 0034) is not the run's either.
+      return event.lane === undefined
+        ? { ...current, stages: [...current.stages, event.stage] }
+        : current
     }
     case "StageCompleted":
     case "StageFailed": {
@@ -449,7 +465,9 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           stages: withoutLast(open.stages, event.stage)
         }))
       }
-      return { ...current, stages: withoutLast(current.stages, event.stage) }
+      return event.lane === undefined
+        ? { ...current, stages: withoutLast(current.stages, event.stage) }
+        : current
     }
     case "Info": {
       // A story's own milestones are `story <id>: …` (resuming, merged,
@@ -655,15 +673,36 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         return current
       }
       const satisfies = event.satisfies === undefined ? {} : { satisfies: event.satisfies }
-      return updateLane(current, lane.id, (open) => ({
-        ...open,
-        task: { index: event.index, count: event.count, title: event.title, ...satisfies },
-        tasks: open.tasks.some((task) => task.index === event.index)
+      const listed = (open: TreeLane): ReadonlyArray<TreeTask> =>
+        open.tasks.some((task) => task.index === event.index)
           ? open.tasks
           : [
               ...open.tasks,
               { index: event.index, title: event.title, done: false, ...satisfies }
             ].sort((left, right) => left.index - right.index)
+      if (event.parallel === true) {
+        return updateLane(current, lane.id, (open) => ({
+          ...open,
+          tasks: listed(open),
+          taskCoders: [
+            ...open.taskCoders.filter((coder) => coder.index !== event.index),
+            {
+              index: event.index,
+              count: event.count,
+              title: event.title,
+              executor: event.executor,
+              clone: event.clone,
+              since: at
+            }
+          ]
+        }))
+      }
+      return updateLane(current, lane.id, (open) => ({
+        ...open,
+        task: { index: event.index, count: event.count, title: event.title, ...satisfies },
+        tasks: listed(open),
+        // Back with the story's coder: no longer beside it.
+        taskCoders: open.taskCoders.filter((coder) => coder.index !== event.index)
       }))
     }
     case "TaskCompleted":
@@ -671,7 +710,8 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         ? current
         : updateLane(current, lane.id, (open) => ({
             ...open,
-            task: undefined,
+            task: open.task?.index === event.index ? undefined : open.task,
+            taskCoders: open.taskCoders.filter((coder) => coder.index !== event.index),
             tasks: open.tasks.map((task) =>
               task.index === event.index ? { ...task, done: true } : task
             )
@@ -1270,6 +1310,19 @@ const laneLine = (
 }
 
 /** A sub-agent the lane's harness spawned, indented under it. */
+/** A task running beside the lane's coder, indented under it (ADR 0034). */
+const taskCoderLine = (coder: TreeTaskCoder, width: number, now: number | undefined): Line =>
+  headThenTail(
+    [
+      span("    └ "),
+      span("task coder ", "dim"),
+      span(`${cloneName(coder.executor ?? "(leasing)", coder.clone)} · `),
+      span(`${coder.index}/${coder.count} ${coder.title}`)
+    ],
+    span(` · ${elapsed(coder.since, now)}`, "dim"),
+    width
+  )
+
 const childLine = (child: TreeChild, width: number, now: number | undefined): Line =>
   headThenTail(
     [
@@ -1285,7 +1338,8 @@ const childLine = (child: TreeChild, width: number, now: number | undefined): Li
 /** The list's rows: a running lane, then each sub-agent still running under it. */
 const listRowsOf = (state: TreeState): number =>
   runningLanes(state).reduce(
-    (total, lane) => total + 1 + lane.children.filter((child) => !child.ended).length,
+    (total, lane) =>
+      total + 1 + lane.taskCoders.length + lane.children.filter((child) => !child.ended).length,
     0
   )
 
@@ -1306,6 +1360,10 @@ const agentRows = (
         lane: lane.id,
         line: laneLine(lane, width, state.now, lane.id === selected?.id, state.idleAfterMs)
       },
+      ...lane.taskCoders.map((coder) => ({
+        lane: lane.id,
+        line: taskCoderLine(coder, width, state.now)
+      })),
       ...lane.children
         .filter((child) => !child.ended)
         .map((child) => ({ lane: lane.id, line: childLine(child, width, state.now) }))
@@ -1362,10 +1420,17 @@ const detailBox = (
     lane.tasks.length === 0
       ? [[span("no task plan yet", "dim")]]
       : lane.tasks.map((task): Line => {
-          const running = lane.task?.index === task.index
+          const beside = lane.taskCoders.find((coder) => coder.index === task.index)
+          const running = lane.task?.index === task.index || beside !== undefined
           const right = task.satisfies === undefined ? "" : `satisfies ${task.satisfies.join(",")}`
           const left: Line = [
-            span(`${tick(task, running)} ${task.index} ${task.title}`, running ? "bold" : undefined)
+            span(
+              `${tick(task, running)} ${task.index} ${task.title}`,
+              running ? "bold" : undefined
+            ),
+            ...(beside === undefined
+              ? []
+              : [span(`  ← ${cloneName(beside.executor ?? "(leasing)", beside.clone)}`, "dim")])
           ]
           return right.length === 0
             ? left
@@ -1475,8 +1540,20 @@ const boardsOf = (
     return [[span("epic board", "bold")], ...epic]
   }
   const taskColumns: ReadonlyArray<readonly [string, (task: TreeTask) => boolean]> = [
-    ["todo", (task) => !task.done && task.index !== selected.task?.index],
-    ["doing", (task) => !task.done && task.index === selected.task?.index],
+    [
+      "todo",
+      (task) =>
+        !task.done &&
+        task.index !== selected.task?.index &&
+        !selected.taskCoders.some((coder) => coder.index === task.index)
+    ],
+    [
+      "doing",
+      (task) =>
+        !task.done &&
+        (task.index === selected.task?.index ||
+          selected.taskCoders.some((coder) => coder.index === task.index))
+    ],
     ["review", () => false],
     ["done", (task) => task.done]
   ]

@@ -295,6 +295,10 @@ export class TaskStarted extends Schema.TaggedClass<TaskStarted>()("TaskStarted"
   count: Schema.Int,
   title: Schema.String,
   satisfies: Schema.optionalKey(Schema.Array(Schema.Int)),
+  /** The task runs beside the story's held coder, in its own worktree (ADR 0034). */
+  parallel: Schema.optionalKey(Schema.Boolean),
+  /** The clone of the extra coder a parallel task holds (ADR 0034). */
+  clone: Schema.optionalKey(Schema.Int),
   lane: Schema.optionalKey(Schema.String),
   executor: Schema.optionalKey(Schema.String)
 }) {}
@@ -513,7 +517,11 @@ const stamped = (
             count: event.count,
             title: event.title,
             ...(event.satisfies === undefined ? {} : { satisfies: event.satisfies }),
-            ...tags
+            ...tags,
+            // A parallel task names its own coder, not the lane's (ADR 0034).
+            ...(event.parallel === undefined ? {} : { parallel: event.parallel }),
+            ...(event.executor === undefined ? {} : { executor: event.executor }),
+            ...(event.clone === undefined ? {} : { clone: event.clone })
           })
     case "TaskCompleted":
       return event.lane !== undefined

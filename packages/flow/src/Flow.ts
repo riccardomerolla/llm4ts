@@ -2,6 +2,7 @@ import { join } from "node:path"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
+import * as Semaphore from "effect/Semaphore"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { collect } from "@llm4ts/core/Streaming"
 import { withToolActivity } from "./Activity.ts"
@@ -25,10 +26,16 @@ import {
   TokensUsed,
   type FlowEventsShape
 } from "./FlowEvents.ts"
-import type { Plan, Task } from "./Plan.ts"
+import { hasParallelTasks, type Plan, type Task } from "./Plan.ts"
 import type { PlainFileStoreShape, PlanStoreShape } from "./Persistence.ts"
 import { ensureBaseline } from "./GateTriage.ts"
-import { implementTaskLoop, stage } from "./PlanExecution.ts"
+import {
+  implementTaskGraph,
+  implementTaskLoop,
+  stage,
+  type AsideOutcome,
+  type AsideRequest
+} from "./PlanExecution.ts"
 import { truth } from "@llm4ts/core/judgment/Schemas"
 import { certaintyOf, decide, judgmentOf, type JudgmentMode } from "./Judgment.ts"
 import {
@@ -74,6 +81,30 @@ export const completeAndPublish = Effect.fn("@llm4ts/flow/Flow.completeAndPublis
   return response.content
 })
 
+/** What a task run aside replaces in the plan's options (ADR 0034). */
+export interface TaskOverrides {
+  /** The gates in the aside worktree; `undefined` runs none. */
+  readonly lint?: Effect.Effect<ReviewResult, FlowError> | undefined
+  readonly triage?: GateTriageOptions
+  /** Present to replace the evidence check: the aside coder's tool calls are elsewhere. */
+  readonly onTaskReply?: ImplementPlanOptions["onTaskReply"] | undefined
+  /** The coder's system prompt there: its own working directory, its own paths. */
+  readonly system?: string
+}
+
+/** Tasks beside the held coder (ADR 0034): how many at once, and who runs one. */
+export interface ParallelPlanTasks {
+  readonly concurrency: number
+  /**
+   * Runs one ready task on another coder: `run` is the task's whole body
+   * (coder, review, gates, commit) in the context it is given.
+   */
+  readonly aside: (
+    request: AsideRequest,
+    run: (context: FlowContextShape, overrides: TaskOverrides) => Effect.Effect<void, FlowError>
+  ) => Effect.Effect<AsideOutcome, FlowError>
+}
+
 export interface ImplementPlanOptions {
   readonly store: PlanStoreShape
   readonly planPath: string
@@ -86,6 +117,11 @@ export interface ImplementPlanOptions {
    * one Chat is shared across every task in the plan.
    */
   readonly chatPerTask?: boolean
+  /**
+   * Ready tasks run beside the held coder (ADR 0034), with `chatPerTask`
+   * only, and only in a plan whose tasks declare that they may.
+   */
+  readonly parallel?: ParallelPlanTasks
   readonly reviewers?: ReadonlyArray<Reviewer>
   readonly commitMessage?: (plan: Plan, task: Task) => string
   readonly checkoutBranch?: boolean
@@ -288,24 +324,26 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
     })
   }
 
-  return yield* implementTaskLoop(
-    options.store,
-    context.events,
-    options.planPath,
-    plan,
-    (task, planSoFar) =>
-      Effect.gen(function* () {
+  const carryLock = yield* Semaphore.make(1)
+  /** The task's body in `ctx`: the plan's own context at home, another one aside (ADR 0034). */
+  const taskBody =
+    (ctx: FlowContextShape, over: TaskOverrides) =>
+    (task: Task, planSoFar: Plan): Effect.Effect<void, FlowError> => {
+      const lint = "lint" in over ? over.lint : options.lint
+      const onTaskReply = "onTaskReply" in over ? over.onTaskReply : options.onTaskReply
+      const system = over.system ?? options.system
+      return Effect.gen(function* () {
         // `sharedCoder`'s definedness mirrors `options.chatPerTask !== true`
         // above: when it's set, every task reuses it; when it's undefined,
         // chatPerTask is active and each task builds its own fresh Chat.
         let coder: Chat
-        if (sharedCoder !== undefined) {
+        if (sharedCoder !== undefined && ctx === context) {
           coder = sharedCoder
         } else {
-          coder = yield* makeChat(context.coder, {
-            events: context.events,
+          coder = yield* makeChat(ctx.coder, {
+            events: ctx.events,
             agent: "coder",
-            system: composeSystem(options.system, planSoFar.render),
+            system: composeSystem(system, planSoFar.render),
             ...(options.stall === undefined ? {} : { stall: options.stall })
           })
         }
@@ -319,11 +357,17 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
         const keepFindings = (reply: string): Effect.Effect<void, FlowError> =>
           Effect.gen(function* () {
             const found = findingsIn(reply)
-            if (options.carry !== undefined && found !== undefined) {
-              yield* options.carry.write(appendNote(notes, task.title, found))
+            const carry = options.carry
+            if (carry !== undefined && found !== undefined) {
+              // Tasks may run at once (ADR 0034): append to the notes as they are now.
+              yield* carryLock.withPermit(
+                Effect.flatMap(carry.read, (latest) =>
+                  carry.write(appendNote(latest, task.title, found))
+                )
+              )
             }
-            if (options.onTaskReply !== undefined) {
-              yield* options.onTaskReply(task, reply, trailerIn(found), taskStartedAt)
+            if (onTaskReply !== undefined) {
+              yield* onTaskReply(task, reply, trailerIn(found), taskStartedAt)
             }
           })
         yield* keepFindings(
@@ -333,7 +377,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
               : `${withNotes(plan.taskPrompt(task), notes)}\n${findingsRequest}`
           )
         )
-        const produced = yield* context.git.diffAll
+        const produced = yield* ctx.git.diffAll
         if (produced.trim().length === 0) {
           // An empty diff is ambiguous: the task may be genuinely satisfied
           // already, or the coder may simply have produced nothing. Ask
@@ -348,19 +392,19 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
             ].join("\n")
           )
           yield* keepFindings(confirmation)
-          const afterConfirmation = yield* context.git.diffAll
+          const afterConfirmation = yield* ctx.git.diffAll
           if (afterConfirmation.trim().length === 0) {
             const judged =
               options.satisfiedProbe !== undefined && options.satisfiedProbe !== "literal"
                 ? yield* satisfiedByJudgment(
-                    context,
+                    ctx,
                     task.title,
                     confirmation,
                     options.satisfiedProbe === "judgment" ? "act" : options.satisfiedProbe.mode
                   )
                 : undefined
             if (judged ?? confirmation.includes("TASK_ALREADY_SATISFIED")) {
-              yield* context.events.publish(
+              yield* ctx.events.publish(
                 Info.make({
                   message: `task "${task.title}" confirmed already satisfied; skipping review and commit`
                 })
@@ -368,7 +412,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
               return
             }
             if (options.noopTaskPolicy === "complete") {
-              yield* context.events.publish(
+              yield* ctx.events.publish(
                 Info.make({
                   message: `task "${task.title}" produced no changes without confirming TASK_ALREADY_SATISFIED; marking complete per noopTaskPolicy`
                 })
@@ -380,7 +424,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
             })
           }
         }
-        const triage = yield* triageFor(context, options)
+        const triage = over.triage ?? (yield* triageFor(ctx, options))
         const repoRules = options.repoRules === undefined ? undefined : yield* options.repoRules
         const reviewers = [
           ...(options.reviewers ?? minimalReviewers),
@@ -390,8 +434,8 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           options.fixer === "separate"
             ? (prompt: string): Effect.Effect<string, FlowError> =>
                 Effect.flatMap(
-                  makeChat(context.coder, {
-                    events: context.events,
+                  makeChat(ctx.coder, {
+                    events: ctx.events,
                     agent: "coder",
                     system: withContract(fixerBrief),
                     ...(options.stall === undefined ? {} : { stall: options.stall })
@@ -403,7 +447,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           options.oracle === undefined
             ? undefined
             : {
-                diff: context.git.diffAll,
+                diff: ctx.git.diffAll,
                 ...(options.oracle.rules === undefined ? {} : { rules: options.oracle.rules }),
                 ...(options.oracle.testsChange === undefined
                   ? {}
@@ -414,14 +458,14 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
               }
         yield* reviewAndFixLoop({
           reviewers,
-          reviewerService: flowReviewer(context),
+          reviewerService: flowReviewer(ctx),
           coder,
           taskTitle: task.title,
-          currentDiff: context.git.diffAll,
-          events: context.events,
+          currentDiff: ctx.git.diffAll,
+          events: ctx.events,
           ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
           ...(options.settle === undefined ? {} : { settle: options.settle }),
-          ...(options.lint === undefined ? {} : { lint: options.lint }),
+          ...(lint === undefined ? {} : { lint }),
           ...(options.format === undefined ? {} : { format: options.format }),
           ...(triage === undefined ? {} : { triage }),
           ...(oracle === undefined ? {} : { oracle }),
@@ -439,12 +483,12 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
                     : options.onReview(task, round, result, settled)
               })
         })
-        if (options.lint !== undefined) {
+        if (lint !== undefined) {
           const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
           const gate = yield* withOracle(
-            yield* applyTriage(yield* options.lint, triage, context.events, reported),
+            yield* applyTriage(yield* lint, triage, ctx.events, reported),
             oracle,
-            context.events,
+            ctx.events,
             yield* Ref.make(true)
           )
           if (!gate.isClean) {
@@ -460,7 +504,37 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
             })
           }
         }
-        yield* context.git.commitAll((options.commitMessage ?? defaultCommitMessage)(plan, task))
+        yield* ctx.git.commitAll((options.commitMessage ?? defaultCommitMessage)(plan, task))
       })
+    }
+
+  const parallel = options.parallel
+  if (
+    parallel !== undefined &&
+    parallel.concurrency > 1 &&
+    options.chatPerTask === true &&
+    hasParallelTasks(plan)
+  ) {
+    return yield* implementTaskGraph(
+      options.store,
+      context.events,
+      options.planPath,
+      plan,
+      taskBody(context, {}),
+      {
+        concurrency: parallel.concurrency,
+        aside: (request) =>
+          parallel.aside(request, (ctx, over) =>
+            taskBody(ctx, over)(request.node.task, request.planSoFar)
+          )
+      }
+    )
+  }
+  return yield* implementTaskLoop(
+    options.store,
+    context.events,
+    options.planPath,
+    plan,
+    taskBody(context, {})
   )
 })

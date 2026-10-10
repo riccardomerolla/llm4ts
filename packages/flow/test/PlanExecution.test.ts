@@ -3,7 +3,13 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import { FlowAborted } from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
-import { implementTaskLoop, satisfiesOf, stage } from "@llm4ts/flow/PlanExecution"
+import {
+  implementTaskGraph,
+  implementTaskLoop,
+  satisfiesOf,
+  stage,
+  type AsideOutcome
+} from "@llm4ts/flow/PlanExecution"
 import { kindAttribute, withKindSpan } from "@llm4ts/flow/Spans"
 import { recordingTracer } from "./support/RecordingTracer.ts"
 import { Plan, Task } from "@llm4ts/flow/Plan"
@@ -214,6 +220,154 @@ describe("stage spans", () => {
         [story?.name, story?.attributes[kindAttribute], story?.root, story?.failed],
         ["story a", "AGENT", true, true]
       )
+    })
+  )
+})
+
+describe("implementTaskGraph (ADR 0034)", () => {
+  const fan = (): Plan =>
+    Plan.make({
+      epicId: "S01",
+      tasks: [
+        Task.make({ title: "a", description: "" }),
+        Task.make({ title: "b", description: "Depends on: 1" }),
+        Task.make({ title: "c", description: "Depends on: 1" }),
+        Task.make({ title: "d", description: "Depends on: 2, 3" })
+      ]
+    })
+
+  const run = (
+    plan: Plan,
+    outcome: (title: string, tries: number) => AsideOutcome,
+    concurrency = 2
+  ) =>
+    Effect.gen(function* () {
+      const files = yield* Ref.make<Readonly<Record<string, string>>>({})
+      const events = yield* makeCollectingFlowEvents
+      const home = yield* Ref.make<ReadonlyArray<string>>([])
+      const aside = yield* Ref.make<ReadonlyArray<string>>([])
+      const store = makePlanStore(memoryFiles(files))
+      const result = yield* implementTaskGraph(
+        store,
+        events,
+        "plan.md",
+        plan,
+        (task) => Ref.update(home, (titles) => [...titles, task.title]),
+        {
+          concurrency,
+          aside: ({ node, announce, exclusive }) =>
+            Effect.gen(function* () {
+              const tries = (yield* Ref.get(aside)).filter((t) => t === node.task.title).length
+              yield* Ref.update(aside, (titles) => [...titles, node.task.title])
+              const answer = outcome(node.task.title, tries)
+              if (answer !== "declined") {
+                yield* announce({ executor: "codex", clone: 2 })
+              }
+              return yield* exclusive(Effect.succeed(answer))
+            })
+        }
+      )
+      return {
+        result,
+        disk: yield* store.load("plan.md"),
+        home: yield* Ref.get(home),
+        aside: yield* Ref.get(aside),
+        recorded: yield* events.recorded
+      }
+    })
+
+  it.effect("runs independent tasks beside the held coder and merges them in", () =>
+    Effect.gen(function* () {
+      const { result, disk, home, aside, recorded } = yield* run(fan(), () => "merged")
+      assert.isTrue(result.tasks.every((task) => task.completed))
+      assert.deepStrictEqual(disk, result)
+      assert.deepStrictEqual(home, ["a", "b", "d"])
+      assert.deepStrictEqual(aside, ["c"])
+      const parallel = recorded.find(
+        (event) => event._tag === "TaskStarted" && event.parallel === true
+      )
+      assert.deepStrictEqual(
+        parallel?._tag === "TaskStarted"
+          ? [parallel.index, parallel.title, parallel.executor, parallel.clone]
+          : [],
+        [3, "c", "codex", 2]
+      )
+      const completed = recorded.flatMap((event) =>
+        event._tag === "TaskCompleted" ? [event.index] : []
+      )
+      assert.deepStrictEqual([...completed].sort(), [1, 2, 3, 4])
+    })
+  )
+
+  it.effect("gives a declined task to the held coder", () =>
+    Effect.gen(function* () {
+      const { result, home, aside } = yield* run(fan(), () => "declined")
+      assert.isTrue(result.tasks.every((task) => task.completed))
+      assert.deepStrictEqual(aside, ["c"])
+      assert.deepStrictEqual(home, ["a", "b", "c", "d"])
+    })
+  )
+
+  it.effect("reruns a conflicting task at home after the others", () =>
+    Effect.gen(function* () {
+      const plan = Plan.make({
+        epicId: "S01",
+        tasks: [
+          Task.make({ title: "a", description: "" }),
+          Task.make({ title: "b", description: "Depends on: 1" }),
+          Task.make({ title: "c", description: "Depends on: 1" }),
+          Task.make({ title: "e", description: "Depends on: 2" })
+        ]
+      })
+      const { result, home, aside } = yield* run(plan, (title) =>
+        title === "c" ? "conflict" : "merged"
+      )
+      assert.isTrue(result.tasks.every((task) => task.completed))
+      assert.deepStrictEqual(aside, ["c"])
+      // e (ready after b) runs before the conflicted c.
+      assert.deepStrictEqual(home, ["a", "b", "e", "c"])
+    })
+  )
+
+  it.effect("never sets a task aside in a plan that is a chain", () =>
+    Effect.gen(function* () {
+      const chain = Plan.make({
+        epicId: "S01",
+        tasks: [
+          Task.make({ title: "a", description: "" }),
+          Task.make({ title: "b", description: "" })
+        ]
+      })
+      const { home, aside } = yield* run(chain, () => "merged")
+      assert.deepStrictEqual(home, ["a", "b"])
+      assert.deepStrictEqual(aside, [])
+    })
+  )
+
+  it.effect("holds one coder only at a task concurrency of 1", () =>
+    Effect.gen(function* () {
+      const { home, aside } = yield* run(fan(), () => "merged", 1)
+      assert.deepStrictEqual(home, ["a", "b", "c", "d"])
+      assert.deepStrictEqual(aside, [])
+    })
+  )
+
+  it.effect("fails when a task at home fails, and stops the tasks aside", () =>
+    Effect.gen(function* () {
+      const files = yield* Ref.make<Readonly<Record<string, string>>>({})
+      const events = yield* makeCollectingFlowEvents
+      const error = yield* Effect.flip(
+        implementTaskGraph(
+          makePlanStore(memoryFiles(files)),
+          events,
+          "plan.md",
+          fan(),
+          (task) =>
+            task.title === "b" ? Effect.fail(FlowAborted.make({ message: "red" })) : Effect.void,
+          { concurrency: 2, aside: () => Effect.never }
+        )
+      )
+      assert.strictEqual(error._tag, "Aborted")
     })
   )
 })

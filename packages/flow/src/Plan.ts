@@ -120,3 +120,74 @@ export const parsePlan = Effect.fn("@llm4ts/flow/Plan.parse")(function* (
     ...(brief === undefined ? {} : { brief })
   })
 })
+
+// ---- The task graph (ADR 0034) ------------------------------------------------
+
+/**
+ * The tasks a task waits for, from its description's `Depends on:` line
+ * (`1, 3`, or `none`). Without the line it waits for every earlier task, so
+ * a plan written before ADR 0034 runs in order. Only earlier tasks count: a
+ * forward or self reference is dropped, so the graph never has a cycle, and
+ * a line left naming none of them is read as no line.
+ */
+export const dependsOnOf = (description: string, index: number): ReadonlyArray<number> => {
+  const earlier = Array.from({ length: Math.max(0, index - 1) }, (_, position) => position + 1)
+  const match = /\bDepends on:\s*([^\n.]*)/iu.exec(description)
+  if (match === null) {
+    return earlier
+  }
+  const text = match[1] ?? ""
+  if (/^\s*none\b/iu.test(text)) {
+    return []
+  }
+  const named = [
+    ...new Set(
+      text
+        .split(/[^\d]+/u)
+        .filter((part) => part.length > 0)
+        .map((part) => Number.parseInt(part, 10))
+        .filter((number) => Number.isInteger(number) && number >= 1 && number < index)
+    )
+  ]
+  return named.length === 0 ? earlier : named
+}
+
+/**
+ * The paths a task says it changes, from its `Owns:` line; empty when it
+ * says none. The line ends at a newline, the next label, or a period that
+ * ends the sentence (the planner writes one-line JSON descriptions).
+ */
+export const ownsOf = (description: string): ReadonlyArray<string> => {
+  const match = /\bOwns:\s*(.*?)(?=\s+(?:Depends on|Satisfies):|\.\s|\.$|\n|$)/iu.exec(description)
+  return match === null
+    ? []
+    : (match[1] ?? "")
+        .split(/[,\s]+/u)
+        .map((path) =>
+          path
+            .trim()
+            .replace(/^`|`$/gu, "")
+            .replace(/[.;]+$/u, "")
+        )
+        .filter((path) => path.length > 0 && path.toLowerCase() !== "none")
+}
+
+/** One task of a plan as the scheduler sees it: its 1-based index and what it waits for. */
+export interface TaskNode {
+  readonly index: number
+  readonly task: Task
+  readonly dependsOn: ReadonlyArray<number>
+  readonly owns: ReadonlyArray<string>
+}
+
+export const taskGraph = (plan: Plan): ReadonlyArray<TaskNode> =>
+  plan.tasks.map((task, position) => ({
+    index: position + 1,
+    task,
+    dependsOn: dependsOnOf(task.description, position + 1),
+    owns: ownsOf(task.description)
+  }))
+
+/** Whether some task of the plan may start without the task right before it. */
+export const hasParallelTasks = (plan: Plan): boolean =>
+  taskGraph(plan).some((node) => node.index > 1 && !node.dependsOn.includes(node.index - 1))

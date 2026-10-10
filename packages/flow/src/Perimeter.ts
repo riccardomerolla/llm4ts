@@ -131,3 +131,39 @@ export const strayTasks = (
     })
     return [{ task, paths, foreign }]
   })
+
+/** A task's `Owns:` entry as a path prefix: `src/session/*` and `src/routes/**` own their directory. */
+const ownedPrefix = (entry: string): string => entry.replace(/\/?\*+$/u, "")
+
+/**
+ * A task run aside (ADR 0034) as a gate over what it changed: every path
+ * outside its `Owns:` entries is one Critical issue handed back to its
+ * coder, so two tasks running at once keep to their own files. A task that
+ * names no paths is not checked; the story's perimeter still is.
+ */
+export const taskOwnsGate = (
+  changedPaths: ReadonlyArray<string>,
+  owns: ReadonlyArray<string>
+): ReviewResult => {
+  if (owns.length === 0) {
+    return ReviewResult.make({ issues: [], summary: "" })
+  }
+  const prefixes = owns.map(ownedPrefix)
+  const stray = changedPaths.filter((path) => !prefixes.some((prefix) => pathWithin(path, prefix)))
+  return stray.length === 0
+    ? ReviewResult.make({ issues: [], summary: "task owns: clean" })
+    : ReviewResult.make({
+        issues: [
+          ReviewIssue.make({
+            severity: "Critical",
+            title: "task owns",
+            description: [
+              `This task owns ${owns.join(", ")} and changed paths outside them: ${stray.join(", ")}.`,
+              "Another task may be changing those right now. Revert them and keep this task's",
+              "work inside the paths it owns."
+            ].join("\n")
+          })
+        ],
+        summary: "task owns: violated"
+      })
+}

@@ -11,7 +11,7 @@ import * as Stream from "effect/Stream"
 import { ConfigError, type LlmError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { Message, type ConnectorCapabilities, type LlmChunk } from "@llm4ts/core/Models"
-import { describeFlowError, type FlowError } from "./FlowError.ts"
+import { describeFlowError, type FlowError, RosterExhausted } from "./FlowError.ts"
 import { ExecutorHandedOver, type FlowEventsShape } from "./FlowEvents.ts"
 import { callPurpose } from "./Timing.ts"
 import {
@@ -48,6 +48,8 @@ export interface RosterView {
   readonly capacityChanged: (role: Role, from: number) => Effect.Effect<number>
   /** The executor holding this context's coder, once leased. */
   readonly executor: Effect.Effect<string | undefined>
+  /** Which clone of it (ADR 0033), once leased. */
+  readonly clone?: Effect.Effect<number | undefined>
   /** Every executor that held this context's coder, in order (handovers). */
   readonly history: Effect.Effect<ReadonlyArray<string>>
   /** The autonomy contract profile an executor's roster entry asks for (ADR 0027), when it does. */
@@ -253,6 +255,11 @@ export interface HeldCoderOptions {
   /** Handovers before a failure surfaces. Default 2. */
   readonly maxHandovers?: number
   readonly label?: string
+  /**
+   * Lease only a slot that is free now; none fails `RosterExhausted` at
+   * once instead of waiting (a task run aside, ADR 0034).
+   */
+  readonly ifFree?: boolean
 }
 
 export interface HeldCoder {
@@ -305,12 +312,26 @@ export const makeHeldCoder = Effect.fn("@llm4ts/flow/RosterSeats.heldCoder")(fun
         return held
       }
       const preferred = yield* Ref.get(prefer)
-      const lease = yield* roster
-        .lease("coder", {
-          ...(preferred === undefined ? {} : { prefer: preferred }),
-          ...(options.label === undefined ? {} : { label: options.label })
-        })
-        .pipe(Scope.provide(scope))
+      const leaseOptions = {
+        ...(preferred === undefined ? {} : { prefer: preferred }),
+        ...(options.label === undefined ? {} : { label: options.label })
+      }
+      const lease =
+        options.ifFree === true
+          ? yield* roster.tryLease("coder", leaseOptions).pipe(
+              Scope.provide(scope),
+              Effect.flatMap((free) =>
+                free === undefined
+                  ? Effect.fail(
+                      RosterExhausted.make({
+                        role: "coder",
+                        reasons: ["no coder slot is free now"]
+                      })
+                    )
+                  : Effect.succeed(free)
+              )
+            )
+          : yield* roster.lease("coder", leaseOptions).pipe(Scope.provide(scope))
       const seat = yield* source.seatFor(lease.executor, "coder", workDir)
       const next = { lease, seat }
       yield* Ref.set(current, next)

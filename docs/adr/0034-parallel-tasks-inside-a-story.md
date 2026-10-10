@@ -1,6 +1,6 @@
 # ADR 0034: Parallel Tasks Inside A Story
 
-Status: Proposed · Date: 2026-10-10 · Extends ADR 0013 and ADR 0019
+Status: Accepted · Date: 2026-10-10 · Extends ADR 0013 and ADR 0019
 
 ## Context
 
@@ -57,3 +57,30 @@ its acceptance criteria allow and still has independent tasks.
   unchanged. Deferred findings (ADR 0031) are per story as before.
 - This diverges from `llm4zio` v4.2.0, which has no intra-story
   parallelism; this ADR is the record.
+
+## Implementation notes (2.42.0)
+
+- A task's branch is `story/<epic>/<id>--task-<n>`, not `…/<id>/task-<n>`:
+  git cannot hold a branch `a/b` and a branch `a/b/c` at once. Its worktree
+  is `<worktreeRoot>/<id>.task-<n>`; both go when the task ends, merged or not.
+- The aside coder is held only if a slot is free at that moment
+  (`ContextOptions.ifFree`, `tryLease`): a task never waits for a slot, so a
+  story never starves another. Without a roster it always runs aside.
+- Not only a conflict hands the task back: no free coder, a failed setup,
+  red gates the review could not settle, or a `BLOCKED_ON` there all give
+  the task to the story's coder, which runs it in the story worktree. A task
+  run aside cannot fail its story.
+- A task without `Depends on:` waits for every earlier task, not only the
+  one before it, so an old-style task after a `none` one cannot overlap
+  the task before it. `Depends on:` lists earlier tasks only; a forward or
+  self reference is dropped, so the graph has no cycle, and a line left
+  naming none is read as no line. `Depends on: none` runs beside the task
+  before it.
+- The aside coder's lease ends with its work: the merge back waits for the
+  story's coder without holding a slot another story could use.
+- The aside coder is told its own working directory and, when the task
+  names them, its `Owns:` paths; the evidence check (ADR 0027 decision 6)
+  is skipped for it, since its tool calls are on its own transcript.
+- After any task merged in, the story's gates run on the result before the
+  judge (`story <id>: gates after parallel tasks`); red is a revision task
+  for the story's coder, up to `mergeRevisions` times, then the story fails.

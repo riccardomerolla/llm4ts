@@ -825,3 +825,68 @@ describe("agent tree reducer (ADR 0033)", () => {
     assert.isUndefined(over.lanes[0]?.pause)
   })
 })
+
+describe("agent tree: tasks beside the story's coder (ADR 0034)", () => {
+  const start = [
+    at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+    at(1, ExecutorLeased.make({ executor: "codex", role: "coder", label: "S01", clone: 1 })),
+    at(
+      2,
+      TasksPlanned.make({
+        lane: "S01",
+        tasks: [
+          { title: "route", completed: true },
+          { title: "cookie", completed: false },
+          { title: "docs", completed: false }
+        ]
+      })
+    ),
+    at(3, TaskStarted.make({ lane: "S01", index: 2, count: 3, title: "cookie" })),
+    at(
+      4,
+      TaskStarted.make({
+        lane: "S01",
+        index: 3,
+        count: 3,
+        title: "docs",
+        parallel: true,
+        executor: "claude",
+        clone: 2
+      })
+    )
+  ]
+
+  it("lists a parallel task's coder under its story and in the checklist", () => {
+    const state = fold([
+      ...start,
+      // The task's own lane is not a story lane: its stages stay out of the run's.
+      at(5, StageStarted.make({ stage: "docs", lane: "S01#t3", executor: "claude" }))
+    ])
+    const lane = state.lanes[0]
+    assert.strictEqual(lane?.task?.index, 2)
+    assert.deepStrictEqual(
+      lane?.taskCoders.map((coder) => [coder.index, coder.executor, coder.clone]),
+      [[3, "claude", 2]]
+    )
+    assert.deepStrictEqual(state.stages, [])
+    const text = renderTree(state, { width: 120, colour: false, view: initialView }).join("\n")
+    assert.include(text, "└ task coder claude#2 · 3/3 docs")
+    assert.include(text, "[▶] 3 docs")
+  })
+
+  it("drops a task coder when its task completes or goes back to the story's coder", () => {
+    const merged = fold([
+      ...start,
+      at(6, TaskCompleted.make({ lane: "S01", index: 3, count: 3, title: "docs" }))
+    ])
+    assert.deepStrictEqual(merged.lanes[0]?.taskCoders, [])
+    assert.isTrue(merged.lanes[0]?.tasks.find((task) => task.index === 3)?.done)
+    const home = fold([
+      ...start,
+      at(6, TaskCompleted.make({ lane: "S01", index: 2, count: 3, title: "cookie" })),
+      at(7, TaskStarted.make({ lane: "S01", index: 3, count: 3, title: "docs" }))
+    ])
+    assert.deepStrictEqual(home.lanes[0]?.taskCoders, [])
+    assert.strictEqual(home.lanes[0]?.task?.index, 3)
+  })
+})

@@ -78,6 +78,7 @@ import {
   judgeRoundsOption,
   judgeSeverity,
   mergeRevisionsOption,
+  taskConcurrencyOption,
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
@@ -276,6 +277,22 @@ describe("epic-stories flags and seats", () => {
         mergeRevisions: 3
       })
       assert.deepStrictEqual(mergeRevisionsOption(undefined, { LLM4TS_MERGE_REVISIONS: "x" }), {})
+      // ADR 0034: coders per story.
+      assert.isUndefined(flags.taskConcurrency)
+      assert.strictEqual((yield* parseEpicArgs(["--task-concurrency", "3"])).taskConcurrency, 3)
+      assert.strictEqual((yield* parseEpicArgs(["--task-concurrency=1"])).taskConcurrency, 1)
+      assert.strictEqual(
+        (yield* Effect.flip(parseEpicArgs(["--task-concurrency", "0"])))._tag,
+        "ScriptUsage"
+      )
+      assert.deepStrictEqual(taskConcurrencyOption(1, { LLM4TS_TASK_CONCURRENCY: "3" }), {
+        taskConcurrency: 1
+      })
+      assert.deepStrictEqual(taskConcurrencyOption(undefined, { LLM4TS_TASK_CONCURRENCY: "3" }), {
+        taskConcurrency: 3
+      })
+      assert.deepStrictEqual(taskConcurrencyOption(undefined, { LLM4TS_TASK_CONCURRENCY: "0" }), {})
+      assert.deepStrictEqual(taskConcurrencyOption(undefined, {}), {})
       assert.isTrue((yield* parseEpicArgs(["--defer-findings"])).deferFindings)
       assert.isTrue(deferFindingsEnabled(true, {}))
       assert.isTrue(deferFindingsEnabled(false, { LLM4TS_DEFER_FINDINGS: "on" }))

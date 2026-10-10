@@ -16,6 +16,11 @@ export interface ContextOptions {
   readonly prefer?: string
   /** Who the context is for, in the roster's events ("story conto-overview"). */
   readonly label?: string
+  /**
+   * Take a coder only if one is free now, else fail `RosterExhausted` at
+   * once: a task offered aside never waits for a slot (ADR 0034).
+   */
+  readonly ifFree?: boolean
 }
 
 export interface FlowContextShape {

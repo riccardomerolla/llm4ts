@@ -749,6 +749,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       capacity: roster.capacity,
       capacityChanged: roster.capacityChanged,
       executor: held.executor,
+      clone: held.clone,
       contractOf: (id) => roster.executors.find((spec) => spec.id === id)?.contract,
       history: held.history
     })
@@ -820,6 +821,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
                       events: laneEvents,
                       eager: true,
                       label,
+                      ...(contextOptions?.ifFree === true ? { ifFree: true } : {}),
                       ...(contextOptions?.prefer === undefined
                         ? {}
                         : { prefer: contextOptions.prefer })
