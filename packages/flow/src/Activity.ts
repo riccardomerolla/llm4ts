@@ -105,9 +105,11 @@ export const toolUseFrom = (chunk: LlmChunk): ToolUse | undefined => {
   if (tool.length === 0) {
     return undefined
   }
+  const parent = chunk.metadata.parent
   return ToolUse.make({
     tool,
-    args: summariseToolArgs(chunk.metadata.tool_input ?? chunk.metadata.toolInput ?? "")
+    args: summariseToolArgs(chunk.metadata.tool_input ?? chunk.metadata.toolInput ?? ""),
+    ...(parent === undefined || parent.length === 0 ? {} : { parent })
   })
 }
 
@@ -130,7 +132,22 @@ interface OpenTool {
   readonly at: number
 }
 
-export type ToolCategory = "explore" | "edit" | "test" | "build" | "install" | "git" | "other"
+export type ToolCategory =
+  | "explore"
+  | "edit"
+  | "test"
+  | "build"
+  | "install"
+  | "git"
+  | "delegate"
+  | "other"
+
+/**
+ * A harness handing work to a sub-agent of its own: Claude's Agent (Task
+ * before 2.1.63), Codex's collab tools, Gemini's built-in agents (ADR 0033).
+ */
+export const delegateTools =
+  /^(agent|task|spawn_agent|send_input|wait_agent|wait|resume_agent|close_agent|codebase_investigator|generalist|cli_help|browser_agent)$/iu
 
 const exploreTools =
   /^(read|read_file|read_many_files|glob|grep|search|search_file_content|list|ls|list_directory|find|view|web_fetch|google_web_search)$/iu
@@ -143,6 +160,9 @@ const shellTools = /^(bash|shell|run_shell_command|exec|command_execution)$/iu
  * Only this name is kept — never the command.
  */
 export const toolCategory = (tool: string, args: string): ToolCategory => {
+  if (delegateTools.test(tool)) {
+    return "delegate"
+  }
   if (editTools.test(tool)) {
     return "edit"
   }

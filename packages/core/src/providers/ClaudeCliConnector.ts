@@ -31,7 +31,8 @@ import {
   toolResultText,
   usageEventChunk,
   type JsonValue,
-  effortWord
+  effortWord,
+  jsonObjectEntries
 } from "./CliSupport.ts"
 
 /**
@@ -93,6 +94,9 @@ export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> 
     return []
   }
 
+  // A sub-agent's lines carry the id of the Agent call that spawned it (ADR 0033).
+  const parentId = jsonStringField(json, "parent_tool_use_id")
+  const parent = parentId === undefined || parentId.length === 0 ? {} : { parent: parentId }
   switch (jsonStringField(json, "type")) {
     case "assistant":
       return jsonArray(jsonField(jsonField(json, "message"), "content")).flatMap(
@@ -107,7 +111,8 @@ export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> 
                 toolEventChunk(
                   jsonStringField(block, "name") ?? "",
                   jsonField(block, "input"),
-                  jsonStringField(block, "id")
+                  jsonStringField(block, "id"),
+                  parent
                 )
               ]
             default:
@@ -123,6 +128,7 @@ export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> 
             ? [
                 toolResultChunk(jsonStringField(block, "tool_use_id"), {
                   failed: jsonField(block, "is_error") === true,
+                  ...parent,
                   ...outputOf(jsonField(block, "content"))
                 })
               ]
@@ -133,21 +139,38 @@ export const parseClaudeCliStreamLine = (line: string): ReadonlyArray<LlmChunk> 
       if (usage === undefined) {
         return []
       }
-      const prompt = jsonIntField(usage, "input_tokens") ?? 0
-      const completion = jsonIntField(usage, "output_tokens") ?? 0
-      const cached = jsonIntField(usage, "cache_read_input_tokens")
       // The CLI reports its own exact cost on the result event; carry it so
       // trackers prefer it over pricing-table estimates. modelUsage's key is
-      // a model-name fallback for when no init line was observed.
+      // a model-name fallback for when no init line was observed, and its
+      // per-model counts include the sub-agents' turns, which `usage` leaves
+      // out (ADR 0033): sum them when they are there.
       const costUsd = jsonNumberField(json, "total_cost_usd")
-      const modelUsage = jsonField(json, "modelUsage")
-      const modelNames =
-        modelUsage !== undefined &&
-        modelUsage !== null &&
-        typeof modelUsage === "object" &&
-        !Array.isArray(modelUsage)
-          ? Object.keys(modelUsage)
-          : []
+      const modelNames = jsonObjectEntries(jsonField(json, "modelUsage")).map(([name]) => name)
+      // Only entries that count tokens can replace `usage`; a key-only
+      // modelUsage (older CLIs, fixtures) still names the model.
+      const perModel = jsonObjectEntries(jsonField(json, "modelUsage")).filter(
+        ([, entry]) =>
+          jsonIntField(entry, "inputTokens") !== undefined ||
+          jsonIntField(entry, "outputTokens") !== undefined
+      )
+      const summed = perModel.reduce(
+        (sum, [, entry]) => ({
+          prompt: sum.prompt + (jsonIntField(entry, "inputTokens") ?? 0),
+          completion: sum.completion + (jsonIntField(entry, "outputTokens") ?? 0),
+          cached: sum.cached + (jsonIntField(entry, "cacheReadInputTokens") ?? 0)
+        }),
+        { prompt: 0, completion: 0, cached: 0 }
+      )
+      const prompt =
+        perModel.length === 0 ? (jsonIntField(usage, "input_tokens") ?? 0) : summed.prompt
+      const completion =
+        perModel.length === 0 ? (jsonIntField(usage, "output_tokens") ?? 0) : summed.completion
+      const cached =
+        perModel.length === 0
+          ? jsonIntField(usage, "cache_read_input_tokens")
+          : summed.cached === 0
+            ? undefined
+            : summed.cached
       return [
         usageEventChunk(
           modelNames.length === 1 ? modelNames[0] : undefined,

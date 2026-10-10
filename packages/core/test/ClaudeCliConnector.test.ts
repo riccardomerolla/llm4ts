@@ -215,6 +215,35 @@ describe("ClaudeCliConnector", () => {
   })
 })
 
+describe("ClaudeCliConnector sub-agents (ADR 0033)", () => {
+  it("marks a sub-agent's tool calls with the Agent call that spawned them", () => {
+    const spawn = parseClaudeCliStreamLine(
+      '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a1","name":"Agent","input":{"subagent_type":"Explore","prompt":"find x"}}]}}'
+    )[0]
+    assert.strictEqual(spawn?.metadata.tool_name, "Agent")
+    assert.isUndefined(spawn?.metadata.parent)
+    const inner = parseClaudeCliStreamLine(
+      '{"type":"assistant","parent_tool_use_id":"a1","message":{"content":[{"type":"tool_use","id":"r1","name":"Read","input":{"file_path":"x.ts"}}]}}'
+    )[0]
+    assert.strictEqual(inner?.metadata.parent, "a1")
+    const result = parseClaudeCliStreamLine(
+      '{"type":"user","parent_tool_use_id":"a1","message":{"content":[{"type":"tool_result","tool_use_id":"r1","content":"ok"}]}}'
+    )[0]
+    assert.strictEqual(result?.metadata.parent, "a1")
+  })
+
+  it("sums usage over every model in modelUsage, which includes sub-agents", () => {
+    const chunk = parseClaudeCliStreamLine(
+      '{"type":"result","usage":{"input_tokens":10,"output_tokens":5},"total_cost_usd":0.5,"modelUsage":{"claude-opus-5-5":{"inputTokens":10,"outputTokens":5,"cacheReadInputTokens":100},"claude-haiku-5-5":{"inputTokens":1000,"outputTokens":200,"cacheReadInputTokens":0}}}'
+    )[0]
+    assert.deepStrictEqual(
+      [chunk?.usage?.prompt, chunk?.usage?.completion, chunk?.usage?.cached, chunk?.usage?.costUsd],
+      [1010, 205, 100, 0.5]
+    )
+    assert.isUndefined(chunk?.metadata.model)
+  })
+})
+
 describe("ClaudeAgentSession", () => {
   it("frames argv and user turns as stream-json", () => {
     assert.deepStrictEqual(claudeSessionArgv("sonnet", ["--mcp-config", "x.json"]).slice(-4), [

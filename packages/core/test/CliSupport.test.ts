@@ -12,7 +12,8 @@ import {
   parseJsonLine,
   sortedFlagArgs,
   toolEventChunk,
-  usageEventChunk
+  usageEventChunk,
+  toolResultChunk
 } from "@llm4ts/core/providers/CliSupport"
 
 describe("CliSupport", () => {
@@ -75,4 +76,17 @@ describe("CliSupport", () => {
       assert.strictEqual(jsonObjectEntries(parsed === undefined ? undefined : parsed).length, 2)
     })
   )
+})
+
+describe("tool chunks (ADR 0033)", () => {
+  it("carries a parent tool id and a harness-reported duration on tool chunks", () => {
+    assert.strictEqual(
+      toolEventChunk("Read", { path: "a" }, "t2", { parent: "t1" }).metadata.parent,
+      "t1"
+    )
+    assert.isUndefined(toolEventChunk("Read", { path: "a" }, "t2").metadata.parent)
+    const ended = toolResultChunk("t2", { parent: "t1", durationMs: 420 }).metadata
+    assert.strictEqual(ended.parent, "t1")
+    assert.strictEqual(ended.tool_duration_ms, "420")
+  })
 })

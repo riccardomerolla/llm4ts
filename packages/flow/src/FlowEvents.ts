@@ -88,6 +88,8 @@ export class Info extends Schema.TaggedClass<Info>()("Info", {
 export class ToolUse extends Schema.TaggedClass<ToolUse>()("ToolUse", {
   tool: Schema.String,
   args: Schema.String,
+  /** The tool call this one runs inside, when a harness delegated it to a sub-agent (ADR 0033). */
+  parent: Schema.optionalKey(Schema.String),
   /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
   lane: Schema.optionalKey(Schema.String),
   /** The roster executor working that lane, when there is one (ADR 0019). */
@@ -538,6 +540,7 @@ const stamped = (
         : ToolUse.make({
             tool: event.tool,
             args: shortenLaneArgs(event.args, workDir),
+            ...(event.parent === undefined ? {} : { parent: event.parent }),
             ...tags
           })
     case "AssistantMessage":

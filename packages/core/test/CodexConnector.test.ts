@@ -220,3 +220,24 @@ describe("CodexConnector", () => {
     })
   )
 })
+
+describe("CodexConnector sub-agents (ADR 0033)", () => {
+  it("turns a spawn_agent collab call into a tool call and its completion into the result", () => {
+    const started = parseCodexStreamLine(
+      '{"type":"item.started","item":{"id":"c1","type":"collab_tool_call","tool":"spawn_agent","sender_thread_id":"t0","receiver_thread_ids":["t1"],"prompt":"write tests","status":"in_progress"}}'
+    )[0]
+    assert.strictEqual(started?.metadata.event, "tool_use")
+    assert.strictEqual(started?.metadata.tool_name, "spawn_agent")
+    assert.strictEqual(started?.metadata.tool_id, "c1")
+    assert.include(started?.metadata.tool_input ?? "", "write tests")
+    const done = parseCodexStreamLine(
+      '{"type":"item.completed","item":{"id":"c1","type":"collab_tool_call","tool":"spawn_agent","status":"completed","receiver_thread_ids":["t1"]}}'
+    )[0]
+    assert.strictEqual(done?.metadata.event, "tool_result")
+    assert.strictEqual(done?.metadata.tool_id, "c1")
+    const failed = parseCodexStreamLine(
+      '{"type":"item.completed","item":{"id":"c2","type":"collab_tool_call","tool":"wait","status":"failed"}}'
+    )[0]
+    assert.strictEqual(failed?.metadata.tool_failed, "true")
+  })
+})

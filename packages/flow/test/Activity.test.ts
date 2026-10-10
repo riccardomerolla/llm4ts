@@ -11,7 +11,7 @@ import {
   toolUseFrom,
   withToolActivity
 } from "@llm4ts/flow/Activity"
-import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
+import { ToolUse, makeCollectingFlowEvents, withLane } from "@llm4ts/flow/FlowEvents"
 
 const toolChunk = (name: string, input: string): LlmChunk =>
   LlmChunk.make({
@@ -225,6 +225,37 @@ describe("withToolActivity", () => {
         event._tag === "Timed" ? [[event.label, event.category]] : []
       )
       assert.deepStrictEqual(timed, [["bash", "test"]])
+    })
+  )
+})
+
+describe("delegation (ADR 0033)", () => {
+  it("classifies harness delegation as delegate and keeps the parent on a ToolUse", () => {
+    assert.strictEqual(toolCategory("Agent", "{}"), "delegate")
+    assert.strictEqual(toolCategory("Task", "{}"), "delegate")
+    assert.strictEqual(toolCategory("spawn_agent", "{}"), "delegate")
+    assert.strictEqual(toolCategory("codebase_investigator", "{}"), "delegate")
+    assert.strictEqual(toolCategory("Read", "{}"), "explore")
+    const use = toolUseFrom(
+      LlmChunk.make({
+        delta: "",
+        metadata: { event: "tool_use", tool_name: "Read", tool_input: "{}", parent: "a1" }
+      })
+    )
+    assert.strictEqual(use?.parent, "a1")
+  })
+
+  it.effect("keeps the parent when a lane stamps a ToolUse", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      yield* withLane(events, { lane: "S01" }).publish(
+        ToolUse.make({ tool: "Read", args: "x.ts", parent: "a1" })
+      )
+      const [event] = yield* events.recorded
+      assert.deepStrictEqual(event?._tag === "ToolUse" ? [event.lane, event.parent] : [], [
+        "S01",
+        "a1"
+      ])
     })
   )
 })
