@@ -820,6 +820,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
                       events: laneEvents,
                       eager: true,
                       label,
+                      ...(contextOptions?.ifFree === true ? { ifFree: true } : {}),
                       ...(contextOptions?.prefer === undefined
                         ? {}
                         : { prefer: contextOptions.prefer })

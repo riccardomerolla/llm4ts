@@ -438,6 +438,35 @@ const text = (service: LlmServiceShape, prompt: string): Effect.Effect<string, u
   )
 
 describe("Roster seats", () => {
+  it.effect(
+    "a coder held only if free takes a free slot now, or fails typed at once (ADR 0034)",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const events = yield* makeCollectingFlowEvents
+          const log = yield* Ref.make<ReadonlyArray<string>>([])
+          const roster = yield* makeRoster({ executors: [executor("solo", { slots: 1 })], events })
+          const source = { seatFor: seatFor(log, () => undefined) }
+          const first = yield* makeHeldCoder(roster, source, "/wt/a", {
+            events,
+            eager: true,
+            ifFree: true,
+            label: "S01#t2"
+          })
+          assert.strictEqual(yield* first.executor, "solo")
+          const second = yield* Effect.flip(
+            makeHeldCoder(roster, source, "/wt/b", {
+              events,
+              eager: true,
+              ifFree: true,
+              label: "S01#t3"
+            })
+          )
+          assert.strictEqual(second._tag, "RosterExhausted")
+        })
+      )
+  )
+
   it.effect("a held coder hands over when its executor is taken out, at most twice", () =>
     Effect.scoped(
       Effect.gen(function* () {
