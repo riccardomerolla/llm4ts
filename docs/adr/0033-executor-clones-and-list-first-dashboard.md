@@ -1,6 +1,6 @@
 # ADR 0033: Executor Clones And A List-First Watch Dashboard
 
-Status: Proposed · Date: 2026-10-10 · Amends ADR 0019 and ADR 0022
+Status: Accepted · Date: 2026-10-10 · Amends ADR 0019 and ADR 0022
 
 ## Context
 

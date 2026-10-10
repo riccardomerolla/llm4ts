@@ -55,9 +55,10 @@ run rate you expect — the numbers a budget needs. Measured token counts and
 character-count estimates stay in separate columns.
 
 `llm4ts run epic-stories --ui tree …` draws the run as an **agent tree**:
-the stories in flight on their executors, the judge's verdicts, the session
-log. `llm4ts watch` draws the same tree from any trace, live or afterwards,
-and replays it. More: [chapter 2](docs/guide/02-run-a-flow.md#watching-a-run-the-agent-tree).
+every agent in flight on one line (its story, its executor clone, its task),
+the selected story's task checklist, the judge's verdicts, the session log,
+and the epic and story boards. `llm4ts watch` draws the same tree from any
+trace, live or afterwards, and replays it. More: [chapter 2](docs/guide/02-run-a-flow.md#watching-a-run-the-agent-tree).
 With `--otel` the same run shows up in a local Arize Phoenix, or in any
 OpenTelemetry backend through the `OTEL_*` variables: [observability](docs/observability.md).
 `llm4ts profile --epic <id>` says where a run's time went — model, tools,

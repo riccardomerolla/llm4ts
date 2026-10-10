@@ -110,6 +110,7 @@ describe("agent tree", () => {
 
   it("draws the clones fixture as its golden frames, with a detail box for the latest lane", () => {
     golden("agent-tree.clones-120.txt", 120, initialView, clonesRun())
+    golden("agent-tree.clones-90.txt", 90, initialView, clonesRun())
     golden("agent-tree.boards-90.txt", 90, { ...initialView, mode: "boards" }, clonesRun())
   })
 

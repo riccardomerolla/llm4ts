@@ -123,3 +123,14 @@ as `~$`.
 - A web renderer over the same core.
 - Showing flows other than `epic-stories` beyond the generic lane view.
 - Retiring the classic status block.
+
+## Amendment (2026-10-10): the list replaces the lane boxes
+
+ADR 0033 supersedes the layout fixed to the video's shape: instead of up to
+three lane boxes, every running agent is one line of a list, sub-agents
+indented under their story, with one detail box for the selected lane (its
+task checklist, stage, tools, a harness pause) that follows the lane that
+moved last; `b` opens a third view mode, the boards. The list shrinks
+before the log on a short terminal. The core, the two hosts, the trace as
+the log, the typed roster events and the classic surface as default are
+unchanged.

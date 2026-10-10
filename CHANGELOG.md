@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.41.0
+
+A roster slot is a clone, every running agent is a line in the watch
+dashboard, and tasks, board moves and harness sub-agents are in the trace.
+
+- **A slot is a clone** (ADR 0033). `coderSlots` now defaults to `slots`;
+  a roster that kept a slot for reasoning sets it explicitly. Leases carry a
+  clone number: the roster log says `codex#2 takes coder for S01`, and the
+  dashboard, the cost ledger (`byExecutor`, report schema 3) and transcripts
+  show it. Independence stays at the executor level.
+- **List-first dashboard.** `llm4ts watch` and `--ui tree` list every
+  running story on one line each, with the harness's sub-agents indented,
+  and one detail box for the selected story: the task checklist with the
+  criteria each task satisfies, the stage, the tools, and a harness pause
+  (retrying, compacting). The three-box cap is gone; the list fits the
+  terminal and scrolls, and the selection follows the story that moved last
+  until a key picks one. `b` opens the boards: the epic board and the
+  selected story's task board.
+- **Tasks and board moves are events.** `TasksPlanned`, `TaskStarted`,
+  `TaskCompleted` and `StoryStatusChanged` are in the trace; the classic
+  surface prints nothing new.
+- **Sub-agents are observed.** Tool calls a harness delegated carry a
+  `parent`; Claude's `Agent`, Codex's `spawn_agent` and Gemini's agents are
+  the `delegate` tool category; Claude usage is summed over `modelUsage`,
+  which includes sub-agents.
+- **pi's richer events.** Retries and compaction show as a pause on the lane,
+  tool durations come from pi, nested calls carry their parent, and an
+  aborted turn is a typed failure.
+
 ## 2.40.1
 
 A read-only pi seat can no longer reach MCP write tools, and pi's package move

@@ -148,3 +148,13 @@ and the terminal says "on its own slot" or "on its own coder's slot".
 Independence is decided per call, so the next call goes back to an
 independent executor the moment one returns. The context's own executor,
 out of the round itself, is still waited past unless nobody can ever serve.
+
+## Amendment (2026-10-10): a slot is a clone
+
+ADR 0033 reads `slots` as the number of clones of an executor that may run
+at once, and gives every clone to coders by default: `coderSlots` defaults
+to `slots`, and a roster that wants a slot kept free for reasoning sets it.
+Each lease carries a clone number (`codex#2`) on `ExecutorLeased` and
+`ExecutorReleased`, in the roster log, the dashboard, the cost ledger and
+transcripts. Independence (decision 2) stays at the executor level: clones
+of one executor are the same model.

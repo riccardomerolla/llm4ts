@@ -106,56 +106,74 @@ branch is the story of the run and `git diff main` is the whole change.
 A run with several stories in flight (`epic-stories` on an executor roster)
 is easier to follow as a tree than as a scrolling log. Add `--ui tree` to
 `llm4ts run` and the terminal shows, full-screen, the orchestrator, the
-judge's latest verdict, one box per running story with the executor that
-holds it, every other story as a status chip, the judge seat, a session
-log, and the run's tokens and estimated cost:
+judge's latest verdict, every running agent on one line — the story, the
+executor clone that holds it (`codex#2` is the second of codex's `slots`),
+its task, how long it has run and what it cost — with the sub-agents the
+harness spawned indented under their story, then one detail box for the
+selected story: its task checklist with the acceptance criteria each task
+satisfies, its stage, its last tools, a harness pause (a provider retry, a
+context compaction), and its figures. Every other story is a status chip
+below; the judge seat, a session log, and the run's tokens and estimated
+cost frame it:
 
 ```text
-                        LLM4TS AGENT TREE  ·  epic conto-bonifico
+                          LLM4TS AGENT TREE  ·  epic bank-login
 ══════════════════════════════════════════════════════════════════════════════════════════
 
-┌────────────────────────┐          ┌─ epic conto-bonifico ──────────────────────┐
+┌────────────────────────┐          ┌─ epic bank-login ──────────────────────────┐
 │       JUDGE SEAT       │          │ stage  implement stories                   │
-│    claude · on call    │          │ stories 6  elapsed 7m10s                   │
+│    codex · on call     │          │ stories 8  elapsed 58s                     │
 │                        │          └────────────────────────────────────────────┘
 │ last verdict:          │                                •
-│ » accounts r2: cleared │  ┌─ JUDGMENT · accounts r2 ───────────────────────────────────┐
-│                        │  │ provides        ██████████  2/2                            │
-│ reviews            1   │  │ scope           ██████████  2/2                            │
-│ verdicts           2   │  │ house-style     ██████████  2/2                            │
-└────────────────────────┘  │ tests           ██████████  2/2                            │
-                            │ cleared → merge                                            │
+│ » S04 r1: 2 issues     │  ┌─ JUDGMENT · S04 r1 ────────────────────────────────────────┐
+│                        │  │ correctness     ████████░░  8/10                           │
+│ reviews            0   │  │ tests           ██████░░░░  6/10                           │
+│ verdicts           1   │  │ 2 issues → coder                                           │
+│ borrowed           1   │  └────────────────────────────────────────────────────────────┘
+└────────────────────────┘            agents · 5 running · codex ×3 · claude ×1
+                            ▸ ◐ S01 codex#1 · 3/5 wire session cookie · 47s · 48.0k tok
+                                └ sub-agent Agent Explore: find session middleware · Read…
+                              ◐ S02 codex#2 · 1/4 scaffold reset route · 27s · 0 tok
+                              ◐ S03 claude#1 · 2/3 verify otp in service · ⏸ pi compactio…
+                              ◐ S04 codex#3 · 5/5 tasks · story S04: judge 1 · 10s · 0 tok
+                              ◐ S05 (leasing) · starting · 2s · 0 tok
+                            ┌─ S01 · codex#1 · task 3/5 ─────────────────────────────────┐
+                            │ [x] 1 add login route                          satisfies 1 │
+                            │ [x] 2 validate credentials against user store  satisfies 1 │
+                            │ [▶] 3 wire session cookie                      satisfies 2 │
+                            │ [ ] 4 add e2e login test                       satisfies 3 │
+                            │ [ ] 5 update docs                              satisfies 3 │
+                            │ stage  wire session cookie                                 │
+                            │ 0s · Edit src/session/cookie.ts                            │
+                            │ tools  Agent Explore: find session middleware · Edit src/… │
+                            │ 47s · 48.0k tok · ~$0.44                                   │
+                            │ ◐ running                                                  │
                             └────────────────────────────────────────────────────────────┘
-                                            delegate to roster · 2 running
-                                                          ▼
-                            ┌────────────────────────────┐  ┌────────────────────────────┐
-                            │ payments                   │  │ overview                   │
-                            │ pi-lmstudio                │  │ codex                      │
-                            │ Payments fake routes       │  │ story overview: setup      │
-                            │ bash pnpm typecheck && pn… │  │ read src/features/conto/p… │
-                            │ 7m06s · 92.5k tok          │  │ 29s · 0 tok                │
-                            │ ◐ running                  │  │ ◐ running                  │
-                            └────────────────────────────┘  └────────────────────────────┘
 
-                            ✓ accounts  ◐ payments  ✗ iban  ◐ overview  · movimenti
-                            ◌ bonifico
+                            ◐ S01  ◐ S02  ◐ S03  ◐ S04  ◐ S05  · S06  · S07  ✓ S00
 
 ┌─ session log ──────────────────────────────────────────────────────────────────────────┐
-│ 00:05:30  judge            accounts r1 · 1 issue → coder                               │
-│ 00:06:35  judge            accounts r2 · cleared → merge                               │
-│ 00:06:39  accounts         merged into epic/conto-bonifico                             │
-│ 00:06:40  accounts         done                                                        │
-│ 00:06:42  roster           codex → coder · overview                                    │
+│ 00:00:32  roster           codex#2 → coder · S02                                       │
+│ 00:00:39  roster           claude#1 → coder · S03                                      │
+│ 00:00:49  roster           codex#3 → coder · S04                                       │
+│ 00:00:52  roster           judge borrowed from own executor codex · S04                │
+│ 00:00:53  judge            S04 r1 · 2 issues → coder                                   │
 └────────────────────────────────────────────────────────────────────────────────────────┘
-stories [1/6 done · 2 running · 1 failed · 1 waiting]  roster [2/4 busy]
-tokens [383.5k]  cost [~$0.38]  run [live]
+stories [1/8 done · 5 running · 0 failed · 0 waiting]  roster [2/2 busy]
+time [model 0% · tools 0% · gates 100% · wait 0%]
+tokens [48.0k]  cost [~$0.44]  run [live]
 ```
 
-Keys: `↑`/`↓` or `1`–`9` select a story, `enter` expands it (its stages and
-last tool calls), `e` switches to one column per executor, `l` shows the
-whole log, `q` hands the screen back to the classic view while the run goes
-on. `ctrl-c` still aborts. Off a terminal, below 90 columns, or with
-`NO_COLOR` set, the classic view is used.
+The detail box follows the story that moved last until you pick one.
+Keys: `↑`/`↓` or `1`–`9` select a story, `enter` expands its detail (every
+stage and tool call), `b` opens the boards — the epic's stories by column
+(planned, active, waiting, done, failed) and the selected story's tasks by
+column (todo, doing, review, done) — `e` switches to one box per executor
+with the leases it holds, `t` tails the selection's transcript, `l` shows
+the whole log, `q` hands the screen back to the classic view while the run
+goes on. `ctrl-c` still aborts. On a short terminal the agent list shrinks
+first (with a count of what is out of view), then the log. Off a terminal,
+below 90 columns, or with `NO_COLOR` set, the classic view is used.
 
 `llm4ts watch` draws the same tree from a trace file, from another terminal
 or after the run: `llm4ts watch --epic <id>` opens an epic's latest run,
