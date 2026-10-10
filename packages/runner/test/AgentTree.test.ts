@@ -14,6 +14,10 @@ import {
   JudgmentObserved,
   StoryJudged,
   StageStarted,
+  StoryStatusChanged,
+  TaskCompleted,
+  TaskStarted,
+  TasksPlanned,
   Timed,
   TokensUsed,
   ToolUse,
@@ -603,5 +607,114 @@ describe("agent tree", () => {
     assert.strictEqual(step(step(open, "pageup"), "pageup").tailBack, 20)
     assert.strictEqual(step(step(step(open, "pageup"), "pagedown"), "pagedown").tailBack, 0)
     assert.strictEqual(step(step(open, "pageup"), "escape").tailBack, 0)
+  })
+})
+
+describe("agent tree reducer (ADR 0033)", () => {
+  it("puts the coder's clone on its lane and counts a borrowed judge", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+      at(1, ExecutorLeased.make({ executor: "codex", role: "coder", label: "S01", clone: 2 })),
+      at(
+        2,
+        ExecutorLeased.make({
+          executor: "codex",
+          role: "judge",
+          label: "S01",
+          borrowed: true,
+          because: "nobody"
+        })
+      )
+    ])
+    assert.strictEqual(state.lanes[0]?.clone, 2)
+    assert.strictEqual(state.leases[0]?.clone, 2)
+    assert.strictEqual(state.judge.borrowed, 1)
+    assert.strictEqual(state.lastChanged, "S01")
+  })
+
+  it("keeps the task checklist, the running task and board moves", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+      at(
+        1,
+        TasksPlanned.make({
+          lane: "S01",
+          tasks: [
+            { title: "route", completed: true, satisfies: [1] },
+            { title: "cookie", completed: false, satisfies: [2] }
+          ]
+        })
+      ),
+      at(2, TaskStarted.make({ lane: "S01", index: 2, count: 2, title: "cookie", satisfies: [2] })),
+      at(3, StoryStatusChanged.make({ id: "S02", status: "waiting" })),
+      at(4, TaskCompleted.make({ lane: "S01", index: 2, count: 2, title: "cookie" }))
+    ])
+    const lane = state.lanes[0]
+    assert.deepStrictEqual(
+      lane?.tasks.map((task) => [task.index, task.done]),
+      [
+        [1, true],
+        [2, true]
+      ]
+    )
+    assert.isUndefined(lane?.task)
+    assert.strictEqual(state.stories.find((story) => story.id === "S02")?.status, "waiting")
+    const mid = fold([
+      at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+      at(2, TaskStarted.make({ lane: "S01", index: 2, count: 5, title: "cookie", satisfies: [2] }))
+    ])
+    assert.deepStrictEqual(mid.lanes[0]?.task, {
+      index: 2,
+      count: 5,
+      title: "cookie",
+      satisfies: [2]
+    })
+    assert.deepStrictEqual(
+      mid.lanes[0]?.tasks.map((task) => [task.index, task.done]),
+      [[2, false]]
+    )
+  })
+
+  it("nests a harness sub-agent under its lane and keeps a parentless tool on the lane", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+      at(1, ToolUse.make({ lane: "S01", tool: "Agent", args: "Explore: find x" })),
+      at(2, ToolUse.make({ lane: "S01", tool: "Read", args: "x.ts", parent: "a1" })),
+      at(3, ToolUse.make({ lane: "S01", tool: "Edit", args: "y.ts" }))
+    ])
+    const lane = state.lanes[0]
+    assert.strictEqual(lane?.children.length, 1)
+    assert.strictEqual(lane?.children[0]?.tool, "Agent")
+    assert.strictEqual(lane?.children[0]?.lastTool, "Read x.ts")
+    assert.strictEqual(lane?.lastTool, "Edit y.ts")
+    const ended = fold(
+      [
+        at(
+          4,
+          Timed.make({ lane: "S01", kind: "tool", label: "Agent", category: "delegate", ms: 3000 })
+        )
+      ],
+      state
+    )
+    assert.isTrue(ended.lanes[0]?.children[0]?.ended)
+    const orphan = fold([
+      at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+      at(1, ToolUse.make({ lane: "S01", tool: "Read", args: "x.ts", parent: "ghost" }))
+    ])
+    assert.strictEqual(orphan.lanes[0]?.children.length, 0)
+    assert.strictEqual(orphan.lanes[0]?.lastTool, "Read x.ts")
+  })
+
+  it("shows a harness pause as the lane's state while it lasts", () => {
+    const paused = fold([
+      at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+      at(1, Began.make({ lane: "S01", kind: "wait", label: "pi compaction" }))
+    ])
+    assert.deepStrictEqual(paused.lanes[0]?.pause, { label: "pi compaction", since: t0 + 1000 })
+    const over = fold(
+      [at(2, Timed.make({ lane: "S01", kind: "wait", label: "pi compaction", ms: 1000 }))],
+      paused
+    )
+    assert.isUndefined(over.lanes[0]?.pause)
   })
 })

@@ -1,7 +1,8 @@
 import type { TokenUsage } from "@llm4ts/core/Models"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { FlowEvent } from "@llm4ts/flow/FlowEvents"
+import { toolCategory } from "@llm4ts/flow/Activity"
+import { FlowEvent, cloneName } from "@llm4ts/flow/FlowEvents"
 import type { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { estimateCostUsd } from "@llm4ts/flow/PriceList"
 import { formatCount } from "./Terminal.ts"
@@ -48,6 +49,41 @@ export interface TreeLane {
   readonly gatesMs: number
   /** Work it said `Began` and no `Timed` has ended yet, innermost last. */
   readonly running: ReadonlyArray<TreeWork>
+  /** The coder's clone number, when its lease carried one (ADR 0033). */
+  readonly clone: number | undefined
+  /** The plan's tasks in order, as `TasksPlanned` and the task events reported them. */
+  readonly tasks: ReadonlyArray<TreeTask>
+  /** The running task: its index from 1 and the plan's count. */
+  readonly task:
+    | {
+        readonly index: number
+        readonly count: number
+        readonly title: string
+        readonly satisfies?: ReadonlyArray<number>
+      }
+    | undefined
+  /** Sub-agents the harness spawned on this lane (a delegate tool call), oldest first. */
+  readonly children: ReadonlyArray<TreeChild>
+  /** A harness pause under way: `pi retry`, `pi compaction`. */
+  readonly pause: { readonly label: string; readonly since: number } | undefined
+}
+
+/** One task of a lane's plan, as the checklist shows it. */
+export interface TreeTask {
+  readonly index: number
+  readonly title: string
+  readonly done: boolean
+  readonly satisfies?: ReadonlyArray<number>
+}
+
+/** A sub-agent a harness spawned inside a lane, observed through its tool calls (ADR 0033). */
+export interface TreeChild {
+  readonly id: string
+  readonly tool: string
+  readonly args: string
+  readonly since: number
+  readonly lastTool: string | undefined
+  readonly ended: boolean
 }
 
 /** Work under way: a model call, a gate or setup command, git, a merge, a wait. */
@@ -87,6 +123,8 @@ export interface TreeLease {
   readonly executor: string
   readonly role: string
   readonly label: string | undefined
+  /** Which clone took the slot, when the lease carried one (ADR 0033). */
+  readonly clone: number | undefined
 }
 
 /** The judge seat: who sits in it, and how often it was asked. */
@@ -94,6 +132,8 @@ export interface TreeJudge {
   readonly executor: string | undefined
   readonly reviews: number
   readonly verdicts: number
+  /** Reviews and verdicts that ran on the story's own executor: not independent (ADR 0033). */
+  readonly borrowed: number
 }
 
 /** The latest story verdict (`StoryJudged`). */
@@ -146,6 +186,8 @@ export interface TreeState {
   readonly running: ReadonlyArray<TreeWork>
   /** A lane with no event for this long, and no tool running, is marked idle. */
   readonly idleAfterMs: number
+  /** The lane that published last, which the detail box follows by default (ADR 0033). */
+  readonly lastChanged: string | undefined
 }
 
 export interface TreeOptions {
@@ -182,7 +224,7 @@ export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   executors: [],
   leases: [],
   exclusions: [],
-  judge: { executor: undefined, reviews: 0, verdicts: 0 },
+  judge: { executor: undefined, reviews: 0, verdicts: 0, borrowed: 0 },
   verdict: undefined,
   judgments: [],
   log: [],
@@ -191,7 +233,8 @@ export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   ended: undefined,
   time: { model: 0, tools: 0, gates: 0, merge: 0, wait: 0 },
   running: [],
-  idleAfterMs: options.idleAfterMs ?? defaultIdleAfterMs
+  idleAfterMs: options.idleAfterMs ?? defaultIdleAfterMs,
+  lastChanged: undefined
 })
 
 const costOf = (model: string | undefined, usage: TokenUsage): number =>
@@ -213,6 +256,25 @@ const updateLane = (
   ...state,
   lanes: state.lanes.map((lane) => (lane.id === id ? update(lane) : lane))
 })
+
+/** A wait label that is a harness pausing itself, not the roster or a gate. */
+const isPause = (label: string): boolean => /^pi (retry|compaction)$/u.test(label)
+
+const newestOpenChild = (children: ReadonlyArray<TreeChild>): number => {
+  for (let index = children.length - 1; index >= 0; index -= 1) {
+    if (children[index]?.ended === false) {
+      return index
+    }
+  }
+  return -1
+}
+
+const endNewestChild = (children: ReadonlyArray<TreeChild>): ReadonlyArray<TreeChild> => {
+  const index = newestOpenChild(children)
+  return index < 0
+    ? children
+    : children.map((child, position) => (position === index ? { ...child, ended: true } : child))
+}
 
 const withoutLast = <A>(items: ReadonlyArray<A>, item: A): ReadonlyArray<A> => {
   const index = items.lastIndexOf(item)
@@ -240,35 +302,45 @@ const withExecutor = (state: TreeState, executor: string): TreeState =>
 const rosterLog = (state: TreeState, at: number, what: string): TreeState =>
   logged(state, { at, source: "roster", who: "roster", what })
 
-const reduceLease = (state: TreeState, at: number, lease: TreeLease): TreeState => {
+const reduceLease = (
+  state: TreeState,
+  at: number,
+  lease: TreeLease,
+  borrowed: boolean
+): TreeState => {
   const held = { ...withExecutor(state, lease.executor), leases: [...state.leases, lease] }
+  const who = cloneName(lease.executor, lease.clone)
+  const forLabel = lease.label === undefined ? "" : ` · ${lease.label}`
   switch (lease.role) {
     case "coder": {
       const lane = held.lanes.find((candidate) => candidate.id === lease.label)
       const placed =
         lane === undefined
           ? held
-          : updateLane(held, lane.id, (open) => ({ ...open, executor: lease.executor }))
-      return rosterLog(
-        placed,
-        at,
-        `${lease.executor} → coder${lease.label === undefined ? "" : ` · ${lease.label}`}`
-      )
+          : updateLane(held, lane.id, (open) => ({
+              ...open,
+              executor: lease.executor,
+              clone: lease.clone
+            }))
+      return rosterLog(placed, at, `${who} → coder${forLabel}`)
     }
     case "reviewer":
-      return {
+    case "judge": {
+      const seat = {
         ...held,
         judge: {
           ...held.judge,
-          executor: held.judge.executor ?? lease.executor,
-          reviews: held.judge.reviews + 1
+          executor:
+            lease.role === "judge" ? lease.executor : (held.judge.executor ?? lease.executor),
+          reviews: held.judge.reviews + (lease.role === "reviewer" ? 1 : 0),
+          verdicts: held.judge.verdicts + (lease.role === "judge" ? 1 : 0),
+          borrowed: held.judge.borrowed + (borrowed ? 1 : 0)
         }
       }
-    case "judge":
-      return {
-        ...held,
-        judge: { ...held.judge, executor: lease.executor, verdicts: held.judge.verdicts + 1 }
-      }
+      return borrowed
+        ? rosterLog(seat, at, `${lease.role} borrowed from own executor ${who}${forLabel}`)
+        : seat
+    }
     default:
       return held
   }
@@ -292,11 +364,14 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
   const current =
     lane === undefined
       ? named
-      : updateLane(named, lane.id, (open) => ({
-          ...open,
-          lastEventAt: at,
-          ...(executor !== undefined && open.executor !== executor ? { executor } : {})
-        }))
+      : {
+          ...updateLane(named, lane.id, (open) => ({
+            ...open,
+            lastEventAt: at,
+            ...(executor !== undefined && open.executor !== executor ? { executor } : {})
+          })),
+          lastChanged: lane.id
+        }
   switch (event._tag) {
     case "StageStarted": {
       const story = storyStage.exec(event.stage)?.[1]
@@ -315,11 +390,17 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           activity: undefined,
           turns: [],
           gatesMs: 0,
-          running: []
+          running: [],
+          clone: undefined,
+          tasks: [],
+          task: undefined,
+          children: [],
+          pause: undefined
         }
         return {
           ...current,
-          lanes: [...current.lanes.filter((open) => open.id !== story), fresh]
+          lanes: [...current.lanes.filter((open) => open.id !== story), fresh],
+          lastChanged: story
         }
       }
       if (lane !== undefined) {
@@ -402,7 +483,14 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
               : event.kind === "model" && event.label === "coder"
                 ? { activity: undefined, turns: [...open.turns, event.ms] }
                 : {}),
-            gatesMs: open.gatesMs + (event.kind === "gate" ? event.ms : 0)
+            gatesMs: open.gatesMs + (event.kind === "gate" ? event.ms : 0),
+            // The delegate call ended: its sub-agent is done.
+            ...(event.kind === "tool" && event.category === "delegate"
+              ? { children: endNewestChild(open.children) }
+              : {}),
+            ...(event.kind === "wait" && open.pause?.label === event.label
+              ? { pause: undefined }
+              : {})
           }))
     }
     case "Began": {
@@ -411,7 +499,14 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         ? event.lane === undefined
           ? { ...current, running: [...current.running, work] }
           : current
-        : updateLane(current, lane.id, (open) => ({ ...open, running: [...open.running, work] }))
+        : updateLane(current, lane.id, (open) => ({
+            ...open,
+            running: [...open.running, work],
+            // A harness pause (`pi retry`, `pi compaction`) is the lane's state while it lasts.
+            ...(event.kind === "wait" && isPause(event.label)
+              ? { pause: { label: event.label, since: at } }
+              : {})
+          }))
     }
     case "StoryJudged": {
       const verdict: TreeVerdict = {
@@ -440,11 +535,12 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         ]
       }
     case "ExecutorLeased":
-      return reduceLease(current, at, {
-        executor: event.executor,
-        role: event.role,
-        label: event.label
-      })
+      return reduceLease(
+        current,
+        at,
+        { executor: event.executor, role: event.role, label: event.label, clone: event.clone },
+        event.borrowed === true
+      )
     case "ExecutorReleased": {
       const index = current.leases.findIndex(
         (lease) =>
@@ -486,15 +582,93 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         at,
         `${event.label ?? "the run"}: ${event.role} leaves ${event.from} · ${event.reason}`
       )
-    case "ToolUse":
+    case "ToolUse": {
+      if (lane === undefined) {
+        return current
+      }
+      const text = `${event.tool} ${event.args}`
+      return updateLane(current, lane.id, (open) => {
+        // A call inside a sub-agent lands on the newest open child; without
+        // one (an older harness, a lost parent) it is the lane's as before.
+        const child = event.parent === undefined ? -1 : newestOpenChild(open.children)
+        if (child >= 0) {
+          return {
+            ...open,
+            children: open.children.map((candidate, index) =>
+              index === child ? { ...candidate, lastTool: text } : candidate
+            )
+          }
+        }
+        const delegated =
+          toolCategory(event.tool, event.args) === "delegate"
+            ? [
+                ...open.children,
+                {
+                  id: `${open.id}:${open.children.length + 1}`,
+                  tool: event.tool,
+                  args: event.args,
+                  since: at,
+                  lastTool: undefined,
+                  ended: false
+                }
+              ]
+            : open.children
+        return {
+          ...open,
+          activity: { text, since: at, tool: true },
+          lastTool: text,
+          tools: [...open.tools, text].slice(-expandedTools),
+          children: delegated
+        }
+      })
+    }
+    case "TasksPlanned":
       return lane === undefined
         ? current
         : updateLane(current, lane.id, (open) => ({
             ...open,
-            activity: { text: `${event.tool} ${event.args}`, since: at, tool: true },
-            lastTool: `${event.tool} ${event.args}`,
-            tools: [...open.tools, `${event.tool} ${event.args}`].slice(-expandedTools)
+            tasks: event.tasks.map((task, position) => ({
+              index: position + 1,
+              title: task.title,
+              done: task.completed,
+              ...(task.satisfies === undefined ? {} : { satisfies: task.satisfies })
+            }))
           }))
+    case "TaskStarted": {
+      if (lane === undefined) {
+        return current
+      }
+      const satisfies = event.satisfies === undefined ? {} : { satisfies: event.satisfies }
+      return updateLane(current, lane.id, (open) => ({
+        ...open,
+        task: { index: event.index, count: event.count, title: event.title, ...satisfies },
+        tasks: open.tasks.some((task) => task.index === event.index)
+          ? open.tasks
+          : [
+              ...open.tasks,
+              { index: event.index, title: event.title, done: false, ...satisfies }
+            ].sort((left, right) => left.index - right.index)
+      }))
+    }
+    case "TaskCompleted":
+      return lane === undefined
+        ? current
+        : updateLane(current, lane.id, (open) => ({
+            ...open,
+            task: undefined,
+            tasks: open.tasks.map((task) =>
+              task.index === event.index ? { ...task, done: true } : task
+            )
+          }))
+    case "StoryStatusChanged":
+      return {
+        ...current,
+        stories: current.stories.some((story) => story.id === event.id)
+          ? current.stories.map((story) =>
+              story.id === event.id ? { ...story, status: event.status } : story
+            )
+          : [...current.stories, { id: event.id, status: event.status }]
+      }
     case "TokensUsed": {
       const tokens = event.usage.total
       const costUsd = costOf(event.model, event.usage)
