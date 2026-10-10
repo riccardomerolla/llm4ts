@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
 import { quoteWiql, type AzureDevOpsToolShape } from "./AzureDevOpsTool.ts"
 import { FlowAborted, type FlowError } from "./FlowError.ts"
+import { StoryStatusChanged, type FlowEventsShape } from "./FlowEvents.ts"
 import { loadVersioned, saveVersioned, type PlainFileStoreShape } from "./Persistence.ts"
 
 // The progress board of the conversion scenario: a port with the work-item
@@ -394,3 +395,22 @@ export const makeAdoBoardSync = Effect.fn("@llm4ts/flow/BoardSync.makeAdo")(func
     })
   }
 })
+
+/** A board whose every move is also a `StoryStatusChanged` event, so the trace carries the board (ADR 0033). */
+export const eventedBoard = (board: BoardSyncShape, events: FlowEventsShape): BoardSyncShape => {
+  const moved = (id: string, status: BoardStatus): Effect.Effect<void> =>
+    events.publish(StoryStatusChanged.make({ id, status }))
+  return {
+    plan: (items) =>
+      Effect.andThen(
+        board.plan(items),
+        Effect.forEach(items, (item) => moved(item.id, item.status), { discard: true })
+      ),
+    start: (id) => Effect.andThen(board.start(id), moved(id, "active")),
+    complete: (id, result) => Effect.andThen(board.complete(id, result), moved(id, "done")),
+    fail: (id, reason) => Effect.andThen(board.fail(id, reason), moved(id, "failed")),
+    skip: (id, reason) => Effect.andThen(board.skip(id, reason), moved(id, "skipped")),
+    wait: (id, reason) => Effect.andThen(board.wait(id, reason), moved(id, "waiting")),
+    snapshot: board.snapshot
+  }
+}

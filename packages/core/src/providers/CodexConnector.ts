@@ -97,15 +97,31 @@ export const parseCodexStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
   switch (jsonStringField(json, "type")) {
     case "item.started": {
       const item = jsonField(json, "item")
-      return jsonStringField(item, "type") === "command_execution"
-        ? [
+      switch (jsonStringField(item, "type")) {
+        case "command_execution":
+          return [
             toolEventChunk(
               "Bash",
               { command: jsonStringField(item, "command") ?? "" },
               jsonStringField(item, "id")
             )
           ]
-        : []
+        // A sub-agent call (spawn_agent, wait, send_input, close_agent): the
+        // delegation shows as a tool, its threads as the arguments (ADR 0033).
+        case "collab_tool_call":
+          return [
+            toolEventChunk(
+              jsonStringField(item, "tool") ?? "collab",
+              {
+                prompt: jsonStringField(item, "prompt") ?? "",
+                receivers: jsonField(item, "receiver_thread_ids") ?? []
+              },
+              jsonStringField(item, "id")
+            )
+          ]
+        default:
+          return []
+      }
     }
     case "item.completed": {
       const item = jsonField(json, "item")
@@ -129,6 +145,13 @@ export const parseCodexStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
             })
           ]
         }
+        case "collab_tool_call":
+          return [
+            toolResultChunk(jsonStringField(item, "id"), {
+              failed: jsonStringField(item, "status") === "failed",
+              tool: jsonStringField(item, "tool") ?? "collab"
+            })
+          ]
         default:
           return []
       }

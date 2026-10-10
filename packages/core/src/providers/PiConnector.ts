@@ -21,7 +21,8 @@ import {
   toolResultChunk,
   toolResultText,
   usageEventChunk,
-  versionTriple
+  versionTriple,
+  statusChunk
 } from "./CliSupport.ts"
 
 /**
@@ -95,27 +96,40 @@ export const parsePiStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
           : undefined
       return delta === undefined || delta.length === 0 ? [] : [LlmChunk.make({ delta })]
     }
-    case "tool_execution_start":
+    // A call nested in another (codemode) names its parent (ADR 0033).
+    case "tool_execution_start": {
+      const parent = jsonStringField(json, "parentToolCallId")
       return [
         toolEventChunk(
           jsonStringField(json, "toolName") ?? "",
           jsonField(json, "args"),
-          jsonStringField(json, "toolCallId")
+          jsonStringField(json, "toolCallId"),
+          parent === undefined ? {} : { parent }
         )
       ]
-    case "tool_execution_end":
+    }
+    case "tool_execution_end": {
+      const parent = jsonStringField(json, "parentToolCallId")
+      const durationMs = jsonIntField(json, "durationMs")
       return [
         toolResultChunk(jsonStringField(json, "toolCallId"), {
           failed: jsonField(json, "isError") === true,
+          ...(parent === undefined ? {} : { parent }),
+          ...(durationMs === undefined ? {} : { durationMs }),
           ...(() => {
             const output = toolResultText(jsonField(jsonField(json, "result"), "content"))
             return output === undefined ? {} : { output }
           })()
         })
       ]
+    }
     case "message_end":
     case "agent_end": {
       const message = jsonField(json, "message")
+      // An aborted turn (a signal, a steer) is not a reply either.
+      if (jsonStringField(message, "stopReason") === "aborted") {
+        return [LlmChunk.make({ delta: "", metadata: { piError: "pi aborted the turn" } })]
+      }
       // pi reports a provider refusal (a usage limit, an auth failure) as an
       // assistant message that stopped with an error and exits 0; without
       // this it reads as an empty, successful reply.
@@ -148,6 +162,10 @@ export const parsePiStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
         )
       ]
     }
+    // A provider retry and a context compaction pause the turn: the lane
+    // says so instead of looking stuck (ADR 0033).
+    case "auto_retry_start":
+      return [statusChunk("retrying", "start", jsonStringField(json, "errorMessage"))]
     case "auto_retry_end":
       return jsonBooleanField(json, "success") === false
         ? [
@@ -158,7 +176,11 @@ export const parsePiStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
               }
             })
           ]
-        : []
+        : [statusChunk("retrying", "end")]
+    case "compaction_start":
+      return [statusChunk("compacting", "start")]
+    case "compaction_end":
+      return [statusChunk("compacting", "end")]
     case "extension_error":
       return [
         LlmChunk.make({

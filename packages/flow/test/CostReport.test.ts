@@ -66,6 +66,61 @@ const sample = (
   })
 
 describe("usageSamplesFromTrace", () => {
+  it("keeps the executor and clone of a lane's usage and groups cost by clone", () => {
+    const usage = TokenUsage.make({ prompt: 100, completion: 50, total: 150 })
+    const line = (seq: number, event: TokensUsed): TraceLine =>
+      traceLine(seq, at("2026-09-18T10:00:00Z") + seq, "run-a", "TokensUsed", event)
+    const samples = usageSamplesFromTrace([
+      line(
+        1,
+        TokensUsed.make({
+          agent: "coder",
+          model: "gpt-5.5",
+          usage,
+          lane: "S01",
+          executor: "codex",
+          clone: 2
+        })
+      ),
+      line(
+        2,
+        TokensUsed.make({
+          agent: "coder",
+          model: "gpt-5.5",
+          usage,
+          lane: "S02",
+          executor: "codex",
+          clone: 1
+        })
+      ),
+      line(3, TokensUsed.make({ agent: "judge", model: "gpt-5.5", usage })),
+      // A judge that ran on the lane's events but another executor: the lane's clone is not its own.
+      line(
+        4,
+        TokensUsed.make({ agent: "judge", model: "gpt-5.5", usage, lane: "S01", executor: "codex" })
+      )
+    ])
+    assert.deepStrictEqual(
+      samples.map((entry) => [entry.executor, entry.clone]),
+      [
+        ["codex", 2],
+        ["codex", 1],
+        [undefined, undefined],
+        ["codex", undefined]
+      ]
+    )
+    const report = buildCostReport(samples)
+    assert.strictEqual(report.schemaVersion, 3)
+    assert.deepStrictEqual(
+      report.byExecutor.map((row) => [row.executor, row.totals.total]),
+      [
+        ["codex#1", 150],
+        ["codex#2", 150]
+      ]
+    )
+    assert.include(renderCostReport(report), "codex#2")
+  })
+
   it("keeps only well-formed TokensUsed lines and prices them like the tracker", () => {
     const measured = TokenUsage.make({ prompt: 1_000_000, completion: 100_000, total: 1_100_000 })
     const reported = TokenUsage.make({ prompt: 10, completion: 5, total: 15, costUsd: 0.5 })

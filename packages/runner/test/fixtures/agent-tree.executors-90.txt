@@ -13,8 +13,7 @@
 └────────────────────────┘  │ tests           ██████████  2/2                            │
                             │ cleared → merge                                            │
                             └────────────────────────────────────────────────────────────┘
-                                            delegate to roster · 2 running                
-                                                          ▼                               
+                                    agents · 2 running · codex ×1 · pi-lmstudio ×1        
                             ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐
                             │ codex      │  │ pi-lmstud… │  │ lemonade   │  │ claude     │
                             │ coder · o… │  │ coder · p… │  │ no lease   │  │ no lease   │

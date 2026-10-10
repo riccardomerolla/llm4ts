@@ -1,6 +1,6 @@
 # ADR 0033: Executor Clones And A List-First Watch Dashboard
 
-Status: Proposed · Date: 2026-10-10 · Amends ADR 0019 and ADR 0022
+Status: Accepted · Date: 2026-10-10 · Amends ADR 0019 and ADR 0022
 
 ## Context
 
@@ -89,3 +89,8 @@ executor` on the lane and in the rail, so a one-executor roster is never
   number.
 - `parent` is optional everywhere, so flows and tools that never set it are
   unchanged.
+- In 2.41 Codex delegation shows as its collab tool calls (`spawn_agent`,
+  `wait`, `close_agent`) without a `parent`: whether a child thread's own
+  items reach the parent's JSONL is unverified. The tree keeps a spawned
+  sub-agent open until a `wait` or `close_agent` ends it. Thread-id parents
+  come with the delegation knob (ADR 0035).

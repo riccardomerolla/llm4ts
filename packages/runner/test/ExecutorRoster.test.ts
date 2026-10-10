@@ -226,6 +226,7 @@ describe("llm4ts roster", () => {
             harness: "claude",
             roles: ["coder", "judge"],
             slots: 3,
+            coderSlots: 2,
             priority: { coder: 3, default: 1 }
           }
         ])
@@ -298,6 +299,7 @@ describe("a run served from a roster", () => {
               harness: "codex",
               roles: ["coder", "reviewer", "judge"],
               slots: 2,
+              coderSlots: 1,
               priority: { coder: 2, default: 2 }
             }),
             ExecutorSpec.make({
@@ -305,6 +307,7 @@ describe("a run served from a roster", () => {
               harness: "claude",
               roles: ["coder", "planner", "reviewer", "judge", "verifier"],
               slots: 3,
+              coderSlots: 2,
               priority: { coder: 3, default: 1 }
             })
           ]

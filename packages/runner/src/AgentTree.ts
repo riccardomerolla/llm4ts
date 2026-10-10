@@ -1,7 +1,8 @@
 import type { TokenUsage } from "@llm4ts/core/Models"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { FlowEvent } from "@llm4ts/flow/FlowEvents"
+import { toolCategory } from "@llm4ts/flow/Activity"
+import { FlowEvent, cloneName } from "@llm4ts/flow/FlowEvents"
 import type { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { estimateCostUsd } from "@llm4ts/flow/PriceList"
 import { formatCount } from "./Terminal.ts"
@@ -48,6 +49,41 @@ export interface TreeLane {
   readonly gatesMs: number
   /** Work it said `Began` and no `Timed` has ended yet, innermost last. */
   readonly running: ReadonlyArray<TreeWork>
+  /** The coder's clone number, when its lease carried one (ADR 0033). */
+  readonly clone: number | undefined
+  /** The plan's tasks in order, as `TasksPlanned` and the task events reported them. */
+  readonly tasks: ReadonlyArray<TreeTask>
+  /** The running task: its index from 1 and the plan's count. */
+  readonly task:
+    | {
+        readonly index: number
+        readonly count: number
+        readonly title: string
+        readonly satisfies?: ReadonlyArray<number>
+      }
+    | undefined
+  /** Sub-agents the harness spawned on this lane (a delegate tool call), oldest first. */
+  readonly children: ReadonlyArray<TreeChild>
+  /** A harness pause under way: `pi retry`, `pi compaction`. */
+  readonly pause: { readonly label: string; readonly since: number } | undefined
+}
+
+/** One task of a lane's plan, as the checklist shows it. */
+export interface TreeTask {
+  readonly index: number
+  readonly title: string
+  readonly done: boolean
+  readonly satisfies?: ReadonlyArray<number>
+}
+
+/** A sub-agent a harness spawned inside a lane, observed through its tool calls (ADR 0033). */
+export interface TreeChild {
+  readonly id: string
+  readonly tool: string
+  readonly args: string
+  readonly since: number
+  readonly lastTool: string | undefined
+  readonly ended: boolean
 }
 
 /** Work under way: a model call, a gate or setup command, git, a merge, a wait. */
@@ -87,6 +123,8 @@ export interface TreeLease {
   readonly executor: string
   readonly role: string
   readonly label: string | undefined
+  /** Which clone took the slot, when the lease carried one (ADR 0033). */
+  readonly clone: number | undefined
 }
 
 /** The judge seat: who sits in it, and how often it was asked. */
@@ -94,6 +132,8 @@ export interface TreeJudge {
   readonly executor: string | undefined
   readonly reviews: number
   readonly verdicts: number
+  /** Reviews and verdicts that ran on the story's own executor: not independent (ADR 0033). */
+  readonly borrowed: number
 }
 
 /** The latest story verdict (`StoryJudged`). */
@@ -146,6 +186,8 @@ export interface TreeState {
   readonly running: ReadonlyArray<TreeWork>
   /** A lane with no event for this long, and no tool running, is marked idle. */
   readonly idleAfterMs: number
+  /** The lane that published last, which the detail box follows by default (ADR 0033). */
+  readonly lastChanged: string | undefined
 }
 
 export interface TreeOptions {
@@ -182,7 +224,7 @@ export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   executors: [],
   leases: [],
   exclusions: [],
-  judge: { executor: undefined, reviews: 0, verdicts: 0 },
+  judge: { executor: undefined, reviews: 0, verdicts: 0, borrowed: 0 },
   verdict: undefined,
   judgments: [],
   log: [],
@@ -191,7 +233,8 @@ export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   ended: undefined,
   time: { model: 0, tools: 0, gates: 0, merge: 0, wait: 0 },
   running: [],
-  idleAfterMs: options.idleAfterMs ?? defaultIdleAfterMs
+  idleAfterMs: options.idleAfterMs ?? defaultIdleAfterMs,
+  lastChanged: undefined
 })
 
 const costOf = (model: string | undefined, usage: TokenUsage): number =>
@@ -213,6 +256,40 @@ const updateLane = (
   ...state,
   lanes: state.lanes.map((lane) => (lane.id === id ? update(lane) : lane))
 })
+
+/** A wait label that is a harness pausing itself, not the roster or a gate. */
+const isPause = (label: string): boolean => /^pi (retry|compaction)$/u.test(label)
+
+/**
+ * A delegate tool that starts a sub-agent: Claude's Agent (Task before
+ * 2.1.63), Codex's spawn_agent, Gemini's agents. Codex's wait, send_input,
+ * resume_agent and close_agent act on one that exists.
+ */
+const spawningTools =
+  /^(agent|task|spawn_agent|codebase_investigator|generalist|cli_help|browser_agent)$/iu
+
+/**
+ * A delegate call whose end ends the sub-agent: a synchronous one (Agent,
+ * a Gemini agent) or Codex's wait and close; spawn_agent returns at once
+ * with the sub-agent still running (ADR 0033).
+ */
+const endsChild = (tool: string): boolean => !/^(spawn_agent|send_input|resume_agent)$/iu.test(tool)
+
+const newestOpenChild = (children: ReadonlyArray<TreeChild>): number => {
+  for (let index = children.length - 1; index >= 0; index -= 1) {
+    if (children[index]?.ended === false) {
+      return index
+    }
+  }
+  return -1
+}
+
+const endNewestChild = (children: ReadonlyArray<TreeChild>): ReadonlyArray<TreeChild> => {
+  const index = newestOpenChild(children)
+  return index < 0
+    ? children
+    : children.map((child, position) => (position === index ? { ...child, ended: true } : child))
+}
 
 const withoutLast = <A>(items: ReadonlyArray<A>, item: A): ReadonlyArray<A> => {
   const index = items.lastIndexOf(item)
@@ -240,35 +317,45 @@ const withExecutor = (state: TreeState, executor: string): TreeState =>
 const rosterLog = (state: TreeState, at: number, what: string): TreeState =>
   logged(state, { at, source: "roster", who: "roster", what })
 
-const reduceLease = (state: TreeState, at: number, lease: TreeLease): TreeState => {
+const reduceLease = (
+  state: TreeState,
+  at: number,
+  lease: TreeLease,
+  borrowed: boolean
+): TreeState => {
   const held = { ...withExecutor(state, lease.executor), leases: [...state.leases, lease] }
+  const who = cloneName(lease.executor, lease.clone)
+  const forLabel = lease.label === undefined ? "" : ` · ${lease.label}`
   switch (lease.role) {
     case "coder": {
       const lane = held.lanes.find((candidate) => candidate.id === lease.label)
       const placed =
         lane === undefined
           ? held
-          : updateLane(held, lane.id, (open) => ({ ...open, executor: lease.executor }))
-      return rosterLog(
-        placed,
-        at,
-        `${lease.executor} → coder${lease.label === undefined ? "" : ` · ${lease.label}`}`
-      )
+          : updateLane(held, lane.id, (open) => ({
+              ...open,
+              executor: lease.executor,
+              clone: lease.clone
+            }))
+      return rosterLog(placed, at, `${who} → coder${forLabel}`)
     }
     case "reviewer":
-      return {
+    case "judge": {
+      const seat = {
         ...held,
         judge: {
           ...held.judge,
-          executor: held.judge.executor ?? lease.executor,
-          reviews: held.judge.reviews + 1
+          executor:
+            lease.role === "judge" ? lease.executor : (held.judge.executor ?? lease.executor),
+          reviews: held.judge.reviews + (lease.role === "reviewer" ? 1 : 0),
+          verdicts: held.judge.verdicts + (lease.role === "judge" ? 1 : 0),
+          borrowed: held.judge.borrowed + (borrowed ? 1 : 0)
         }
       }
-    case "judge":
-      return {
-        ...held,
-        judge: { ...held.judge, executor: lease.executor, verdicts: held.judge.verdicts + 1 }
-      }
+      return borrowed
+        ? rosterLog(seat, at, `${lease.role} borrowed from own executor ${who}${forLabel}`)
+        : seat
+    }
     default:
       return held
   }
@@ -292,11 +379,14 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
   const current =
     lane === undefined
       ? named
-      : updateLane(named, lane.id, (open) => ({
-          ...open,
-          lastEventAt: at,
-          ...(executor !== undefined && open.executor !== executor ? { executor } : {})
-        }))
+      : {
+          ...updateLane(named, lane.id, (open) => ({
+            ...open,
+            lastEventAt: at,
+            ...(executor !== undefined && open.executor !== executor ? { executor } : {})
+          })),
+          lastChanged: lane.id
+        }
   switch (event._tag) {
     case "StageStarted": {
       const story = storyStage.exec(event.stage)?.[1]
@@ -315,11 +405,17 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           activity: undefined,
           turns: [],
           gatesMs: 0,
-          running: []
+          running: [],
+          clone: undefined,
+          tasks: [],
+          task: undefined,
+          children: [],
+          pause: undefined
         }
         return {
           ...current,
-          lanes: [...current.lanes.filter((open) => open.id !== story), fresh]
+          lanes: [...current.lanes.filter((open) => open.id !== story), fresh],
+          lastChanged: story
         }
       }
       if (lane !== undefined) {
@@ -402,7 +498,15 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
               : event.kind === "model" && event.label === "coder"
                 ? { activity: undefined, turns: [...open.turns, event.ms] }
                 : {}),
-            gatesMs: open.gatesMs + (event.kind === "gate" ? event.ms : 0)
+            gatesMs: open.gatesMs + (event.kind === "gate" ? event.ms : 0),
+            // The delegate call ended: its sub-agent is done — unless it was
+            // only spawned, and runs on until a wait or close.
+            ...(event.kind === "tool" && event.category === "delegate" && endsChild(event.label)
+              ? { children: endNewestChild(open.children) }
+              : {}),
+            ...(event.kind === "wait" && open.pause?.label === event.label
+              ? { pause: undefined }
+              : {})
           }))
     }
     case "Began": {
@@ -411,7 +515,14 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         ? event.lane === undefined
           ? { ...current, running: [...current.running, work] }
           : current
-        : updateLane(current, lane.id, (open) => ({ ...open, running: [...open.running, work] }))
+        : updateLane(current, lane.id, (open) => ({
+            ...open,
+            running: [...open.running, work],
+            // A harness pause (`pi retry`, `pi compaction`) is the lane's state while it lasts.
+            ...(event.kind === "wait" && isPause(event.label)
+              ? { pause: { label: event.label, since: at } }
+              : {})
+          }))
     }
     case "StoryJudged": {
       const verdict: TreeVerdict = {
@@ -440,11 +551,12 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         ]
       }
     case "ExecutorLeased":
-      return reduceLease(current, at, {
-        executor: event.executor,
-        role: event.role,
-        label: event.label
-      })
+      return reduceLease(
+        current,
+        at,
+        { executor: event.executor, role: event.role, label: event.label, clone: event.clone },
+        event.borrowed === true
+      )
     case "ExecutorReleased": {
       const index = current.leases.findIndex(
         (lease) =>
@@ -486,15 +598,93 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         at,
         `${event.label ?? "the run"}: ${event.role} leaves ${event.from} · ${event.reason}`
       )
-    case "ToolUse":
+    case "ToolUse": {
+      if (lane === undefined) {
+        return current
+      }
+      const text = `${event.tool} ${event.args}`
+      return updateLane(current, lane.id, (open) => {
+        // A call inside a sub-agent lands on the newest open child; without
+        // one (an older harness, a lost parent) it is the lane's as before.
+        const child = event.parent === undefined ? -1 : newestOpenChild(open.children)
+        if (child >= 0) {
+          return {
+            ...open,
+            children: open.children.map((candidate, index) =>
+              index === child ? { ...candidate, lastTool: text } : candidate
+            )
+          }
+        }
+        const delegated =
+          toolCategory(event.tool, event.args) === "delegate" && spawningTools.test(event.tool)
+            ? [
+                ...open.children,
+                {
+                  id: `${open.id}:${open.children.length + 1}`,
+                  tool: event.tool,
+                  args: event.args,
+                  since: at,
+                  lastTool: undefined,
+                  ended: false
+                }
+              ]
+            : open.children
+        return {
+          ...open,
+          activity: { text, since: at, tool: true },
+          lastTool: text,
+          tools: [...open.tools, text].slice(-expandedTools),
+          children: delegated
+        }
+      })
+    }
+    case "TasksPlanned":
       return lane === undefined
         ? current
         : updateLane(current, lane.id, (open) => ({
             ...open,
-            activity: { text: `${event.tool} ${event.args}`, since: at, tool: true },
-            lastTool: `${event.tool} ${event.args}`,
-            tools: [...open.tools, `${event.tool} ${event.args}`].slice(-expandedTools)
+            tasks: event.tasks.map((task, position) => ({
+              index: position + 1,
+              title: task.title,
+              done: task.completed,
+              ...(task.satisfies === undefined ? {} : { satisfies: task.satisfies })
+            }))
           }))
+    case "TaskStarted": {
+      if (lane === undefined) {
+        return current
+      }
+      const satisfies = event.satisfies === undefined ? {} : { satisfies: event.satisfies }
+      return updateLane(current, lane.id, (open) => ({
+        ...open,
+        task: { index: event.index, count: event.count, title: event.title, ...satisfies },
+        tasks: open.tasks.some((task) => task.index === event.index)
+          ? open.tasks
+          : [
+              ...open.tasks,
+              { index: event.index, title: event.title, done: false, ...satisfies }
+            ].sort((left, right) => left.index - right.index)
+      }))
+    }
+    case "TaskCompleted":
+      return lane === undefined
+        ? current
+        : updateLane(current, lane.id, (open) => ({
+            ...open,
+            task: undefined,
+            tasks: open.tasks.map((task) =>
+              task.index === event.index ? { ...task, done: true } : task
+            )
+          }))
+    case "StoryStatusChanged":
+      return {
+        ...current,
+        stories: current.stories.some((story) => story.id === event.id)
+          ? current.stories.map((story) =>
+              story.id === event.id ? { ...story, status: event.status } : story
+            )
+          : [...current.stories, { id: event.id, status: event.status }]
+      }
     case "TokensUsed": {
       const tokens = event.usage.total
       const costUsd = costOf(event.model, event.usage)
@@ -698,12 +888,12 @@ const paint = (line: Line, colour: boolean): string =>
     )
     .join("")
 
-export type TreeMode = "lanes" | "executors"
+export type TreeMode = "lanes" | "executors" | "boards"
 
 /** What the reader chose to look at; the run's state is separate. */
 export interface TreeView {
   readonly mode: TreeMode
-  /** The selected lane's story id, or in the executors view the executor. */
+  /** The selected lane's story id, or in the executors view the executor; unset follows the lane that moved last. */
   readonly selected: string | undefined
   readonly expanded: boolean
   readonly fullLog: boolean
@@ -713,6 +903,8 @@ export interface TreeView {
   readonly tailRole: string | undefined
   /** How many lines the tail is scrolled back from its end (page up/down). */
   readonly tailBack: number
+  /** The first row of the agent list shown, when the list is taller than its room. */
+  readonly scroll: number
 }
 
 export const initialView: TreeView = {
@@ -722,11 +914,26 @@ export const initialView: TreeView = {
   fullLog: false,
   tail: false,
   tailRole: undefined,
-  tailBack: 0
+  tailBack: 0,
+  scroll: 0
 }
 
 const runningLanes = (state: TreeState): ReadonlyArray<TreeLane> =>
   state.lanes.filter((lane) => lane.status === "running")
+
+/**
+ * The lane the detail box is about: the selection, else the lane that moved
+ * last, else the first running one — so an unattended screen still shows
+ * what is happening (ADR 0033).
+ */
+export const selectedLane = (state: TreeState, view: TreeView): TreeLane | undefined => {
+  const running = runningLanes(state)
+  return (
+    running.find((lane) => lane.id === view.selected) ??
+    running.find((lane) => lane.id === state.lastChanged) ??
+    running[0]
+  )
+}
 
 const tailRoles: ReadonlyArray<string | undefined> = [undefined, "coder", "reviewer", "judge"]
 const tailPage = 10
@@ -737,24 +944,31 @@ export const tailTargetOf = (
 ): { readonly lane: string } | { readonly executor: string } | undefined =>
   view.selected === undefined
     ? undefined
-    : view.mode === "lanes"
-      ? { lane: view.selected }
-      : { executor: view.selected }
+    : view.mode === "executors"
+      ? { executor: view.selected }
+      : { lane: view.selected }
 
 /**
  * The view after a key: arrows or 1–9 select a running lane (an executor in
- * the executors view), enter expands it, `t` tails its transcript, `r`
- * cycles the tail's role, escape closes, `e` switches lanes and executors,
- * `l` the full log, `q` quits. Keys it does not know return the same view.
+ * the executors view), enter expands its detail, `t` tails its transcript,
+ * `r` cycles the tail's role, escape closes, `e` switches lanes and
+ * executors, `b` the boards, `l` the full log, `q` quits. Keys it does not
+ * know return the same view.
  */
 export const onTreeKey = (view: TreeView, key: string, state: TreeState): TreeView | "quit" => {
   const choices =
-    view.mode === "lanes" ? runningLanes(state).map((lane) => lane.id) : state.executors
-  const index = choices.findIndex((id) => id === view.selected)
+    view.mode === "executors" ? state.executors : runningLanes(state).map((lane) => lane.id)
+  const current = view.mode === "executors" ? view.selected : selectedLane(state, view)?.id
+  const index = choices.findIndex((id) => id === current)
   const select = (next: number): TreeView => {
-    const id = choices[Math.max(0, Math.min(choices.length - 1, next))]
-    return id === undefined ? view : { ...view, selected: id }
+    const row = Math.max(0, Math.min(choices.length - 1, next))
+    const id = choices[row]
+    return id === undefined
+      ? view
+      : { ...view, selected: id, scroll: row < view.scroll ? row : view.scroll }
   }
+  const chosen = (): string | undefined =>
+    view.mode === "executors" ? view.selected : selectedLane(state, view)?.id
   switch (key) {
     case "q":
       return "quit"
@@ -765,13 +979,15 @@ export const onTreeKey = (view: TreeView, key: string, state: TreeState): TreeVi
     case "left":
       return select(index < 0 ? 0 : index - 1)
     case "enter":
-      return view.selected === undefined || view.mode !== "lanes"
+      return view.mode === "executors" || chosen() === undefined
         ? view
         : { ...view, expanded: !view.expanded }
-    case "t":
-      return view.selected === undefined
+    case "t": {
+      const id = chosen()
+      return id === undefined
         ? view
-        : { ...view, tail: !view.tail, expanded: false, tailBack: 0 }
+        : { ...view, selected: id, tail: !view.tail, expanded: false, tailBack: 0 }
+    }
     case "pageup":
       return view.tail ? { ...view, tailBack: view.tailBack + tailPage } : view
     case "pagedown":
@@ -788,8 +1004,16 @@ export const onTreeKey = (view: TreeView, key: string, state: TreeState): TreeVi
     case "e":
       return {
         ...view,
-        mode: view.mode === "lanes" ? "executors" : "lanes",
+        mode: view.mode === "executors" ? "lanes" : "executors",
         selected: undefined,
+        expanded: false,
+        tail: false,
+        scroll: 0
+      }
+    case "b":
+      return {
+        ...view,
+        mode: view.mode === "boards" ? "lanes" : "boards",
         expanded: false,
         tail: false
       }
@@ -811,7 +1035,8 @@ export interface TreeRenderOptions {
 }
 
 const railWidth = 26
-const maxLaneBoxes = 3
+/** The agent list never shrinks below this many rows for the log's sake. */
+const minListRows = 3
 
 const counter = (label: string, value: number): Line => [
   span(`${label.padEnd(15)}${String(value).padStart(5)}`)
@@ -833,40 +1058,8 @@ const railOf = (state: TreeState): Array<Line> =>
     ],
     [],
     counter("reviews", state.judge.reviews),
-    counter("verdicts", state.judge.verdicts)
-  ])
-
-const laneBox = (
-  lane: TreeLane,
-  width: number,
-  now: number | undefined,
-  selected: boolean,
-  idleAfterMs: number
-): Array<Line> =>
-  box(width, "running", [
-    [span(selected ? `▸ ${lane.id}` : lane.id, "bold")],
-    [span(lane.executor ?? "(leasing)")],
-    [span(lane.stages.at(-1) ?? "starting")],
-    doingLine(lane, now),
-    [
-      span(
-        `${elapsed(lane.startedAt, now)} · ${formatCount(lane.tokens)} tok${lane.costUsd > 0 ? ` · ${dollars(lane.costUsd)}` : ""}`
-      )
-    ],
-    ...(lane.turns.length === 0 && lane.gatesMs === 0
-      ? []
-      : [
-          [
-            span(
-              `turns ${lane.turns.length} · avg ${elapsedMs(
-                lane.turns.length === 0
-                  ? 0
-                  : lane.turns.reduce((total, turn) => total + turn, 0) / lane.turns.length
-              )} · gates ${elapsedMs(lane.gatesMs)}`
-            )
-          ]
-        ]),
-    statusLine(lane, now, idleAfterMs)
+    counter("verdicts", state.judge.verdicts),
+    ...(state.judge.borrowed === 0 ? [] : [counter("borrowed", state.judge.borrowed)])
   ])
 
 /** Work under way as a card names it: the command itself, the call, the wait. */
@@ -1025,18 +1218,310 @@ const columnsOf = <A>(
   )
 }
 
-const expandedLane = (lane: TreeLane, width: number, now: number | undefined): Array<Line> =>
-  box(
+/** `◐`/`⏸`: the lane's status at a glance, as `statusLine` grades it. */
+const statusMark = (lane: TreeLane, now: number | undefined, idleAfterMs: number): Span => {
+  const line = statusLine(lane, now, idleAfterMs)
+  const text = line[0]?.text ?? ""
+  return span(text.startsWith("◐") ? "◐" : "⏸", line[0]?.style)
+}
+
+/** `3/5 wire session cookie`, or `2/5 tasks` between tasks, or nothing before the plan. */
+const taskText = (lane: TreeLane): string =>
+  lane.task !== undefined
+    ? `${lane.task.index}/${lane.task.count} ${lane.task.title}`
+    : lane.tasks.length > 0
+      ? `${lane.tasks.filter((task) => task.done).length}/${lane.tasks.length} tasks`
+      : ""
+
+/** `head` then `tail` in `width`: a long head is cut, the tail (a timer, a count) never is. */
+const headThenTail = (head: Line, tail: Span, width: number): Line => {
+  const room = width - [...tail.text].length
+  return lengthOf(head) <= room ? [...head, tail] : [...fit(head, Math.max(1, room)), tail]
+}
+
+/** The one line a running lane is in the agent list (ADR 0033). */
+const laneLine = (
+  lane: TreeLane,
+  width: number,
+  now: number | undefined,
+  selected: boolean,
+  idleAfterMs: number
+): Line => {
+  const task = taskText(lane)
+  const stage = lane.stages.at(-1) ?? "starting"
+  const head: Line = [
+    span(selected ? "▸ " : "  "),
+    statusMark(lane, now, idleAfterMs),
+    span(" "),
+    span(lane.id, "bold"),
+    span(` ${cloneName(lane.executor ?? "(leasing)", lane.clone)}`),
+    ...(task.length === 0 ? [] : [span(" · "), span(task)]),
+    // A task is a stage of its own name: say it once.
+    ...(stage === lane.task?.title ? [] : [span(" · "), span(stage, "dim")]),
+    ...(lane.pause === undefined
+      ? []
+      : [span(" · "), span(`⏸ ${lane.pause.label} ${elapsed(lane.pause.since, now)}`, "judge")])
+  ]
+  return headThenTail(
+    head,
+    span(` · ${elapsed(lane.startedAt, now)} · ${formatCount(lane.tokens)} tok`),
+    width
+  )
+}
+
+/** A sub-agent the lane's harness spawned, indented under it. */
+const childLine = (child: TreeChild, width: number, now: number | undefined): Line =>
+  headThenTail(
+    [
+      span("    └ "),
+      span("sub-agent ", "dim"),
+      span(`${child.tool} ${child.args}`),
+      span(` · ${child.lastTool ?? "starting"}`, "dim")
+    ],
+    span(` · ${elapsed(child.since, now)}`, "dim"),
+    width
+  )
+
+/** The list's rows: a running lane, then each sub-agent still running under it. */
+const listRowsOf = (state: TreeState): number =>
+  runningLanes(state).reduce(
+    (total, lane) => total + 1 + lane.children.filter((child) => !child.ended).length,
+    0
+  )
+
+/**
+ * Every running agent, one row each, scrolled so the selected lane is in
+ * view and cut to `rows` with a count of what is out of view (ADR 0033).
+ */
+const agentRows = (
+  state: TreeState,
+  width: number,
+  view: TreeView,
+  selected: TreeLane | undefined,
+  rows: number | undefined
+): Array<Line> => {
+  const all: Array<{ readonly lane: string; readonly line: Line }> = runningLanes(state).flatMap(
+    (lane) => [
+      {
+        lane: lane.id,
+        line: laneLine(lane, width, state.now, lane.id === selected?.id, state.idleAfterMs)
+      },
+      ...lane.children
+        .filter((child) => !child.ended)
+        .map((child) => ({ lane: lane.id, line: childLine(child, width, state.now) }))
+    ]
+  )
+  if (rows === undefined || all.length <= rows) {
+    return all.map((row) => row.line)
+  }
+  const wanted = all.findIndex((row) => row.lane === selected?.id)
+  // The "… n above/more" notes take rows of the budget too.
+  const window = (room: number): number => {
+    const start = Math.max(0, Math.min(view.scroll, all.length - room))
+    return wanted < 0
+      ? start
+      : wanted < start
+        ? wanted
+        : wanted >= start + room
+          ? wanted - room + 1
+          : start
+  }
+  let room = Math.max(1, rows - 1)
+  let first = window(room)
+  if (first > 0 && first + room < all.length) {
+    room = Math.max(1, rows - 2)
+    first = window(room)
+  }
+  const shown = all.slice(first, first + room)
+  const above = first
+  const below = all.length - first - shown.length
+  return [
+    ...(above > 0 ? [[span(`… ${above} above`, "dim")]] : []),
+    ...shown.map((row) => row.line),
+    ...(below > 0 ? [[span(`… ${below} more`, "dim")]] : [])
+  ]
+}
+
+const tick = (task: TreeTask, running: boolean): string =>
+  task.done ? "[x]" : running ? "[▶]" : "[ ]"
+
+/**
+ * The selected lane in full: its task checklist with the criteria each task
+ * satisfies, its stage, what it is doing, its tools, a harness pause, and
+ * its figures (ADR 0033). Expanded, every stage and tool it ran.
+ */
+const detailBox = (
+  lane: TreeLane,
+  width: number,
+  now: number | undefined,
+  idleAfterMs: number,
+  expanded: boolean
+): Array<Line> => {
+  const inner = width - 4
+  const checklist: Array<Line> =
+    lane.tasks.length === 0
+      ? [[span("no task plan yet", "dim")]]
+      : lane.tasks.map((task): Line => {
+          const running = lane.task?.index === task.index
+          const right = task.satisfies === undefined ? "" : `satisfies ${task.satisfies.join(",")}`
+          const left: Line = [
+            span(`${tick(task, running)} ${task.index} ${task.title}`, running ? "bold" : undefined)
+          ]
+          return right.length === 0
+            ? left
+            : [...fit(left, Math.max(1, inner - [...right].length - 1)), span(` ${right}`, "dim")]
+        })
+  const stages: Array<Line> = expanded
+    ? lane.stages.map((stage): Line => [span(stage)])
+    : [[span("stage  "), span(lane.stages.at(-1) ?? "starting")]]
+  const tools: Array<Line> = expanded
+    ? [
+        [span(`tools (last ${lane.tools.length})`, "dim")],
+        ...lane.tools.map((tool): Line => [span(`  ${tool}`, "dim")])
+      ]
+    : lane.tools.length === 0
+      ? []
+      : [[span("tools  "), span(lane.tools.slice(-3).join(" · "), "dim")]]
+  const title = `${lane.id} · ${cloneName(lane.executor ?? "(leasing)", lane.clone)}${
+    lane.task === undefined ? "" : ` · task ${lane.task.index}/${lane.task.count}`
+  }`
+  return box(
     width,
     "running",
     [
-      [span(`story ${lane.id}`, "bold"), span(`  ${elapsed(lane.startedAt, now)}`)],
-      ...lane.stages.map((stage): Line => [span(stage)]),
-      [span(`tools (last ${lane.tools.length})`, "dim")],
-      ...lane.tools.map((tool): Line => [span(`  ${tool}`, "dim")]),
-      [span(`${formatCount(lane.tokens)} tok · ${dollars(lane.costUsd)}`)]
+      ...checklist,
+      ...stages,
+      doingLine(lane, now),
+      ...(lane.pause === undefined
+        ? []
+        : [[span(`⏸ ${lane.pause.label} ${elapsed(lane.pause.since, now)}`, "judge")]]),
+      ...tools,
+      [
+        span(
+          `${elapsed(lane.startedAt, now)} · ${formatCount(lane.tokens)} tok${lane.costUsd > 0 ? ` · ${dollars(lane.costUsd)}` : ""}`
+        )
+      ],
+      ...(lane.turns.length === 0 && lane.gatesMs === 0
+        ? []
+        : [
+            [
+              span(
+                `turns ${lane.turns.length} · avg ${elapsedMs(
+                  lane.turns.length === 0
+                    ? 0
+                    : lane.turns.reduce((total, turn) => total + turn, 0) / lane.turns.length
+                )} · gates ${elapsedMs(lane.gatesMs)}`
+              )
+            ]
+          ]),
+      statusLine(lane, now, idleAfterMs)
     ],
-    `${lane.id} · ${lane.executor ?? "(leasing)"}`
+    title
+  )
+}
+
+const bar = (done: number, total: number, width = 5): string => {
+  const filled = total === 0 ? 0 : Math.round((done / total) * width)
+  return "█".repeat(filled) + "░".repeat(width - filled)
+}
+
+const boardColumns: ReadonlyArray<readonly [string, ChipStatus]> = [
+  ["planned", "planned"],
+  ["active", "running"],
+  ["waiting", "waiting"],
+  ["done", "done"],
+  ["failed", "failed"]
+]
+
+/**
+ * The boards (ADR 0033): the epic's stories by column, with a running lane's
+ * clone and progress on its card, then the selected lane's tasks by column.
+ */
+const boardsOf = (
+  state: TreeState,
+  width: number,
+  selected: TreeLane | undefined,
+  now: number | undefined
+): Array<Line> => {
+  const chips = chipsOf(state)
+  // Five columns need ~16 characters each to read; narrower, two rows of columns.
+  const epic = chunked(boardColumns, width >= 5 * 16 + 8 ? 5 : 3).flatMap((group) =>
+    columnsOf(group, width, ([name, status], each) => {
+      const members = chips.filter((chip) => chip.status === status)
+      const cards = members.flatMap((chip): Array<Line> => {
+        const lane = state.lanes.find((candidate) => candidate.id === chip.id)
+        if (lane === undefined || lane.status !== "running") {
+          return [[span(chip.id)]]
+        }
+        const done = lane.tasks.filter((task) => task.done).length
+        const progress =
+          lane.tasks.length === 0
+            ? ""
+            : ` ${done}/${lane.tasks.length}${each >= 24 ? ` ${bar(done, lane.tasks.length)}` : ""}`
+        return [
+          [span(chip.id, "bold")],
+          [span(`  ${cloneName(lane.executor ?? "(leasing)", lane.clone)}${progress}`, "dim")]
+        ]
+      })
+      return box(
+        each,
+        "running",
+        cards.length === 0 ? [[span("—", "dim")]] : cards,
+        `${name} (${members.length})`
+      )
+    })
+  )
+  if (selected === undefined) {
+    return [[span("epic board", "bold")], ...epic]
+  }
+  const taskColumns: ReadonlyArray<readonly [string, (task: TreeTask) => boolean]> = [
+    ["todo", (task) => !task.done && task.index !== selected.task?.index],
+    ["doing", (task) => !task.done && task.index === selected.task?.index],
+    ["review", () => false],
+    ["done", (task) => task.done]
+  ]
+  const story = chunked(taskColumns, width >= 4 * 16 + 6 ? 4 : 2).flatMap((group) =>
+    columnsOf(group, width, ([name, keep], each) => {
+      const members = selected.tasks.filter(keep)
+      return box(
+        each,
+        "running",
+        members.length === 0
+          ? [[span("—", "dim")]]
+          : members.map((task): Line => [span(`${task.index} ${task.title}`)]),
+        `${name} (${members.length})`
+      )
+    })
+  )
+  return [
+    [span("epic board", "bold")],
+    ...epic,
+    [],
+    [
+      span(
+        `story board · ${selected.id} · ${cloneName(selected.executor ?? "(leasing)", selected.clone)}`,
+        "bold"
+      ),
+      span(` · ${elapsed(selected.startedAt, now)}`)
+    ],
+    ...story
+  ]
+}
+
+/** `codex ×2 · claude ×1`: how many leases each executor holds now. */
+const leaseCounts = (state: TreeState): string =>
+  state.executors
+    .map(
+      (executor) =>
+        [executor, state.leases.filter((lease) => lease.executor === executor).length] as const
+    )
+    .filter(([, count]) => count > 0)
+    .map(([executor, count]) => `${executor} ×${count}`)
+    .join(" · ")
+
+const chunked = <A>(items: ReadonlyArray<A>, size: number): Array<ReadonlyArray<A>> =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, index) =>
+    items.slice(index * size, index * size + size)
   )
 
 const barWidth = 10
@@ -1112,9 +1597,10 @@ const mainOf = (
   state: TreeState,
   width: number,
   view: TreeView,
-  tail: ReadonlyArray<string> | undefined
+  tail: ReadonlyArray<string> | undefined,
+  listRows: number | undefined
 ): Array<Line> => {
-  const running = state.lanes.filter((lane) => lane.status === "running")
+  const running = runningLanes(state)
   const orchestratorWidth = Math.min(46, width)
   const stage = state.stages.at(-1) ?? (running.length > 0 ? "implement stories" : "idle")
   // The run's own work under way (its gates, outside any story), innermost.
@@ -1140,32 +1626,37 @@ const mainOf = (
     ],
     state.title
   )
-  const selected = running.find((lane) => lane.id === view.selected)
-  const shown = running.slice(0, maxLaneBoxes)
-  const executors = state.executors.slice(0, maxLaneBoxes + 1)
-  const lanes =
+  const selected = selectedLane(state, view)
+  const counts = leaseCounts(state)
+  const agents = centre(
+    [span(`agents · ${running.length} running${counts.length === 0 ? "" : ` · ${counts}`}`)],
+    width
+  )
+  const body =
     view.tail && view.selected !== undefined
       ? tailOf(view, tail, width)
-      : view.expanded && selected !== undefined
-        ? expandedLane(selected, width, state.now)
-        : view.mode === "executors"
-          ? executors.length === 0
-            ? [centre([span("no executors yet", "dim")], width)]
-            : columnsOf(executors, width, (executor, each) =>
+      : view.mode === "executors"
+        ? state.executors.length === 0
+          ? [centre([span("no executors yet", "dim")], width)]
+          : chunked(state.executors, 4).flatMap((group) =>
+              columnsOf(group, width, (executor, each) =>
                 executorBox(state, executor, each, executor === view.selected)
               )
-          : shown.length === 0
+            )
+        : view.mode === "boards"
+          ? boardsOf(state, width, selected, state.now)
+          : running.length === 0 || selected === undefined
             ? [centre([span("no stories in flight", "dim")], width)]
-            : columnsOf(shown, width, (lane, each) =>
-                laneBox(lane, each, state.now, lane.id === view.selected, state.idleAfterMs)
-              )
+            : [
+                ...agentRows(state, width, view, selected, listRows),
+                ...detailBox(selected, width, state.now, state.idleAfterMs, view.expanded)
+              ]
   return [
     ...orchestrator.map((line) => centre(line, width)),
     centre([span("•", "orchestrator")], width),
     ...judgmentOf(state, width),
-    centre([span(`delegate to roster · ${running.length} running`)], width),
-    centre([span("▼", "dim")], width),
-    ...lanes,
+    agents,
+    ...body,
     [],
     ...wrapChips(chipsOf(state).map(chipOf), width)
   ]
@@ -1198,7 +1689,8 @@ const timeSplitOf = (time: TreeTimeSplit): Array<Line> => {
 const frameOf = (
   state: TreeState,
   options: TreeRenderOptions,
-  logCount: number | "none"
+  logCount: number | "none",
+  listRows: number | undefined
 ): ReadonlyArray<string> => {
   const { width } = options
   const mainWidth = width - railWidth - 2
@@ -1214,7 +1706,7 @@ const frameOf = (
     [span("═".repeat(width), "dim")],
     [],
     ...beside(
-      [railOf(state), mainOf(state, mainWidth, options.view, options.tail)],
+      [railOf(state), mainOf(state, mainWidth, options.view, options.tail, listRows)],
       [railWidth, mainWidth]
     ),
     ...(logCount === "none"
@@ -1236,24 +1728,38 @@ const frameOf = (
 }
 
 /**
- * The tree at a width and, when `height` is given, no taller: the session
- * log gives way first — fewer lines, down to one, then none — and only then
- * is the frame cut, keeping its status lines, so a redraw never scrolls.
+ * The tree at a width and, when `height` is given, no taller: the agent
+ * list gives way first (down to `minListRows`, with a count of what is out
+ * of view), then the session log — fewer lines, down to one, then none —
+ * and only then is the frame cut, keeping its status lines, so a redraw
+ * never scrolls.
  */
 export const renderTree = (state: TreeState, options: TreeRenderOptions): ReadonlyArray<string> => {
   const wanted = options.view.fullLog ? fullLogLines : logLines
-  const full = frameOf(state, options, wanted)
+  const full = frameOf(state, options, wanted, undefined)
   const { height } = options
   if (height === undefined || full.length <= height) {
     return full
   }
-  for (let count = wanted - 1; count >= 1; count -= 1) {
-    const shorter = frameOf(state, options, count)
+  const total = listRowsOf(state)
+  const floor = Math.min(total, minListRows)
+  const listRows =
+    options.view.mode === "lanes" && total > floor
+      ? Math.max(floor, total - (full.length - height))
+      : undefined
+  if (listRows !== undefined) {
+    const shorter = frameOf(state, options, wanted, listRows)
     if (shorter.length <= height) {
       return shorter
     }
   }
-  return fitToRows(frameOf(state, options, "none"), height)
+  for (let count = wanted - 1; count >= 1; count -= 1) {
+    const shorter = frameOf(state, options, count, listRows)
+    if (shorter.length <= height) {
+      return shorter
+    }
+  }
+  return fitToRows(frameOf(state, options, "none", listRows), height)
 }
 
 /**

@@ -33,6 +33,33 @@ const replying: LlmServiceShape = {
 }
 
 describe("transcriptSeat", () => {
+  it.effect("records the executor's clone on a call when the seat knows it", () =>
+    Effect.gen(function* () {
+      const transcript = yield* makeMemoryTranscriptSink
+      const numbered = transcriptSeat(replying, transcript.sink, {
+        lane: "home",
+        role: "coder",
+        executor: Effect.succeed("codex"),
+        clone: Effect.succeed(2)
+      })
+      yield* collect(numbered.executeStream("Task 1"))
+      const bare = transcriptSeat(replying, transcript.sink, {
+        lane: "home",
+        role: "coder",
+        executor: Effect.succeed("codex"),
+        clone: Effect.succeed(undefined)
+      })
+      yield* collect(bare.executeStream("Task 2"))
+      const calls = (yield* transcript.entries).flatMap((entry) =>
+        entry.entry._tag === "Call" ? [[entry.entry.executor, entry.entry.clone]] : []
+      )
+      assert.deepStrictEqual(calls, [
+        ["codex", 2],
+        ["codex", undefined]
+      ])
+    })
+  )
+
   it.effect(
     "records a call's input, its reply, its tools and their results, redacted and capped",
     () =>

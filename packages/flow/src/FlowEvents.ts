@@ -88,6 +88,8 @@ export class Info extends Schema.TaggedClass<Info>()("Info", {
 export class ToolUse extends Schema.TaggedClass<ToolUse>()("ToolUse", {
   tool: Schema.String,
   args: Schema.String,
+  /** The tool call this one runs inside, when a harness delegated it to a sub-agent (ADR 0033). */
+  parent: Schema.optionalKey(Schema.String),
   /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
   lane: Schema.optionalKey(Schema.String),
   /** The roster executor working that lane, when there is one (ADR 0019). */
@@ -109,7 +111,9 @@ export class TokensUsed extends Schema.TaggedClass<TokensUsed>()("TokensUsed", {
   /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
   lane: Schema.optionalKey(Schema.String),
   /** The roster executor working that lane, when there is one (ADR 0019). */
-  executor: Schema.optionalKey(Schema.String)
+  executor: Schema.optionalKey(Schema.String),
+  /** The executor's clone that made the call, when the lane's coder holds a slot (ADR 0033). */
+  clone: Schema.optionalKey(Schema.Int)
 }) {}
 
 /** One issue a review round found, as the operator sees it. */
@@ -270,9 +274,54 @@ export class StoryJudged extends Schema.TaggedClass<StoryJudged>()("StoryJudged"
  * The executor roster's events (ADR 0019, 0022). `label` names who holds the
  * lease — a story's id, or "the run" — so a view can put an executor on its lane.
  */
+/** One task of a story's plan as the task loop announces it (ADR 0033). */
+export const PlannedTask = Schema.Struct({
+  title: Schema.String,
+  completed: Schema.Boolean,
+  /** The acceptance criteria the task's description names (`Satisfies: 1, 3`). */
+  satisfies: Schema.optionalKey(Schema.Array(Schema.Int))
+})
+
+/** The task loop's plan, before its first task: every task in order (ADR 0033). */
+export class TasksPlanned extends Schema.TaggedClass<TasksPlanned>()("TasksPlanned", {
+  tasks: Schema.Array(PlannedTask),
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
+/** A task begins: its position in the plan, from 1, and the plan's size (ADR 0033). */
+export class TaskStarted extends Schema.TaggedClass<TaskStarted>()("TaskStarted", {
+  index: Schema.Int,
+  count: Schema.Int,
+  title: Schema.String,
+  satisfies: Schema.optionalKey(Schema.Array(Schema.Int)),
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
+/** A task is ticked in the plan (ADR 0033). */
+export class TaskCompleted extends Schema.TaggedClass<TaskCompleted>()("TaskCompleted", {
+  index: Schema.Int,
+  count: Schema.Int,
+  title: Schema.String,
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
+/** A story moved on the epic's board (ADR 0033); the statuses are `BoardSync`'s. */
+export class StoryStatusChanged extends Schema.TaggedClass<StoryStatusChanged>()(
+  "StoryStatusChanged",
+  {
+    id: Schema.String,
+    status: Schema.Literals(["planned", "active", "waiting", "done", "failed", "skipped"])
+  }
+) {}
+
 export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("ExecutorLeased", {
   executor: Schema.String,
   role: Schema.String,
+  /** Which of the executor's clones took the slot, from 1 (ADR 0033); absent when borrowed or before 2.41. */
+  clone: Schema.optionalKey(Schema.Int),
   label: Schema.optionalKey(Schema.String),
   /** What the call is for beyond its role: a review lens, a vote. */
   purpose: Schema.optionalKey(Schema.String),
@@ -290,6 +339,8 @@ export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("Execut
 export class ExecutorReleased extends Schema.TaggedClass<ExecutorReleased>()("ExecutorReleased", {
   executor: Schema.String,
   role: Schema.String,
+  /** Which of the executor's clones freed the slot (ADR 0033); absent when borrowed or before 2.41. */
+  clone: Schema.optionalKey(Schema.Int),
   label: Schema.optionalKey(Schema.String)
 }) {}
 
@@ -335,12 +386,16 @@ const resumedWords: Readonly<Record<ExecutorResumed["why"], string>> = {
  * the roster used to publish as `Info` — or `undefined` for one it does not
  * show (a release) and for any other event.
  */
+/** `codex#2` for a numbered clone, the bare executor otherwise (ADR 0033). */
+export const cloneName = (executor: string, clone: number | undefined): string =>
+  clone === undefined ? executor : `${executor}#${clone}`
+
 export const rosterEventMessage = (event: FlowEvent): string | undefined => {
   const forLabel = (label: string | undefined): string =>
     label === undefined ? "" : ` for ${label}`
   switch (event._tag) {
     case "ExecutorLeased": {
-      const taken = `roster: ${event.executor} takes ${event.role}${forLabel(event.label)}${
+      const taken = `roster: ${cloneName(event.executor, event.clone)} takes ${event.role}${forLabel(event.label)}${
         event.purpose === undefined ? "" : ` · ${event.purpose}`
       }`
       if (event.because === undefined && event.borrowed !== true) {
@@ -395,7 +450,11 @@ export const FlowEvent = Schema.Union([
   ExecutorHandedOver,
   StoryJudged,
   Timed,
-  Began
+  Began,
+  TasksPlanned,
+  TaskStarted,
+  TaskCompleted,
+  StoryStatusChanged
 ])
 export type FlowEvent = typeof FlowEvent.Type
 
@@ -419,6 +478,8 @@ export interface Lane {
   readonly lane: string
   /** The executor working it now; read at every publish, so a handover shows. */
   readonly executor?: Effect.Effect<string | undefined>
+  /** The coder's clone number, read at every publish as `executor` is (ADR 0033). */
+  readonly clone?: Effect.Effect<number | undefined>
   /** The lane's working directory, dropped from tool arguments (the lane already names it). */
   readonly workDir?: string
 }
@@ -436,10 +497,33 @@ const stamped = (
   event: FlowEvent,
   lane: string,
   executor: string | undefined,
-  workDir: string | undefined
+  workDir: string | undefined,
+  clone: number | undefined
 ): FlowEvent => {
   const tags = { lane, ...(executor === undefined ? {} : { executor }) }
+  const usageTags = { ...tags, ...(clone === undefined ? {} : { clone }) }
   switch (event._tag) {
+    case "TasksPlanned":
+      return event.lane !== undefined ? event : TasksPlanned.make({ tasks: event.tasks, ...tags })
+    case "TaskStarted":
+      return event.lane !== undefined
+        ? event
+        : TaskStarted.make({
+            index: event.index,
+            count: event.count,
+            title: event.title,
+            ...(event.satisfies === undefined ? {} : { satisfies: event.satisfies }),
+            ...tags
+          })
+    case "TaskCompleted":
+      return event.lane !== undefined
+        ? event
+        : TaskCompleted.make({
+            index: event.index,
+            count: event.count,
+            title: event.title,
+            ...tags
+          })
     case "StageStarted":
       return event.lane !== undefined ? event : StageStarted.make({ stage: event.stage, ...tags })
     case "StageCompleted":
@@ -456,6 +540,7 @@ const stamped = (
         : ToolUse.make({
             tool: event.tool,
             args: shortenLaneArgs(event.args, workDir),
+            ...(event.parent === undefined ? {} : { parent: event.parent }),
             ...tags
           })
     case "AssistantMessage":
@@ -485,7 +570,9 @@ const stamped = (
             agent: event.agent,
             usage: event.usage,
             ...(event.model === undefined ? {} : { model: event.model }),
-            ...tags
+            // The lane's clone is its coder's: a reviewer or judge on the
+            // lane's events ran on another executor (ADR 0033).
+            ...(event.agent === "coder" ? usageTags : tags)
           })
     // The lane's executor is its coder's: it names a coder call or tool, not
     // a reviewer's or judge's call made on another executor.
@@ -523,7 +610,9 @@ const stamped = (
 export const withLane = (events: FlowEventsShape, lane: Lane): FlowEventsShape => ({
   publish: (event) =>
     Effect.flatMap(lane.executor ?? Effect.succeed(undefined), (executor) =>
-      events.publish(stamped(event, lane.lane, executor, lane.workDir))
+      Effect.flatMap(lane.clone ?? Effect.succeed(undefined), (clone) =>
+        events.publish(stamped(event, lane.lane, executor, lane.workDir, clone))
+      )
     )
 })
 

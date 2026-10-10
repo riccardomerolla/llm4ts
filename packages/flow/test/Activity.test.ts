@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
-import { toolEventChunk, toolResultChunk } from "@llm4ts/core/providers/CliSupport"
+import { statusChunk, toolEventChunk, toolResultChunk } from "@llm4ts/core/providers/CliSupport"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import {
   summariseToolArgs,
@@ -11,7 +11,7 @@ import {
   toolUseFrom,
   withToolActivity
 } from "@llm4ts/flow/Activity"
-import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
+import { TokensUsed, ToolUse, makeCollectingFlowEvents, withLane } from "@llm4ts/flow/FlowEvents"
 
 const toolChunk = (name: string, input: string): LlmChunk =>
   LlmChunk.make({
@@ -226,5 +226,84 @@ describe("withToolActivity", () => {
       )
       assert.deepStrictEqual(timed, [["bash", "test"]])
     })
+  )
+})
+
+describe("delegation (ADR 0033)", () => {
+  it("classifies harness delegation as delegate and keeps the parent on a ToolUse", () => {
+    assert.strictEqual(toolCategory("Agent", "{}"), "delegate")
+    assert.strictEqual(toolCategory("Task", "{}"), "delegate")
+    assert.strictEqual(toolCategory("spawn_agent", "{}"), "delegate")
+    assert.strictEqual(toolCategory("codebase_investigator", "{}"), "delegate")
+    assert.strictEqual(toolCategory("Read", "{}"), "explore")
+    const use = toolUseFrom(
+      LlmChunk.make({
+        delta: "",
+        metadata: { event: "tool_use", tool_name: "Read", tool_input: "{}", parent: "a1" }
+      })
+    )
+    assert.strictEqual(use?.parent, "a1")
+  })
+
+  it.effect("stamps the lane's clone on the coder's usage only", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const laned = withLane(events, { lane: "S01", clone: Effect.succeed(2) })
+      const usage = TokenUsage.make({ prompt: 1, completion: 1, total: 2 })
+      yield* laned.publish(TokensUsed.make({ agent: "coder", usage }))
+      yield* laned.publish(TokensUsed.make({ agent: "judge", usage }))
+      const clones = (yield* events.recorded).map((event) =>
+        event._tag === "TokensUsed" ? [event.agent, event.lane, event.clone] : []
+      )
+      assert.deepStrictEqual(clones, [
+        ["coder", "S01", 2],
+        ["judge", "S01", undefined]
+      ])
+    })
+  )
+
+  it.effect("keeps the parent when a lane stamps a ToolUse", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      yield* withLane(events, { lane: "S01" }).publish(
+        ToolUse.make({ tool: "Read", args: "x.ts", parent: "a1" })
+      )
+      const [event] = yield* events.recorded
+      assert.deepStrictEqual(event?._tag === "ToolUse" ? [event.lane, event.parent] : [], [
+        "S01",
+        "a1"
+      ])
+    })
+  )
+})
+
+describe("harness status and durations (ADR 0033)", () => {
+  it.effect(
+    "turns a harness status into a wait, and takes the tool duration the harness reports",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        yield* Stream.runDrain(
+          withToolActivity(
+            events,
+            Stream.make(
+              statusChunk("retrying", "start", "529"),
+              statusChunk("retrying", "end"),
+              toolEventChunk("read", {}, "t1"),
+              toolResultChunk("t1", { durationMs: 1234 })
+            )
+          )
+        )
+        const seen = yield* events.recorded
+        const began = seen.find((event) => event._tag === "Began")
+        assert.deepStrictEqual(began?._tag === "Began" ? [began.kind, began.label] : [], [
+          "wait",
+          "pi retry"
+        ])
+        const waits = seen.filter((event) => event._tag === "Timed" && event.kind === "wait")
+        assert.strictEqual(waits.length, 1)
+        const tool = seen.find((event) => event._tag === "Timed" && event.kind === "tool")
+        assert.strictEqual(tool?._tag === "Timed" ? tool.ms : undefined, 1234)
+      })
   )
 })

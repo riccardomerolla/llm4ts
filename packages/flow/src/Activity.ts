@@ -4,7 +4,7 @@ import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import type { LlmError } from "@llm4ts/core/Errors"
 import { LlmChunk } from "@llm4ts/core/Models"
-import { Timed, ToolUse, UsageProgress, type FlowEventsShape } from "./FlowEvents.ts"
+import { Began, Timed, ToolUse, UsageProgress, type FlowEventsShape } from "./FlowEvents.ts"
 
 /**
  * Live agent activity.
@@ -105,9 +105,11 @@ export const toolUseFrom = (chunk: LlmChunk): ToolUse | undefined => {
   if (tool.length === 0) {
     return undefined
   }
+  const parent = chunk.metadata.parent
   return ToolUse.make({
     tool,
-    args: summariseToolArgs(chunk.metadata.tool_input ?? chunk.metadata.toolInput ?? "")
+    args: summariseToolArgs(chunk.metadata.tool_input ?? chunk.metadata.toolInput ?? ""),
+    ...(parent === undefined || parent.length === 0 ? {} : { parent })
   })
 }
 
@@ -130,7 +132,22 @@ interface OpenTool {
   readonly at: number
 }
 
-export type ToolCategory = "explore" | "edit" | "test" | "build" | "install" | "git" | "other"
+export type ToolCategory =
+  | "explore"
+  | "edit"
+  | "test"
+  | "build"
+  | "install"
+  | "git"
+  | "delegate"
+  | "other"
+
+/**
+ * A harness handing work to a sub-agent of its own: Claude's Agent (Task
+ * before 2.1.63), Codex's collab tools, Gemini's built-in agents (ADR 0033).
+ */
+export const delegateTools =
+  /^(agent|task|spawn_agent|send_input|wait_agent|wait|resume_agent|close_agent|codebase_investigator|generalist|cli_help|browser_agent)$/iu
 
 const exploreTools =
   /^(read|read_file|read_many_files|glob|grep|search|search_file_content|list|ls|list_directory|find|view|web_fetch|google_web_search)$/iu
@@ -143,6 +160,9 @@ const shellTools = /^(bash|shell|run_shell_command|exec|command_execution)$/iu
  * Only this name is kept — never the command.
  */
 export const toolCategory = (tool: string, args: string): ToolCategory => {
+  if (delegateTools.test(tool)) {
+    return "delegate"
+  }
   if (editTools.test(tool)) {
     return "edit"
   }
@@ -210,15 +230,54 @@ const toolEnded = (
     }
     const now = yield* Clock.currentTimeMillis
     const failed = chunk.metadata.tool_failed === "true" || chunk.metadata.tool_status === "error"
+    // The harness's own figure when it reports one (pi), else the wall clock.
+    const reported = Number(chunk.metadata.tool_duration_ms)
+    const ms =
+      chunk.metadata.tool_duration_ms !== undefined && Number.isFinite(reported) && reported >= 0
+        ? reported
+        : now - started.at
     yield* events.publish(
       Timed.make({
         kind: "tool",
         label: started.tool,
         category: started.category,
-        ms: now - started.at,
+        ms,
         ...(failed ? { failed: true } : {})
       })
     )
+  })
+
+/** A harness pause (`statusChunk`) as a wait on the lane: `Began` at its start, `Timed` at its end. */
+const pauseLabels: Readonly<Record<string, string>> = {
+  retrying: "pi retry",
+  compacting: "pi compaction"
+}
+
+const statusChanged = (
+  events: FlowEventsShape,
+  pauses: Ref.Ref<ReadonlyArray<{ readonly label: string; readonly at: number }>>,
+  chunk: LlmChunk
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const label = pauseLabels[chunk.metadata.status ?? ""]
+    if (label === undefined) {
+      return
+    }
+    const now = yield* Clock.currentTimeMillis
+    if (chunk.metadata.phase === "start") {
+      yield* Ref.update(pauses, (open) => [...open, { label, at: now }])
+      return yield* events.publish(Began.make({ kind: "wait", label }))
+    }
+    const started = yield* Ref.modify(pauses, (open) => {
+      const index = open.findIndex((pause) => pause.label === label)
+      return [
+        index < 0 ? undefined : open[index],
+        index < 0 ? open : [...open.slice(0, index), ...open.slice(index + 1)]
+      ] as const
+    })
+    if (started !== undefined) {
+      yield* events.publish(Timed.make({ kind: "wait", label, ms: now - started.at }))
+    }
   })
 
 /**
@@ -236,15 +295,22 @@ export const withToolActivity = <R>(
   // call that reported any closes with `done` so the display drops it.
   Stream.unwrap(
     Effect.map(
-      Effect.all([nextCall, Ref.make(false), Ref.make<ReadonlyArray<OpenTool>>([])]),
-      ([call, reported, open]) =>
+      Effect.all([
+        nextCall,
+        Ref.make(false),
+        Ref.make<ReadonlyArray<OpenTool>>([]),
+        Ref.make<ReadonlyArray<{ readonly label: string; readonly at: number }>>([])
+      ]),
+      ([call, reported, open, pauses]) =>
         Stream.tap(stream, (chunk) => {
           const event = toolUseFrom(chunk)
           const tool =
             event === undefined
               ? chunk.metadata.event === "tool_result"
                 ? toolEnded(events, open, chunk)
-                : Effect.void
+                : chunk.metadata.event === "status"
+                  ? statusChanged(events, pauses, chunk)
+                  : Effect.void
               : Effect.andThen(
                   events.publish(event),
                   Effect.flatMap(Clock.currentTimeMillis, (at) =>

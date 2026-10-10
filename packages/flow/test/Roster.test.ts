@@ -19,6 +19,8 @@ import { ConnectorCapabilities, LlmChunk, Message } from "@llm4ts/core/Models"
 import { withCallPurpose } from "@llm4ts/flow/Timing"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 import {
+  ExecutorLeased,
+  cloneName,
   makeCollectingFlowEvents,
   rosterEventMessage,
   type FlowEvent
@@ -64,12 +66,15 @@ const codex = executor("codex", {
   harness: "codex",
   roles: ["coder", "reviewer", "judge"],
   slots: 2,
+  // One slot stays free for reasoning: set explicitly since ADR 0033.
+  coderSlots: 1,
   priority: { coder: 2, default: 2 }
 })
 const claude = executor("claude", {
   harness: "claude",
   roles: ["coder", "reviewer", "judge", "verifier", "planner"],
   slots: 3,
+  coderSlots: 2,
   priority: { coder: 3, default: 1 }
 })
 
@@ -133,7 +138,7 @@ describe("Roster documents", () => {
     assert.isUndefined(effortOf(executor("d", { effort: { judge: "max" } }), "coder"))
   })
 
-  it("keeps a reasoning slot on an executor that also codes, and reads priorities per role", () => {
+  it("keeps the reasoning slots a roster sets with coderSlots, and reads priorities per role", () => {
     assert.strictEqual(coderSlotsOf(claude), 2)
     assert.strictEqual(coderSlotsOf(codex), 1)
     assert.strictEqual(coderSlotsOf(local), 1)
@@ -221,7 +226,7 @@ describe("Roster leasing", () => {
         assert.deepStrictEqual(order, ["pi-local", "lemonade", "codex", "claude", "claude"])
         assert.strictEqual(yield* roster.available("coder"), 0)
         assert.isUndefined(yield* roster.tryLease("coder"))
-        // One slot on each reasoning executor stayed out of the coders' reach.
+        // The slot each reasoning executor kept with coderSlots stayed out of the coders' reach.
         assert.strictEqual((yield* roster.lease("judge")).executor.id, "claude")
         assert.strictEqual((yield* roster.lease("judge")).executor.id, "codex")
         const recorded = yield* events.recorded
@@ -231,7 +236,7 @@ describe("Roster leasing", () => {
           ["pi-local", "coder"]
         )
         assert.isFalse(recorded.some((event) => event._tag === "Info"))
-        assert.include(rosterLines(recorded), "roster: pi-local takes coder")
+        assert.include(rosterLines(recorded), "roster: pi-local#1 takes coder")
       })
     )
   )
@@ -265,7 +270,7 @@ describe("Roster leasing", () => {
           )
           assert.isTrue(released?._tag === "ExecutorReleased" && released.label === "home")
           assert.deepStrictEqual(rosterLines(recorded), [
-            `roster: ${lease.executor.id} takes coder for home`,
+            `roster: ${lease.executor.id}#1 takes coder for home`,
             "roster: claude out of the round for this run: not logged in",
             "roster: claude resumed"
           ])
@@ -518,8 +523,8 @@ describe("Roster seats", () => {
           line.includes(" takes reviewer")
         )
         assert.deepStrictEqual(lines, [
-          "roster: claude takes reviewer for story a · adversarial lens",
-          "roster: claude takes reviewer for story a"
+          "roster: claude#1 takes reviewer for story a · adversarial lens",
+          "roster: claude#1 takes reviewer for story a"
         ])
       })
     )
@@ -610,7 +615,7 @@ describe("Roster seats", () => {
           assert.isTrue(lines.some((line) => line.includes("reviewer for a moves off claude")))
           assert.isTrue(
             lines.includes(
-              "roster: codex takes reviewer for a on its own slot — not independent (no other executor can take reviewer)"
+              "roster: codex#2 takes reviewer for a on its own slot — not independent (no other executor can take reviewer)"
             ),
             lines.join("\n")
           )
@@ -781,7 +786,7 @@ describe("Roster seats", () => {
         const lines = rosterLines(yield* events.recorded)
         assert.isTrue(
           lines.includes(
-            "roster: codex takes reviewer for a on its own slot — not independent (every other executor that takes reviewer is out of the round)"
+            "roster: codex#2 takes reviewer for a on its own slot — not independent (every other executor that takes reviewer is out of the round)"
           ),
           lines.join("\n")
         )
@@ -890,4 +895,58 @@ describe("Roster capacity", () => {
       })
     )
   )
+})
+
+describe("executor clones (ADR 0033)", () => {
+  it("coderSlots defaults to slots, so an executor with a judge role keeps every clone for coders", () => {
+    const spec = executor("codex", { roles: ["coder", "judge"], slots: 3 })
+    assert.strictEqual(coderSlotsOf(spec), 3)
+    assert.strictEqual(
+      coderSlotsOf(executor("codex", { roles: ["coder", "judge"], slots: 3, coderSlots: 2 })),
+      2
+    )
+  })
+
+  it.effect(
+    "numbers clones from 1, reuses the lowest free number, and publishes it on lease and release",
+    () =>
+      Effect.gen(function* () {
+        const seen: Array<FlowEvent> = []
+        const events = { publish: (event: FlowEvent) => Effect.sync(() => void seen.push(event)) }
+        const roster = yield* makeRoster({ executors: [executor("codex", { slots: 3 })], events })
+        const last = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const a = yield* roster.lease("coder", { label: "S01" })
+            const b = yield* roster.lease("coder", { label: "S02" })
+            assert.strictEqual(a.clone, 1)
+            assert.strictEqual(b.clone, 2)
+            yield* a.release
+            const c = yield* roster.lease("coder", { label: "S03" })
+            assert.strictEqual(c.clone, 1)
+            return c
+          })
+        )
+        assert.strictEqual(last.clone, 1)
+        const leased = seen.flatMap((event) =>
+          event._tag === "ExecutorLeased" ? [event.clone] : []
+        )
+        assert.deepStrictEqual(leased, [1, 2, 1])
+        const released = seen.flatMap((event) =>
+          event._tag === "ExecutorReleased" ? [event.clone] : []
+        )
+        // a's release, then the scope's finalizers last-in first-out: c (1), b (2).
+        assert.deepStrictEqual(released, [1, 1, 2])
+      })
+  )
+
+  it("names a clone in the roster log line", () => {
+    assert.strictEqual(cloneName("codex", 2), "codex#2")
+    assert.strictEqual(cloneName("codex", undefined), "codex")
+    assert.strictEqual(
+      rosterEventMessage(
+        ExecutorLeased.make({ executor: "codex", role: "coder", label: "S01", clone: 2 })
+      ),
+      "roster: codex#2 takes coder for S01"
+    )
+  })
 })

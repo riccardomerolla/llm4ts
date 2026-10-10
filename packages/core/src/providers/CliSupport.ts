@@ -75,14 +75,25 @@ export const optionalModelArgs = (model: string | undefined): ReadonlyArray<stri
 export const effortWord = (effort: Effort, top: "max" | "xhigh" = "max"): string =>
   effort === "max" ? top : effort
 
-export const toolEventChunk = (name: string, input: JsonValue | undefined, id?: string): LlmChunk =>
+export const toolEventChunk = (
+  name: string,
+  input: JsonValue | undefined,
+  id?: string,
+  options: {
+    /** The tool call this one runs inside, when a harness delegated it to a sub-agent (ADR 0033). */
+    readonly parent?: string
+  } = {}
+): LlmChunk =>
   LlmChunk.make({
     delta: "",
     metadata: {
       event: "tool_use",
       tool_name: name,
       tool_input: input === undefined ? "{}" : jsonText(input),
-      ...(id === undefined || id.length === 0 ? {} : { tool_id: id })
+      ...(id === undefined || id.length === 0 ? {} : { tool_id: id }),
+      ...(options.parent === undefined || options.parent.length === 0
+        ? {}
+        : { parent: options.parent })
     }
   })
 
@@ -117,6 +128,10 @@ export const toolResultChunk = (
     readonly input?: JsonValue
     /** What the tool returned, for an opt-in transcript; never in the trace. */
     readonly output?: string
+    /** The tool call this one ran inside (ADR 0033). */
+    readonly parent?: string
+    /** How long the harness says the tool ran, when it reports that itself. */
+    readonly durationMs?: number
   } = {}
 ): LlmChunk =>
   LlmChunk.make({
@@ -125,6 +140,12 @@ export const toolResultChunk = (
       event: "tool_result",
       ...(id === undefined || id.length === 0 ? {} : { tool_id: id }),
       ...(options.failed === true ? { tool_failed: "true" } : {}),
+      ...(options.parent === undefined || options.parent.length === 0
+        ? {}
+        : { parent: options.parent }),
+      ...(options.durationMs === undefined || !Number.isFinite(options.durationMs)
+        ? {}
+        : { tool_duration_ms: String(Math.max(0, Math.round(options.durationMs))) }),
       ...(options.tool === undefined ? {} : { tool_name: options.tool }),
       ...(options.input === undefined ? {} : { tool_input: jsonText(options.input) }),
       ...(options.output === undefined ? {} : { tool_content: options.output })
@@ -242,3 +263,22 @@ export const atLeastVersion = (
   }
   return true
 }
+
+/**
+ * A harness pausing a turn on its own account — a provider retry, a context
+ * compaction — so the lane can say so instead of looking stuck (ADR 0033).
+ */
+export const statusChunk = (
+  status: "retrying" | "compacting",
+  phase: "start" | "end",
+  detail?: string
+): LlmChunk =>
+  LlmChunk.make({
+    delta: "",
+    metadata: {
+      event: "status",
+      status,
+      phase,
+      ...(detail === undefined || detail.length === 0 ? {} : { status_detail: detail })
+    }
+  })

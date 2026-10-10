@@ -1,5 +1,13 @@
 import * as Effect from "effect/Effect"
-import { StageCompleted, StageFailed, StageStarted, type FlowEventsShape } from "./FlowEvents.ts"
+import {
+  StageCompleted,
+  StageFailed,
+  StageStarted,
+  TaskCompleted,
+  TaskStarted,
+  TasksPlanned,
+  type FlowEventsShape
+} from "./FlowEvents.ts"
 import { withKindSpan, type SpanOptions } from "./Spans.ts"
 import { describeFlowError, type FlowError } from "./FlowError.ts"
 import type { Plan, Task } from "./Plan.ts"
@@ -35,6 +43,26 @@ export const stage = <A, E, R>(
     )
   )
 
+/** The acceptance criteria a task's description names: `Satisfies: 1, 3` → `[1, 3]` (ADR 0033). */
+export const satisfiesOf = (description: string): ReadonlyArray<number> | undefined => {
+  // The planner writes JSON, so the line is usually the description's last sentence.
+  const match = /\bSatisfies:\s*([^\n]*)/iu.exec(description)
+  if (match === null) {
+    return undefined
+  }
+  const numbers = (match[1] ?? "")
+    .split(/[^\d]+/u)
+    .filter((part) => part.length > 0)
+    .map((part) => Number.parseInt(part, 10))
+    .filter((number) => Number.isInteger(number) && number > 0)
+  return numbers.length === 0 ? undefined : numbers
+}
+
+const withSatisfies = (description: string): { readonly satisfies?: ReadonlyArray<number> } => {
+  const satisfies = satisfiesOf(description)
+  return satisfies === undefined ? {} : { satisfies }
+}
+
 export const implementTaskLoop = Effect.fn("@llm4ts/flow/PlanExecution.implementTaskLoop")(
   function* <E, R>(
     store: PlanStoreShape,
@@ -44,11 +72,26 @@ export const implementTaskLoop = Effect.fn("@llm4ts/flow/PlanExecution.implement
     perTask: (task: Task, planSoFar: Plan) => Effect.Effect<void, E, R>
   ): Effect.fn.Return<Plan, E | FlowError, R> {
     let current = plan
-    for (const task of plan.tasks) {
+    const count = plan.tasks.length
+    yield* events.publish(
+      TasksPlanned.make({
+        tasks: plan.tasks.map((task) => ({
+          title: task.title,
+          completed: task.completed,
+          ...withSatisfies(task.description)
+        }))
+      })
+    )
+    for (const [position, task] of plan.tasks.entries()) {
       if (!task.completed) {
+        const index = position + 1
+        yield* events.publish(
+          TaskStarted.make({ index, count, title: task.title, ...withSatisfies(task.description) })
+        )
         yield* stage(events, task.title, perTask(task, current))
         current = current.complete(task.title)
         yield* store.save(planPath, current)
+        yield* events.publish(TaskCompleted.make({ index, count, title: task.title }))
       }
     }
     return current

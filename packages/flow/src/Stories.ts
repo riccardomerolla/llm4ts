@@ -18,7 +18,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { cap } from "./Context.ts"
 import type { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import type { LlmError } from "@llm4ts/core/Errors"
-import { BoardItem, type BoardSyncShape } from "./BoardSync.ts"
+import { BoardItem, eventedBoard, type BoardSyncShape } from "./BoardSync.ts"
 import { makeChat } from "./Chat.ts"
 import { implementPlanFlow } from "./Flow.ts"
 import {
@@ -873,8 +873,10 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   options: StoriesOptions
 ): Effect.fn.Return<EpicReport, FlowError> {
   const plan = yield* validateStoryPlan(options.plan)
-  const { files, board } = options
+  const { files } = options
   const events = context.events
+  // Every board move is also an event, so the trace and the dashboard see it (ADR 0033).
+  const board = eventedBoard(options.board, events)
   const epicBranch = options.epicBranch ?? `epic/${plan.epicId}`
   const concurrency = Math.max(1, options.concurrency ?? 3)
   const judgeRounds = Math.max(1, options.judgeRounds ?? 2)

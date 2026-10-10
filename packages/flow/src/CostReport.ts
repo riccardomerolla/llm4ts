@@ -3,7 +3,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type { TokenUsage } from "@llm4ts/core/Models"
 import { isEstimatedModel } from "./EstimatedUsage.ts"
-import { TokensUsed } from "./FlowEvents.ts"
+import { TokensUsed, cloneName } from "./FlowEvents.ts"
 import type { TraceLine } from "./FlowRecorder.ts"
 import { estimateCostUsd, PricesAsOf } from "./PriceList.ts"
 
@@ -31,7 +31,10 @@ export class UsageSample extends Schema.Class<UsageSample>("UsageSample")({
   total: Schema.Int,
   cached: Schema.optionalKey(Schema.Int),
   costUsd: Schema.optionalKey(Schema.Number),
-  estimated: Schema.Boolean
+  estimated: Schema.Boolean,
+  /** The lane's executor and clone, when the usage came from a roster lane (ADR 0033). */
+  executor: Schema.optionalKey(Schema.String),
+  clone: Schema.optionalKey(Schema.Int)
 }) {}
 
 export class UsageTotals extends Schema.Class<UsageTotals>("UsageTotals")({
@@ -87,6 +90,13 @@ export class UsageProjection extends Schema.Class<UsageProjection>("UsageProject
   costUsdPerDay: Schema.optionalKey(Schema.Number)
 }) {}
 
+/** One executor clone's usage (`codex#2`): the coder's calls on a lane that holds that clone. */
+export class ExecutorUsage extends Schema.Class<ExecutorUsage>("ExecutorUsage")({
+  executor: Schema.String,
+  totals: UsageTotals,
+  share: Schema.Number
+}) {}
+
 export class CostReport extends Schema.Class<CostReport>("CostReport")({
   schemaVersion: Schema.Int,
   timeZone: Schema.String,
@@ -102,10 +112,12 @@ export class CostReport extends Schema.Class<CostReport>("CostReport")({
   byDay: Schema.Array(UsageBucket),
   byHour: Schema.Array(UsageBucket),
   byModel: Schema.Array(ModelUsage),
-  byAgent: Schema.Array(AgentUsage)
+  byAgent: Schema.Array(AgentUsage),
+  /** Per executor clone, for lanes served by a roster (schema 3, ADR 0033). */
+  byExecutor: Schema.Array(ExecutorUsage)
 }) {}
 
-export const CurrentCostReportSchema = 2
+export const CurrentCostReportSchema = 3
 
 const tokensUsedCodec = Schema.fromJsonString(TokensUsed)
 const decodeTokensUsed = Schema.decodeUnknownOption(tokensUsedCodec)
@@ -145,7 +157,9 @@ export const usageSamplesFromTrace = (
         total: event.usage.total,
         ...(event.usage.cached === undefined ? {} : { cached: event.usage.cached }),
         ...(costUsd === undefined ? {} : { costUsd }),
-        estimated: isEstimatedModel(model)
+        estimated: isEstimatedModel(model),
+        ...(event.executor === undefined ? {} : { executor: event.executor }),
+        ...(event.clone === undefined ? {} : { clone: event.clone })
       })
     ]
   })
@@ -320,6 +334,26 @@ export const buildCostReport = (
         right.totals.total - left.totals.total || left.agent.localeCompare(right.agent)
     )
 
+  // Coder clones only: a sample that names the lane's executor without its
+  // clone is a reviewer's or judge's, which ran elsewhere (ADR 0033).
+  const byExecutorGroups = new Map<string, Array<UsageSample>>()
+  for (const sample of ordered) {
+    if (sample.executor !== undefined && sample.clone !== undefined) {
+      const key = cloneName(sample.executor, sample.clone)
+      byExecutorGroups.set(key, [...(byExecutorGroups.get(key) ?? []), sample])
+    }
+  }
+  const byExecutor = [...byExecutorGroups.entries()]
+    .map(([executor, members]) => {
+      const executorTotals = totalsOf(members)
+      return ExecutorUsage.make({
+        executor,
+        totals: executorTotals,
+        share: tokens === 0 ? 0 : executorTotals.total / tokens
+      })
+    })
+    .sort((left, right) => left.executor.localeCompare(right.executor))
+
   return CostReport.make({
     schemaVersion: CurrentCostReportSchema,
     timeZone: zoneLabel(timeZone),
@@ -349,7 +383,8 @@ export const buildCostReport = (
     byDay,
     byHour,
     byModel,
-    byAgent
+    byAgent,
+    byExecutor
   })
 }
 
@@ -424,6 +459,16 @@ export const renderCostReport = (report: CostReport): string => {
       ...report.byAgent.map(
         (entry) =>
           `  ${entry.agent}  ${thousands(entry.totals.total)} tokens (${Math.round(entry.share * 100)}%)${money(entry.totals.costUsd)}`
+      )
+    )
+  }
+  if (report.byExecutor.length > 0) {
+    sections.push(
+      "",
+      "by executor clone:",
+      ...report.byExecutor.map(
+        (entry) =>
+          `  ${entry.executor}  ${thousands(entry.totals.total)} tokens (${Math.round(entry.share * 100)}%)${money(entry.totals.costUsd)}`
       )
     )
   }

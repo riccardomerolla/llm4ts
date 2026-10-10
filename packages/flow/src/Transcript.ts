@@ -22,6 +22,8 @@ const Call = Schema.TaggedStruct("Call", {
   call: Schema.String,
   role: Schema.String,
   executor: Schema.optionalKey(Schema.String),
+  /** The executor's clone, when the seat's coder holds a slot (ADR 0033). */
+  clone: Schema.optionalKey(Schema.Int),
   /** The system prompt, on a chat's first call only. */
   system: Schema.optionalKey(Schema.String),
   /** The input: a chat's newest message, or a one-shot prompt. */
@@ -96,6 +98,8 @@ export interface TranscriptSeatOptions {
   readonly role: string
   /** Who serves the seat, read at each call (a roster hands the coder over). */
   readonly executor?: Effect.Effect<string | undefined>
+  /** Which clone of that executor, read at each call (ADR 0033). */
+  readonly clone?: Effect.Effect<number | undefined>
 }
 
 /** A seat whose every call is written to `sink`, as it happens. */
@@ -115,12 +119,14 @@ export const transcriptSeat = (
       const start = yield* Clock.currentTimeMillis
       const role = yield* roleOr(options.role)
       const executor = options.executor === undefined ? undefined : yield* options.executor
+      const clone = options.clone === undefined ? undefined : yield* options.clone
       yield* write({
         _tag: "Call",
         at: start,
         call,
         role,
         ...(executor === undefined ? {} : { executor }),
+        ...(clone === undefined ? {} : { clone }),
         ...(extra.system === undefined ? {} : { system: clean(extra.system, inputChars) }),
         input: clean(input, inputChars),
         ...(extra.earlier === undefined ? {} : { earlier: extra.earlier })
