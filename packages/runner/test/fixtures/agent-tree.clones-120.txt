@@ -1,0 +1,45 @@
+                                         LLM4TS AGENT TREE  ·  epic bank-login                                          
+════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+                                                                                                                        
+┌────────────────────────┐                         ┌─ epic bank-login ──────────────────────────┐                       
+│       JUDGE SEAT       │                         │ stage  implement stories                   │                       
+│    codex · on call     │                         │ stories 8  elapsed 58s                     │                       
+│                        │                         └────────────────────────────────────────────┘                       
+│ last verdict:          │                                               •                                              
+│ » S04 r1: 2 issues     │  ┌─ JUDGMENT · S04 r1 ──────────────────────────────────────────────────────────────────────┐
+│                        │  │ correctness     ████████░░  8/10                                                         │
+│ reviews            0   │  │ tests           ██████░░░░  6/10                                                         │
+│ verdicts           1   │  │ 2 issues → coder                                                                         │
+│ borrowed           1   │  └──────────────────────────────────────────────────────────────────────────────────────────┘
+└────────────────────────┘                           agents · 5 running · codex ×3 · claude ×1                          
+                            ▸ ◐ S01 codex#1 · 3/5 wire session cookie · 47s · 48.0k tok                                 
+                                └ sub-agent Agent Explore: find session middleware · Read src/session/middleware.ts · 3…
+                              ◐ S02 codex#2 · 1/4 scaffold reset route · 27s · 0 tok                                    
+                              ◐ S03 claude#1 · 2/3 verify otp in service · ⏸ pi compaction 12s · 20s · 0 tok            
+                              ◐ S04 codex#3 · 5/5 tasks · story S04: judge 1 · 10s · 0 tok                              
+                              ◐ S05 (leasing) · starting · 2s · 0 tok                                                   
+                            ┌─ S01 · codex#1 · task 3/5 ───────────────────────────────────────────────────────────────┐
+                            │ [x] 1 add login route                                                        satisfies 1 │
+                            │ [x] 2 validate credentials against user store                                satisfies 1 │
+                            │ [▶] 3 wire session cookie                                                    satisfies 2 │
+                            │ [ ] 4 add e2e login test                                                     satisfies 3 │
+                            │ [ ] 5 update docs                                                            satisfies 3 │
+                            │ stage  wire session cookie                                                               │
+                            │ 0s · Edit src/session/cookie.ts                                                          │
+                            │ tools  Agent Explore: find session middleware · Edit src/session/cookie.ts               │
+                            │ 47s · 48.0k tok · ~$0.44                                                                 │
+                            │ ◐ running                                                                                │
+                            └──────────────────────────────────────────────────────────────────────────────────────────┘
+                                                                                                                        
+                            ◐ S01  ◐ S02  ◐ S03  ◐ S04  ◐ S05  · S06  · S07  ✓ S00                                      
+                                                                                                                        
+┌─ session log ────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 00:00:32  roster           codex#2 → coder · S02                                                                     │
+│ 00:00:39  roster           claude#1 → coder · S03                                                                    │
+│ 00:00:49  roster           codex#3 → coder · S04                                                                     │
+│ 00:00:52  roster           judge borrowed from own executor codex · S04                                              │
+│ 00:00:53  judge            S04 r1 · 2 issues → coder                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+stories [1/8 done · 5 running · 0 failed · 0 waiting]  roster [2/2 busy]                                                
+time [model 0% · tools 0% · gates 100% · wait 0%]                                                                       
+tokens [48.0k]  cost [~$0.44]  run [live]                                                                               

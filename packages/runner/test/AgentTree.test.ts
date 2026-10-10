@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 import {
@@ -34,6 +34,7 @@ import {
   tailTargetOf,
   reduceTree,
   renderTree,
+  selectedLane,
   treeInputsOfTrace,
   type TreeInput,
   type TreeState,
@@ -56,6 +57,27 @@ const frame = (state: TreeState, width = 90): ReadonlyArray<string> =>
 
 const fixture = (name: string): string =>
   readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")
+
+/** The frame against its golden file; `UPDATE_GOLDENS=1` rewrites the file first. */
+const golden = (name: string, width: number, view: TreeView, state: TreeState): void => {
+  const rendered = `${renderTree(state, { width, colour: false, view }).join("\n")}\n`
+  if (process.env.UPDATE_GOLDENS === "1") {
+    writeFileSync(new URL(`./fixtures/${name}`, import.meta.url), rendered)
+  }
+  assert.strictEqual(rendered, fixture(name))
+}
+
+const traceInputs = (name: string): ReadonlyArray<TreeInput> =>
+  treeInputsOfTrace(
+    fixture(name)
+      .trim()
+      .split("\n")
+      .map((line) => Schema.decodeUnknownSync(Schema.fromJsonString(TraceLine))(line))
+  )
+
+/** A run with clones, task plans, a sub-agent, a pause, a borrowed judge and board moves (ADR 0033). */
+const clonesRun = (): TreeState =>
+  fold(traceInputs("agent-tree.clones.trace.jsonl"), emptyTree({ title: "epic bank-login" }))
 
 const fixtureRun = (): TreeState =>
   fold(
@@ -81,14 +103,42 @@ const fixtureRun = (): TreeState =>
 describe("agent tree", () => {
   it("draws the fixture run as its golden frames", () => {
     const state = fixtureRun()
-    const golden = (name: string, width: number, view: TreeView) =>
-      assert.strictEqual(
-        `${renderTree(state, { width, colour: false, view }).join("\n")}\n`,
-        fixture(name)
-      )
-    golden("agent-tree.lanes-90.txt", 90, initialView)
-    golden("agent-tree.lanes-120.txt", 120, initialView)
-    golden("agent-tree.executors-90.txt", 90, { ...initialView, mode: "executors" })
+    golden("agent-tree.lanes-90.txt", 90, initialView, state)
+    golden("agent-tree.lanes-120.txt", 120, initialView, state)
+    golden("agent-tree.executors-90.txt", 90, { ...initialView, mode: "executors" }, state)
+  })
+
+  it("draws the clones fixture as its golden frames, with a detail box for the latest lane", () => {
+    golden("agent-tree.clones-120.txt", 120, initialView, clonesRun())
+    golden("agent-tree.boards-90.txt", 90, { ...initialView, mode: "boards" }, clonesRun())
+  })
+
+  it("selects the most recently changed lane by default and switches to the boards by key", () => {
+    const state = clonesRun()
+    assert.strictEqual(state.lastChanged, "S01")
+    assert.strictEqual(selectedLane(state, initialView)?.id, "S01")
+    const down = onTreeKey(initialView, "down", state)
+    assert.strictEqual(down !== "quit" && down.selected, "S02")
+    const boards = onTreeKey(initialView, "b", state)
+    assert.strictEqual(boards !== "quit" && boards.mode, "boards")
+    const back = boards === "quit" ? initialView : onTreeKey(boards, "b", state)
+    assert.strictEqual(back !== "quit" && back.mode, "lanes")
+  })
+
+  it("fits a short terminal by shortening the agent list before the log", () => {
+    const state = clonesRun()
+    const full = renderTree(state, { width: 120, colour: false, view: initialView })
+    const lines = renderTree(state, {
+      width: 120,
+      colour: false,
+      view: initialView,
+      height: full.length - 2
+    })
+    assert.strictEqual(lines.length, full.length - 2)
+    assert.strictEqual(lines.filter((line) => /^│ \d\d:\d\d:\d\d /u.test(line)).length, 5)
+    assert.isTrue(lines.some((line) => line.includes("… 3 more")))
+    assert.isTrue(lines.some((line) => line.includes("▸ ◐ S01")))
+    assert.isTrue(lines.at(-1)?.includes("run [live]") ?? false)
   })
 
   it("fits a short terminal by shrinking the log first, then dropping it", () => {
@@ -157,9 +207,9 @@ describe("agent tree", () => {
       at(5, StageStarted.make({ stage: "story home: setup", lane: "home", executor: "codex" }))
     ])
     const text = frame(state).join("\n")
-    assert.include(text, "│ home")
-    assert.include(text, "│ codex")
-    assert.include(text, "│ story home: setup")
+    assert.include(text, "▸ ◐ home codex")
+    assert.include(text, "┌─ home · codex")
+    assert.include(text, "│ stage  story home: setup")
     assert.include(text, "◐ home")
     assert.notInclude(text, "no stories in flight")
   })
@@ -214,7 +264,7 @@ describe("agent tree", () => {
     assert.include(text, "tokens [1.1M]  cost [~$4.50]")
   })
 
-  it("draws three lanes at most and shows every board story as a chip", () => {
+  it("lists every running lane and shows every board story as a chip", () => {
     const board = emptyTree({
       title: "epic conto-bonifico",
       stories: [
@@ -233,8 +283,13 @@ describe("agent tree", () => {
       board
     )
     const lines = frame(state)
-    const laneTops = lines.filter((line) => line.includes("│ ◐ running")).at(0) ?? ""
-    assert.strictEqual(laneTops.split("◐ running").length - 1, 3)
+    for (const id of ["b", "c", "d", "e"]) {
+      assert.isTrue(
+        lines.some((line) => line.includes(`◐ ${id} x`)),
+        `${id} is listed`
+      )
+    }
+    assert.isTrue(lines.some((line) => line.includes("agents · 4 running")))
     assert.include(lines.join("\n"), "✓ a  ◐ b  ◐ c  ◐ d  ◐ e  ◌ f")
     assert.include(lines.join("\n"), "epic conto-bonifico")
     assert.include(lines.join("\n"), "stories [1/6 done · 4 running · 0 failed · 1 waiting]")
@@ -305,9 +360,10 @@ describe("agent tree", () => {
     const draw = (view: TreeView) =>
       renderTree(state, { width: 90, colour: false, view }).join("\n")
 
-    assert.strictEqual(viewAfter("down", "down").selected, "iban")
+    assert.strictEqual(viewAfter("1", "down").selected, "iban")
     assert.strictEqual(viewAfter("2").selected, "iban")
-    assert.include(draw(viewAfter("2")), "│ ▸ iban")
+    assert.include(draw(viewAfter("2")), "▸ ◐ iban claude")
+    assert.include(draw(viewAfter("1")), "▸ ◐ home codex")
 
     const expanded = draw(viewAfter("2", "enter"))
     assert.include(expanded, "┌─ iban · claude")
@@ -365,7 +421,7 @@ describe("agent tree", () => {
       )
     ])
     const lanes = frame(state).join("\n")
-    assert.include(lanes, "│ codex")
+    assert.include(lanes, "┌─ home · codex")
     assert.include(lanes, "│    claude · on call    │")
     assert.include(lanes, "│ reviews            2   │")
     assert.include(lanes, "│ verdicts           1   │")
@@ -566,7 +622,8 @@ describe("agent tree", () => {
         return next === "quit" ? current : next
       }, view)
     // Nothing selected: nothing to tail.
-    assert.isFalse(press(initialView, "t").tail)
+    // With a lane followed by default, `t` tails it straight away.
+    assert.isTrue(press(initialView, "t").tail)
     const onStory = press(initialView, "2", "t")
     assert.isTrue(onStory.tail)
     assert.deepStrictEqual(tailTargetOf(onStory), { lane: "iban" })

@@ -13,16 +13,17 @@
 └────────────────────────┘  │ tests           ██████████  2/2                            │
                             │ cleared → merge                                            │
                             └────────────────────────────────────────────────────────────┘
-                                            delegate to roster · 2 running                
-                                                          ▼                               
-                            ┌────────────────────────────┐  ┌────────────────────────────┐
-                            │ payments                   │  │ overview                   │
-                            │ pi-lmstudio                │  │ codex                      │
-                            │ Payments fake routes       │  │ story overview: setup      │
-                            │ 0s · bash pnpm typecheck … │  │ 10s · read src/features/c… │
-                            │ 7m06s · 92.5k tok          │  │ 29s · 0 tok                │
-                            │ ◐ running                  │  │ ◐ running                  │
-                            └────────────────────────────┘  └────────────────────────────┘
+                                    agents · 2 running · codex ×1 · pi-lmstudio ×1        
+                            ▸ ◐ payments pi-lmstudio · Payments fake routes · 7m06s · 92.…
+                              ◐ overview codex · story overview: setup · 29s · 0 tok      
+                            ┌─ payments · pi-lmstudio ───────────────────────────────────┐
+                            │ no task plan yet                                           │
+                            │ stage  Payments fake routes                                │
+                            │ 0s · bash pnpm typecheck && pnpm lint && pnpm test         │
+                            │ tools  edit src/fake/payments.ts · bash pnpm typecheck &&… │
+                            │ 7m06s · 92.5k tok                                          │
+                            │ ◐ running                                                  │
+                            └────────────────────────────────────────────────────────────┘
                                                                                           
                             ✓ accounts  ◐ payments  ✗ iban  ◐ overview  · movimenti       
                             ◌ bonifico                                                    
