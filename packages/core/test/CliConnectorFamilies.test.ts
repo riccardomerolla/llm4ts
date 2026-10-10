@@ -93,6 +93,38 @@ describe("PiConnector", () => {
     assert.deepStrictEqual(piExtraArgs(config), ["--no-tools"])
   })
 
+  it("maps aborted turns, tool durations, nested calls, retries and compaction (ADR 0033)", () => {
+    assert.strictEqual(
+      parsePiStreamLine(
+        '{"type":"message_end","message":{"role":"assistant","stopReason":"aborted"}}'
+      )[0]?.metadata.piError,
+      "pi aborted the turn"
+    )
+    const ended = parsePiStreamLine(
+      '{"type":"tool_execution_end","toolCallId":"t1","durationMs":1234,"result":{"content":[{"type":"text","text":"ok"}]}}'
+    )[0]?.metadata
+    assert.strictEqual(ended?.tool_duration_ms, "1234")
+    const nested = parsePiStreamLine(
+      '{"type":"tool_execution_start","toolCallId":"t2","parentToolCallId":"t1","toolName":"read","args":{}}'
+    )[0]?.metadata
+    assert.strictEqual(nested?.parent, "t1")
+    assert.deepStrictEqual(
+      parsePiStreamLine(
+        '{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"errorMessage":"529"}'
+      )[0]?.metadata,
+      { event: "status", status: "retrying", phase: "start", status_detail: "529" }
+    )
+    assert.strictEqual(
+      parsePiStreamLine('{"type":"auto_retry_end","success":true}')[0]?.metadata.phase,
+      "end"
+    )
+    assert.strictEqual(
+      parsePiStreamLine('{"type":"compaction_start"}')[0]?.metadata.status,
+      "compacting"
+    )
+    assert.strictEqual(parsePiStreamLine('{"type":"compaction_end"}')[0]?.metadata.phase, "end")
+  })
+
   it("keeps the built-in llama.cpp provider when isolation would drop it (pi >= 0.99.0)", () => {
     const local = CliConnectorConfig.make({
       connectorId: ConnectorIds.Pi,

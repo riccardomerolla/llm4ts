@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
-import { toolEventChunk, toolResultChunk } from "@llm4ts/core/providers/CliSupport"
+import { statusChunk, toolEventChunk, toolResultChunk } from "@llm4ts/core/providers/CliSupport"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import {
   summariseToolArgs,
@@ -257,5 +257,36 @@ describe("delegation (ADR 0033)", () => {
         "a1"
       ])
     })
+  )
+})
+
+describe("harness status and durations (ADR 0033)", () => {
+  it.effect(
+    "turns a harness status into a wait, and takes the tool duration the harness reports",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        yield* Stream.runDrain(
+          withToolActivity(
+            events,
+            Stream.make(
+              statusChunk("retrying", "start", "529"),
+              statusChunk("retrying", "end"),
+              toolEventChunk("read", {}, "t1"),
+              toolResultChunk("t1", { durationMs: 1234 })
+            )
+          )
+        )
+        const seen = yield* events.recorded
+        const began = seen.find((event) => event._tag === "Began")
+        assert.deepStrictEqual(began?._tag === "Began" ? [began.kind, began.label] : [], [
+          "wait",
+          "pi retry"
+        ])
+        const waits = seen.filter((event) => event._tag === "Timed" && event.kind === "wait")
+        assert.strictEqual(waits.length, 1)
+        const tool = seen.find((event) => event._tag === "Timed" && event.kind === "tool")
+        assert.strictEqual(tool?._tag === "Timed" ? tool.ms : undefined, 1234)
+      })
   )
 })

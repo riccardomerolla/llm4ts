@@ -263,3 +263,22 @@ export const atLeastVersion = (
   }
   return true
 }
+
+/**
+ * A harness pausing a turn on its own account — a provider retry, a context
+ * compaction — so the lane can say so instead of looking stuck (ADR 0033).
+ */
+export const statusChunk = (
+  status: "retrying" | "compacting",
+  phase: "start" | "end",
+  detail?: string
+): LlmChunk =>
+  LlmChunk.make({
+    delta: "",
+    metadata: {
+      event: "status",
+      status,
+      phase,
+      ...(detail === undefined || detail.length === 0 ? {} : { status_detail: detail })
+    }
+  })
