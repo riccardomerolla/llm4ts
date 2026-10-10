@@ -272,6 +272,40 @@ export class StoryJudged extends Schema.TaggedClass<StoryJudged>()("StoryJudged"
  * The executor roster's events (ADR 0019, 0022). `label` names who holds the
  * lease — a story's id, or "the run" — so a view can put an executor on its lane.
  */
+/** One task of a story's plan as the task loop announces it (ADR 0033). */
+export const PlannedTask = Schema.Struct({
+  title: Schema.String,
+  completed: Schema.Boolean,
+  /** The acceptance criteria the task's description names (`Satisfies: 1, 3`). */
+  satisfies: Schema.optionalKey(Schema.Array(Schema.Int))
+})
+
+/** The task loop's plan, before its first task: every task in order (ADR 0033). */
+export class TasksPlanned extends Schema.TaggedClass<TasksPlanned>()("TasksPlanned", {
+  tasks: Schema.Array(PlannedTask),
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
+/** A task begins: its position in the plan, from 1, and the plan's size (ADR 0033). */
+export class TaskStarted extends Schema.TaggedClass<TaskStarted>()("TaskStarted", {
+  index: Schema.Int,
+  count: Schema.Int,
+  title: Schema.String,
+  satisfies: Schema.optionalKey(Schema.Array(Schema.Int)),
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
+/** A task is ticked in the plan (ADR 0033). */
+export class TaskCompleted extends Schema.TaggedClass<TaskCompleted>()("TaskCompleted", {
+  index: Schema.Int,
+  count: Schema.Int,
+  title: Schema.String,
+  lane: Schema.optionalKey(Schema.String),
+  executor: Schema.optionalKey(Schema.String)
+}) {}
+
 export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("ExecutorLeased", {
   executor: Schema.String,
   role: Schema.String,
@@ -405,7 +439,10 @@ export const FlowEvent = Schema.Union([
   ExecutorHandedOver,
   StoryJudged,
   Timed,
-  Began
+  Began,
+  TasksPlanned,
+  TaskStarted,
+  TaskCompleted
 ])
 export type FlowEvent = typeof FlowEvent.Type
 
@@ -454,6 +491,27 @@ const stamped = (
   const tags = { lane, ...(executor === undefined ? {} : { executor }) }
   const usageTags = { ...tags, ...(clone === undefined ? {} : { clone }) }
   switch (event._tag) {
+    case "TasksPlanned":
+      return event.lane !== undefined ? event : TasksPlanned.make({ tasks: event.tasks, ...tags })
+    case "TaskStarted":
+      return event.lane !== undefined
+        ? event
+        : TaskStarted.make({
+            index: event.index,
+            count: event.count,
+            title: event.title,
+            ...(event.satisfies === undefined ? {} : { satisfies: event.satisfies }),
+            ...tags
+          })
+    case "TaskCompleted":
+      return event.lane !== undefined
+        ? event
+        : TaskCompleted.make({
+            index: event.index,
+            count: event.count,
+            title: event.title,
+            ...tags
+          })
     case "StageStarted":
       return event.lane !== undefined ? event : StageStarted.make({ stage: event.stage, ...tags })
     case "StageCompleted":

@@ -43,6 +43,9 @@ export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean =>
     case "ExecutorReleased":
     case "StoryJudged":
     case "Timed":
+    case "TasksPlanned":
+    case "TaskStarted":
+    case "TaskCompleted":
       return false
     // A gate or a setup may run for many minutes: its start is a line, so a
     // long one reads as running, not stuck. Other work starts too often.
@@ -250,6 +253,10 @@ export const terminalLine = (
     case "UsageProgress":
     case "StoryJudged":
     case "Timed":
+    // Tasks are stages already; the typed events feed the tree and the trace.
+    case "TasksPlanned":
+    case "TaskStarted":
+    case "TaskCompleted":
       return ""
     case "Began":
       return event.kind === "gate" ? palette.info(`running ${safe(event.label)}`) : ""
@@ -553,6 +560,9 @@ export const laneOfEvent = (
     case "TokensUsed":
     case "UsageProgress":
     case "ReviewFindings":
+    case "TasksPlanned":
+    case "TaskStarted":
+    case "TaskCompleted":
       return event.lane === undefined
         ? undefined
         : {

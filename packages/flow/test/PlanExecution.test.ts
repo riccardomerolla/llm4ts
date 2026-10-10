@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import { FlowAborted } from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
-import { implementTaskLoop, stage } from "@llm4ts/flow/PlanExecution"
+import { implementTaskLoop, satisfiesOf, stage } from "@llm4ts/flow/PlanExecution"
 import { kindAttribute, withKindSpan } from "@llm4ts/flow/Spans"
 import { recordingTracer } from "./support/RecordingTracer.ts"
 import { Plan, Task } from "@llm4ts/flow/Plan"
@@ -54,8 +54,73 @@ describe("implementTaskLoop", () => {
       assert.deepStrictEqual(disk, result)
       assert.deepStrictEqual(
         recorded.map((event) => event._tag),
-        ["StageStarted", "StageCompleted", "StageStarted", "StageCompleted"]
+        [
+          "TasksPlanned",
+          "TaskStarted",
+          "StageStarted",
+          "StageCompleted",
+          "TaskCompleted",
+          "TaskStarted",
+          "StageStarted",
+          "StageCompleted",
+          "TaskCompleted"
+        ]
       )
+    })
+  )
+
+  it("reads the criteria a task satisfies from its description", () => {
+    assert.deepStrictEqual(satisfiesOf("Add the route.\nSatisfies: 2"), [2])
+    assert.deepStrictEqual(satisfiesOf("Tests.\n\nSatisfies: 1, 3"), [1, 3])
+    assert.isUndefined(satisfiesOf("No criteria here"))
+    assert.isUndefined(satisfiesOf("Satisfies: n/a"))
+  })
+
+  it.effect("announces the plan, then each unfinished task's position, title and criteria", () =>
+    Effect.gen(function* () {
+      const files = yield* Ref.make<Readonly<Record<string, string>>>({})
+      const events = yield* makeCollectingFlowEvents
+      const plan = Plan.make({
+        epicId: "S01",
+        tasks: [
+          Task.make({ title: "route", description: "Satisfies: 1", completed: true }),
+          Task.make({ title: "cookie", description: "Wire it.\nSatisfies: 2" }),
+          Task.make({ title: "docs", description: "" })
+        ]
+      })
+      yield* implementTaskLoop(
+        makePlanStore(memoryFiles(files)),
+        events,
+        "plan.md",
+        plan,
+        () => Effect.void
+      )
+      const recorded = yield* events.recorded
+      const planned = recorded[0]
+      assert.strictEqual(planned?._tag, "TasksPlanned")
+      if (planned?._tag === "TasksPlanned") {
+        assert.deepStrictEqual(
+          planned.tasks.map((task) => [task.title, task.completed, task.satisfies]),
+          [
+            ["route", true, [1]],
+            ["cookie", false, [2]],
+            ["docs", false, undefined]
+          ]
+        )
+      }
+      const tasks = recorded.flatMap((event) =>
+        event._tag === "TaskStarted" || event._tag === "TaskCompleted"
+          ? [`${event._tag} ${event.index}/${event.count} ${event.title}`]
+          : []
+      )
+      assert.deepStrictEqual(tasks, [
+        "TaskStarted 2/3 cookie",
+        "TaskCompleted 2/3 cookie",
+        "TaskStarted 3/3 docs",
+        "TaskCompleted 3/3 docs"
+      ])
+      const started = recorded.find((event) => event._tag === "TaskStarted")
+      assert.deepStrictEqual(started?._tag === "TaskStarted" ? started.satisfies : [], [2])
     })
   )
 
