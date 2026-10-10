@@ -70,9 +70,14 @@ its acceptance criteria allow and still has independent tasks.
   red gates the review could not settle, or a `BLOCKED_ON` there all give
   the task to the story's coder, which runs it in the story worktree. A task
   run aside cannot fail its story.
-- `Depends on:` lists earlier tasks only; a forward or self reference is
-  dropped, so the graph has no cycle. `Depends on: none` runs beside the
-  task before it.
+- A task without `Depends on:` waits for every earlier task, not only the
+  one before it, so an old-style task after a `none` one cannot overlap
+  the task before it. `Depends on:` lists earlier tasks only; a forward or
+  self reference is dropped, so the graph has no cycle, and a line left
+  naming none is read as no line. `Depends on: none` runs beside the task
+  before it.
+- The aside coder's lease ends with its work: the merge back waits for the
+  story's coder without holding a slot another story could use.
 - The aside coder is told its own working directory and, when the task
   names them, its `Owns:` paths; the evidence check (ADR 0027 decision 6)
   is skipped for it, since its tool calls are on its own transcript.

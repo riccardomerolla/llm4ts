@@ -2287,6 +2287,8 @@ describe("Stories executor with tasks aside (ADR 0034)", () => {
             if (!free) {
               return yield* RosterExhausted.make({ role: "coder", reasons: ["none free"] })
             }
+            // The coder's lease ends with this scope.
+            yield* Effect.addFinalizer(() => record(harness, `seats-aside-closed:${workDir}`))
             const seats: StorySeats = {
               context: {
                 ...context,
@@ -2323,6 +2325,12 @@ describe("Stories executor with tasks aside (ADR 0034)", () => {
       assert.include(log, `seats-aside:${where}:true`)
       assert.include(log, `commit:${where}:a: docs`)
       assert.include(log, "catch-up:/repo/.llm4ts/worktrees/a:story/single/a--task-3:plain")
+      // The aside coder's slot is free before the merge waits for the story's coder.
+      assert.isBelow(
+        log.indexOf(`seats-aside-closed:${where}`),
+        log.indexOf("catch-up:/repo/.llm4ts/worktrees/a:story/single/a--task-3:plain")
+      )
+      assert.isAtLeast(log.indexOf(`seats-aside-closed:${where}`), 0)
       assert.include(log, `worktree-remove:${where}:force`)
       assert.include(log, "branch-delete:story/single/a--task-3")
       assert.notInclude(log, "commit:/repo/.llm4ts/worktrees/a:a: docs")

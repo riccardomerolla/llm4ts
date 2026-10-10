@@ -1645,69 +1645,78 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         // A previous run's leftovers go first.
         yield* cleanUp
         yield* context.git.addWorktreeNewBranch(where, branch, state.branch)
-        const asideSeats = yield* options.contextFor(where, {
-          label: `${story.id}#t${node.index}`,
-          ifFree: true
-        })
-        const asideRoster = asideSeats.context.roster
-        yield* request.announce({
-          ...(asideRoster === undefined
-            ? {}
-            : {
-                ...(yield* Effect.map(asideRoster.executor, (executor) =>
-                  executor === undefined ? {} : { executor }
-                )),
-                ...(asideRoster.clone === undefined
-                  ? {}
-                  : yield* Effect.map(asideRoster.clone, (clone) =>
-                      clone === undefined ? {} : { clone }
-                    ))
-              })
-        })
-        if (options.setup !== undefined) {
-          yield* options.setup(where, lane)
-        }
-        const asideBlocked = yield* Ref.make<string | undefined>(undefined)
-        const asideContext: FlowContextShape = {
-          ...asideSeats.context,
-          coder: watchForBlockedOn(asideSeats.context.coder, asideBlocked)
-        }
-        const asideGit = asideContext.git
-        const asideSystem = [
-          withContract(
-            [
-              perimeterRules(story, { plan, worktree: where, epicCheckout: context.workDir }),
-              gateRules,
-              extra,
-              node.owns.length === 0
-                ? undefined
-                : `This task owns ${node.owns.join(", ")}: another task of this story may be changing other files right now, so change nothing else.`
+        // The coder is held for the work only: its slot is free again before
+        // the merge waits for the story's coder to finish its own task.
+        const blockedOn = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const asideSeats = yield* options.contextFor(where, {
+              label: `${story.id}#t${node.index}`,
+              ifFree: true
+            })
+            const asideRoster = asideSeats.context.roster
+            yield* request.announce({
+              ...(asideRoster === undefined
+                ? {}
+                : {
+                    ...(yield* Effect.map(asideRoster.executor, (executor) =>
+                      executor === undefined ? {} : { executor }
+                    )),
+                    ...(asideRoster.clone === undefined
+                      ? {}
+                      : yield* Effect.map(asideRoster.clone, (clone) =>
+                          clone === undefined ? {} : { clone }
+                        ))
+                  })
+            })
+            if (options.setup !== undefined) {
+              yield* options.setup(where, lane)
+            }
+            const asideBlocked = yield* Ref.make<string | undefined>(undefined)
+            const asideContext: FlowContextShape = {
+              ...asideSeats.context,
+              coder: watchForBlockedOn(asideSeats.context.coder, asideBlocked)
+            }
+            const asideGit = asideContext.git
+            const asideSystem = [
+              withContract(
+                [
+                  perimeterRules(story, { plan, worktree: where, epicCheckout: context.workDir }),
+                  gateRules,
+                  extra,
+                  node.owns.length === 0
+                    ? undefined
+                    : `This task owns ${node.owns.join(", ")}: another task of this story may be changing other files right now, so change nothing else.`
+                ]
+                  .filter((part): part is string => part !== undefined && part.trim().length > 0)
+                  .join("\n\n"),
+                contractProfile
+              ),
+              startingCode
             ]
-              .filter((part): part is string => part !== undefined && part.trim().length > 0)
-              .join("\n\n"),
-            contractProfile
-          ),
-          startingCode
-        ]
-          .filter((part): part is string => part !== undefined)
-          .join("\n\n")
-        yield* run(asideContext, {
-          lint: gatesAt(
-            where,
-            asideGit,
-            join(storyGateLogDir(options.stateDir, story.id), `task-${node.index}`),
-            { owns: node.owns, from: state.branch }
-          ),
-          triage: {
-            baseline: storyBaseline,
-            roots: rootsOf(where),
-            ...(options.testGate === undefined ? {} : { rerunTest: options.testGate(where, lane) })
-          },
-          // Its tool calls are on its own lane's transcript, not the story's.
-          onTaskReply: undefined,
-          system: asideSystem
-        })
-        if ((yield* Ref.get(asideBlocked)) !== undefined) {
+              .filter((part): part is string => part !== undefined)
+              .join("\n\n")
+            yield* run(asideContext, {
+              lint: gatesAt(
+                where,
+                asideGit,
+                join(storyGateLogDir(options.stateDir, story.id), `task-${node.index}`),
+                { owns: node.owns, from: state.branch }
+              ),
+              triage: {
+                baseline: storyBaseline,
+                roots: rootsOf(where),
+                ...(options.testGate === undefined
+                  ? {}
+                  : { rerunTest: options.testGate(where, lane) })
+              },
+              // Its tool calls are on its own lane's transcript, not the story's.
+              onTaskReply: undefined,
+              system: asideSystem
+            })
+            return yield* Ref.get(asideBlocked)
+          })
+        )
+        if (blockedOn !== undefined) {
           yield* said("stopped on BLOCKED_ON aside; the story's coder takes it")
           return "declined" as const
         }
