@@ -108,6 +108,45 @@ A feedback item a Refine round's planner left out, with the reason or the
 question whose answer would make it plannable.
 _Avoid_: skipped, rejected, open point (that is an epic brief's term)
 
+### Roster and dashboard
+
+**Executor**:
+A harness and a model, with the roles it may take and how many Clones of it
+may run at once.
+_Avoid_: agent, provider, worker
+
+**Clone**:
+One of an Executor's concurrent instances. A Lease names the Clone it holds.
+The number of Clones is the Executor's slots.
+_Avoid_: slot (that is the count), instance, worker, sub-agent
+
+**Lease**:
+One Clone taken by a role: for a story's whole life by its coder, for one
+call by a reasoning role. Independence is between Executors, never between
+Clones of one Executor.
+_Avoid_: reservation, booking
+
+**Task**:
+One step of a story's plan, written by the story's coder and tied to an
+acceptance criterion. A Task may depend on earlier Tasks and own the paths
+it changes.
+_Avoid_: step, subtask, ticket, todo
+
+**Sub-agent**:
+An agent a harness spawned on its own inside a Lease. llm4ts observes it
+and attributes its cost to the Lease; it never leases or counts it.
+_Avoid_: clone, child executor, worker
+
+**Lane**:
+A running story as the dashboard shows it: its Clone, its current Task, its
+open stage, and the Sub-agents and parallel Task coders under it.
+_Avoid_: box, card, thread
+
+**Board**:
+The epic's stories by column (planned, active, waiting, done, failed,
+skipped), or one story's Tasks by column (todo, doing, review, done).
+_Avoid_: kanban, dashboard (that is the whole screen), tree
+
 ### Existing evaluation terms (kept distinct from Judgment)
 
 **Judge**:
