@@ -120,3 +120,61 @@ export const parsePlan = Effect.fn("@llm4ts/flow/Plan.parse")(function* (
     ...(brief === undefined ? {} : { brief })
   })
 })
+
+// ---- The task graph (ADR 0034) ------------------------------------------------
+
+/**
+ * The tasks a task waits for, from its description's `Depends on:` line
+ * (`1, 3`, or `none`). Without the line it waits for the previous task, so
+ * a plan written before ADR 0034 runs in order. Only earlier tasks count: a
+ * forward or self reference is dropped, so the graph never has a cycle.
+ */
+export const dependsOnOf = (description: string, index: number): ReadonlyArray<number> => {
+  const match = /\bDepends on:\s*([^\n.]*)/iu.exec(description)
+  if (match === null) {
+    return index > 1 ? [index - 1] : []
+  }
+  return [
+    ...new Set(
+      (match[1] ?? "")
+        .split(/[^\d]+/u)
+        .filter((part) => part.length > 0)
+        .map((part) => Number.parseInt(part, 10))
+        .filter((number) => Number.isInteger(number) && number >= 1 && number < index)
+    )
+  ]
+}
+
+/** The paths a task says it changes, from its `Owns:` line; empty when it says none. */
+export const ownsOf = (description: string): ReadonlyArray<string> => {
+  const match = /\bOwns:\s*([^\n]*)/iu.exec(description)
+  return match === null
+    ? []
+    : (match[1] ?? "")
+        .split(/[,\s]+/u)
+        .map((path) => path.trim().replace(/^`|`$/gu, ""))
+        .filter((path) => path.length > 0 && path.toLowerCase() !== "none")
+}
+
+/** One task of a plan as the scheduler sees it: its 1-based index and what it waits for. */
+export interface TaskNode {
+  readonly index: number
+  readonly task: Task
+  readonly dependsOn: ReadonlyArray<number>
+  readonly owns: ReadonlyArray<string>
+}
+
+export const taskGraph = (plan: Plan): ReadonlyArray<TaskNode> =>
+  plan.tasks.map((task, position) => ({
+    index: position + 1,
+    task,
+    dependsOn: dependsOnOf(task.description, position + 1),
+    owns: ownsOf(task.description)
+  }))
+
+/** Whether some task of the plan waits for anything but its predecessor alone. */
+export const hasParallelTasks = (plan: Plan): boolean =>
+  taskGraph(plan).some(
+    (node) =>
+      node.index > 1 && !(node.dependsOn.length === 1 && node.dependsOn[0] === node.index - 1)
+  )
