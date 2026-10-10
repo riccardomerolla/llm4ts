@@ -77,6 +77,7 @@ import {
   deferredFeedback,
   judgeRoundsOption,
   judgeSeverity,
+  mergeRevisionsOption,
   parseEpicArgs,
   reasonerFromEnvironment,
   serverHealthUrl,
@@ -261,6 +262,20 @@ describe("epic-stories flags and seats", () => {
       assert.deepStrictEqual(judgeRoundsOption(undefined, { LLM4TS_JUDGE_ROUNDS: "x" }), {})
       assert.deepStrictEqual(judgeRoundsOption(undefined, {}), {})
       assert.isFalse(flags.deferFindings)
+      assert.isUndefined(flags.mergeRevisions)
+      assert.strictEqual((yield* parseEpicArgs(["--merge-revisions", "0"])).mergeRevisions, 0)
+      assert.strictEqual((yield* parseEpicArgs(["--merge-revisions=2"])).mergeRevisions, 2)
+      assert.strictEqual(
+        (yield* Effect.flip(parseEpicArgs(["--merge-revisions", "-1"])))._tag,
+        "ScriptUsage"
+      )
+      assert.deepStrictEqual(mergeRevisionsOption(0, { LLM4TS_MERGE_REVISIONS: "3" }), {
+        mergeRevisions: 0
+      })
+      assert.deepStrictEqual(mergeRevisionsOption(undefined, { LLM4TS_MERGE_REVISIONS: "3" }), {
+        mergeRevisions: 3
+      })
+      assert.deepStrictEqual(mergeRevisionsOption(undefined, { LLM4TS_MERGE_REVISIONS: "x" }), {})
       assert.isTrue((yield* parseEpicArgs(["--defer-findings"])).deferFindings)
       assert.isTrue(deferFindingsEnabled(true, {}))
       assert.isTrue(deferFindingsEnabled(false, { LLM4TS_DEFER_FINDINGS: "on" }))

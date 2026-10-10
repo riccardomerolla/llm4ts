@@ -72,6 +72,10 @@ export const compactGateLog = (text: string, roots: ReadonlyArray<string>): stri
 export const storyGateLogDir = (stateDir: string, storyId: string): string =>
   join(stateDir, "stories", storyId, "gates")
 
+/** Where the epic gates write their logs after merging one story. */
+export const mergeGateLogDir = (stateDir: string, storyId: string): string =>
+  join(storyGateLogDir(stateDir, storyId), "merge")
+
 /**
  * What `--land` keeps of the gates: no baselines (reproducible), and each
  * story's gate logs reduced to their failing lines. Logs are enumerated from
@@ -90,14 +94,16 @@ export const compactGateArtifacts = Effect.fn("@llm4ts/flow/Gates.compactArtifac
   }
   let logs = 0
   for (const storyId of storyIds) {
-    for (const [index, command] of commands.entries()) {
-      const logPath = join(storyGateLogDir(stateDir, storyId), gateLogName(index, command))
-      const text = yield* files.read(logPath)
-      if (text === undefined) {
-        continue
+    for (const dir of [storyGateLogDir(stateDir, storyId), mergeGateLogDir(stateDir, storyId)]) {
+      for (const [index, command] of commands.entries()) {
+        const logPath = join(dir, gateLogName(index, command))
+        const text = yield* files.read(logPath)
+        if (text === undefined) {
+          continue
+        }
+        yield* files.writeAtomic(logPath, compactGateLog(text, []))
+        logs += 1
       }
-      yield* files.writeAtomic(logPath, compactGateLog(text, []))
-      logs += 1
     }
   }
   return { baselines: hadBaselines ? 1 : 0, logs }

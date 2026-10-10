@@ -27,7 +27,7 @@ import {
   ensureBaseline as ensureStoredBaseline,
   failingLinesOf,
   storyGateLogDir,
-  triageGates,
+  mergeGateLogDir,
   writeBaseline,
   type GateLogDir
 } from "./Gates.ts"
@@ -704,6 +704,13 @@ export interface StoriesOptions {
    */
   readonly judgeRounds?: number
   /**
+   * When the epic gates are red after a story merges (the merge is undone),
+   * the story goes back to its worktree this many times: it catches up with
+   * the epic, gets a revision task with the failures, and merges again.
+   * Default 1; 0 fails the story at once, as before.
+   */
+  readonly mergeRevisions?: number
+  /**
    * How much of the code a story starts from goes into its coder's system
    * prompt, in characters: the shared read-only files it uses, then its own.
    * Each file read up front is a model round trip the coder does not spend
@@ -871,6 +878,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const epicBranch = options.epicBranch ?? `epic/${plan.epicId}`
   const concurrency = Math.max(1, options.concurrency ?? 3)
   const judgeRounds = Math.max(1, options.judgeRounds ?? 2)
+  const mergeRevisions = Math.max(0, options.mergeRevisions ?? 1)
   const deferring = options.deferNonBlocking === true
   const statePath = (story: Story): string => join(options.stateDir, `stories/${story.id}.json`)
   const planPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.plan.md`)
@@ -1010,8 +1018,15 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
 
   const mergeLock = yield* Semaphore.make(1)
 
-  /** Merge the story branch into the epic branch and re-gate the epic head, one story at a time. */
-  const integrate = (story: Story, branch: string): Effect.Effect<void, FlowError> =>
+  /**
+   * Merge the story branch into the epic branch and re-gate the epic head,
+   * one story at a time. Red gates undo the merge and are returned (the
+   * failures the merge added); `undefined` means merged.
+   */
+  const integrate = (
+    story: Story,
+    branch: string
+  ): Effect.Effect<ReviewResult | undefined, FlowError> =>
     Effect.flatMap(Clock.currentTimeMillis, (requested) =>
       Effect.andThen(
         laneOf(story).publish(Began.make({ kind: "wait", label: "merge lock" })),
@@ -1032,22 +1047,36 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
                 Timed.make({ kind: "merge", label: "merge", ms, ...(failed ? { failed } : {}) }),
               () => Began.make({ kind: "merge", label: "merge" })
             )
-            const gate = yield* options.gates(context.workDir, lane)
+            // The whole output is kept: the reason below names only the
+            // failing lines, which is not enough to tell why.
+            const gate = yield* options.gates(context.workDir, lane, {
+              files,
+              dir: mergeGateLogDir(options.stateDir, story.id)
+            })
             // Charged only with what the merge added: the head before it had
-            // a baseline (run start or the previous merge).
+            // a baseline (run start or the previous merge). A new line green
+            // on one rerun of the test gate is flaky, as in the worktree.
             const before = yield* ensureBaseline(
               checkpoint,
               Effect.succeed(ReviewResult.make({ issues: [] })),
               context.workDir
             )
-            const verdict = triageGates(gate, before, rootsOf(context.workDir))
-            if (!verdict.blocking.isClean) {
+            const blocking = yield* applyTriage(
+              gate,
+              {
+                baseline: Effect.succeed(before),
+                roots: rootsOf(context.workDir),
+                ...(options.testGate === undefined
+                  ? {}
+                  : { rerunTest: options.testGate(context.workDir, lane) })
+              },
+              lane,
+              yield* Ref.make<ReadonlySet<string>>(new Set())
+            )
+            if (!blocking.isClean) {
               // Never leave a red epic head for the next story to inherit.
               yield* context.git.rollback(checkpoint)
-              return yield* failed(
-                story,
-                `epic gates failed after merging; merge undone:\n${issueLines(verdict.blocking)}`
-              )
+              return blocking
             }
             if (gateCommands !== undefined) {
               const mergedHead = yield* context.git.checkpoint
@@ -1061,6 +1090,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             yield* laneOf(story).publish(
               Info.make({ message: `story ${story.id}: merged into ${epicBranch}` })
             )
+            return undefined
           })
         )
       )
@@ -1173,7 +1203,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   /** Everything that happens inside a story's worktree: plan, implement, judge, perimeter. */
   const implementStory = Effect.fn("@llm4ts/flow/Stories.implementStory")(function* (
     story: Story,
-    state: StoryState
+    state: StoryState,
+    /** The epic gates' failures after the story's last merge: run as a revision task. */
+    mergeFailure?: ReviewResult
   ): Effect.fn.Return<
     {
       readonly judge: string | undefined
@@ -1497,6 +1529,34 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       yield* git.commitAll(`${story.id}: put paths outside the perimeter back`)
     })
 
+    /** A revision task on the story's own plan, run by the task loop like any other. */
+    const appendRevision = (subject: string, lead: string, verdict: ReviewResult) =>
+      Effect.gen(function* () {
+        const store = makePlanStore(files)
+        const current = yield* store.load(planPath(story))
+        if (current === undefined) {
+          return
+        }
+        const number = current.tasks.filter((task) => revisionTitle.test(task.title)).length + 1
+        yield* store.save(
+          planPath(story),
+          Plan.make({
+            ...current,
+            tasks: [
+              ...current.tasks,
+              Task.make({
+                title: `Revision ${number}: ${subject}`,
+                description: [
+                  lead,
+                  "Close these gaps without weakening any test and without leaving your owned paths:",
+                  issueLines(verdict)
+                ].join("\n")
+              })
+            ]
+          })
+        )
+      })
+
     const planTasks = options.planTasks ?? defaultPlanTasks
     // Taken after catch-up and setup: the code as the first task finds it.
     const startingCode = yield* startingCodeOf(
@@ -1570,6 +1630,19 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
       ...(deferring ? { settle: "blocking" as const } : {})
     })
+    if (mergeFailure !== undefined) {
+      // The branch already caught up with the epic above: the gates in the
+      // worktree now see the combination that was red after the merge.
+      yield* appendRevision(
+        "make the epic gates green after merging",
+        [
+          `The story "${story.title}" was merged into ${epicBranch} and the epic's gates went red, so the merge was undone.`,
+          `Your branch now includes everything merged into ${epicBranch} since you started: the failures`,
+          "come from your change combined with that work. Fix them on your side."
+        ].join("\n"),
+        mergeFailure
+      )
+    }
     yield* guarded(implementTasks, implementTasks)
 
     // Other stories may have merged while this one ran: judge the branch
@@ -1580,33 +1653,13 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     // A judge finding becomes a revision task on the story's own plan, run by
     // the task loop like any other: coder, review, gates, commit.
     const addRevision = (verdict: ReviewResult, empty: boolean): Effect.Effect<void, FlowError> =>
-      Effect.gen(function* () {
-        const store = makePlanStore(files)
-        const current = yield* store.load(planPath(story))
-        if (current === undefined) {
-          return
-        }
-        const number = current.tasks.filter((task) => revisionTitle.test(task.title)).length + 1
-        yield* store.save(
-          planPath(story),
-          Plan.make({
-            ...current,
-            tasks: [
-              ...current.tasks,
-              Task.make({
-                title: `Revision ${number}: close the judge's findings`,
-                description: [
-                  empty
-                    ? `The story "${story.title}" has no changes yet, and what it must provide is not all in place on the epic branch.`
-                    : `The story "${story.title}" was judged short of done.`,
-                  "Close these gaps without weakening any test and without leaving your owned paths:",
-                  issueLines(verdict)
-                ].join("\n")
-              })
-            ]
-          })
-        )
-      })
+      appendRevision(
+        "close the judge's findings",
+        empty
+          ? `The story "${story.title}" has no changes yet, and what it must provide is not all in place on the epic branch.`
+          : `The story "${story.title}" was judged short of done.`,
+        verdict
+      )
 
     let judgeNote: string | undefined
     let inPlace = false
@@ -1756,11 +1809,16 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     const changed = yield* git.changedFilesVsBase(epicBranch)
     yield* enforcePerimeter(changed, story)
     if (deferring) {
+      // A merge revision adds to what the story's first run deferred.
+      if (mergeFailure !== undefined) {
+        const earlier = yield* files.read(deferredPath(options.stateDir, story.id))
+        deferred.unshift(...(earlier ?? "").split("\n").filter((line) => line.startsWith("- [")))
+      }
       yield* deferred.length === 0
         ? files.remove(deferredPath(options.stateDir, story.id))
         : files.writeAtomic(
             deferredPath(options.stateDir, story.id),
-            [`# Deferred from ${story.id}: ${story.title}`, "", ...deferred, ""].join("\n")
+            [`# Deferred from ${story.id}: ${story.title}`, "", ...new Set(deferred), ""].join("\n")
           )
     }
     const totals = seats.totals === undefined ? undefined : yield* seats.totals
@@ -1790,14 +1848,38 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         judge: "merged on a previous run"
       })
     }
-    const result = yield* Effect.scoped(implementStory(story, state))
-    if (result.inPlace) {
-      // Verified already on the epic: there is nothing to merge or re-gate.
-      yield* laneOf(story).publish(
-        Info.make({ message: `story ${story.id}: verified already in place; nothing to merge` })
+    let result = yield* Effect.scoped(implementStory(story, state))
+    for (let revision = 0; ; revision += 1) {
+      if (result.inPlace) {
+        // Verified already on the epic: there is nothing to merge or re-gate.
+        yield* laneOf(story).publish(
+          Info.make({ message: `story ${story.id}: verified already in place; nothing to merge` })
+        )
+        break
+      }
+      const red = yield* integrate(story, state.branch)
+      if (red === undefined) {
+        break
+      }
+      const logs = red.issues.flatMap((issue) =>
+        issue.logPath === undefined ? [] : [issue.logPath]
       )
-    } else {
-      yield* integrate(story, state.branch)
+      const why = `${issueLines(red)}${logs.length === 0 ? "" : `\nfull output: ${logs.join(", ")}`}`
+      if (revision >= mergeRevisions) {
+        return yield* failed(
+          story,
+          `epic gates failed after merging${
+            revision === 0 ? "" : ` (after ${revision} merge revision${revision === 1 ? "" : "s"})`
+          }; merge undone:\n${why}`
+        )
+      }
+      yield* appendFindings(story, `epic gates after merging — red, merge undone; revising`, red)
+      yield* laneOf(story).publish(
+        Info.make({
+          message: `story ${story.id}: epic gates red after merging; merge undone, sending it back to catch up and fix (merge revision ${revision + 1} of ${mergeRevisions})`
+        })
+      )
+      result = yield* Effect.scoped(implementStory(story, state, red))
     }
     const last = result.executor?.split(" → ").at(-1)
     yield* saveVersioned(

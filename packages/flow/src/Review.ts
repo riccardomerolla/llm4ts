@@ -19,7 +19,7 @@ import {
   type FlowError
 } from "./FlowError.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
-import { GateBaseline, isGateIssue, triageGates } from "./GateTriage.ts"
+import { GateBaseline, gateIssuePrefix, isGateIssue, triageGates } from "./GateTriage.ts"
 import {
   type OracleRules,
   checkOracle,
@@ -572,7 +572,7 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
     issues: [
       ReviewIssue.make({
         severity: "Critical",
-        title: `lint failed: ${label}`,
+        title: `${gateIssuePrefix}${label}`,
         description:
           result === undefined
             ? `gate killed: no exit after ${seconds} seconds (LLM4TS_GATE_TIMEOUT)`
@@ -581,7 +581,7 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
         ...(logPath === undefined ? {} : { logPath })
       })
     ],
-    summary: "lint failed",
+    summary: "gate failed",
     ...(passed === undefined ? {} : { passed })
   })
 })
