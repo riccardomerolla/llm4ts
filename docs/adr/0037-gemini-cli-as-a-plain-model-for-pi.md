@@ -51,9 +51,13 @@ Two routes would make Gemini a plain model behind pi:
 --output-format stream-json -e none` in an empty scratch directory, with:
    - `GEMINI_SYSTEM_MD` pointing at a file the bridge writes: pi's system
      message, the tool-call protocol below, and pi's tool schemas;
-   - `GEMINI_CLI_SYSTEM_DEFAULTS_PATH` pointing at settings with
-     `tools.core: []` and `experimental.enableAgents: false`, the seam llm4ts
-     already uses for `model.maxSessionTurns`;
+   - `GEMINI_CLI_SYSTEM_SETTINGS_PATH` pointing at settings that allow no
+     built-in tool and set `experimental.enableAgents: false`. It is the
+     system _settings_ file, which overrides user and project settings; the
+     system _defaults_ file llm4ts uses for `model.maxSessionTurns` is
+     overridden by them, and the first probe run showed tools and sub-agents
+     still active with it. Which allowlist removes every tool (`[]`, or one
+     tool that does not exist) is the probe's to settle;
    - the conversation (user, assistant and tool messages) rendered as the
      prompt, in order, each tool result under the call it answers.
 4. **Tool calls as text.** The model asks for a tool with one block,
@@ -114,3 +118,26 @@ node examples/gemini-model-probe.mjs --model gemini-2.5-pro --trials 10
 The summary prints the four verdicts and the prompt tokens of a baseline
 call, a call with the prompt replaced, and one with the tools removed too.
 `--skip-acp` leaves out question 4.
+
+## Probe run 1 (2026-10-10)
+
+On the customer's Gemini CLI, with `gemini-2.5-pro` and `gemini-3.8-flash`:
+
+- **Question 1, the prompt override, passes on both.** The canary came back
+  in headless mode.
+- **Question 4, the override in ACP mode, passes on both.**
+- **Question 2 was not answered.** The settings went in the system defaults
+  file, which the user's own settings override. With `gemini-2.5-pro`, the
+  tool-protocol trials called Gemini's built-in tools natively (`glob`,
+  `read_file`, `list_directory`, `google_web_search`, `invoke_agent`), so
+  tools and sub-agents were still there. The stage-2 check passed only
+  because the model declined to use a tool. The probe now writes the
+  system settings file, tries two allowlists, and tells the model to use
+  its tools.
+- **Question 3, the tool-call protocol:** `gemini-3.8-flash` kept to it in
+  10 of 10 calls, each the right tool with its argument. `gemini-2.5-pro`
+  scored 0 of 10, all because it called the native tools it still had. It
+  must be measured again once question 2 passes.
+- **Tokens were not read.** This Gemini CLI reports stats in a shape the
+  probe did not parse. The probe now reads both shapes and prints the raw
+  stats of its first call.

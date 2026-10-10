@@ -8,10 +8,11 @@
  *   1. Does `GEMINI_SYSTEM_MD` replace the built-in system prompt in
  *      headless mode (`gemini -p`)? A canary planted in our prompt file must
  *      come back, and the prompt tokens must drop.
- *   2. Do `tools.core: []` and `experimental.enableAgents: false` (a system
- *      defaults file, as llm4ts injects one) remove every tool? Asked to run
- *      a shell command, Gemini must make no tool call, and the prompt tokens
- *      must drop further.
+ *   2. Does a tool allowlist with `experimental.enableAgents: false`, in
+ *      Gemini CLI's system settings file (which overrides user and project
+ *      settings), remove every tool? Told to use its tools, Gemini must make
+ *      no tool call; asked to name its functions, it must name none. Two
+ *      allowlists are tried: `[]` and one tool that does not exist.
  *   3. How reliably does the model keep to a text tool-call protocol
  *      (`<tool_call>{"name":…,"arguments":{…}}</tool_call>`) for pi's tools?
  *   4. Does the override also apply in ACP mode (`gemini --experimental-acp`),
@@ -83,16 +84,30 @@ writeFileSync(
   ].join("\n")
 )
 
-const noToolsSettings = join(work, "no-tools-settings.json")
-writeFileSync(
-  noToolsSettings,
-  JSON.stringify({ tools: { core: [] }, experimental: { enableAgents: false } }, null, 2)
-)
+/**
+ * Two ways to take every built-in tool away, written as Gemini CLI's
+ * *system settings* file (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`): it overrides
+ * user and project settings, where the system *defaults* file (the first
+ * run's choice) is overridden by them. An empty allowlist may read as "no
+ * allowlist", so the second names one tool that does not exist.
+ */
+const settingsVariants = [
+  { name: "tools.core []", tools: { core: [] } },
+  { name: 'tools.core ["llm4ts_no_tool"]', tools: { core: ["llm4ts_no_tool"] } }
+].map((variant, index) => {
+  const path = join(work, `no-tools-settings-${index + 1}.json`)
+  writeFileSync(
+    path,
+    JSON.stringify({ tools: variant.tools, experimental: { enableAgents: false } }, null, 2)
+  )
+  return { name: variant.name, path }
+})
 
 const baseEnv = { ...process.env, GEMINI_CLI_TRUST_WORKSPACE: "true" }
 // Our own overrides only: a caller's GEMINI_SYSTEM_MD must not leak into the baseline.
 delete baseEnv.GEMINI_SYSTEM_MD
 delete baseEnv.GEMINI_CLI_SYSTEM_DEFAULTS_PATH
+delete baseEnv.GEMINI_CLI_SYSTEM_SETTINGS_PATH
 
 /** One headless call: the stream-json events, the reply text, tool calls and token stats. */
 const headless = (label, prompt, env) =>
@@ -171,17 +186,31 @@ const headless = (label, prompt, env) =>
     })
   })
 
-/** Prompt (including cached), cached and output tokens over every model a call used. */
+/**
+ * Prompt (including cached), cached and output tokens: per model
+ * (`stats.models[m].tokens`, as gemini 0.5x reports) or flat
+ * (`input_tokens`, `output_tokens`, `cached`, as later versions do).
+ */
 const tokensOf = (stats) => {
   const totals = { prompt: 0, cached: 0, output: 0 }
-  for (const entry of Object.values(stats?.models ?? {})) {
-    const tokens = entry?.tokens ?? {}
-    totals.prompt += tokens.prompt ?? 0
-    totals.cached += tokens.cached ?? 0
-    totals.output += (tokens.candidates ?? 0) + (tokens.thoughts ?? 0)
+  const models = Object.values(stats?.models ?? {})
+  if (models.length > 0) {
+    for (const entry of models) {
+      const tokens = entry?.tokens ?? entry ?? {}
+      totals.prompt += tokens.prompt ?? tokens.input_tokens ?? 0
+      totals.cached += tokens.cached ?? 0
+      totals.output += (tokens.candidates ?? tokens.output_tokens ?? 0) + (tokens.thoughts ?? 0)
+    }
+    if (totals.prompt + totals.output > 0) return totals
   }
-  return totals
+  return {
+    prompt: stats?.input_tokens ?? stats?.prompt_tokens ?? 0,
+    cached: stats?.cached ?? stats?.cached_tokens ?? 0,
+    output: stats?.output_tokens ?? 0
+  }
 }
+
+const toolCallsOf = (stats) => stats?.tools?.totalCalls ?? stats?.tool_calls ?? "?"
 
 const show = (outcome) => {
   const tokens = tokensOf(outcome.stats)
@@ -190,7 +219,7 @@ const show = (outcome) => {
   console.log(`reply: ${JSON.stringify(outcome.reply.trim().slice(0, 300))}`)
   console.log(`tool calls: ${outcome.toolUses.length === 0 ? "none" : outcome.toolUses.join(", ")}`)
   console.log(
-    `tokens: prompt ${tokens.prompt} (cached ${tokens.cached}) · output ${tokens.output} · tool calls in stats ${outcome.stats?.tools?.totalCalls ?? "?"}`
+    `tokens: prompt ${tokens.prompt} (cached ${tokens.cached}) · output ${tokens.output} · tool calls in stats ${toolCallsOf(outcome.stats)}`
   )
   for (const error of outcome.errors) console.log(`ERROR: ${error}`)
   return tokens
@@ -214,14 +243,14 @@ const parseToolCall = (reply) => {
 }
 
 /** ACP mode: does the override reach a session started by `--experimental-acp`? */
-const acpCanary = () =>
+const acpCanary = (settingsPath) =>
   new Promise((resolve) => {
     const child = spawn("gemini", ["--experimental-acp", ...(model ? ["-m", model] : [])], {
       cwd: work,
       env: {
         ...baseEnv,
         GEMINI_SYSTEM_MD: plainPrompt,
-        GEMINI_CLI_SYSTEM_DEFAULTS_PATH: noToolsSettings
+        GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath
       },
       stdio: ["pipe", "pipe", "pipe"]
     })
@@ -301,9 +330,14 @@ const main = async () => {
   console.log(`gemini model probe · model ${model ?? "(gemini's default)"} · work dir ${work}`)
 
   // 1. Baseline, then the system prompt replaced.
-  const baseline = show(
-    await headless("1a baseline (built-in system prompt)", "Reply with exactly: OK", {})
+  const baselineCall = await headless(
+    "1a baseline (built-in system prompt)",
+    "Reply with exactly: OK",
+    {}
   )
+  const baseline = show(baselineCall)
+  // The raw shape, so a stats layout this script does not read is visible.
+  console.log(`raw stats: ${JSON.stringify(baselineCall.stats ?? null).slice(0, 600)}`)
   const replacedCall = await headless(
     "1b GEMINI_SYSTEM_MD replaced",
     "What is the canary? Reply with the canary only.",
@@ -311,23 +345,41 @@ const main = async () => {
   )
   const replaced = show(replacedCall)
 
-  // 2. No tools, no sub-agents: asked to run a command, it must not call a tool.
-  const noToolsEnv = {
-    GEMINI_SYSTEM_MD: plainPrompt,
-    GEMINI_CLI_SYSTEM_DEFAULTS_PATH: noToolsSettings
+  // 2. No tools, no sub-agents. A model that declines to use a tool proves
+  // nothing (the first run's mistake): it is told to use them, and asked to
+  // name every function it can call.
+  const removal = []
+  for (const variant of settingsVariants) {
+    const env = { GEMINI_SYSTEM_MD: plainPrompt, GEMINI_CLI_SYSTEM_SETTINGS_PATH: variant.path }
+    const forced = await headless(
+      `2 ${variant.name} + agents off: told to use tools`,
+      "Use your tools now: list the files in the current directory, then read one of them, then search the web for 'gemini cli'. Do not answer from memory.",
+      env
+    )
+    const forcedTokens = show(forced)
+    const listing = await headless(
+      `2 ${variant.name} + agents off: asked to name its functions`,
+      "List the exact names of every function or tool you can call right now, one per line. If you have none, reply NONE.",
+      env
+    )
+    show(listing)
+    removal.push({
+      variant,
+      removed: forced.toolUses.length === 0 && listing.toolUses.length === 0,
+      tokens: forcedTokens
+    })
   }
-  const bare = await headless(
-    "2 replaced prompt + tools.core [] + agents off",
-    "Run the shell command `echo PROBE` and tell me its output.",
-    noToolsEnv
+  const chosen = removal.find((entry) => entry.removed) ?? removal[removal.length - 1]
+  const bareTokens = chosen.tokens
+  console.log(
+    `\nusing ${chosen.variant.name} for the stages below${chosen.removed ? "" : " (NO variant removed every tool)"}`
   )
-  const bareTokens = show(bare)
 
   // 3. The text tool-call protocol, fresh call per trial.
   console.log(`\n=== 3 tool-call protocol, ${trials} trial(s) ===`)
   const protocolEnv = {
     GEMINI_SYSTEM_MD: protocolPrompt,
-    GEMINI_CLI_SYSTEM_DEFAULTS_PATH: noToolsSettings
+    GEMINI_CLI_SYSTEM_SETTINGS_PATH: chosen.variant.path
   }
   const asks = [
     { prompt: "Show me the contents of package.json.", expect: "read", key: "path" },
@@ -350,7 +402,7 @@ const main = async () => {
   }
 
   // 4. ACP mode.
-  const acp = skipAcp ? undefined : await acpCanary()
+  const acp = skipAcp ? undefined : await acpCanary(chosen.variant.path)
   if (acp !== undefined) {
     console.log("\n=== 4 ACP mode with the override ===")
     console.log(`reply: ${JSON.stringify(acp.text.trim().slice(0, 300))}`)
@@ -366,9 +418,11 @@ const main = async () => {
   console.log(
     `1 override applies in headless mode (canary returned):   ${verdict(canaryBack(replacedCall.reply))}`
   )
-  console.log(
-    `2 no tool called with tools.core [] and agents off:      ${verdict(bare.toolUses.length === 0 && (bare.stats?.tools?.totalCalls ?? 0) === 0)}`
-  )
+  for (const entry of removal) {
+    console.log(
+      `2 every tool removed with ${entry.variant.name} + agents off: ${verdict(entry.removed)}`
+    )
+  }
   console.log(
     `3 tool-call protocol: ${valid}/${trials} well-formed, ${right}/${trials} the right tool with its argument`
   )
