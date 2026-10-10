@@ -5,7 +5,9 @@ import {
   enforcePerimeter,
   isWithinPerimeter,
   perimeterGate,
-  strayTasks, taskOwnsGate } from "@llm4ts/flow/Perimeter"
+  strayTasks,
+  taskOwnsGate
+} from "@llm4ts/flow/Perimeter"
 import { Task } from "@llm4ts/flow/Plan"
 import { Story, StoryPlan, pathsNamedIn } from "@llm4ts/flow/StoryPlan"
 

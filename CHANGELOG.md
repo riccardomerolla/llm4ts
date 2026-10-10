@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.42.0
+
+A story runs the tasks that need nothing from each other at the same time
+(ADR 0034).
+
+- **Parallel tasks inside a story.** The story's coder now plans each task
+  with a `Depends on:` line (earlier tasks it needs, or `none`) and an
+  `Owns:` line (the files it changes). A ready task beside a running one
+  goes to a coder that is free right now, in its own worktree on
+  `story/<epic>/<id>--task-<n>`, with its own setup, review and gates —
+  plus a check that it stayed inside its `Owns:` paths — and merges into
+  the story branch between the story coder's tasks. No free coder, a
+  failure there, or a merge conflict gives the task back to the story's
+  coder; it never fails the story. After tasks merged in, the story's
+  gates run on them together and red becomes a revision task, bounded by
+  `--merge-revisions`.
+- **`--task-concurrency <n>`** (or `LLM4TS_TASK_CONCURRENCY`) caps the
+  coders one story holds, its own included; default 2, and `1` runs every
+  task in order as before. A plan without `Depends on:` lines runs in order
+  whatever the setting.
+- **The dashboard** lists a task running aside under its story
+  (`└ task coder claude#2 · 3/5 …`), marks it in the checklist and the
+  story board's doing column. `TaskStarted` carries `parallel` and the
+  extra coder's clone.
+
 ## 2.41.0
 
 A roster slot is a clone, every running agent is a line in the watch
