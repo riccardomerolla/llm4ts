@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.40.1
+
+A read-only pi seat can no longer reach MCP write tools, and pi's package move
+is reflected.
+
+- **pi read-only seats add `--no-mcp` and need pi 1.0.4.** Since pi 1.0.4
+  `--tools read` keeps every MCP tool configured in `~/.pi/agent/mcp.json`, so
+  a judge or reviewer seat could call an MCP write tool. The read-only argv now
+  adds `--no-mcp`, and a read-only pi connector asks `pi --version` once before
+  its first turn and refuses, typed, anything older than `piReadOnlyFloor`
+  (1.0.4), as Gemini does below 0.37.0. Seats that are not read-only run on any
+  pi as before. (ADR 0035, decision 0.)
+- **Isolated pi seats keep the built-in llama.cpp provider.** `--no-extensions`
+  disables it since pi 0.99.0; a model on `llama.cpp/...` gets
+  `-e builtin:llama.cpp` back.
+- **The positional pi prompt follows `--`**, so a prompt starting with a dash
+  is not read as a flag. Stdin prompts are unchanged.
+- Docs point at pi's new home, `github.com/earendil-works/pi`
+  (`@earendil-works/pi-coding-agent`).
+
 ## 2.40.0
 
 A story that turns the epic red when it merges is sent back to fix it instead

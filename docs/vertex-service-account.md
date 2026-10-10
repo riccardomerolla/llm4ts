@@ -154,8 +154,8 @@ Sources: <https://opencode.ai/docs/providers/>,
 - Model: `provider/id`, so `google-vertex/gemini-2.5-flash` in the roster.
 - pi has no Claude-on-Vertex provider: Gemini models only.
 
-Source: the `pi-mono` repository,
-[providers](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md).
+Source: the `pi` repository,
+[providers](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md).
 
 ## Codex CLI (`codex`): not with a Vertex key
 

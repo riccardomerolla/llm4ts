@@ -27,6 +27,7 @@ import {
 import { collect } from "../Streaming.ts"
 import { jsonCandidates, parseFromText, withSchemaHint } from "../StructuredOutput.ts"
 import {
+  atLeastVersion,
   failClassifiedCliError,
   isLoopDetectedMessage,
   jsonField,
@@ -36,6 +37,7 @@ import {
   jsonStringField,
   jsonText,
   parseJsonLine,
+  versionTriple,
   type JsonValue
 } from "./CliSupport.ts"
 
@@ -271,24 +273,8 @@ export const geminiProcessEnv = (
  */
 export const geminiReadOnlyFloor = "0.37.0"
 
-const versionTriple = (text: string): ReadonlyArray<number> | undefined => {
-  const match = /(\d+)\.(\d+)\.(\d+)/.exec(text)
-  return match === null ? undefined : match.slice(1, 4).map(Number)
-}
-
 /** The `x.y.z` in a `gemini --version` answer, if it holds one. */
 export const geminiVersionOf = (text: string): string | undefined => versionTriple(text)?.join(".")
-
-const atLeast = (version: ReadonlyArray<number>, floor: ReadonlyArray<number>): boolean => {
-  for (let index = 0; index < floor.length; index += 1) {
-    const have = version[index] ?? 0
-    const want = floor[index] ?? 0
-    if (have !== want) {
-      return have > want
-    }
-  }
-  return true
-}
 
 /** Why this CLI cannot hold a read-only seat, or nothing when it can. */
 export const geminiReadOnlyProblem = (versionText: string): string | undefined => {
@@ -300,7 +286,7 @@ export const geminiReadOnlyProblem = (versionText: string): string | undefined =
       `needs gemini >= ${geminiReadOnlyFloor}, whose plan mode is enforced by its policy engine`
     )
   }
-  return atLeast(version, floor)
+  return atLeastVersion(version, floor)
     ? undefined
     : `Gemini CLI ${version.join(".")} cannot enforce a read-only seat: plan mode is a policy ` +
         `only from ${geminiReadOnlyFloor}; upgrade gemini, or give the judge and reviewer ` +

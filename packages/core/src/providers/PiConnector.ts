@@ -2,10 +2,11 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ProviderError } from "../Errors.ts"
+import { InvalidRequestError, ProviderError, type LlmError } from "../Errors.ts"
 import { ConnectorCapabilities, ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
+  atLeastVersion,
   effortWord,
   cumulativeUsage,
   failClassifiedCliError,
@@ -19,8 +20,39 @@ import {
   toolEventChunk,
   toolResultChunk,
   toolResultText,
-  usageEventChunk
+  usageEventChunk,
+  versionTriple
 } from "./CliSupport.ts"
+
+/**
+ * The first pi whose `--tools` allowlist can be kept free of MCP tools: from
+ * 1.0.4 `--tools read` keeps every MCP tool the user configured in
+ * `~/.pi/agent/mcp.json` unless `--no-mcp` (new in that release) drops them,
+ * and MCP tools are built in since 0.99.0. Below this a read-only seat can
+ * reach any MCP write tool, so llm4ts refuses it (ADR 0010, ADR 0035).
+ */
+export const piReadOnlyFloor = "1.0.4"
+
+/** Why this pi cannot hold a read-only seat, or nothing when it can. */
+export const piReadOnlyProblem = (versionText: string): string | undefined => {
+  const version = versionTriple(versionText)
+  const floor = versionTriple(piReadOnlyFloor) ?? []
+  if (version === undefined) {
+    return (
+      `could not read the pi version from '${versionText.trim()}'; a read-only seat needs ` +
+      `pi >= ${piReadOnlyFloor}, whose --no-mcp keeps MCP tools out of the read allowlist`
+    )
+  }
+  return atLeastVersion(version, floor)
+    ? undefined
+    : `pi ${version.join(".")} cannot enforce a read-only seat: --tools read keeps MCP tools ` +
+        `until --no-mcp arrived in ${piReadOnlyFloor}; upgrade pi, or give the judge and ` +
+        "reviewer seats to another harness"
+}
+
+/** The provider half of pi's `provider/model[:thinking]` model id. */
+const providerOf = (model: string | undefined): string | undefined =>
+  model === undefined ? undefined : model.split("/", 1)[0]
 
 export const piExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => [
   ...optionalModelArgs(config.model),
@@ -29,12 +61,22 @@ export const piExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> =
   // offers a read tool the model can invoke — fine for an interactive
   // session, unsafe for a one-shot complete() call with no tool-loop
   // continuation (see the field's doc comment on CliConnectorConfig).
-  ...(config.noTools ? ["--no-tools"] : config.readOnly ? ["--tools", "read"] : []),
+  // `--no-tools` also drops MCP tools; `--tools read` keeps them (pi >= 1.0.4),
+  // so a read-only seat adds `--no-mcp` (ADR 0035).
+  ...(config.noTools ? ["--no-tools"] : config.readOnly ? ["--tools", "read", "--no-mcp"] : []),
   // `--thinking` is pi's effort flag (off, minimal, low, medium, high, xhigh).
   ...(config.effort === undefined ? [] : ["--thinking", effortWord(config.effort, "xhigh")]),
   // Isolation is partial (ADR 0029): project extensions and skills stay
   // out; pi still reads AGENTS.md from the working directory and its parents.
-  ...(config.isolated ? ["--no-extensions", "--no-skills"] : []),
+  // `--no-extensions` also drops the built-in llama.cpp provider (pi >=
+  // 0.99.0), so a local model on it is re-enabled by name.
+  ...(config.isolated
+    ? [
+        "--no-extensions",
+        "--no-skills",
+        ...(providerOf(config.model) === "llama.cpp" ? ["-e", "builtin:llama.cpp"] : [])
+      ]
+    : []),
   ...sortedFlagArgs(config.flags)
 ]
 
@@ -138,9 +180,27 @@ export const makePiConnector = (
   const cwd = config.workingDir ?? "."
   const extraArgs = piExtraArgs(config)
 
+  // A read-only seat is only taken on a pi whose read allowlist can exclude
+  // MCP tools (`piReadOnlyFloor`): the version answer decides before the
+  // first turn, once per connector; a failed probe is retried on the next.
+  let floorChecked = !config.readOnly
+  const checkFloorOnce: Effect.Effect<void, LlmError> = Effect.suspend(() =>
+    floorChecked
+      ? Effect.void
+      : Effect.flatMap(executor.run(["pi", "--version"], cwd, config.envVars), (result) => {
+          const problem = piReadOnlyProblem([...result.stdout, ...result.stderr].join("\n"))
+          return problem === undefined
+            ? Effect.sync(() => {
+                floorChecked = true
+              })
+            : Effect.fail(InvalidRequestError.make({ message: problem }))
+        })
+  )
+
   const complete = Effect.fn("@llm4ts/core/providers/PiConnector.complete")(function* (
     prompt: string
   ) {
+    yield* checkFloorOnce
     const result = yield* executor.runWithStdin(
       ["pi", "-p", ...extraArgs],
       cwd,
@@ -161,24 +221,26 @@ export const makePiConnector = (
   })
 
   const completeStream = (prompt: string) =>
-    executor
-      .runStreamingWithStdin(
-        ["pi", "-p", "--mode", "json", ...extraArgs],
-        cwd,
-        config.envVars,
-        prompt
-      )
-      .pipe(
-        Stream.flatMap((line) => Stream.fromIterable(parsePiStreamLine(line))),
-        // pi reports usage per assistant message; a turn is all of them.
-        cumulativeUsage,
-        Stream.mapEffect((chunk) => {
-          const message = chunk.metadata.piError
-          return message === undefined
-            ? Effect.succeed(chunk)
-            : failClassifiedCliError("pi", "pi error", message)
-        })
-      )
+    Stream.fromEffect(checkFloorOnce).pipe(
+      Stream.drain,
+      Stream.concat(
+        executor.runStreamingWithStdin(
+          ["pi", "-p", "--mode", "json", ...extraArgs],
+          cwd,
+          config.envVars,
+          prompt
+        )
+      ),
+      Stream.flatMap((line) => Stream.fromIterable(parsePiStreamLine(line))),
+      // pi reports usage per assistant message; a turn is all of them.
+      cumulativeUsage,
+      Stream.mapEffect((chunk) => {
+        const message = chunk.metadata.piError
+        return message === undefined
+          ? Effect.succeed(chunk)
+          : failClassifiedCliError("pi", "pi error", message)
+      })
+    )
 
   return makeCliConnector({
     id: ConnectorIds.Pi,
@@ -186,13 +248,17 @@ export const makePiConnector = (
     // `--tools read` is pi's documented comma-separated ALLOWLIST of tool
     // names: only `read` is enabled, so bash/edit/write are absent — a real
     // capability removal, the same mechanism class as claude's `--tools`.
+    // `--no-mcp` keeps MCP tools out of it, and `checkFloorOnce` refuses a
+    // read-only seat on a pi without that flag, so the grade holds.
     capabilities: ConnectorCapabilities.make({
       interactiveSessions: true,
       readOnlyEnforcement: "enforced",
       effort: "mapped",
       isolatedHeadless: "partial"
     }),
-    buildArgv: (prompt, _context) => ["pi", "-p", ...extraArgs, prompt],
+    // `--` ends the options (pi >= 0.84.3): a prompt starting with a dash
+    // is a prompt, not a flag. Stdin paths need no separator.
+    buildArgv: (prompt, _context) => ["pi", "-p", ...extraArgs, "--", prompt],
     buildInteractiveArgv: (_context) => ["pi", ...extraArgs],
     complete,
     completeStream,

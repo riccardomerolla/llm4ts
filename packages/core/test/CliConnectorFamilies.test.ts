@@ -26,7 +26,13 @@ import {
   openCodeCliExtraArgs,
   parseOpenCodeCliStreamLine
 } from "@llm4ts/core/providers/OpenCodeCliConnector"
-import { makePiConnector, parsePiStreamLine, piExtraArgs } from "@llm4ts/core/providers/PiConnector"
+import {
+  makePiConnector,
+  parsePiStreamLine,
+  piExtraArgs,
+  piReadOnlyFloor,
+  piReadOnlyProblem
+} from "@llm4ts/core/providers/PiConnector"
 
 const context = CliContext.make({
   worktreePath: "/workspace",
@@ -56,6 +62,7 @@ describe("PiConnector", () => {
       "lmstudio/foo",
       "--tools",
       "read",
+      "--no-mcp",
       "--alpha",
       "one",
       "--zeta"
@@ -85,6 +92,106 @@ describe("PiConnector", () => {
 
     assert.deepStrictEqual(piExtraArgs(config), ["--no-tools"])
   })
+
+  it("keeps the built-in llama.cpp provider when isolation would drop it (pi >= 0.99.0)", () => {
+    const local = CliConnectorConfig.make({
+      connectorId: ConnectorIds.Pi,
+      model: "llama.cpp/qwen3-8b",
+      isolated: true
+    })
+    assert.deepStrictEqual(piExtraArgs(local), [
+      "--model",
+      "llama.cpp/qwen3-8b",
+      "--no-extensions",
+      "--no-skills",
+      "-e",
+      "builtin:llama.cpp"
+    ])
+    const remote = CliConnectorConfig.make({
+      connectorId: ConnectorIds.Pi,
+      model: "openai-codex/gpt-5.3-codex",
+      isolated: true
+    })
+    assert.deepStrictEqual(piExtraArgs(remote).slice(-2), ["--no-extensions", "--no-skills"])
+  })
+
+  it("ends the options before a positional prompt, so a dash-prefixed prompt is not a flag", () => {
+    const connector = makePiConnector(
+      CliConnectorConfig.make({ connectorId: ConnectorIds.Pi }),
+      executorWithStream([])
+    )
+    assert.deepStrictEqual(connector.buildArgv("--help me", context), [
+      "pi",
+      "-p",
+      "--",
+      "--help me"
+    ])
+  })
+
+  it("grades a read-only seat enforced only from the first pi whose --tools can drop MCP tools", () => {
+    assert.strictEqual(piReadOnlyFloor, "1.0.4")
+    assert.isUndefined(piReadOnlyProblem("1.1.0\n"))
+    assert.isUndefined(piReadOnlyProblem("1.0.4"))
+    assert.include(piReadOnlyProblem("1.0.3") ?? "", "1.0.3")
+    assert.include(piReadOnlyProblem("1.0.3") ?? "", "1.0.4")
+    assert.include(piReadOnlyProblem("0.73.1") ?? "", "1.0.4")
+    assert.include(piReadOnlyProblem("pi: command not found") ?? "", "could not read")
+  })
+
+  it.effect("refuses a read-only seat on a pi older than the floor, before any turn", () =>
+    Effect.gen(function* () {
+      const turns = yield* Ref.make(0)
+      const versionAsked = yield* Ref.make(0)
+      const piAt = (version: string): ProcessExecutorShape =>
+        makeProcessExecutor({
+          run: (argv) =>
+            argv[1] === "--version"
+              ? Ref.update(versionAsked, (n) => n + 1).pipe(
+                  Effect.as(ProcessResult.make({ stdout: [version], exitCode: 0 }))
+                )
+              : Effect.succeed(ProcessResult.make({ stdout: ["captured"], exitCode: 0 })),
+          runStreaming: () => Stream.empty,
+          runWithStdin: () =>
+            Ref.update(turns, (n) => n + 1).pipe(
+              Effect.as(ProcessResult.make({ stdout: ["ok"], exitCode: 0 }))
+            ),
+          runStreamingWithStdin: () =>
+            Stream.fromEffect(Ref.update(turns, (n) => n + 1)).pipe(
+              Stream.drain,
+              Stream.concat(
+                Stream.make(
+                  '{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"ok"}}'
+                )
+              )
+            )
+        })
+      const readOnly = CliConnectorConfig.make({ connectorId: ConnectorIds.Pi, readOnly: true })
+
+      const old = makePiConnector(readOnly, piAt("1.0.3"))
+      const streamed = yield* Effect.flip(Stream.runCollect(old.completeStream("judge this")))
+      assert.strictEqual(streamed._tag, "InvalidRequestError")
+      assert.include(streamed.message, "1.0.3")
+      const completed = yield* Effect.flip(old.complete("judge this"))
+      assert.strictEqual(completed._tag, "InvalidRequestError")
+      assert.strictEqual(yield* Ref.get(turns), 0)
+
+      // The same old pi still serves a seat that asked for nothing.
+      const writing = makePiConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.Pi }),
+        piAt("1.0.3")
+      )
+      assert.strictEqual(yield* writing.complete("code this"), "ok")
+      assert.strictEqual(yield* Ref.get(turns), 1)
+
+      // A pi on the floor is asked its version once, then serves every turn.
+      yield* Ref.set(versionAsked, 0)
+      const current = makePiConnector(readOnly, piAt("1.1.0"))
+      yield* Stream.runCollect(current.completeStream("judge this"))
+      assert.strictEqual(yield* current.complete("judge this"), "ok")
+      assert.strictEqual(yield* Ref.get(versionAsked), 1)
+      assert.strictEqual(yield* Ref.get(turns), 3)
+    })
+  )
 
   it.effect("feeds streaming prompts through stdin and parses text, tools, and usage", () =>
     Effect.gen(function* () {

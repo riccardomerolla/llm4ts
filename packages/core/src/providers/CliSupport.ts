@@ -221,3 +221,24 @@ export const failClassifiedCliError = Effect.fn(
       message: `${fallbackPrefix}: ${raw}`
     })
 })
+
+/** The first `x.y.z` in a CLI's `--version` answer, if it holds one. */
+export const versionTriple = (text: string): ReadonlyArray<number> | undefined => {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(text)
+  return match === null ? undefined : match.slice(1, 4).map(Number)
+}
+
+/** Whether `version` is `floor` or newer, component by component. */
+export const atLeastVersion = (
+  version: ReadonlyArray<number>,
+  floor: ReadonlyArray<number>
+): boolean => {
+  for (let index = 0; index < floor.length; index += 1) {
+    const have = version[index] ?? 0
+    const want = floor[index] ?? 0
+    if (have !== want) {
+      return have > want
+    }
+  }
+  return true
+}

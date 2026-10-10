@@ -44,7 +44,10 @@ connector's `readOnly` mapping restricts its harness (ADR 0010):
   the harness's advertised surface. Claude gets a `--tools Read,Grep,Glob,Skill`
   allowlist (plan mode removes no tools, and a denylist misses `Bash` and MCP
   tools by construction); Codex runs under an OS-level `read-only` sandbox; Pi's
-  `--tools read` is its documented tool-name allowlist. Gemini read-only runs
+  `--tools read --no-mcp` is its documented tool-name allowlist with the MCP
+  tools kept out of it, taken only on `piReadOnlyFloor` (1.0.4, the release
+  that added `--no-mcp`) or newer and refused, typed, before the first turn on
+  anything older. Gemini read-only runs
   headless in `--approval-mode default`: Gemini's own write policy denies the
   shell, `write_file`, `replace`, `activate_skill` and `web_fetch` when
   non-interactive, unmatched tools default to deny, and the file tools refuse
