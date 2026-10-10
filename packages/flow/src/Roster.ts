@@ -55,7 +55,7 @@ export class ExecutorSpec extends Schema.Class<ExecutorSpec>("ExecutorSpec")({
   baseUrl: Schema.optionalKey(Schema.String),
   roles: Schema.Array(Schema.String),
   slots: Schema.optionalKey(Schema.Number),
-  /** Slots coders may use; default `slots - 1` when the executor also reasons. */
+  /** Slots coders may use; default: every slot (ADR 0033). */
   coderSlots: Schema.optionalKey(Schema.Number),
   /** Lower first. A number for every role, or per role with a `default`. */
   priority: Schema.optionalKey(
@@ -105,8 +105,6 @@ export class RosterState extends Schema.Class<RosterState>("RosterState")({
 
 // ---- Pure helpers -------------------------------------------------------------
 
-const reasoningRoles: ReadonlyArray<Role> = ["planner", "reviewer", "judge", "verifier"]
-
 export const isRole = (value: string): value is Role => roles.some((role) => role === value)
 
 export const rolesOf = (spec: ExecutorSpec): ReadonlyArray<Role> => spec.roles.filter(isRole)
@@ -115,14 +113,12 @@ export const hasRole = (spec: ExecutorSpec, role: Role): boolean => rolesOf(spec
 
 export const slotsOf = (spec: ExecutorSpec): number => Math.max(1, Math.floor(spec.slots ?? 1))
 
-/** Slots coders may hold: one stays free for reasoning on an executor that does both. */
+/** Slots coders may hold: every clone, unless the roster sets `coderSlots` lower (ADR 0033). */
 export const coderSlotsOf = (spec: ExecutorSpec): number => {
   const slots = slotsOf(spec)
-  if (spec.coderSlots !== undefined) {
-    return Math.max(0, Math.min(slots, Math.floor(spec.coderSlots)))
-  }
-  const reasons = rolesOf(spec).some((role) => reasoningRoles.includes(role))
-  return hasRole(spec, "coder") && reasons && slots > 1 ? slots - 1 : slots
+  return spec.coderSlots === undefined
+    ? slots
+    : Math.max(0, Math.min(slots, Math.floor(spec.coderSlots)))
 }
 
 /** The effort a role runs at on this executor (ADR 0029); absent is the harness's default. */
@@ -419,6 +415,8 @@ export interface Lease {
   readonly role: Role
   /** Frees the slot; idempotent, and also run when the lease's scope closes. */
   readonly release: Effect.Effect<void>
+  /** Which of the executor's clones this is, from 1; absent on a borrowed lease (ADR 0033). */
+  readonly clone: number | undefined
   /** Took no slot: the context's own coder executor serves the call (see `LeaseOptions.borrow`). */
   readonly borrowed: boolean
   /** Set when the executor is the context's own coder (not independent), and why; see `ExecutorLeased.because`. */
@@ -522,6 +520,12 @@ interface Usage {
   busyCoders: number
 }
 
+/** A slot taken under the lock: the executor and which of its clones. */
+interface Taken {
+  readonly spec: ExecutorSpec
+  readonly clone: number
+}
+
 export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
   options: RosterOptions
 ): Effect.fn.Return<RosterShape, FlowError> {
@@ -534,6 +538,21 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
   const rateLimits = new Map<string, ReadonlyArray<number>>()
   const lastLeased = new Map<string, number>()
   let leases = 0
+  /** Clone numbers in use per executor; a lease takes the lowest free one (ADR 0033). */
+  const clones = new Map<string, Set<number>>(executors.map((spec) => [spec.id, new Set<number>()]))
+  const takeClone = (spec: ExecutorSpec): number => {
+    const used = clones.get(spec.id) ?? new Set<number>()
+    let clone = 1
+    while (used.has(clone)) {
+      clone += 1
+    }
+    used.add(clone)
+    clones.set(spec.id, used)
+    return clone
+  }
+  const freeClone = (spec: ExecutorSpec, clone: number): void => {
+    clones.get(spec.id)?.delete(clone)
+  }
   const changed = yield* Ref.make(yield* Deferred.make<void>())
   const known = new Set(executors.map((spec) => spec.id))
 
@@ -611,7 +630,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
       : best
   }
 
-  const release = (spec: ExecutorSpec, role: Role): Effect.Effect<void> =>
+  const release = (spec: ExecutorSpec, role: Role, clone: number): Effect.Effect<void> =>
     lock
       .withPermit(
         Effect.sync(() => {
@@ -622,33 +641,42 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
               used.busyCoders = Math.max(0, used.busyCoders - 1)
             }
           }
+          freeClone(spec, clone)
         })
       )
       .pipe(Effect.andThen(signal))
 
   const leaseOf = (
-    spec: ExecutorSpec,
+    taken: Taken,
     role: Role,
     who: LeaseOptions,
     because?: "nobody" | "held" | "out"
   ): Effect.Effect<Lease, never, Scope.Scope> =>
     Effect.gen(function* () {
+      const { spec, clone } = taken
       const labelled = who.label === undefined ? {} : { label: who.label }
       const own = because === undefined ? {} : { because }
       yield* events.publish(
-        ExecutorLeased.make({ executor: spec.id, role, ...labelled, ...purposeOf(who), ...own })
+        ExecutorLeased.make({
+          executor: spec.id,
+          role,
+          clone,
+          ...labelled,
+          ...purposeOf(who),
+          ...own
+        })
       )
       const done = yield* Ref.make(false)
       const free = Effect.flatMap(Ref.getAndSet(done, true), (was) =>
         was
           ? Effect.void
           : Effect.andThen(
-              release(spec, role),
-              events.publish(ExecutorReleased.make({ executor: spec.id, role, ...labelled }))
+              release(spec, role, clone),
+              events.publish(ExecutorReleased.make({ executor: spec.id, role, clone, ...labelled }))
             )
       )
       yield* Effect.addFinalizer(() => free)
-      return { executor: spec, role, release: free, borrowed: false, ...own }
+      return { executor: spec, role, clone, release: free, borrowed: false, ...own }
     })
 
   /** A lease over the context's own coder executor: no slot taken, none freed. */
@@ -677,32 +705,30 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
           : events.publish(ExecutorReleased.make({ executor: spec.id, role, ...labelled }))
       )
       yield* Effect.addFinalizer(() => free)
-      return { executor: spec, role, release: free, borrowed: true, because }
+      return { executor: spec, role, clone: undefined, release: free, borrowed: true, because }
     })
 
-  /** One attempt: expire, pick, take the slot — all under the lock. */
-  const attempt = (
-    role: Role,
-    leaseOptions: LeaseOptions
-  ): Effect.Effect<ExecutorSpec | undefined> =>
+  /** One attempt: expire, pick, take the slot and its clone number — all under the lock. */
+  const attempt = (role: Role, leaseOptions: LeaseOptions): Effect.Effect<Taken | undefined> =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
-      const { spec, back } = yield* lock.withPermit(
+      const { taken, back } = yield* lock.withPermit(
         Effect.sync(() => {
           const back = expire(now)
           const spec = pick(role, leaseOptions)
-          if (spec !== undefined) {
-            const used = usage.get(spec.id)
-            if (used !== undefined) {
-              used.busy += 1
-              if (role === "coder") {
-                used.busyCoders += 1
-              }
-            }
-            leases += 1
-            lastLeased.set(spec.id, leases)
+          if (spec === undefined) {
+            return { taken: undefined, back }
           }
-          return { spec, back }
+          const used = usage.get(spec.id)
+          if (used !== undefined) {
+            used.busy += 1
+            if (role === "coder") {
+              used.busyCoders += 1
+            }
+          }
+          leases += 1
+          lastLeased.set(spec.id, leases)
+          return { taken: { spec, clone: takeClone(spec) }, back }
         })
       )
       if (back.length > 0) {
@@ -711,7 +737,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
         )
         yield* persist
       }
-      return spec
+      return taken
     })
 
   const canEverServe = (role: Role, avoid: ReadonlyArray<string> = []): Effect.Effect<boolean> =>
@@ -880,7 +906,7 @@ export const makeRoster = Effect.fn("@llm4ts/flow/Roster.make")(function* (
             prefer: borrow.id
           })
           yield* waited
-          return own !== undefined && own.id === borrow.id
+          return own !== undefined && own.spec.id === borrow.id
             ? yield* leaseOf(own, role, leaseOptions, because)
             : own !== undefined
               ? // Someone came back between the check and the pick: independent after all.

@@ -273,6 +273,8 @@ export class StoryJudged extends Schema.TaggedClass<StoryJudged>()("StoryJudged"
 export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("ExecutorLeased", {
   executor: Schema.String,
   role: Schema.String,
+  /** Which of the executor's clones took the slot, from 1 (ADR 0033); absent when borrowed or before 2.41. */
+  clone: Schema.optionalKey(Schema.Int),
   label: Schema.optionalKey(Schema.String),
   /** What the call is for beyond its role: a review lens, a vote. */
   purpose: Schema.optionalKey(Schema.String),
@@ -290,6 +292,8 @@ export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("Execut
 export class ExecutorReleased extends Schema.TaggedClass<ExecutorReleased>()("ExecutorReleased", {
   executor: Schema.String,
   role: Schema.String,
+  /** Which of the executor's clones freed the slot (ADR 0033); absent when borrowed or before 2.41. */
+  clone: Schema.optionalKey(Schema.Int),
   label: Schema.optionalKey(Schema.String)
 }) {}
 
@@ -335,12 +339,16 @@ const resumedWords: Readonly<Record<ExecutorResumed["why"], string>> = {
  * the roster used to publish as `Info` — or `undefined` for one it does not
  * show (a release) and for any other event.
  */
+/** `codex#2` for a numbered clone, the bare executor otherwise (ADR 0033). */
+export const cloneName = (executor: string, clone: number | undefined): string =>
+  clone === undefined ? executor : `${executor}#${clone}`
+
 export const rosterEventMessage = (event: FlowEvent): string | undefined => {
   const forLabel = (label: string | undefined): string =>
     label === undefined ? "" : ` for ${label}`
   switch (event._tag) {
     case "ExecutorLeased": {
-      const taken = `roster: ${event.executor} takes ${event.role}${forLabel(event.label)}${
+      const taken = `roster: ${cloneName(event.executor, event.clone)} takes ${event.role}${forLabel(event.label)}${
         event.purpose === undefined ? "" : ` · ${event.purpose}`
       }`
       if (event.because === undefined && event.borrowed !== true) {

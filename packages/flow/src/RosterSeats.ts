@@ -258,6 +258,8 @@ export interface HeldCoderOptions {
 export interface HeldCoder {
   readonly service: LlmServiceShape
   readonly executor: Effect.Effect<string | undefined>
+  /** The held coder's clone number, when it holds a slot (ADR 0033). */
+  readonly clone: Effect.Effect<number | undefined>
   readonly lease: Effect.Effect<ExecutorSpec | undefined>
   readonly history: Effect.Effect<ReadonlyArray<string>>
 }
@@ -375,6 +377,7 @@ export const makeHeldCoder = Effect.fn("@llm4ts/flow/RosterSeats.heldCoder")(fun
   return {
     service: serviceOver({ run, stream, isAvailable: roster.canEverServe("coder") }),
     executor: Effect.map(Ref.get(current), (held) => held?.lease.executor.id),
+    clone: Effect.map(Ref.get(current), (held) => held?.lease.clone),
     lease: Effect.map(Ref.get(current), (held) => held?.lease.executor),
     history: Ref.get(history)
   }
