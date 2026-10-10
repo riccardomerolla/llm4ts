@@ -11,7 +11,7 @@ import {
   toolUseFrom,
   withToolActivity
 } from "@llm4ts/flow/Activity"
-import { ToolUse, makeCollectingFlowEvents, withLane } from "@llm4ts/flow/FlowEvents"
+import { TokensUsed, ToolUse, makeCollectingFlowEvents, withLane } from "@llm4ts/flow/FlowEvents"
 
 const toolChunk = (name: string, input: string): LlmChunk =>
   LlmChunk.make({
@@ -244,6 +244,23 @@ describe("delegation (ADR 0033)", () => {
     )
     assert.strictEqual(use?.parent, "a1")
   })
+
+  it.effect("stamps the lane's clone on the coder's usage only", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const laned = withLane(events, { lane: "S01", clone: Effect.succeed(2) })
+      const usage = TokenUsage.make({ prompt: 1, completion: 1, total: 2 })
+      yield* laned.publish(TokensUsed.make({ agent: "coder", usage }))
+      yield* laned.publish(TokensUsed.make({ agent: "judge", usage }))
+      const clones = (yield* events.recorded).map((event) =>
+        event._tag === "TokensUsed" ? [event.agent, event.lane, event.clone] : []
+      )
+      assert.deepStrictEqual(clones, [
+        ["coder", "S01", 2],
+        ["judge", "S01", undefined]
+      ])
+    })
+  )
 
   it.effect("keeps the parent when a lane stamps a ToolUse", () =>
     Effect.gen(function* () {

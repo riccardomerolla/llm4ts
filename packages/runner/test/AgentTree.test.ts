@@ -114,6 +114,55 @@ describe("agent tree", () => {
     golden("agent-tree.boards-90.txt", 90, { ...initialView, mode: "boards" }, clonesRun())
   })
 
+  it("keeps a list line's timer and tokens at the 90-column floor, cutting the middle", () => {
+    const lines = renderTree(clonesRun(), { width: 90, colour: false, view: initialView })
+    const s03 = lines.find((line) => line.includes("◐ S03 claude#1")) ?? ""
+    assert.match(s03, /· 20s · 0 tok\s*$/u)
+    assert.include(s03, "…")
+    const child = lines.find((line) => line.includes("└ sub-agent")) ?? ""
+    assert.match(child, /· \d+s\s*$/u)
+  })
+
+  it("keeps a Codex sub-agent open past spawn_agent and ends it on wait or close", () => {
+    const spawned = fold([
+      at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+      at(1, ToolUse.make({ lane: "S01", tool: "spawn_agent", args: "write tests" })),
+      at(
+        2,
+        Timed.make({
+          lane: "S01",
+          kind: "tool",
+          label: "spawn_agent",
+          category: "delegate",
+          ms: 10
+        })
+      ),
+      at(3, ToolUse.make({ lane: "S01", tool: "wait", args: "t1" })),
+      at(
+        4,
+        Timed.make({ lane: "S01", kind: "tool", label: "wait", category: "delegate", ms: 5000 })
+      )
+    ])
+    const lane = spawned.lanes[0]
+    assert.strictEqual(lane?.children.length, 1)
+    assert.isTrue(lane?.children[0]?.ended)
+    const open = fold([
+      at(0, StageStarted.make({ stage: "story S01", lane: "S01" })),
+      at(1, ToolUse.make({ lane: "S01", tool: "spawn_agent", args: "write tests" })),
+      at(
+        2,
+        Timed.make({
+          lane: "S01",
+          kind: "tool",
+          label: "spawn_agent",
+          category: "delegate",
+          ms: 10
+        })
+      )
+    ])
+    assert.isFalse(open.lanes[0]?.children[0]?.ended)
+  })
+
   it("selects the most recently changed lane by default and switches to the boards by key", () => {
     const state = clonesRun()
     assert.strictEqual(state.lastChanged, "S01")

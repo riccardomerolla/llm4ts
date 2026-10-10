@@ -90,7 +90,7 @@ export class UsageProjection extends Schema.Class<UsageProjection>("UsageProject
   costUsdPerDay: Schema.optionalKey(Schema.Number)
 }) {}
 
-/** One executor clone's usage: `codex#2`, or the bare executor when the usage carried no clone. */
+/** One executor clone's usage (`codex#2`): the coder's calls on a lane that holds that clone. */
 export class ExecutorUsage extends Schema.Class<ExecutorUsage>("ExecutorUsage")({
   executor: Schema.String,
   totals: UsageTotals,
@@ -334,9 +334,11 @@ export const buildCostReport = (
         right.totals.total - left.totals.total || left.agent.localeCompare(right.agent)
     )
 
+  // Coder clones only: a sample that names the lane's executor without its
+  // clone is a reviewer's or judge's, which ran elsewhere (ADR 0033).
   const byExecutorGroups = new Map<string, Array<UsageSample>>()
   for (const sample of ordered) {
-    if (sample.executor !== undefined) {
+    if (sample.executor !== undefined && sample.clone !== undefined) {
       const key = cloneName(sample.executor, sample.clone)
       byExecutorGroups.set(key, [...(byExecutorGroups.get(key) ?? []), sample])
     }

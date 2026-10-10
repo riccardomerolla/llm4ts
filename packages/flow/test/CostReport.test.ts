@@ -93,14 +93,20 @@ describe("usageSamplesFromTrace", () => {
           clone: 1
         })
       ),
-      line(3, TokensUsed.make({ agent: "judge", model: "gpt-5.5", usage }))
+      line(3, TokensUsed.make({ agent: "judge", model: "gpt-5.5", usage })),
+      // A judge that ran on the lane's events but another executor: the lane's clone is not its own.
+      line(
+        4,
+        TokensUsed.make({ agent: "judge", model: "gpt-5.5", usage, lane: "S01", executor: "codex" })
+      )
     ])
     assert.deepStrictEqual(
       samples.map((entry) => [entry.executor, entry.clone]),
       [
         ["codex", 2],
         ["codex", 1],
-        [undefined, undefined]
+        [undefined, undefined],
+        ["codex", undefined]
       ]
     )
     const report = buildCostReport(samples)

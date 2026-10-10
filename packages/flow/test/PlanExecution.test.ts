@@ -71,6 +71,9 @@ describe("implementTaskLoop", () => {
 
   it("reads the criteria a task satisfies from its description", () => {
     assert.deepStrictEqual(satisfiesOf("Add the route.\nSatisfies: 2"), [2])
+    // The planner writes JSON, so the line is usually one line.
+    assert.deepStrictEqual(satisfiesOf("Add the route. Satisfies: 2"), [2])
+    assert.deepStrictEqual(satisfiesOf("Ship it; satisfies: 1 and 4."), [1, 4])
     assert.deepStrictEqual(satisfiesOf("Tests.\n\nSatisfies: 1, 3"), [1, 3])
     assert.isUndefined(satisfiesOf("No criteria here"))
     assert.isUndefined(satisfiesOf("Satisfies: n/a"))

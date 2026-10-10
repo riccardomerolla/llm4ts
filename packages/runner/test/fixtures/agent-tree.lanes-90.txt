@@ -14,7 +14,7 @@
                             │ cleared → merge                                            │
                             └────────────────────────────────────────────────────────────┘
                                     agents · 2 running · codex ×1 · pi-lmstudio ×1        
-                            ▸ ◐ payments pi-lmstudio · Payments fake routes · 7m06s · 92.…
+                            ▸ ◐ payments pi-lmstudio · Payments fake … · 7m06s · 92.5k tok
                               ◐ overview codex · story overview: setup · 29s · 0 tok      
                             ┌─ payments · pi-lmstudio ───────────────────────────────────┐
                             │ no task plan yet                                           │

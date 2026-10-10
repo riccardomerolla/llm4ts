@@ -45,12 +45,14 @@ export const stage = <A, E, R>(
 
 /** The acceptance criteria a task's description names: `Satisfies: 1, 3` → `[1, 3]` (ADR 0033). */
 export const satisfiesOf = (description: string): ReadonlyArray<number> | undefined => {
-  const match = /^\s*Satisfies:\s*(.+)$/imu.exec(description)
+  // The planner writes JSON, so the line is usually the description's last sentence.
+  const match = /\bSatisfies:\s*([^\n]*)/iu.exec(description)
   if (match === null) {
     return undefined
   }
   const numbers = (match[1] ?? "")
-    .split(/[,\s]+/u)
+    .split(/[^\d]+/u)
+    .filter((part) => part.length > 0)
     .map((part) => Number.parseInt(part, 10))
     .filter((number) => Number.isInteger(number) && number > 0)
   return numbers.length === 0 ? undefined : numbers

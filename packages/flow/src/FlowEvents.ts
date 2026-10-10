@@ -570,7 +570,9 @@ const stamped = (
             agent: event.agent,
             usage: event.usage,
             ...(event.model === undefined ? {} : { model: event.model }),
-            ...usageTags
+            // The lane's clone is its coder's: a reviewer or judge on the
+            // lane's events ran on another executor (ADR 0033).
+            ...(event.agent === "coder" ? usageTags : tags)
           })
     // The lane's executor is its coder's: it names a coder call or tool, not
     // a reviewer's or judge's call made on another executor.

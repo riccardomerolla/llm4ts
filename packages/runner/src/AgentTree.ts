@@ -260,6 +260,21 @@ const updateLane = (
 /** A wait label that is a harness pausing itself, not the roster or a gate. */
 const isPause = (label: string): boolean => /^pi (retry|compaction)$/u.test(label)
 
+/**
+ * A delegate tool that starts a sub-agent: Claude's Agent (Task before
+ * 2.1.63), Codex's spawn_agent, Gemini's agents. Codex's wait, send_input,
+ * resume_agent and close_agent act on one that exists.
+ */
+const spawningTools =
+  /^(agent|task|spawn_agent|codebase_investigator|generalist|cli_help|browser_agent)$/iu
+
+/**
+ * A delegate call whose end ends the sub-agent: a synchronous one (Agent,
+ * a Gemini agent) or Codex's wait and close; spawn_agent returns at once
+ * with the sub-agent still running (ADR 0033).
+ */
+const endsChild = (tool: string): boolean => !/^(spawn_agent|send_input|resume_agent)$/iu.test(tool)
+
 const newestOpenChild = (children: ReadonlyArray<TreeChild>): number => {
   for (let index = children.length - 1; index >= 0; index -= 1) {
     if (children[index]?.ended === false) {
@@ -484,8 +499,9 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
                 ? { activity: undefined, turns: [...open.turns, event.ms] }
                 : {}),
             gatesMs: open.gatesMs + (event.kind === "gate" ? event.ms : 0),
-            // The delegate call ended: its sub-agent is done.
-            ...(event.kind === "tool" && event.category === "delegate"
+            // The delegate call ended: its sub-agent is done — unless it was
+            // only spawned, and runs on until a wait or close.
+            ...(event.kind === "tool" && event.category === "delegate" && endsChild(event.label)
               ? { children: endNewestChild(open.children) }
               : {}),
             ...(event.kind === "wait" && open.pause?.label === event.label
@@ -600,7 +616,7 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           }
         }
         const delegated =
-          toolCategory(event.tool, event.args) === "delegate"
+          toolCategory(event.tool, event.args) === "delegate" && spawningTools.test(event.tool)
             ? [
                 ...open.children,
                 {
@@ -1217,16 +1233,23 @@ const taskText = (lane: TreeLane): string =>
       ? `${lane.tasks.filter((task) => task.done).length}/${lane.tasks.length} tasks`
       : ""
 
+/** `head` then `tail` in `width`: a long head is cut, the tail (a timer, a count) never is. */
+const headThenTail = (head: Line, tail: Span, width: number): Line => {
+  const room = width - [...tail.text].length
+  return lengthOf(head) <= room ? [...head, tail] : [...fit(head, Math.max(1, room)), tail]
+}
+
 /** The one line a running lane is in the agent list (ADR 0033). */
 const laneLine = (
   lane: TreeLane,
+  width: number,
   now: number | undefined,
   selected: boolean,
   idleAfterMs: number
 ): Line => {
   const task = taskText(lane)
   const stage = lane.stages.at(-1) ?? "starting"
-  return [
+  const head: Line = [
     span(selected ? "▸ " : "  "),
     statusMark(lane, now, idleAfterMs),
     span(" "),
@@ -1237,18 +1260,27 @@ const laneLine = (
     ...(stage === lane.task?.title ? [] : [span(" · "), span(stage, "dim")]),
     ...(lane.pause === undefined
       ? []
-      : [span(" · "), span(`⏸ ${lane.pause.label} ${elapsed(lane.pause.since, now)}`, "judge")]),
-    span(` · ${elapsed(lane.startedAt, now)} · ${formatCount(lane.tokens)} tok`)
+      : [span(" · "), span(`⏸ ${lane.pause.label} ${elapsed(lane.pause.since, now)}`, "judge")])
   ]
+  return headThenTail(
+    head,
+    span(` · ${elapsed(lane.startedAt, now)} · ${formatCount(lane.tokens)} tok`),
+    width
+  )
 }
 
 /** A sub-agent the lane's harness spawned, indented under it. */
-const childLine = (child: TreeChild, now: number | undefined): Line => [
-  span("    └ "),
-  span("sub-agent ", "dim"),
-  span(`${child.tool} ${child.args}`),
-  span(` · ${child.lastTool ?? "starting"} · ${elapsed(child.since, now)}`, "dim")
-]
+const childLine = (child: TreeChild, width: number, now: number | undefined): Line =>
+  headThenTail(
+    [
+      span("    └ "),
+      span("sub-agent ", "dim"),
+      span(`${child.tool} ${child.args}`),
+      span(` · ${child.lastTool ?? "starting"}`, "dim")
+    ],
+    span(` · ${elapsed(child.since, now)}`, "dim"),
+    width
+  )
 
 /** The list's rows: a running lane, then each sub-agent still running under it. */
 const listRowsOf = (state: TreeState): number =>
@@ -1263,6 +1295,7 @@ const listRowsOf = (state: TreeState): number =>
  */
 const agentRows = (
   state: TreeState,
+  width: number,
   view: TreeView,
   selected: TreeLane | undefined,
   rows: number | undefined
@@ -1271,11 +1304,11 @@ const agentRows = (
     (lane) => [
       {
         lane: lane.id,
-        line: laneLine(lane, state.now, lane.id === selected?.id, state.idleAfterMs)
+        line: laneLine(lane, width, state.now, lane.id === selected?.id, state.idleAfterMs)
       },
       ...lane.children
         .filter((child) => !child.ended)
-        .map((child) => ({ lane: lane.id, line: childLine(child, state.now) }))
+        .map((child) => ({ lane: lane.id, line: childLine(child, width, state.now) }))
     ]
   )
   if (rows === undefined || all.length <= rows) {
@@ -1615,7 +1648,7 @@ const mainOf = (
           : running.length === 0 || selected === undefined
             ? [centre([span("no stories in flight", "dim")], width)]
             : [
-                ...agentRows(state, view, selected, listRows),
+                ...agentRows(state, width, view, selected, listRows),
                 ...detailBox(selected, width, state.now, state.idleAfterMs, view.expanded)
               ]
   return [

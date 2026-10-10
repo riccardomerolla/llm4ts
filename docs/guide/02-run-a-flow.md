@@ -132,9 +132,9 @@ cost frame it:
 │ borrowed           1   │  └────────────────────────────────────────────────────────────┘
 └────────────────────────┘            agents · 5 running · codex ×3 · claude ×1
                             ▸ ◐ S01 codex#1 · 3/5 wire session cookie · 47s · 48.0k tok
-                                └ sub-agent Agent Explore: find session middleware · Read…
+                                └ sub-agent Agent Explore: find session middleware … · 31s
                               ◐ S02 codex#2 · 1/4 scaffold reset route · 27s · 0 tok
-                              ◐ S03 claude#1 · 2/3 verify otp in service · ⏸ pi compactio…
+                              ◐ S03 claude#1 · 2/3 verify otp in service · … · 20s · 0 tok
                               ◐ S04 codex#3 · 5/5 tasks · story S04: judge 1 · 10s · 0 tok
                               ◐ S05 (leasing) · starting · 2s · 0 tok
                             ┌─ S01 · codex#1 · task 3/5 ─────────────────────────────────┐
