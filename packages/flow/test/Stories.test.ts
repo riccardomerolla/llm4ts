@@ -11,7 +11,7 @@ import { ConnectorCapabilities, LlmChunk, TokenUsage } from "@llm4ts/core/Models
 import { makeLocalBoardSync, type BoardStatus } from "@llm4ts/flow/BoardSync"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import type { RosterView } from "@llm4ts/flow/RosterSeats"
-import { FlowAborted, MergeConflict, type FlowError } from "@llm4ts/flow/FlowError"
+import { FlowAborted, MergeConflict, RosterExhausted, type FlowError } from "@llm4ts/flow/FlowError"
 import { makeCollectingFlowEvents, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
@@ -1995,6 +1995,13 @@ describe("story prompts carry the acceptance criteria", () => {
     assert.include(instructions, "Satisfies: <n>")
     assert.notInclude(storyTaskPlanInstructions(story("b")), "Satisfies:")
   })
+
+  it("storyTaskPlanInstructions ask every task what it depends on and what it owns (ADR 0034)", () => {
+    const instructions = storyTaskPlanInstructions(story("b"))
+    assert.include(instructions, "Depends on: <n, …>")
+    assert.include(instructions, "Depends on: none")
+    assert.include(instructions, "Owns: <paths>")
+  })
 })
 
 describe("startingCodeOf", () => {
@@ -2239,5 +2246,242 @@ describe("Stories executor feedback", () => {
         )
         assert.includeMembers(stages, ["story a: baseline gates", "story a: plan tasks"])
       })
+  )
+})
+
+describe("Stories executor with tasks aside (ADR 0034)", () => {
+  const fanTasks = (story: Story): Plan =>
+    Plan.make({
+      epicId: story.id,
+      tasks: [
+        Task.make({ title: "route", description: "Add the route." }),
+        Task.make({ title: "cookie", description: "Wire the cookie. Depends on: 1" }),
+        Task.make({
+          title: "docs",
+          description: `Write the docs. Depends on: 1. Owns: ${story.owned[0] ?? ""}/docs.md`
+        })
+      ]
+    })
+
+  /** contextFor that serves a story worktree as before and a task worktree beside it. */
+  const asideOptions = (
+    harness: Harness,
+    context: FlowContextShape,
+    free: boolean,
+    taskConcurrency = 2
+  ) =>
+    Effect.gen(function* () {
+      const base = yield* makeOptions(harness, single, context, {
+        planTasks: (_seats, item) => Effect.succeed(fanTasks(item)),
+        taskConcurrency
+      })
+      const options: StoriesOptions = {
+        ...base,
+        contextFor: (workDir, contextOptions) => {
+          const task = /\.task-(\d+)$/u.exec(workDir)
+          if (task === null) {
+            return base.contextFor(workDir, contextOptions)
+          }
+          return Effect.gen(function* () {
+            yield* record(harness, `seats-aside:${workDir}:${contextOptions?.ifFree === true}`)
+            if (!free) {
+              return yield* RosterExhausted.make({ role: "coder", reasons: ["none free"] })
+            }
+            const seats: StorySeats = {
+              context: {
+                ...context,
+                coder: coder("done"),
+                git: {
+                  ...worktreeGit(harness, workDir, single.stories[0] ?? story("a")),
+                  changedFilesVsBase: () => Effect.succeed(["src/features/a/docs.md"])
+                },
+                workDir
+              },
+              totals: Effect.succeed(TokenUsage.make({ prompt: 1, completion: 1, total: 2 }))
+            }
+            return seats
+          })
+        }
+      }
+      memories.set(options, memoryFilesOf(base))
+      return options
+    })
+
+  it.effect("runs a ready task in its own worktree on a free coder and merges it in", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const options = yield* asideOptions(harness, context, true)
+      const report = yield* implementStoriesFlow(context, options)
+      assert.deepStrictEqual(
+        report.stories.map((outcome) => [outcome.id, outcome.status]),
+        [["a", "done"]]
+      )
+      const log = yield* Ref.get(harness.log)
+      const where = "/repo/.llm4ts/worktrees/a.task-3"
+      assert.include(log, `worktree-new:story/single/a--task-3@story/single/a->${where}`)
+      assert.include(log, `seats-aside:${where}:true`)
+      assert.include(log, `commit:${where}:a: docs`)
+      assert.include(log, "catch-up:/repo/.llm4ts/worktrees/a:story/single/a--task-3:plain")
+      assert.include(log, `worktree-remove:${where}:force`)
+      assert.include(log, "branch-delete:story/single/a--task-3")
+      assert.notInclude(log, "commit:/repo/.llm4ts/worktrees/a:a: docs")
+      const planText =
+        (yield* memoryFilesOf(options))["/repo/.llm4ts/epics/single/stories/a.plan.md"] ?? ""
+      assert.include(planText, "## [x] docs")
+    })
+  )
+
+  it.effect("gives the task to the held coder when no coder is free", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const options = yield* asideOptions(harness, context, false)
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const log = yield* Ref.get(harness.log)
+      assert.include(log, "commit:/repo/.llm4ts/worktrees/a:a: docs")
+      assert.include(log, "worktree-remove:/repo/.llm4ts/worktrees/a.task-3:force")
+    })
+  )
+
+  it.effect("holds one coder only at a task concurrency of 1", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const options = yield* asideOptions(harness, context, true, 1)
+      yield* implementStoriesFlow(context, options)
+      const log = yield* Ref.get(harness.log)
+      assert.isFalse(log.some((line) => line.includes(".task-")))
+      assert.include(log, "commit:/repo/.llm4ts/worktrees/a:a: docs")
+    })
+  )
+})
+
+describe("Stories executor with tasks aside: conflicts and red merges (ADR 0034)", () => {
+  const fanTasks = (story: Story): Plan =>
+    Plan.make({
+      epicId: story.id,
+      tasks: [
+        Task.make({ title: "route", description: "Add the route." }),
+        Task.make({ title: "cookie", description: "Wire the cookie. Depends on: 1" }),
+        Task.make({ title: "docs", description: "Write the docs. Depends on: 1" })
+      ]
+    })
+
+  const withAside = (
+    harness: Harness,
+    context: FlowContextShape,
+    overrides: Partial<StoriesOptions>,
+    storyMerge?: (branch: string) => Effect.Effect<void, FlowError>
+  ) =>
+    Effect.gen(function* () {
+      const base = yield* makeOptions(harness, single, context, {
+        planTasks: (_seats, item) => Effect.succeed(fanTasks(item)),
+        ...overrides
+      })
+      const options: StoriesOptions = {
+        ...base,
+        contextFor: (workDir, contextOptions) =>
+          /\.task-\d+$/u.test(workDir)
+            ? Effect.succeed({
+                context: {
+                  ...context,
+                  coder: coder("done"),
+                  git: worktreeGit(harness, workDir, single.stories[0] ?? story("a")),
+                  workDir
+                },
+                totals: Effect.succeed(TokenUsage.make({ prompt: 1, completion: 1, total: 2 }))
+              })
+            : Effect.map(base.contextFor(workDir, contextOptions), (seats) =>
+                storyMerge === undefined
+                  ? seats
+                  : {
+                      ...seats,
+                      context: {
+                        ...seats.context,
+                        git: {
+                          ...seats.context.git,
+                          merge: (
+                            branch: string,
+                            message: string,
+                            mergeOptions?: { readonly preferIncoming?: boolean }
+                          ) =>
+                            branch.includes("--task-")
+                              ? storyMerge(branch)
+                              : seats.context.git.merge(branch, message, mergeOptions)
+                        }
+                      }
+                    }
+              )
+      }
+      memories.set(options, memoryFilesOf(base))
+      return options
+    })
+
+  it.effect("a task whose merge back conflicts runs at home after the others", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const options = yield* withAside(harness, context, {}, (branch) =>
+        Effect.fail(MergeConflict.make({ branch, into: "story/single/a", paths: ["x.ts"] }))
+      )
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const log = yield* Ref.get(harness.log)
+      // Task 3 ran aside and conflicted, so the story's coder ran it after task 2.
+      assert.include(log, "commit:/repo/.llm4ts/worktrees/a.task-3:a: docs")
+      const home = log.filter((line) => line.startsWith("commit:/repo/.llm4ts/worktrees/a:"))
+      assert.deepStrictEqual(home.slice(0, 3), [
+        "commit:/repo/.llm4ts/worktrees/a:a: route",
+        "commit:/repo/.llm4ts/worktrees/a:a: cookie",
+        "commit:/repo/.llm4ts/worktrees/a:a: docs"
+      ])
+    })
+  )
+
+  it.effect("story gates red after a task merged in become a revision for the story's coder", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const merged = yield* Ref.make(false)
+      const fired = yield* Ref.make(false)
+      const options = yield* withAside(
+        harness,
+        context,
+        {
+          // Red once, on the story's first gate run after a task merged in.
+          gates: (workDir) =>
+            Effect.gen(function* () {
+              const red =
+                workDir === "/repo/.llm4ts/worktrees/a" &&
+                (yield* Ref.get(merged)) &&
+                !(yield* Ref.getAndSet(fired, true))
+              return red
+                ? ReviewResult.make({
+                    issues: [
+                      ReviewIssue.make({
+                        severity: "Critical",
+                        title: "combined red",
+                        description: ""
+                      })
+                    ]
+                  })
+                : clean
+            })
+        },
+        () => Ref.set(merged, true)
+      )
+      const reviseOnCommit = options
+      const report = yield* implementStoriesFlow(context, reviseOnCommit)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const planText =
+        (yield* memoryFilesOf(reviseOnCommit))["/repo/.llm4ts/epics/single/stories/a.plan.md"] ?? ""
+      assert.include(
+        planText,
+        "[x] Revision 1: make the story gates green after merging its parallel tasks"
+      )
+      assert.include(planText, "combined red")
+    })
   )
 })

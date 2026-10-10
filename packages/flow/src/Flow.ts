@@ -87,7 +87,9 @@ export interface TaskOverrides {
   readonly lint?: Effect.Effect<ReviewResult, FlowError> | undefined
   readonly triage?: GateTriageOptions
   /** Present to replace the evidence check: the aside coder's tool calls are elsewhere. */
-  readonly onTaskReply?: ImplementPlanOptions["onTaskReply"]
+  readonly onTaskReply?: ImplementPlanOptions["onTaskReply"] | undefined
+  /** The coder's system prompt there: its own working directory, its own paths. */
+  readonly system?: string
 }
 
 /** Tasks beside the held coder (ADR 0034): how many at once, and who runs one. */
@@ -329,6 +331,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
     (task: Task, planSoFar: Plan): Effect.Effect<void, FlowError> => {
       const lint = "lint" in over ? over.lint : options.lint
       const onTaskReply = "onTaskReply" in over ? over.onTaskReply : options.onTaskReply
+      const system = over.system ?? options.system
       return Effect.gen(function* () {
         // `sharedCoder`'s definedness mirrors `options.chatPerTask !== true`
         // above: when it's set, every task reuses it; when it's undefined,
@@ -340,7 +343,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
           coder = yield* makeChat(ctx.coder, {
             events: ctx.events,
             agent: "coder",
-            system: composeSystem(options.system, planSoFar.render),
+            system: composeSystem(system, planSoFar.render),
             ...(options.stall === undefined ? {} : { stall: options.stall })
           })
         }

@@ -5,8 +5,7 @@ import {
   enforcePerimeter,
   isWithinPerimeter,
   perimeterGate,
-  strayTasks
-} from "@llm4ts/flow/Perimeter"
+  strayTasks, taskOwnsGate } from "@llm4ts/flow/Perimeter"
 import { Task } from "@llm4ts/flow/Plan"
 import { Story, StoryPlan, pathsNamedIn } from "@llm4ts/flow/StoryPlan"
 
@@ -148,5 +147,21 @@ describe("Perimeter against the plan", () => {
     assert.strictEqual(red.issues[0]?.severity, "Critical")
     assert.include(red.issues[0]?.description ?? "", "src/kit/theme.css (shared read-only")
     assert.include(red.issues[0]?.description ?? "", "src/App.tsx (not in the story's owned paths)")
+  })
+})
+
+describe("taskOwnsGate (ADR 0034)", () => {
+  it("passes paths inside a task's Owns, globs as prefixes, and names the rest", () => {
+    const owns = ["src/session/*", "test/session.test.ts", "src/routes/**"]
+    assert.isTrue(
+      taskOwnsGate(["src/session/cookie.ts", "test/session.test.ts", "src/routes/a/b.ts"], owns)
+        .isClean
+    )
+    const stray = taskOwnsGate(["src/session/cookie.ts", "src/app.ts"], owns)
+    assert.isFalse(stray.isClean)
+    assert.include(stray.issues[0]?.description ?? "", "src/app.ts")
+    assert.notInclude(stray.issues[0]?.description ?? "", "cookie")
+    // A task that names no paths is not checked.
+    assert.isTrue(taskOwnsGate(["anything.ts"], []).isClean)
   })
 })

@@ -48,6 +48,8 @@ export interface RosterView {
   readonly capacityChanged: (role: Role, from: number) => Effect.Effect<number>
   /** The executor holding this context's coder, once leased. */
   readonly executor: Effect.Effect<string | undefined>
+  /** Which clone of it (ADR 0033), once leased. */
+  readonly clone?: Effect.Effect<number | undefined>
   /** Every executor that held this context's coder, in order (handovers). */
   readonly history: Effect.Effect<ReadonlyArray<string>>
   /** The autonomy contract profile an executor's roster entry asks for (ADR 0027), when it does. */

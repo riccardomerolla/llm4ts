@@ -20,7 +20,7 @@ import type { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import type { LlmError } from "@llm4ts/core/Errors"
 import { BoardItem, eventedBoard, type BoardSyncShape } from "./BoardSync.ts"
 import { makeChat } from "./Chat.ts"
-import { implementPlanFlow } from "./Flow.ts"
+import { implementPlanFlow, type TaskOverrides } from "./Flow.ts"
 import {
   GateBaseline,
   baselineKey,
@@ -58,6 +58,7 @@ import {
   enforcePerimeter,
   isWithinPerimeter,
   perimeterGate,
+  taskOwnsGate,
   strayTasks,
   type PerimeterCheck
 } from "./Perimeter.ts"
@@ -68,7 +69,7 @@ import {
   type PlainFileStoreShape
 } from "./Persistence.ts"
 import { Plan, Task } from "./Plan.ts"
-import { stage } from "./PlanExecution.ts"
+import { stage, type AsideOutcome, type AsideRequest } from "./PlanExecution.ts"
 import { planFrom } from "./Planner.ts"
 import {
   ReviewIssue,
@@ -459,6 +460,10 @@ export const storyTaskPlanInstructions = (story: Story): string =>
           "End every task's description with `Satisfies: <n>` naming the criteria it serves, and",
           "make sure every criterion is served by at least one task."
         ]),
+    "End every task's description with a `Depends on: <n, …>` line naming the earlier tasks it",
+    "needs done first (`Depends on: none` when it needs none; without the line it waits for the",
+    "task before it), and an `Owns: <paths>` line naming the files it changes. Tasks that need",
+    "nothing from each other and own different files may run at the same time.",
     "Never plan a task that creates or changes anything outside them — registering or wiring",
     "the story in elsewhere (the app's composition point, a shared kit file) is another story's job.",
     `Use exactly this epicId: "${story.id}".`,
@@ -727,6 +732,13 @@ export interface StoriesOptions {
   ) => Effect.Effect<Plan, FlowError>
   /** Stories implemented at once. Default 3. */
   readonly concurrency?: number
+  /**
+   * Coders one story may hold at once, its own included (ADR 0034): a
+   * ready task whose plan says it may runs beside the held coder, in its
+   * own worktree, on a coder that is free now. Default 2; 1 runs every task
+   * in order on the story's coder.
+   */
+  readonly taskConcurrency?: number
   /** Stop the epic at the first failed story instead of skipping its dependents. */
   readonly failFast?: boolean
   readonly reviewers?: ReadonlyArray<Reviewer>
@@ -881,6 +893,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const concurrency = Math.max(1, options.concurrency ?? 3)
   const judgeRounds = Math.max(1, options.judgeRounds ?? 2)
   const mergeRevisions = Math.max(0, options.mergeRevisions ?? 1)
+  const taskConcurrency = Math.max(1, options.taskConcurrency ?? 2)
   const deferring = options.deferNonBlocking === true
   const statePath = (story: Story): string => join(options.stateDir, `stories/${story.id}.json`)
   const planPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.plan.md`)
@@ -1362,12 +1375,15 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     )
     // The oracle guard over the story's whole change against the epic:
     // committed on the branch and uncommitted in the worktree (ADR 0027).
-    const oracleGate = (target: ReviewResult): Effect.Effect<ReviewResult, FlowError> =>
+    const oracleGate = (
+      target: ReviewResult,
+      where: GitToolShape = git
+    ): Effect.Effect<ReviewResult, FlowError> =>
       story.testsChange
         ? Effect.succeed(ReviewResult.make({ issues: [] }))
         : Effect.gen(function* () {
-            const committed = yield* git.diffVsBase(epicBranch)
-            const uncommitted = yield* git.diffAll
+            const committed = yield* where.diffVsBase(epicBranch)
+            const uncommitted = yield* where.diffAll
             const base =
               gateCommands === undefined ? undefined : (yield* storyBaseline)?.passedCount
             const issues = checkOracle(
@@ -1378,17 +1394,41 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             )
             return ReviewResult.make({ issues, summary: issues.length === 0 ? "" : "oracle guard" })
           })
-    const gates: Effect.Effect<ReviewResult, FlowError> = Effect.gen(function* () {
-      const target = yield* options.gates(state.worktree, laneOf(story), {
-        files,
-        dir: storyGateLogDir(options.stateDir, story.id)
+    /**
+     * The gates in a worktree of the story: the target's, the story's
+     * perimeter, the oracle guard and — for a task run aside — the paths the
+     * task said it owns, against the story branch it started from.
+     */
+    const gatesAt = (
+      workDir: string,
+      where: GitToolShape,
+      logDir: string,
+      task?: { readonly owns: ReadonlyArray<string>; readonly from: string }
+    ): Effect.Effect<ReviewResult, FlowError> =>
+      Effect.gen(function* () {
+        const target = yield* options.gates(workDir, laneOf(story), { files, dir: logDir })
+        const changed = yield* perimeterNow(story, where)
+        const owned =
+          task === undefined || task.owns.length === 0
+            ? ReviewResult.make({ issues: [] })
+            : taskOwnsGate(
+                [
+                  ...new Set([
+                    ...(yield* where.changedFilesVsBase(task.from)),
+                    ...(yield* where.uncommittedFiles)
+                  ])
+                ],
+                task.owns
+              )
+        return combined(
+          combined(
+            combined(target, perimeterGate([...changed.sharedReadOnly, ...changed.outside], story)),
+            yield* oracleGate(target, where)
+          ),
+          owned
+        )
       })
-      const changed = yield* perimeterNow(story, git)
-      return combined(
-        combined(target, perimeterGate([...changed.sharedReadOnly, ...changed.outside], story)),
-        yield* oracleGate(target)
-      )
-    })
+    const gates = gatesAt(state.worktree, git, storyGateLogDir(options.stateDir, story.id))
     const triage: GateTriageOptions = {
       baseline: storyBaseline,
       roots: rootsOf(state.worktree),
@@ -1571,6 +1611,138 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     const taskSystem = [system, startingCode]
       .filter((part): part is string => part !== undefined)
       .join("\n\n")
+    /** Tasks merged in from beside the held coder this run: the story's gates rerun after them. */
+    let mergedAside = 0
+    /**
+     * A ready task beside the held coder (ADR 0034): a coder free now, a
+     * worktree on its own branch from the story branch, the task's whole
+     * body there — coder, review, gates with its `Owns:` — then a merge
+     * into the story branch while no task runs at home. Anything short of
+     * a clean merge hands the task back to the held coder; a conflict
+     * hands it back to run after the others.
+     */
+    const runAside = (
+      request: AsideRequest,
+      run: (at: FlowContextShape, overrides: TaskOverrides) => Effect.Effect<void, FlowError>
+    ): Effect.Effect<AsideOutcome, FlowError> => {
+      const { node } = request
+      const where = join(options.worktreeRoot, `${story.id}.task-${node.index}`)
+      const branch = `${state.branch}--task-${node.index}`
+      const lane = laneOf(story)
+      const said = (message: string) =>
+        lane.publish(Info.make({ message: `story ${story.id}: task ${node.index} ${message}` }))
+      const cleanUp = Effect.gen(function* () {
+        yield* context.git.removeWorktree(where, true).pipe(Effect.ignore)
+        if (yield* context.git.branchExists(branch).pipe(Effect.orElseSucceed(() => false))) {
+          yield* context.git.deleteBranch(branch).pipe(Effect.ignore)
+        }
+      })
+      const attempt = Effect.gen(function* () {
+        // No disk work while no coder is free: the held coder takes the task.
+        if (roster !== undefined && (yield* roster.available("coder")) === 0) {
+          return "declined" as const
+        }
+        // A previous run's leftovers go first.
+        yield* cleanUp
+        yield* context.git.addWorktreeNewBranch(where, branch, state.branch)
+        const asideSeats = yield* options.contextFor(where, {
+          label: `${story.id}#t${node.index}`,
+          ifFree: true
+        })
+        const asideRoster = asideSeats.context.roster
+        yield* request.announce({
+          ...(asideRoster === undefined
+            ? {}
+            : {
+                ...(yield* Effect.map(asideRoster.executor, (executor) =>
+                  executor === undefined ? {} : { executor }
+                )),
+                ...(asideRoster.clone === undefined
+                  ? {}
+                  : yield* Effect.map(asideRoster.clone, (clone) =>
+                      clone === undefined ? {} : { clone }
+                    ))
+              })
+        })
+        if (options.setup !== undefined) {
+          yield* options.setup(where, lane)
+        }
+        const asideBlocked = yield* Ref.make<string | undefined>(undefined)
+        const asideContext: FlowContextShape = {
+          ...asideSeats.context,
+          coder: watchForBlockedOn(asideSeats.context.coder, asideBlocked)
+        }
+        const asideGit = asideContext.git
+        const asideSystem = [
+          withContract(
+            [
+              perimeterRules(story, { plan, worktree: where, epicCheckout: context.workDir }),
+              gateRules,
+              extra,
+              node.owns.length === 0
+                ? undefined
+                : `This task owns ${node.owns.join(", ")}: another task of this story may be changing other files right now, so change nothing else.`
+            ]
+              .filter((part): part is string => part !== undefined && part.trim().length > 0)
+              .join("\n\n"),
+            contractProfile
+          ),
+          startingCode
+        ]
+          .filter((part): part is string => part !== undefined)
+          .join("\n\n")
+        yield* run(asideContext, {
+          lint: gatesAt(
+            where,
+            asideGit,
+            join(storyGateLogDir(options.stateDir, story.id), `task-${node.index}`),
+            { owns: node.owns, from: state.branch }
+          ),
+          triage: {
+            baseline: storyBaseline,
+            roots: rootsOf(where),
+            ...(options.testGate === undefined ? {} : { rerunTest: options.testGate(where, lane) })
+          },
+          // Its tool calls are on its own lane's transcript, not the story's.
+          onTaskReply: undefined,
+          system: asideSystem
+        })
+        if ((yield* Ref.get(asideBlocked)) !== undefined) {
+          yield* said("stopped on BLOCKED_ON aside; the story's coder takes it")
+          return "declined" as const
+        }
+        return yield* request.exclusive(
+          Effect.gen(function* () {
+            yield* git.merge(branch, `${story.id}: merge task ${node.index} (${node.task.title})`)
+            mergedAside += 1
+            yield* said(`merged from beside the story's coder`)
+            return "merged" as const
+          })
+        )
+      })
+      return Effect.scoped(
+        Effect.gen(function* () {
+          yield* Effect.addFinalizer(() => cleanUp)
+          return yield* attempt
+        })
+      ).pipe(
+        Effect.catch((error) =>
+          error._tag === "MergeConflict"
+            ? Effect.as(
+                said("conflicted merging back; the story's coder runs it last"),
+                "conflict" as const
+              )
+            : error._tag === "RosterExhausted"
+              ? Effect.succeed("declined" as const)
+              : Effect.as(
+                  said(
+                    `could not finish aside (${error.message.split("\n")[0] ?? ""}); the story's coder takes it`
+                  ),
+                  "declined" as const
+                )
+        )
+      )
+    }
     const implementTasks = implementPlanFlow(storyContext, {
       store: makePlanStore(files),
       planPath: planPath(story),
@@ -1588,6 +1760,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       ),
       system: taskSystem,
       chatPerTask: true,
+      ...(taskConcurrency > 1
+        ? { parallel: { concurrency: taskConcurrency, aside: runAside } }
+        : {}),
       carry: {
         read: files.read(notesPath(story)),
         write: (notes) => files.writeAtomic(notesPath(story), notes)
@@ -1646,6 +1821,33 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       )
     }
     yield* guarded(implementTasks, implementTasks)
+    // Tasks merged in from beside the held coder were each green alone: the
+    // story's gates now run on them together, and red goes back to the
+    // story's coder as a revision, as a red epic merge does (ADR 0034).
+    for (let revision = 0; mergedAside > 0; revision += 1) {
+      mergedAside = 0
+      const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+      const together = yield* stage(
+        laneOf(story),
+        `story ${story.id}: gates after parallel tasks`,
+        Effect.flatMap(gates, (result) => applyTriage(result, triage, laneOf(story), reported))
+      )
+      if (together.isClean) {
+        break
+      }
+      if (revision >= mergeRevisions) {
+        return yield* failed(
+          story,
+          `its gates are red with its parallel tasks merged together:\n${issueLines(together)}`
+        )
+      }
+      yield* appendRevision(
+        "make the story gates green after merging its parallel tasks",
+        `Tasks of the story "${story.title}" ran at the same time and were merged together; the gates are red on the result.`,
+        together
+      )
+      yield* guarded(implementTasks, implementTasks)
+    }
 
     // Other stories may have merged while this one ran: judge the branch
     // against the epic as it is now.
