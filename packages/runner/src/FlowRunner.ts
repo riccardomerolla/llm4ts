@@ -314,14 +314,16 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     service: LlmServiceShape,
     lane: string | undefined,
     role: string,
-    executor?: Effect.Effect<string | undefined>
+    executor?: Effect.Effect<string | undefined>,
+    clone?: Effect.Effect<number | undefined>
   ): LlmServiceShape =>
     transcripts === undefined
       ? service
       : transcriptSeat(service, transcripts, {
           role,
           ...(lane === undefined ? {} : { lane }),
-          ...(executor === undefined ? {} : { executor })
+          ...(executor === undefined ? {} : { executor }),
+          ...(clone === undefined ? {} : { clone })
         })
   const judgmentLog =
     options.judgmentLog === true
@@ -781,7 +783,8 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             timedSeat(held.service, laneEvents, "coder", seatOptions(held.executor)),
             lane,
             "coder",
-            held.executor
+            held.executor,
+            held.clone
           ),
           judgment,
           judge: judgmentSeat,
@@ -804,9 +807,13 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
                     const executorRef = yield* Ref.make<Effect.Effect<string | undefined>>(
                       Effect.succeed(undefined)
                     )
+                    const cloneRef = yield* Ref.make<Effect.Effect<number | undefined>>(
+                      Effect.succeed(undefined)
+                    )
                     const laneEvents = withLane(events, {
                       lane: label,
                       executor: Effect.flatten(Ref.get(executorRef)),
+                      clone: Effect.flatten(Ref.get(cloneRef)),
                       workDir: directory
                     })
                     const storyCoder = yield* makeHeldCoder(roster, source, directory, {
@@ -818,6 +825,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
                         : { prefer: contextOptions.prefer })
                     })
                     yield* Ref.set(executorRef, storyCoder.executor)
+                    yield* Ref.set(cloneRef, storyCoder.clone)
                     return yield* contextIn(directory, storyCoder, label, false, laneEvents)
                   })
               }

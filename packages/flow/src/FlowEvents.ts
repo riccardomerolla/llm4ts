@@ -109,7 +109,9 @@ export class TokensUsed extends Schema.TaggedClass<TokensUsed>()("TokensUsed", {
   /** The concurrent unit (a story) this event belongs to; absent for run-wide events. */
   lane: Schema.optionalKey(Schema.String),
   /** The roster executor working that lane, when there is one (ADR 0019). */
-  executor: Schema.optionalKey(Schema.String)
+  executor: Schema.optionalKey(Schema.String),
+  /** The executor's clone that made the call, when the lane's coder holds a slot (ADR 0033). */
+  clone: Schema.optionalKey(Schema.Int)
 }) {}
 
 /** One issue a review round found, as the operator sees it. */
@@ -427,6 +429,8 @@ export interface Lane {
   readonly lane: string
   /** The executor working it now; read at every publish, so a handover shows. */
   readonly executor?: Effect.Effect<string | undefined>
+  /** The coder's clone number, read at every publish as `executor` is (ADR 0033). */
+  readonly clone?: Effect.Effect<number | undefined>
   /** The lane's working directory, dropped from tool arguments (the lane already names it). */
   readonly workDir?: string
 }
@@ -444,9 +448,11 @@ const stamped = (
   event: FlowEvent,
   lane: string,
   executor: string | undefined,
-  workDir: string | undefined
+  workDir: string | undefined,
+  clone: number | undefined
 ): FlowEvent => {
   const tags = { lane, ...(executor === undefined ? {} : { executor }) }
+  const usageTags = { ...tags, ...(clone === undefined ? {} : { clone }) }
   switch (event._tag) {
     case "StageStarted":
       return event.lane !== undefined ? event : StageStarted.make({ stage: event.stage, ...tags })
@@ -493,7 +499,7 @@ const stamped = (
             agent: event.agent,
             usage: event.usage,
             ...(event.model === undefined ? {} : { model: event.model }),
-            ...tags
+            ...usageTags
           })
     // The lane's executor is its coder's: it names a coder call or tool, not
     // a reviewer's or judge's call made on another executor.
@@ -531,7 +537,9 @@ const stamped = (
 export const withLane = (events: FlowEventsShape, lane: Lane): FlowEventsShape => ({
   publish: (event) =>
     Effect.flatMap(lane.executor ?? Effect.succeed(undefined), (executor) =>
-      events.publish(stamped(event, lane.lane, executor, lane.workDir))
+      Effect.flatMap(lane.clone ?? Effect.succeed(undefined), (clone) =>
+        events.publish(stamped(event, lane.lane, executor, lane.workDir, clone))
+      )
     )
 })
 
