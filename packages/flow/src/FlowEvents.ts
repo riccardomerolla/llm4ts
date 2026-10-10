@@ -306,6 +306,15 @@ export class TaskCompleted extends Schema.TaggedClass<TaskCompleted>()("TaskComp
   executor: Schema.optionalKey(Schema.String)
 }) {}
 
+/** A story moved on the epic's board (ADR 0033); the statuses are `BoardSync`'s. */
+export class StoryStatusChanged extends Schema.TaggedClass<StoryStatusChanged>()(
+  "StoryStatusChanged",
+  {
+    id: Schema.String,
+    status: Schema.Literals(["planned", "active", "waiting", "done", "failed", "skipped"])
+  }
+) {}
+
 export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("ExecutorLeased", {
   executor: Schema.String,
   role: Schema.String,
@@ -442,7 +451,8 @@ export const FlowEvent = Schema.Union([
   Began,
   TasksPlanned,
   TaskStarted,
-  TaskCompleted
+  TaskCompleted,
+  StoryStatusChanged
 ])
 export type FlowEvent = typeof FlowEvent.Type
 

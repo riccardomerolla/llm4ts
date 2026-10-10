@@ -11,9 +11,49 @@ import {
   renderBoard
 } from "@llm4ts/flow/BoardSync"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import { eventedBoard } from "@llm4ts/flow/BoardSync"
+import { type FlowEvent, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 
 const planned = (id: string, title: string, wave?: string): BoardItem =>
   BoardItem.make({ id, title, status: "planned", ...(wave === undefined ? {} : { wave }) })
+
+describe("eventedBoard (ADR 0033)", () => {
+  it.effect("publishes StoryStatusChanged for every move, including the plan", () =>
+    Effect.gen(function* () {
+      const seen: Array<FlowEvent> = []
+      const events: FlowEventsShape = {
+        publish: (event) => Effect.sync(() => void seen.push(event))
+      }
+      const memory = yield* makeMemoryPlainFileStore()
+      const board = eventedBoard(
+        makeLocalBoardSync(memory.store, ".llm4ts/epics/e1", "Epic: e1"),
+        events
+      )
+      yield* board.plan([planned("S01", "login"), planned("S02", "reset")])
+      yield* board.start("S01")
+      yield* board.wait("S02", "depends on S01")
+      yield* board.complete("S01", {})
+      yield* board.fail("S02", "red")
+      yield* board.skip("S02", "dropped")
+      assert.deepStrictEqual(
+        seen.map((event) =>
+          event._tag === "StoryStatusChanged" ? `${event.id}:${event.status}` : event._tag
+        ),
+        [
+          "S01:planned",
+          "S02:planned",
+          "S01:active",
+          "S02:waiting",
+          "S01:done",
+          "S02:failed",
+          "S02:skipped"
+        ]
+      )
+      const snapshot = yield* board.snapshot
+      assert.strictEqual(snapshot.items.find((item) => item.id === "S01")?.status, "done")
+    })
+  )
+})
 
 describe("BoardSync local adapter", () => {
   it.effect("walks the lifecycle and keeps board.json and board.md in step", () =>
