@@ -1,6 +1,6 @@
 # ADR 0037: Gemini CLI As A Plain Model For pi
 
-Status: Proposed · Date: 2026-10-10 · Extends ADR 0016
+Status: Accepted for `gemini-3.8-flash` · Date: 2026-10-10 · Extends ADR 0016
 
 ## Context
 
@@ -185,3 +185,11 @@ among the variants:
 Decisions 2–5 pass their gate for `gemini-3.8-flash`. Before the bridge is
 built, `gemini-2.5-pro` runs once more with the admin policy, so the tool
 removal is confirmed on a model that would use the tools.
+
+## Probe run 4 and the decision (2026-10-11)
+
+`gemini-2.5-pro` with the deny-all admin policy kept to the tool-call
+protocol in 1 call of 10. `gemini-3.8-flash` passed in runs 1 and 3 (10 of
+10 both times). The bridge is built for flash only; `gemini-2.5-pro` is an
+older model, and a newer one is run through the probe before it is used.
+`docs/configuration.md` says so where the mode is set up.

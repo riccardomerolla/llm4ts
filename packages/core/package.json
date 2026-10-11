@@ -59,6 +59,7 @@
     "./providers/GeminiAcpSession": "./dist/providers/GeminiAcpSession.js",
     "./providers/GeminiApiProvider": "./dist/providers/GeminiApiProvider.js",
     "./providers/GeminiCliProvider": "./dist/providers/GeminiCliProvider.js",
+    "./providers/GeminiModelBridge": "./dist/providers/GeminiModelBridge.js",
     "./providers/GeminiModels": "./dist/providers/GeminiModels.js",
     "./providers/LmStudioModels": "./dist/providers/LmStudioModels.js",
     "./providers/LmStudioProvider": "./dist/providers/LmStudioProvider.js",

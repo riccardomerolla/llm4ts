@@ -10,7 +10,8 @@ import {
   geminiPrerequisites,
   makeDoctorProgram,
   piModelRefs,
-  piModelsConfig
+  piModelsConfig,
+  geminiModelModePrerequisites
 } from "@llm4ts/runner/Doctor"
 
 // Doctor's gate check is a process spawn; tests hand it an answer.
@@ -449,4 +450,31 @@ describe("doctor gates section", () => {
       assert.include(bad, "✖ node: the gates would run on Node v24.12.0")
     })
   )
+})
+
+describe("the Gemini model bridge in the doctor (ADR 0037)", () => {
+  it("says nothing unless the bridge runs in model mode", () => {
+    assert.isUndefined(geminiModelModePrerequisites({}, []))
+    assert.isUndefined(geminiModelModePrerequisites({ LLM4TS_GEMINI_BRIDGE: "1" }, []))
+  })
+
+  it("prints Gemini CLI's terms clause and pi's provider shape in model mode", () => {
+    const report = geminiModelModePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "1", LLM4TS_GEMINI_BRIDGE_MODE: "model" },
+      []
+    )
+    assert.isTrue(report?.satisfied)
+    const text = [report?.summary, report?.hint, ...(report?.detail ?? [])].join("\n")
+    assert.include(text, "Directly accessing the services powering Gemini CLI")
+    assert.include(text, '"api": "openai-completions"')
+  })
+
+  it("is not satisfied when a system admin policy would override the bridge's", () => {
+    const report = geminiModelModePrerequisites(
+      { LLM4TS_GEMINI_BRIDGE: "1", LLM4TS_GEMINI_BRIDGE_MODE: "model" },
+      ["/etc/gemini-cli/policies/bank.toml"]
+    )
+    assert.isFalse(report?.satisfied)
+    assert.include(report?.summary ?? "", "/etc/gemini-cli/policies/bank.toml")
+  })
 })

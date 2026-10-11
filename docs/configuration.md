@@ -143,6 +143,60 @@ prerequisites:
         gemini-bridge/gemini-2.5-pro
 ```
 
+#### Model mode: Gemini CLI as a plain model for `pi` (ADR 0037)
+
+In the mode above Gemini CLI stays an agent: its own system prompt (about
+16,600 tokens on every call, measured with `gemini-2.5-pro`) and its own
+tools ride along with pi's. `LLM4TS_GEMINI_BRIDGE_MODE=model` serves pi an
+OpenAI-shaped `/v1/chat/completions` route instead. Each request is one
+`gemini` call, run in an empty scratch directory, with:
+
+- pi's system prompt, a text tool-call protocol and pi's tool schemas in
+  place of Gemini's prompt (`GEMINI_SYSTEM_MD`);
+- an admin policy denying every tool (`--admin-policy`), so Gemini sees
+  none of its own;
+- sub-agents switched off in Gemini CLI's system settings.
+
+pi runs its own tools, Gemini only answers. A reply whose tool call cannot
+be used gets one retry with the reason; a second bad reply reaches pi as
+text. Usage reports cached prompt tokens apart, as OpenAI's shape does.
+
+pi's provider for this mode uses the OpenAI completions API:
+
+```json
+{
+  "providers": {
+    "gemini-bridge": {
+      "baseUrl": "http://127.0.0.1:8731/v1",
+      "api": "openai-completions",
+      "apiKey": "bridge-unused",
+      "models": [{ "id": "gemini-3.8-flash" }]
+    }
+  }
+}
+```
+
+```sh
+LLM4TS_GEMINI_BRIDGE=1 LLM4TS_GEMINI_BRIDGE_MODE=model llm4ts doctor
+```
+
+Limits, from `examples/gemini-model-probe.mjs` on a real subscription:
+
+- **Models.** `gemini-3.8-flash` kept to the tool-call protocol in 10 of 10
+  calls; `gemini-2.5-pro` in 1 of 10. Use flash, and run the probe on a
+  new model before switching to it.
+- **System admin policies.** When Gemini CLI's system policy directory
+  (`/etc/gemini-cli/policies` on Linux) holds a `.toml` file, Gemini CLI
+  ignores `--admin-policy`; the bridge then refuses to start in this mode,
+  since Gemini's tools would stay in view.
+- **One process per turn.** Each pi turn starts Gemini CLI, about a second
+  or two, and resends the whole conversation.
+- **Terms.** Only Gemini CLI talks to Google, under its own login; llm4ts
+  never reads or forwards its credentials. Gemini CLI's terms forbid
+  directly accessing its services from third-party software, and using it
+  as a model for another agent stays close to that clause. `llm4ts doctor`
+  prints the clause in this mode; confirm with Google before relying on it.
+
 The ADR 0016 smoke test (`examples/gemini-acp-bridge-smoke.ts`) reads the
 same list rather than assuming a name: with exactly one bridged pair it uses
 it, and otherwise asks for `LLM4TS_GEMINI_BRIDGE_MODEL`. That value only
