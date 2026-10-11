@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.44.0
+
+The Gemini bridge runs on its own, for pi used directly.
 
 - **`llm4ts gemini-bridge`** runs the Gemini bridge on its own until Ctrl-C,
   so `pi` can use the Gemini CLI subscription directly through an
