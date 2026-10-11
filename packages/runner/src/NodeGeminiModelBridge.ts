@@ -14,7 +14,7 @@ import {
   completionChunks,
   completionJson,
   correctionTranscript,
-  denyAllToolsPolicyToml,
+  modelModePolicyToml,
   modelModeSettingsJson,
   openAiUsage,
   parseModelReply,
@@ -123,9 +123,9 @@ const geminiTurn = (
         modelModeSettingsJson
       )
       const policy = yield* config.temporaryFiles.write(
-        "gemini-deny-all-",
+        "gemini-model-mode-",
         ".toml",
-        denyAllToolsPolicyToml
+        modelModePolicyToml
       )
       const events = yield* Stream.runCollect(
         config.executor

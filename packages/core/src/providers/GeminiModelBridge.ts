@@ -126,7 +126,9 @@ export const toolCallProtocol = [
   '<tool_call>{"name": "<tool>", "arguments": {...}}</tool_call>',
   "",
   "The arguments are a JSON object matching the tool's parameters. Call one tool at a time.",
-  "When no tool is needed, reply in plain text without any <tool_call> block."
+  "When no tool is needed, reply in plain text without any <tool_call> block.",
+  "Never call a native function, update_topic included: it does nothing here. Only the",
+  "<tool_call> block reaches the caller."
 ].join("\n")
 
 /**
@@ -347,14 +349,28 @@ export const completionChunks = (
 }
 
 /**
- * The admin policy that takes every tool out of the model's view: a deny
- * rule without an argument pattern excludes the tool entirely, and `*`
- * matches every tool, sub-agents included (probe runs 2–4, ADR 0037).
+ * The one built-in tool left in the model's view. Gemini CLI always sends
+ * `tools: [{ functionDeclarations }]`, and with none declared Google
+ * rejects the request (`tools[0].tool_type: required one_of`). This one
+ * only sets a status line: no file, shell or network access.
  */
-export const denyAllToolsPolicyToml = [
+export const inertGeminiTool = "update_topic"
+
+/**
+ * The admin policy for a model-mode call: every tool denied — a deny rule
+ * without an argument pattern excludes the tool from the model's view, and
+ * `*` matches every tool, sub-agents included — except the one inert tool,
+ * allowed at a higher priority so the tool list is never empty (ADR 0037).
+ */
+export const modelModePolicyToml = [
   "[[rule]]",
   'toolName = "*"',
   'decision = "deny"',
+  "priority = 100",
+  "",
+  "[[rule]]",
+  `toolName = "${inertGeminiTool}"`,
+  'decision = "allow"',
   "priority = 999",
   ""
 ].join("\n")

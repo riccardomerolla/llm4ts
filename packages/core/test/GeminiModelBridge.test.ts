@@ -10,11 +10,12 @@ import {
   completionChunks,
   completionJson,
   correctionTranscript,
-  denyAllToolsPolicyToml,
+  modelModePolicyToml,
   modelModeSettingsJson,
   openAiUsage,
   parseModelReply,
   systemFileFor,
+  toolCallProtocol,
   transcriptFor
 } from "@llm4ts/core/providers/GeminiModelBridge"
 
@@ -180,12 +181,25 @@ describe("Gemini model bridge (ADR 0037)", () => {
     assert.strictEqual(jsonStringField(delta, "content"), "hello")
   })
 
-  it("locks Gemini CLI down: no tool in view, no sub-agents", () => {
-    assert.include(denyAllToolsPolicyToml, 'toolName = "*"')
-    assert.include(denyAllToolsPolicyToml, 'decision = "deny"')
-    assert.notInclude(denyAllToolsPolicyToml, "argsPattern")
+  it("locks Gemini CLI down to one inert tool: an empty tool list is a 400 from Google", () => {
+    // Gemini CLI always sends tools: [{ functionDeclarations }]; with none
+    // declared, the API rejects the request (tools[0].tool_type).
+    assert.include(modelModePolicyToml, 'toolName = "*"')
+    assert.include(modelModePolicyToml, 'decision = "deny"')
+    assert.include(modelModePolicyToml, 'toolName = "update_topic"')
+    assert.include(modelModePolicyToml, 'decision = "allow"')
+    assert.notInclude(modelModePolicyToml, "argsPattern")
+    const deny = /toolName = "\*"\ndecision = "deny"\npriority = (\d+)/u.exec(modelModePolicyToml)
+    const allow = /toolName = "update_topic"\ndecision = "allow"\npriority = (\d+)/u.exec(
+      modelModePolicyToml
+    )
+    assert.isAbove(Number(allow?.[1]), Number(deny?.[1]))
     assert.deepStrictEqual(JSON.parse(modelModeSettingsJson), {
       experimental: { enableAgents: false }
     })
+  })
+
+  it("tells the model its one native function is not for use", () => {
+    assert.include(toolCallProtocol, "update_topic")
   })
 })
