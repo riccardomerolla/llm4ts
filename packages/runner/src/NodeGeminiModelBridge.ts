@@ -27,6 +27,8 @@ import {
 import {
   acquireServer,
   errorStatus,
+  localRequestProblem,
+  maxRequestBytes,
   parseJsonBody,
   readBody,
   requestPath,
@@ -62,6 +64,8 @@ export interface GeminiModelBridgeConfig extends GeminiModelCallConfig {
    * Default: what is on this machine (`systemAdminPolicies`).
    */
   readonly systemPolicies?: ReadonlyArray<string>
+  /** A token every request must carry as a bearer (pi's `apiKey`); none by default. */
+  readonly token?: string
 }
 
 export interface RunningGeminiModelBridge {
@@ -197,9 +201,6 @@ const addTokens = (
   cached: (left?.cached ?? 0) + (right?.cached ?? 0)
 })
 
-/** The largest request the bridge reads: a long conversation, not an unbounded upload. */
-const maxRequestBytes = 32 * 1024 * 1024
-
 /** What a Gemini model id looks like: `gemini-3.8-flash`, `gemini-2.5-pro-001`. */
 const modelName = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
 
@@ -290,20 +291,9 @@ export const runGeminiModelBridge = Effect.fn("@llm4ts/runner/NodeGeminiModelBri
         writeJson(response, 404, { error: { message: "not found" } })
         return
       }
-      // pi posts JSON from Node, with no Origin. A browser page posting to
-      // this loopback port (a cross-site form needs no preflight as
-      // text/plain) is refused before anything runs.
-      const contentType = request.headers["content-type"] ?? ""
-      // A DNS name rebound to 127.0.0.1 still sends its own Host.
-      const host = (request.headers.host ?? "").replace(/:\d+$/u, "")
-      if (
-        request.headers.origin !== undefined ||
-        !contentType.includes("application/json") ||
-        !["127.0.0.1", "localhost", "[::1]"].includes(host)
-      ) {
-        writeJson(response, 403, {
-          error: { message: "the bridge answers JSON requests from local tools only" }
-        })
+      const problem = localRequestProblem(request.headers, config.token)
+      if (problem !== undefined) {
+        writeJson(response, 403, { error: { message: problem } })
         return
       }
       const handled = Effect.gen(function* () {

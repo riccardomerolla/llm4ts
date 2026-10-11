@@ -911,6 +911,7 @@ export interface GeminiBridgeFlags {
   readonly port: Option.Option<number>
   readonly mode: Option.Option<string>
   readonly model: Option.Option<string>
+  readonly token: Option.Option<string>
 }
 
 /** The `gemini-bridge` flags as program options; every rejection is a usage error. */
@@ -931,10 +932,12 @@ export const geminiBridgeOptionsFrom = (
         message: `--mode is "${mode}"; use model (OpenAI chat completions) or acp (Anthropic Messages)`
       })
     }
+    const token = Option.getOrUndefined(flags.token) ?? environment.LLM4TS_GEMINI_BRIDGE_TOKEN
     return {
       port,
       mode,
-      ...(Option.isSome(flags.model) ? { model: flags.model.value } : {})
+      ...(Option.isSome(flags.model) ? { model: flags.model.value } : {}),
+      ...(token === undefined || token.length === 0 ? {} : { token })
     }
   })
 
@@ -954,6 +957,12 @@ const geminiBridgeCommand = Command.make(
     model: Flag.String("model").pipe(
       Flag.optional,
       Flag.withDescription("Gemini model for every request (default: the one the client names)")
+    ),
+    token: Flag.String("token").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Token every request must carry, used as pi's apiKey (model mode; default LLM4TS_GEMINI_BRIDGE_TOKEN, else none)"
+      )
     )
   },
   (flags) =>

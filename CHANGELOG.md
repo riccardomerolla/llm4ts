@@ -7,6 +7,11 @@
   OpenAI-compatible server (ADR 0037's model mode by default, `--mode acp`
   for ADR 0016's route). It prints the `~/.pi/agent/models.json` entry and
   the `pi --model` to use.
+- **Both bridge routes answer local tools only.** The ACP route now refuses,
+  like the model route, a request with a browser `Origin`, a non-JSON body
+  or a Host other than loopback, and reads at most 32 MB. `--token` (or
+  `LLM4TS_GEMINI_BRIDGE_TOKEN`) makes the model route require a bearer
+  token, set as pi's `apiKey`.
 
 ## 2.43.0
 

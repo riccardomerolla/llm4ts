@@ -308,7 +308,11 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
       cwd: scratch,
       executor: dependencies.process,
       temporaryFiles: dependencies.temporaryFiles ?? nodeTemporaryFiles,
-      ...geminiModel
+      ...geminiModel,
+      ...(environment.LLM4TS_GEMINI_BRIDGE_TOKEN === undefined ||
+      environment.LLM4TS_GEMINI_BRIDGE_TOKEN.length === 0
+        ? {}
+        : { token: environment.LLM4TS_GEMINI_BRIDGE_TOKEN })
     }).pipe(Effect.mapError(FlowLlmError.from))
   } else {
     yield* runGeminiAcpBridge({

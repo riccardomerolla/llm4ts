@@ -71,6 +71,10 @@ describe("llm4ts gemini-bridge (ADR 0037)", () => {
     const openai = piProviderSnippet("model", 8731, "gemini-3.8-flash")
     assert.include(openai, '"baseUrl": "http://127.0.0.1:8731/v1"')
     assert.include(openai, '"api": "openai-completions"')
+    assert.include(
+      piProviderSnippet("model", 8731, "gemini-3.8-flash", "s3cret"),
+      '"apiKey": "s3cret"'
+    )
     const acp = piProviderSnippet("acp", 9000, "gemini-3.8-flash")
     assert.include(acp, '"baseUrl": "http://127.0.0.1:9000"')
     assert.include(acp, '"api": "anthropic-messages"')

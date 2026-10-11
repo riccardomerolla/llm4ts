@@ -22,6 +22,8 @@ export interface GeminiBridgeOptions {
   readonly mode: "model" | "acp"
   /** The Gemini model every request runs on, whatever the client names. */
   readonly model?: string
+  /** A token requests must carry (model mode), printed as pi's `apiKey`. */
+  readonly token?: string
 }
 
 export interface GeminiBridgeDependencies {
@@ -38,14 +40,19 @@ export interface GeminiBridgeDependencies {
 export const defaultBridgeModelId = "gemini-3.8-flash"
 
 /** pi's provider entry for `~/.pi/agent/models.json`, for this mode and port. */
-export const piProviderSnippet = (mode: "model" | "acp", port: number, model: string): string =>
+export const piProviderSnippet = (
+  mode: "model" | "acp",
+  port: number,
+  model: string,
+  token?: string
+): string =>
   JSON.stringify(
     {
       providers: {
         "gemini-bridge": {
           baseUrl: mode === "model" ? `http://127.0.0.1:${port}/v1` : `http://127.0.0.1:${port}`,
           api: mode === "model" ? "openai-completions" : "anthropic-messages",
-          apiKey: "bridge-unused",
+          apiKey: token ?? "bridge-unused",
           models: [{ id: model }]
         }
       }
@@ -77,7 +84,8 @@ export const makeGeminiBridgeProgram = (
                   executor: dependencies.executor,
                   temporaryFiles: dependencies.temporaryFiles,
                   systemPolicies: dependencies.systemPolicies ?? systemAdminPolicies(),
-                  ...model
+                  ...model,
+                  ...(options.token === undefined ? {} : { token: options.token })
                 })
             )
           : yield* runGeminiAcpBridge({
@@ -93,7 +101,12 @@ export const makeGeminiBridgeProgram = (
           `gemini bridge (${options.mode === "model" ? "model mode: OpenAI chat completions" : "ACP mode: Anthropic Messages"}) listening on ${url}`,
           "",
           "pi provider for ~/.pi/agent/models.json:",
-          piProviderSnippet(options.mode, running.port, id),
+          piProviderSnippet(
+            options.mode,
+            running.port,
+            id,
+            options.mode === "model" ? options.token : undefined
+          ),
           "",
           `then: pi --model gemini-bridge/${id}`,
           ...(options.mode === "model"

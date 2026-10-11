@@ -414,7 +414,12 @@ describe("graphCommandFrom", () => {
 })
 
 describe("geminiBridgeOptionsFrom (ADR 0037)", () => {
-  const none = { port: Option.none(), mode: Option.none(), model: Option.none() }
+  const none = {
+    port: Option.none(),
+    mode: Option.none(),
+    model: Option.none(),
+    token: Option.none()
+  }
 
   it.effect("defaults to the OpenAI model mode on the bridge port", () =>
     Effect.gen(function* () {
@@ -431,12 +436,30 @@ describe("geminiBridgeOptionsFrom (ADR 0037)", () => {
           {
             port: Option.some(9100),
             mode: Option.some("acp"),
-            model: Option.some("gemini-3.8-flash")
+            model: Option.some("gemini-3.8-flash"),
+            token: Option.none()
           },
           {}
         ),
         { port: 9100, mode: "acp", model: "gemini-3.8-flash" }
       )
+    })
+  )
+
+  it.effect("takes a token from the flag, else LLM4TS_GEMINI_BRIDGE_TOKEN", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(
+        (yield* geminiBridgeOptionsFrom(none, { LLM4TS_GEMINI_BRIDGE_TOKEN: "env-token" })).token,
+        "env-token"
+      )
+      assert.strictEqual(
+        (yield* geminiBridgeOptionsFrom(
+          { ...none, token: Option.some("flag-token") },
+          { LLM4TS_GEMINI_BRIDGE_TOKEN: "env-token" }
+        )).token,
+        "flag-token"
+      )
+      assert.isUndefined((yield* geminiBridgeOptionsFrom(none, {})).token)
     })
   )
 

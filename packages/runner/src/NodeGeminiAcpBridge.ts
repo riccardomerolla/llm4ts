@@ -1,4 +1,11 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
+import { timingSafeEqual } from "node:crypto"
+import {
+  createServer,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse
+} from "node:http"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -400,6 +407,42 @@ export const handleMessagesRequest = Effect.fn(
   return anthropicResponse(requestModel(body), outcome)
 })
 
+/**
+ * Why a request may not reach the bridge, or nothing when it may: both
+ * routes answer local tools only. pi and gemini post JSON from Node, with
+ * no Origin; a browser page posting to this loopback port (a cross-site
+ * form needs no preflight as text/plain) carries one, and a DNS name
+ * rebound to 127.0.0.1 still sends its own Host. With a token, the request
+ * must carry it as a bearer (pi sends its `apiKey` that way).
+ */
+export const localRequestProblem = (
+  headers: IncomingHttpHeaders,
+  token?: string
+): string | undefined => {
+  const contentType = headers["content-type"] ?? ""
+  const host = (headers.host ?? "").replace(/:\d+$/u, "")
+  if (headers.origin !== undefined) {
+    return "the bridge answers local tools, not browser pages"
+  }
+  if (!contentType.includes("application/json")) {
+    return "the bridge answers JSON requests only"
+  }
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(host)) {
+    return "the bridge answers requests to 127.0.0.1 only"
+  }
+  if (token !== undefined) {
+    const given = Buffer.from(headers.authorization ?? "")
+    const wanted = Buffer.from(`Bearer ${token}`)
+    if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
+      return "the bridge's token is missing or wrong"
+    }
+  }
+  return undefined
+}
+
+/** The largest request either route reads: a long conversation, not an unbounded upload. */
+export const maxRequestBytes = 32 * 1024 * 1024
+
 /** Shared with the model route (`NodeGeminiModelBridge.ts`, ADR 0037). */
 export const readBody = (
   request: IncomingMessage,
@@ -552,9 +595,14 @@ export const runGeminiAcpBridge = Effect.fn("@llm4ts/runner/NodeGeminiAcpBridge.
       writeJson(response, 404, { error: { message: "not found" } })
       return
     }
+    const problem = localRequestProblem(request.headers)
+    if (problem !== undefined) {
+      writeJson(response, 403, { error: { message: problem } })
+      return
+    }
 
     const handled = Effect.gen(function* () {
-      const raw = yield* readBody(request)
+      const raw = yield* readBody(request, maxRequestBytes)
       const body = yield* parseJsonBody(raw)
       if (path === "/mcp") {
         const tools = yield* Ref.get(state.tools)
