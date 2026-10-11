@@ -29,6 +29,7 @@
     "./McpStdio": "./dist/McpStdio.js",
     "./NodeGeminiAcpBridge": "./dist/NodeGeminiAcpBridge.js",
     "./NodeGeminiModelBridge": "./dist/NodeGeminiModelBridge.js",
+    "./GeminiBridgeServe": "./dist/GeminiBridgeServe.js",
     "./NodeHttpClient": "./dist/NodeHttpClient.js",
     "./NodeGeminiCliExecutor": "./dist/NodeGeminiCliExecutor.js",
     "./NodePlainFileStore": "./dist/NodePlainFileStore.js",

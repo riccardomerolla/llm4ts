@@ -14,6 +14,7 @@ import {
   renderKitList,
   resolveFlow,
   runEnvironmentFrom,
+  geminiBridgeOptionsFrom,
   watchOptionsFrom
 } from "@llm4ts/shell/Cli"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
@@ -408,6 +409,47 @@ describe("graphCommandFrom", () => {
         graphCommandFrom("query", { ...base, text: "x", hops: "many" }, "/w")
       )
       assert.match(nan.message, /hops must be a positive integer/)
+    })
+  )
+})
+
+describe("geminiBridgeOptionsFrom (ADR 0037)", () => {
+  const none = { port: Option.none(), mode: Option.none(), model: Option.none() }
+
+  it.effect("defaults to the OpenAI model mode on the bridge port", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* geminiBridgeOptionsFrom(none, {}), {
+        port: 8731,
+        mode: "model"
+      })
+      assert.deepStrictEqual(
+        yield* geminiBridgeOptionsFrom(none, { LLM4TS_GEMINI_BRIDGE_PORT: "9000" }),
+        { port: 9000, mode: "model" }
+      )
+      assert.deepStrictEqual(
+        yield* geminiBridgeOptionsFrom(
+          {
+            port: Option.some(9100),
+            mode: Option.some("acp"),
+            model: Option.some("gemini-3.8-flash")
+          },
+          {}
+        ),
+        { port: 9100, mode: "acp", model: "gemini-3.8-flash" }
+      )
+    })
+  )
+
+  it.effect("rejects an unknown mode and a port out of range", () =>
+    Effect.gen(function* () {
+      const mode = yield* Effect.flip(
+        geminiBridgeOptionsFrom({ ...none, mode: Option.some("openai") }, {})
+      )
+      assert.include(mode.message, "--mode")
+      const port = yield* Effect.flip(
+        geminiBridgeOptionsFrom({ ...none, port: Option.some(0) }, {})
+      )
+      assert.include(port.message, "--port")
     })
   )
 })

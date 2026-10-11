@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **`llm4ts gemini-bridge`** runs the Gemini bridge on its own until Ctrl-C,
+  so `pi` can use the Gemini CLI subscription directly through an
+  OpenAI-compatible server (ADR 0037's model mode by default, `--mode acp`
+  for ADR 0016's route). It prints the `~/.pi/agent/models.json` entry and
+  the `pi --model` to use.
+
 ## 2.43.0
 
 pi can run on the Gemini CLI subscription with Gemini as a plain model.
