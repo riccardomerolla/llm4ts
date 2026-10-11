@@ -8,11 +8,12 @@
  *   1. Does `GEMINI_SYSTEM_MD` replace the built-in system prompt in
  *      headless mode (`gemini -p`)? A canary planted in our prompt file must
  *      come back, and the prompt tokens must drop.
- *   2. Does a tool allowlist with `experimental.enableAgents: false`, in
- *      Gemini CLI's system settings file (which overrides user and project
- *      settings), remove every tool? Told to use its tools, Gemini must make
- *      no tool call; asked to name its functions, it must name none. Two
- *      allowlists are tried: `[]` and one tool that does not exist.
+ *   2. What removes every tool? Three ways are tried, each with
+ *      `experimental.enableAgents: false` in Gemini CLI's system settings
+ *      file: a `tools.core` allowlist of `[]`, one naming a tool that does
+ *      not exist, and an admin policy denying `*` (`--admin-policy`). Told
+ *      to use its tools, Gemini must make no tool call; asked to name its
+ *      functions, it must name none.
  *   3. How reliably does the model keep to a text tool-call protocol
  *      (`<tool_call>{"name":…,"arguments":{…}}</tool_call>`) for pi's tools?
  *   4. Does the override also apply in ACP mode (`gemini --experimental-acp`),
@@ -24,10 +25,13 @@
  * ~/.gemini/GEMINI.md still is: the report says so when the prompt tokens
  * stay high). Each stage is one model call against the subscription quota.
  *
- * Usage: node examples/gemini-model-probe.mjs [--model <id>] [--trials <n>] [--skip-acp]
+ * Usage: node examples/gemini-model-probe.mjs [--model <id>] [--trials <n>] [--timeout <s>] [--skip-acp]
+ *
+ * Each call prints a line when it starts, so a stall shows where it is; a
+ * call is killed after --timeout seconds (default 120).
  */
 import { spawn } from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
@@ -42,7 +46,7 @@ const option = (name) => {
 const model = option("model")
 const trials = Math.max(1, Number.parseInt(option("trials") ?? "5", 10) || 5)
 const skipAcp = args.includes("--skip-acp")
-const callTimeoutMs = 180_000
+const callTimeoutMs = Math.max(10, Number.parseInt(option("timeout") ?? "120", 10) || 120) * 1000
 
 const work = mkdtempSync(join(tmpdir(), "llm4ts-gemini-model-probe-"))
 const canary = `CANARY-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
@@ -100,7 +104,53 @@ const settingsVariants = [
     path,
     JSON.stringify({ tools: variant.tools, experimental: { enableAgents: false } }, null, 2)
   )
-  return { name: variant.name, path }
+  return {
+    name: `${variant.name} + agents off`,
+    env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: path },
+    args: []
+  }
+})
+
+/**
+ * The third way, from Gemini CLI's policy engine docs: a `deny` rule with
+ * no argument pattern excludes the tool from the model's view entirely, and
+ * `toolName = "*"` matches every tool, built-in or MCP (sub-agents are
+ * tools too). Loaded as an admin policy with `--admin-policy`, the flag
+ * llm4ts already passes to Gemini seats.
+ */
+const denyAllPolicy = join(work, "deny-all-tools.toml")
+writeFileSync(
+  denyAllPolicy,
+  ["[[rule]]", 'toolName = "*"', 'decision = "deny"', "priority = 999", ""].join("\n")
+)
+const variants = [
+  ...settingsVariants,
+  {
+    name: 'admin policy deny "*" + agents off',
+    env: settingsVariants[0].env,
+    args: ["--admin-policy", denyAllPolicy]
+  }
+]
+
+/**
+ * Supplemental admin policies (`--admin-policy`) are ignored when the
+ * standard system policy directory holds any .toml file: say so up front.
+ */
+const systemPolicyDirs = [
+  "/etc/gemini-cli/policies",
+  "/Library/Application Support/GeminiCli/policies",
+  "C:\\ProgramData\\gemini-cli\\policies"
+]
+const systemPolicies = systemPolicyDirs.flatMap((dir) => {
+  try {
+    return existsSync(dir)
+      ? readdirSync(dir)
+          .filter((file) => file.endsWith(".toml"))
+          .map((file) => join(dir, file))
+      : []
+  } catch {
+    return []
+  }
 })
 
 const baseEnv = { ...process.env, GEMINI_CLI_TRUST_WORKSPACE: "true" }
@@ -110,8 +160,9 @@ delete baseEnv.GEMINI_CLI_SYSTEM_DEFAULTS_PATH
 delete baseEnv.GEMINI_CLI_SYSTEM_SETTINGS_PATH
 
 /** One headless call: the stream-json events, the reply text, tool calls and token stats. */
-const headless = (label, prompt, env) =>
+const headless = (label, prompt, env, extraArgs = []) =>
   new Promise((resolve) => {
+    console.log(`→ ${label} · started ${new Date().toISOString().slice(11, 19)}`)
     const argv = [
       "-p",
       prompt,
@@ -119,6 +170,7 @@ const headless = (label, prompt, env) =>
       "stream-json",
       "-e",
       "none",
+      ...extraArgs,
       ...(model ? ["-m", model] : [])
     ]
     const child = spawn("gemini", argv, {
@@ -243,14 +295,16 @@ const parseToolCall = (reply) => {
 }
 
 /** ACP mode: does the override reach a session started by `--experimental-acp`? */
-const acpCanary = (settingsPath) =>
+const acpCanary = (variant) =>
   new Promise((resolve) => {
-    const child = spawn("gemini", ["--experimental-acp", ...(model ? ["-m", model] : [])], {
+    console.log(`→ 4 ACP mode · started ${new Date().toISOString().slice(11, 19)}`)
+    const argv = ["--experimental-acp", ...variant.args, ...(model ? ["-m", model] : [])]
+    const child = spawn("gemini", argv, {
       cwd: work,
       env: {
         ...baseEnv,
         GEMINI_SYSTEM_MD: plainPrompt,
-        GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath
+        ...variant.env
       },
       stdio: ["pipe", "pipe", "pipe"]
     })
@@ -348,19 +402,26 @@ const main = async () => {
   // 2. No tools, no sub-agents. A model that declines to use a tool proves
   // nothing (the first run's mistake): it is told to use them, and asked to
   // name every function it can call.
+  if (systemPolicies.length > 0) {
+    console.log(
+      `\nNOTE: system admin policies exist (${systemPolicies.join(", ")}): Gemini CLI then ignores --admin-policy.`
+    )
+  }
   const removal = []
-  for (const variant of settingsVariants) {
-    const env = { GEMINI_SYSTEM_MD: plainPrompt, GEMINI_CLI_SYSTEM_SETTINGS_PATH: variant.path }
+  for (const variant of variants) {
+    const env = { GEMINI_SYSTEM_MD: plainPrompt, ...variant.env }
     const forced = await headless(
-      `2 ${variant.name} + agents off: told to use tools`,
+      `2 ${variant.name}: told to use tools`,
       "Use your tools now: list the files in the current directory, then read one of them, then search the web for 'gemini cli'. Do not answer from memory.",
-      env
+      env,
+      variant.args
     )
     const forcedTokens = show(forced)
     const listing = await headless(
-      `2 ${variant.name} + agents off: asked to name its functions`,
+      `2 ${variant.name}: asked to name its functions`,
       "List the exact names of every function or tool you can call right now, one per line. If you have none, reply NONE.",
-      env
+      env,
+      variant.args
     )
     show(listing)
     removal.push({
@@ -377,10 +438,7 @@ const main = async () => {
 
   // 3. The text tool-call protocol, fresh call per trial.
   console.log(`\n=== 3 tool-call protocol, ${trials} trial(s) ===`)
-  const protocolEnv = {
-    GEMINI_SYSTEM_MD: protocolPrompt,
-    GEMINI_CLI_SYSTEM_SETTINGS_PATH: chosen.variant.path
-  }
+  const protocolEnv = { GEMINI_SYSTEM_MD: protocolPrompt, ...chosen.variant.env }
   const asks = [
     { prompt: "Show me the contents of package.json.", expect: "read", key: "path" },
     { prompt: "Run the test suite with `pnpm test`.", expect: "bash", key: "command" }
@@ -389,7 +447,7 @@ const main = async () => {
   let right = 0
   for (let trial = 0; trial < trials; trial += 1) {
     const ask = asks[trial % asks.length]
-    const outcome = await headless(`3.${trial + 1}`, ask.prompt, protocolEnv)
+    const outcome = await headless(`3.${trial + 1}`, ask.prompt, protocolEnv, chosen.variant.args)
     const parsed = parseToolCall(outcome.reply)
     const ok = parsed.call !== undefined
     const correct =
@@ -402,7 +460,7 @@ const main = async () => {
   }
 
   // 4. ACP mode.
-  const acp = skipAcp ? undefined : await acpCanary(chosen.variant.path)
+  const acp = skipAcp ? undefined : await acpCanary(chosen.variant)
   if (acp !== undefined) {
     console.log("\n=== 4 ACP mode with the override ===")
     console.log(`reply: ${JSON.stringify(acp.text.trim().slice(0, 300))}`)

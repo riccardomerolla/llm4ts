@@ -51,13 +51,17 @@ Two routes would make Gemini a plain model behind pi:
 --output-format stream-json -e none` in an empty scratch directory, with:
    - `GEMINI_SYSTEM_MD` pointing at a file the bridge writes: pi's system
      message, the tool-call protocol below, and pi's tool schemas;
-   - `GEMINI_CLI_SYSTEM_SETTINGS_PATH` pointing at settings that allow no
-     built-in tool and set `experimental.enableAgents: false`. It is the
-     system _settings_ file, which overrides user and project settings; the
-     system _defaults_ file llm4ts uses for `model.maxSessionTurns` is
-     overridden by them, and the first probe run showed tools and sub-agents
-     still active with it. Which allowlist removes every tool (`[]`, or one
-     tool that does not exist) is the probe's to settle;
+   - an admin policy (`--admin-policy`, the flag llm4ts already passes to
+     Gemini seats) with one rule, `toolName = "*"`, `decision = "deny"`.
+     Gemini CLI's policy engine docs say a deny rule without an argument
+     pattern excludes the tool from the model's view entirely; sub-agents
+     are tools too. A `tools.core` allowlist did not remove the tools (probe
+     run 2). Gemini CLI ignores `--admin-policy` when the standard system
+     policy directory holds a `.toml` file; the bridge then refuses to start
+     in model mode, since it cannot vouch for the tool list;
+   - `GEMINI_CLI_SYSTEM_SETTINGS_PATH` pointing at settings with
+     `experimental.enableAgents: false` (the system settings file overrides
+     user and project settings; the system defaults file does not);
    - the conversation (user, assistant and tool messages) rendered as the
      prompt, in order, each tool result under the call it answers.
 4. **Tool calls as text.** The model asks for a tool with one block,
@@ -141,3 +145,22 @@ On the customer's Gemini CLI, with `gemini-2.5-pro` and `gemini-3.8-flash`:
 - **Tokens were not read.** This Gemini CLI reports stats in a shape the
   probe did not parse. The probe now reads both shapes and prints the raw
   stats of its first call.
+
+## Probe run 2 (2026-10-10)
+
+With the settings moved to the system settings file:
+
+- **The override is most of the overhead.** `gemini-2.5-pro`'s baseline
+  call sent 17,177 prompt tokens; with `GEMINI_SYSTEM_MD` replaced it sent 576. Gemini CLI's own system prompt and context are about 16,600 tokens
+  on every call.
+- **Neither `tools.core` allowlist removed the tools** (`[]`, or one tool
+  that does not exist), so `gemini-2.5-pro` still answered the protocol
+  trials with native tool calls (0 of 10 well-formed). Questions 1 and 4
+  passed again.
+- **`gemini-3.8-flash` did not finish.** The probe printed nothing until a
+  call ended, so where it stalled is unknown; with tools still present, the
+  "use your tools" prompt likely ran long agent loops.
+
+The probe now also tries an admin policy denying `*`, prints a line as each
+call starts, kills a call after `--timeout` seconds (default 120), and says
+when a system admin policy would make Gemini CLI ignore `--admin-policy`.
