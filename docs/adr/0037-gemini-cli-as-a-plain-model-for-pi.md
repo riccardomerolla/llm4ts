@@ -1,6 +1,6 @@
 # ADR 0037: Gemini CLI As A Plain Model For pi
 
-Status: Proposed · Date: 2026-10-10 · Extends ADR 0016
+Status: Accepted for `gemini-3.8-flash` · Date: 2026-10-10 · Extends ADR 0016
 
 ## Context
 
@@ -164,3 +164,32 @@ With the settings moved to the system settings file:
 The probe now also tries an admin policy denying `*`, prints a line as each
 call starts, kills a call after `--timeout` seconds (default 120), and says
 when a system admin policy would make Gemini CLI ignore `--admin-policy`.
+
+## Probe run 3 (2026-10-11)
+
+`gemini-3.8-flash`, `--skip-acp`, 10 trials, with the deny-all admin policy
+among the variants:
+
+- **Prompt tokens:** baseline 19,893, replaced 1,846. The override again
+  removes about nine tenths of every call's prompt.
+- **Question 2:** all three variants reported no tool call when told to use
+  tools, and no function when asked to name them. With flash this is weaker
+  evidence than it looks: in run 1 flash also declined tools it still had,
+  so only the admin policy, which the docs say removes the tool from the
+  model's view, is taken as settled. The decisive check is `gemini-2.5-pro`,
+  which does call tools it has: with `tools.core` it still did (run 2).
+- **Question 3:** 10 of 10 well-formed, each the right tool with its
+  argument, as in run 1.
+- **Question 4** was skipped; run 1 passed it for flash.
+
+Decisions 2–5 pass their gate for `gemini-3.8-flash`. Before the bridge is
+built, `gemini-2.5-pro` runs once more with the admin policy, so the tool
+removal is confirmed on a model that would use the tools.
+
+## Probe run 4 and the decision (2026-10-11)
+
+`gemini-2.5-pro` with the deny-all admin policy kept to the tool-call
+protocol in 1 call of 10. `gemini-3.8-flash` passed in runs 1 and 3 (10 of
+10 both times). The bridge is built for flash only; `gemini-2.5-pro` is an
+older model, and a newer one is run through the probe before it is used.
+`docs/configuration.md` says so where the mode is set up.

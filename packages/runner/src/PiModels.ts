@@ -35,6 +35,26 @@ export const geminiBridgePort = (
     : defaultGeminiBridgePort
 
 /**
+ * Which route the bridge serves (ADR 0037): `acp` (ADR 0016's Anthropic
+ * Messages over a Gemini ACP session, the default) or `model` (OpenAI chat
+ * completions over one locked-down `gemini` call per request).
+ */
+export type GeminiBridgeMode =
+  | { readonly _tag: "Mode"; readonly mode: "acp" | "model" }
+  | { readonly _tag: "Unknown"; readonly value: string }
+
+export const geminiBridgeMode = (
+  environment: Readonly<Record<string, string | undefined>>
+): GeminiBridgeMode => {
+  const value = (environment.LLM4TS_GEMINI_BRIDGE_MODE ?? "").trim().toLowerCase()
+  return value === "" || value === "acp"
+    ? { _tag: "Mode", mode: "acp" }
+    : value === "model"
+      ? { _tag: "Mode", mode: "model" }
+      : { _tag: "Unknown", value }
+}
+
+/**
  * One value pi accepts for `--model`: `<provider>/<model>`, where the
  * provider is a key under `providers` in `~/.pi/agent/models.json` and the
  * model is a `models` entry's `id`. `bridged` marks the pairs whose provider

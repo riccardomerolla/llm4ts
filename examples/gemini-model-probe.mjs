@@ -477,9 +477,7 @@ const main = async () => {
     `1 override applies in headless mode (canary returned):   ${verdict(canaryBack(replacedCall.reply))}`
   )
   for (const entry of removal) {
-    console.log(
-      `2 every tool removed with ${entry.variant.name} + agents off: ${verdict(entry.removed)}`
-    )
+    console.log(`2 every tool removed with ${entry.variant.name}: ${verdict(entry.removed)}`)
   }
   console.log(
     `3 tool-call protocol: ${valid}/${trials} well-formed, ${right}/${trials} the right tool with its argument`

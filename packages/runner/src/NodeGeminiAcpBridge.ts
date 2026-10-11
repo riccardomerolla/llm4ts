@@ -400,10 +400,23 @@ export const handleMessagesRequest = Effect.fn(
   return anthropicResponse(requestModel(body), outcome)
 })
 
-const readBody = (request: IncomingMessage): Effect.Effect<string, ProviderError> =>
+/** Shared with the model route (`NodeGeminiModelBridge.ts`, ADR 0037). */
+export const readBody = (
+  request: IncomingMessage,
+  maxBytes: number = Number.POSITIVE_INFINITY
+): Effect.Effect<string, ProviderError> =>
   Effect.callback((resume) => {
     const chunks: Array<Buffer> = []
-    request.on("data", (chunk: Buffer) => chunks.push(chunk))
+    let size = 0
+    request.on("data", (chunk: Buffer) => {
+      size += chunk.length
+      if (size > maxBytes) {
+        request.destroy()
+        resume(Effect.fail(ProviderError.make({ message: `request body over ${maxBytes} bytes` })))
+        return
+      }
+      chunks.push(chunk)
+    })
     request.on("end", () => resume(Effect.succeed(Buffer.concat(chunks).toString("utf8"))))
     request.on("error", (error) =>
       resume(ProviderError.make({ message: "failed to read request body", cause: error }))
@@ -412,7 +425,8 @@ const readBody = (request: IncomingMessage): Effect.Effect<string, ProviderError
 
 const parseJson = (raw: string): JsonValue => JSON.parse(raw)
 
-const parseJsonBody = (raw: string): Effect.Effect<JsonValue, InvalidRequestError> =>
+/** Shared with the model route (`NodeGeminiModelBridge.ts`, ADR 0037). */
+export const parseJsonBody = (raw: string): Effect.Effect<JsonValue, InvalidRequestError> =>
   Effect.try({
     try: () => parseJson(raw),
     catch: () => InvalidRequestError.make({ message: "request body is not valid JSON" })
@@ -459,13 +473,15 @@ const respondStreaming = (
     })
   )
 
-const writeJson = (response: ServerResponse, status: number, body: JsonValue): void => {
+/** Shared with the model route (`NodeGeminiModelBridge.ts`, ADR 0037). */
+export const writeJson = (response: ServerResponse, status: number, body: JsonValue): void => {
   const text = JSON.stringify(body)
   response.writeHead(status, { "Content-Type": "application/json" })
   response.end(text)
 }
 
-const errorStatus = (error: LlmError | InvalidRequestError): number =>
+/** Shared with the model route (`NodeGeminiModelBridge.ts`, ADR 0037). */
+export const errorStatus = (error: LlmError | InvalidRequestError): number =>
   error._tag === "InvalidRequestError" ? 400 : error._tag === "AuthenticationError" ? 401 : 502
 
 export interface GeminiAcpBridgeConfig {
@@ -489,7 +505,8 @@ const bindError = (port: number, cause: unknown): ProviderError =>
     cause
   })
 
-const acquireServer = (
+/** Shared with the model route (`NodeGeminiModelBridge.ts`, ADR 0037). */
+export const acquireServer = (
   port: number,
   listener: (request: IncomingMessage, response: ServerResponse) => void
 ): Effect.Effect<Server, ProviderError, Scope.Scope> =>

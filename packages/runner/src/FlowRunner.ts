@@ -1,3 +1,5 @@
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
@@ -25,11 +27,13 @@ import { ConnectorIds } from "@llm4ts/core/Models"
 import { ProviderError } from "@llm4ts/core/Errors"
 import { makeCostTracker, type CostTracker } from "@llm4ts/flow/CostTracker"
 import { runGeminiAcpBridge } from "./NodeGeminiAcpBridge.ts"
+import { runGeminiModelBridge } from "./NodeGeminiModelBridge.ts"
 import {
   bridgeModelProblem,
   defaultReadPiModelsJson,
   geminiBridgePort,
-  resolveBridgeModel
+  resolveBridgeModel,
+  geminiBridgeMode
 } from "./PiModels.ts"
 import {
   appendCostRecord,
@@ -128,6 +132,8 @@ export interface FlowRunnerDependencies {
   readonly files: PlainFileStoreShape
   /** pi's own model config (ADR 0016), injectable so a test never reads $HOME. */
   readonly readPiModelsJson?: () => string | undefined
+  /** Files the Gemini model bridge writes per call (ADR 0037); temporary files on disk by default. */
+  readonly temporaryFiles?: TemporaryFilesShape
   /** For the hosted TypeSafe judgment backend; defaults to the Node client. */
   readonly http?: HttpClientShape
   /** Where `--transcript` writes, given its directory; files on disk by default. */
@@ -280,14 +286,38 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
   }
   const model = resolution.model
 
-  yield* runGeminiAcpBridge({
-    port: Number(port),
-    cwd: options.workDir,
-    executor: dependencies.process,
-    ...(environment.LLM4TS_GEMINI_MODEL === undefined
-      ? {}
-      : { model: environment.LLM4TS_GEMINI_MODEL })
-  }).pipe(Effect.mapError(FlowLlmError.from))
+  const mode = geminiBridgeMode(environment)
+  if (mode._tag === "Unknown") {
+    return yield* FlowLlmError.from(
+      ProviderError.make({
+        message: `LLM4TS_GEMINI_BRIDGE_MODE is "${mode.value}"; use acp (the default) or model`
+      })
+    )
+  }
+  const geminiModel =
+    environment.LLM4TS_GEMINI_MODEL === undefined ? {} : { model: environment.LLM4TS_GEMINI_MODEL }
+  if (mode.mode === "model") {
+    // ADR 0037: one locked-down `gemini` call per request, in an empty
+    // directory so no project GEMINI.md reaches the model.
+    const scratch = yield* Effect.acquireRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "llm4ts-gemini-model-"))),
+      (directory) => Effect.sync(() => rmSync(directory, { recursive: true, force: true }))
+    )
+    yield* runGeminiModelBridge({
+      port: Number(port),
+      cwd: scratch,
+      executor: dependencies.process,
+      temporaryFiles: dependencies.temporaryFiles ?? nodeTemporaryFiles,
+      ...geminiModel
+    }).pipe(Effect.mapError(FlowLlmError.from))
+  } else {
+    yield* runGeminiAcpBridge({
+      port: Number(port),
+      cwd: options.workDir,
+      executor: dependencies.process,
+      ...geminiModel
+    }).pipe(Effect.mapError(FlowLlmError.from))
+  }
 
   return (config: ConnectorConfig): ConnectorConfig =>
     isPiSeat(config) && config.model === undefined

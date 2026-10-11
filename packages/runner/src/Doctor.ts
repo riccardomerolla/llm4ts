@@ -9,8 +9,10 @@ import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
 import {
   defaultReadPiModelsJson as readPiModels,
   geminiBridgePort as bridgePort,
-  piModelsConfig as parsePiModels
+  piModelsConfig as parsePiModels,
+  geminiBridgeMode
 } from "./PiModels.ts"
+import { systemAdminPolicies, systemPolicyProblem } from "./NodeGeminiModelBridge.ts"
 import { otelConfig, otelDoctorLine, probeOtelEndpoint, type OtelConfig } from "./Otel.ts"
 
 const credentialKeys = [
@@ -210,6 +212,50 @@ export const geminiBridgePrerequisites = (
   }
 }
 
+/** Gemini CLI's own words on third-party access (0.62.0, `docs/resources/tos-privacy.md`). */
+export const geminiTermsClause =
+  "Directly accessing the services powering Gemini CLI (for example, the Gemini Code Assist " +
+  "service) using third-party software, tools, or services (for example, using OpenClaw with " +
+  "Gemini CLI OAuth) is a violation of applicable terms and policies. Such actions may be " +
+  "grounds for suspension or termination of your account."
+
+/**
+ * The model mode of the bridge (ADR 0037): whether a system admin policy
+ * would keep Gemini's tools in view, how pi's provider must be shaped, and
+ * the terms clause the customer confirms against. `undefined` unless the
+ * bridge runs in model mode.
+ */
+export const geminiModelModePrerequisites = (
+  environment: Readonly<Record<string, string | undefined>>,
+  systemPolicies: ReadonlyArray<string>
+): PrerequisiteReport | undefined => {
+  const mode = geminiBridgeMode(environment)
+  if (!truthy(environment.LLM4TS_GEMINI_BRIDGE) || mode._tag !== "Mode" || mode.mode !== "model") {
+    return undefined
+  }
+  const detail = [
+    'pi\'s bridge provider in ~/.pi/agent/models.json needs "api": "openai-completions"',
+    "(the route is /v1/chat/completions); only Gemini CLI talks to Google, under its own",
+    "login, and llm4ts never reads or forwards its credentials. Gemini CLI's terms say:",
+    `  "${geminiTermsClause}"`,
+    "Using Gemini CLI as a model for pi stays close to that clause: confirm with Google",
+    "before relying on it."
+  ]
+  return systemPolicies.length > 0
+    ? {
+        satisfied: false,
+        summary: `system admin policies make Gemini CLI ignore the bridge's: ${systemPolicies.join(", ")}`,
+        hint: systemPolicyProblem(systemPolicies),
+        detail
+      }
+    : {
+        satisfied: true,
+        summary:
+          "model mode: Gemini CLI answers as a plain model, its prompt replaced and every tool denied",
+        detail
+      }
+}
+
 export const makeDoctorProgram = (
   registry: ConnectorRegistryShape = nodeFlowRunnerDependencies().registry,
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -223,7 +269,9 @@ export const makeDoctorProgram = (
     environment
   ),
   /** Whether the OTLP endpoint answers (ADR 0026); the network probe by default. */
-  probeOtel: (config: OtelConfig) => Effect.Effect<boolean | undefined> = probeOtelEndpoint
+  probeOtel: (config: OtelConfig) => Effect.Effect<boolean | undefined> = probeOtelEndpoint,
+  /** Gemini CLI's system admin policy files (ADR 0037); this machine's by default. */
+  systemPolicies: () => ReadonlyArray<string> = systemAdminPolicies
 ): Effect.Effect<string> => {
   const otel = otelConfig(environment)
   return Effect.map(
@@ -266,6 +314,7 @@ export const makeDoctorProgram = (
             id.value === ConnectorIds.GeminiCli.value || id.value === ConnectorIds.GeminiApi.value
         )
       const bridge = geminiBridgePrerequisites(environment, readPiModelsJson())
+      const modelMode = geminiModelModePrerequisites(environment, systemPolicies())
       if (geminiRelevant || bridge !== undefined) {
         lines.push("")
         lines.push("prerequisites:")
@@ -283,6 +332,9 @@ export const makeDoctorProgram = (
         }
         if (bridge !== undefined) {
           pushReport("pi-gemini-bridge", bridge)
+        }
+        if (modelMode !== undefined) {
+          pushReport("pi-gemini-bridge model mode", modelMode)
         }
       }
 

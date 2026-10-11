@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.43.0
+
+pi can run on the Gemini CLI subscription with Gemini as a plain model.
+
+- **Gemini CLI as a plain model for pi** (ADR 0037).
+  `LLM4TS_GEMINI_BRIDGE_MODE=model` makes the Gemini bridge serve
+  `/v1/chat/completions` in OpenAI's shape. Each pi request is one `gemini`
+  call with pi's system prompt in place of Gemini's, every Gemini tool
+  denied by an admin policy and sub-agents off, so pi runs its own tools on
+  the Gemini CLI subscription without Gemini's own agent overhead. Tool
+  calls travel as a text protocol with one retry on a bad call. Validated
+  on `gemini-3.8-flash` only. `llm4ts doctor` prints Gemini CLI's terms
+  clause in this mode and refuses it when a system admin policy would
+  keep Gemini's tools in view.
+
 ## 2.42.0
 
 A story runs the tasks that need nothing from each other at the same time
