@@ -401,10 +401,22 @@ export const handleMessagesRequest = Effect.fn(
 })
 
 /** Shared with the model route (`NodeGeminiModelBridge.ts`, ADR 0037). */
-export const readBody = (request: IncomingMessage): Effect.Effect<string, ProviderError> =>
+export const readBody = (
+  request: IncomingMessage,
+  maxBytes: number = Number.POSITIVE_INFINITY
+): Effect.Effect<string, ProviderError> =>
   Effect.callback((resume) => {
     const chunks: Array<Buffer> = []
-    request.on("data", (chunk: Buffer) => chunks.push(chunk))
+    let size = 0
+    request.on("data", (chunk: Buffer) => {
+      size += chunk.length
+      if (size > maxBytes) {
+        request.destroy()
+        resume(Effect.fail(ProviderError.make({ message: `request body over ${maxBytes} bytes` })))
+        return
+      }
+      chunks.push(chunk)
+    })
     request.on("end", () => resume(Effect.succeed(Buffer.concat(chunks).toString("utf8"))))
     request.on("error", (error) =>
       resume(ProviderError.make({ message: "failed to read request body", cause: error }))

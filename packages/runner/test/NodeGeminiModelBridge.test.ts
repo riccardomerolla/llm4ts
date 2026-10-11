@@ -1,3 +1,4 @@
+import { request as httpRequest } from "node:http"
 import { assert, describe, it } from "@effect/vitest"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -70,6 +71,30 @@ const streamingRequest = {
 }
 
 const request: JsonValue = streamingRequest
+
+/** A POST with headers fetch would not let a caller set (Host), answering its status. */
+const rawPost = (
+  port: number,
+  body: string,
+  headers: Readonly<Record<string, string>>
+): Effect.Effect<number> =>
+  Effect.callback((resume) => {
+    const outgoing = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers }
+      },
+      (incoming) => {
+        incoming.resume()
+        incoming.on("end", () => resume(Effect.succeed(incoming.statusCode ?? 0)))
+      }
+    )
+    outgoing.on("error", () => resume(Effect.succeed(0)))
+    outgoing.end(body)
+  })
 
 describe("Gemini model bridge (ADR 0037)", () => {
   it.effect("runs one locked-down gemini call: pi's prompt, no tools, no sub-agents", () =>
@@ -261,7 +286,16 @@ describe("Gemini model bridge (ADR 0037)", () => {
           nodeHttpClient.send("POST", url, body, {}, "text/plain", Duration.seconds(5))
         )
         assert.strictEqual(asText._tag, "Failure")
-        assert.strictEqual((yield* Ref.get(gemini.calls)).length, 0)
+        // A rebound DNS name pointing at 127.0.0.1 still names another host.
+        const rebound = yield* rawPost(bridge.port, body, { Host: "evil.example" })
+        assert.strictEqual(rebound, 403)
+        // The same raw request naming the loopback host is served.
+        assert.strictEqual(
+          yield* rawPost(bridge.port, body, { Host: `127.0.0.1:${bridge.port}` }),
+          200
+        )
+        // Only the loopback request reached Gemini.
+        assert.strictEqual((yield* Ref.get(gemini.calls)).length, 1)
       })
     )
   )

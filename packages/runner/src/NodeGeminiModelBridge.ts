@@ -197,6 +197,9 @@ const addTokens = (
   cached: (left?.cached ?? 0) + (right?.cached ?? 0)
 })
 
+/** The largest request the bridge reads: a long conversation, not an unbounded upload. */
+const maxRequestBytes = 32 * 1024 * 1024
+
 /** What a Gemini model id looks like: `gemini-3.8-flash`, `gemini-2.5-pro-001`. */
 const modelName = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
 
@@ -291,14 +294,20 @@ export const runGeminiModelBridge = Effect.fn("@llm4ts/runner/NodeGeminiModelBri
       // this loopback port (a cross-site form needs no preflight as
       // text/plain) is refused before anything runs.
       const contentType = request.headers["content-type"] ?? ""
-      if (request.headers.origin !== undefined || !contentType.includes("application/json")) {
+      // A DNS name rebound to 127.0.0.1 still sends its own Host.
+      const host = (request.headers.host ?? "").replace(/:\d+$/u, "")
+      if (
+        request.headers.origin !== undefined ||
+        !contentType.includes("application/json") ||
+        !["127.0.0.1", "localhost", "[::1]"].includes(host)
+      ) {
         writeJson(response, 403, {
           error: { message: "the bridge answers JSON requests from local tools only" }
         })
         return
       }
       const handled = Effect.gen(function* () {
-        const body = yield* parseJsonBody(yield* readBody(request))
+        const body = yield* parseJsonBody(yield* readBody(request, maxRequestBytes))
         const outcome = yield* handleChatCompletion(config, body)
         const { id, callId } = nextIds()
         const created = Math.floor(Date.now() / 1000)
