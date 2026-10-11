@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.43.0
+
+pi can run on the Gemini CLI subscription with Gemini as a plain model.
 
 - **Gemini CLI as a plain model for pi** (ADR 0037).
   `LLM4TS_GEMINI_BRIDGE_MODE=model` makes the Gemini bridge serve
