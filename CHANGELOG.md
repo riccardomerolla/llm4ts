@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.44.1
 
 - **The Gemini bridge's model mode works against Google's API.** With every
   Gemini tool denied, Gemini CLI sent an empty tool list, which Google
