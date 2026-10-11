@@ -17,6 +17,7 @@ import { nodeHttpClient } from "@llm4ts/runner/NodeHttpClient"
 import {
   anthropicToolToMcpTool,
   handleMessagesRequest,
+  localRequestProblem,
   makeBridgeState,
   requestPath,
   runGeminiAcpBridge,
@@ -244,9 +245,45 @@ describe("NodeGeminiAcpBridge", () => {
             )
             .pipe(Effect.result)
           assert.strictEqual(withQuery._tag, "Success")
+
+          // The same gate as the model route: no browser page, JSON only.
+          const fromPage = yield* nodeHttpClient
+            .postJson(
+              `${bridge.baseUrl}/mcp`,
+              JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+              { Origin: "https://evil.example" },
+              Duration.seconds(5)
+            )
+            .pipe(Effect.result)
+          assert.strictEqual(fromPage._tag, "Failure")
+          const asText = yield* nodeHttpClient
+            .send(
+              "POST",
+              `${bridge.baseUrl}/v1/messages`,
+              "{}",
+              {},
+              "text/plain",
+              Duration.seconds(5)
+            )
+            .pipe(Effect.result)
+          assert.strictEqual(asText._tag, "Failure")
         })
       )
     )
+
+    it("lets through only local JSON requests, with the token when one is set", () => {
+      const local = { "content-type": "application/json", host: "127.0.0.1:8731" }
+      assert.isUndefined(localRequestProblem(local))
+      assert.isUndefined(localRequestProblem({ ...local, host: "localhost:8731" }))
+      assert.isDefined(localRequestProblem({ ...local, origin: "https://evil.example" }))
+      assert.isDefined(localRequestProblem({ ...local, "content-type": "text/plain" }))
+      assert.isDefined(localRequestProblem({ ...local, host: "evil.example" }))
+      assert.isDefined(localRequestProblem(local, "s3cret"))
+      assert.isDefined(localRequestProblem({ ...local, authorization: "Bearer nope" }, "s3cret"))
+      assert.isUndefined(
+        localRequestProblem({ ...local, authorization: "Bearer s3cret" }, "s3cret")
+      )
+    })
 
     it("routes on the path alone, ignoring query and fragment", () => {
       assert.strictEqual(requestPath("/v1/messages?beta=true"), "/v1/messages")

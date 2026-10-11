@@ -180,6 +180,32 @@ pi's provider for this mode uses the OpenAI completions API:
 LLM4TS_GEMINI_BRIDGE=1 LLM4TS_GEMINI_BRIDGE_MODE=model llm4ts doctor
 ```
 
+#### Running the bridge on its own
+
+The bridge also runs outside any flow run, as an OpenAI-compatible server
+for `pi` itself (or any OpenAI chat-completions client), the way LM Studio
+serves a local model:
+
+```sh
+llm4ts gemini-bridge
+```
+
+It listens on `127.0.0.1` (`--port`, else `LLM4TS_GEMINI_BRIDGE_PORT`, else
+`8731`) until Ctrl-C, and prints the `models.json` entry pi needs and the
+`pi --model` to use. `--mode model` (the default) is this section's route;
+`--mode acp` serves ADR 0016's Anthropic Messages route instead.
+`--model <id>` runs every request on that Gemini model, whatever the client
+names. A flow run with `LLM4TS_GEMINI_BRIDGE` set starts its own bridge on
+the same port, so stop this one first.
+
+Both routes answer local tools only: a request with a browser `Origin`, a
+content type other than JSON, or a Host other than `127.0.0.1`, `localhost`
+or `[::1]` is refused. For model mode, `--token <value>` (or
+`LLM4TS_GEMINI_BRIDGE_TOKEN`, which flow runs read too) makes every request
+carry that token as a bearer; put the same value in pi's `apiKey`. It keeps
+other programs on the machine from using the subscription through the
+bridge.
+
 Limits, from `examples/gemini-model-probe.mjs` on a real subscription:
 
 - **Models.** `gemini-3.8-flash` kept to the tool-call protocol in 10 of 10

@@ -16,6 +16,10 @@ import {
   type CostsOptions
 } from "@llm4ts/runner/Costs"
 import { makeDoctorProgram } from "@llm4ts/runner/Doctor"
+import { makeGeminiBridgeProgram, type GeminiBridgeOptions } from "@llm4ts/runner/GeminiBridgeServe"
+import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
+import { nodeTemporaryFiles } from "@llm4ts/runner/NodeTemporaryFiles"
+import { geminiBridgePort } from "@llm4ts/runner/PiModels"
 import {
   pauseExecutor,
   renderRosterReport,
@@ -903,6 +907,80 @@ const graphCommand = Command.make("graph", {}, () =>
   ])
 )
 
+export interface GeminiBridgeFlags {
+  readonly port: Option.Option<number>
+  readonly mode: Option.Option<string>
+  readonly model: Option.Option<string>
+  readonly token: Option.Option<string>
+}
+
+/** The `gemini-bridge` flags as program options; every rejection is a usage error. */
+export const geminiBridgeOptionsFrom = (
+  flags: GeminiBridgeFlags,
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): Effect.Effect<GeminiBridgeOptions, ShellUsageError> =>
+  Effect.gen(function* () {
+    const port = Option.getOrElse(flags.port, () => Number(geminiBridgePort(environment)))
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return yield* new ShellUsageError({ message: "--port must be a port number (1-65535)" })
+    }
+    const mode = Option.getOrElse(flags.mode, () => "model")
+      .trim()
+      .toLowerCase()
+    if (mode !== "model" && mode !== "acp") {
+      return yield* new ShellUsageError({
+        message: `--mode is "${mode}"; use model (OpenAI chat completions) or acp (Anthropic Messages)`
+      })
+    }
+    const token = Option.getOrUndefined(flags.token) ?? environment.LLM4TS_GEMINI_BRIDGE_TOKEN
+    return {
+      port,
+      mode,
+      ...(Option.isSome(flags.model) ? { model: flags.model.value } : {}),
+      ...(token === undefined || token.length === 0 ? {} : { token })
+    }
+  })
+
+const geminiBridgeCommand = Command.make(
+  "gemini-bridge",
+  {
+    port: Flag.Int("port").pipe(
+      Flag.optional,
+      Flag.withDescription("Port on 127.0.0.1 (default LLM4TS_GEMINI_BRIDGE_PORT, else 8731)")
+    ),
+    mode: Flag.String("mode").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "model: OpenAI chat completions, Gemini as a plain model (default, ADR 0037); acp: Anthropic Messages over a Gemini agent (ADR 0016)"
+      )
+    ),
+    model: Flag.String("model").pipe(
+      Flag.optional,
+      Flag.withDescription("Gemini model for every request (default: the one the client names)")
+    ),
+    token: Flag.String("token").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Token every request must carry, used as pi's apiKey (model mode; default LLM4TS_GEMINI_BRIDGE_TOKEN, else none)"
+      )
+    )
+  },
+  (flags) =>
+    Effect.gen(function* () {
+      const options = yield* geminiBridgeOptionsFrom(flags)
+      yield* makeGeminiBridgeProgram(options, {
+        executor: nodeProcessExecutor,
+        temporaryFiles: nodeTemporaryFiles,
+        log: (line) => Console.log(line),
+        until: () => Effect.never
+      })
+    })
+).pipe(
+  Command.withDescription(
+    "Serve the Gemini CLI subscription to pi on 127.0.0.1 until Ctrl-C (OpenAI-compatible by default)"
+  )
+)
+
 const doctorCommand = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const report = yield* makeDoctorProgram()
@@ -935,6 +1013,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     profileCommand,
     graphCommand,
     rosterCommand,
+    geminiBridgeCommand,
     doctorCommand
   ])
 )

@@ -299,4 +299,36 @@ describe("Gemini model bridge (ADR 0037)", () => {
       })
     )
   )
+
+  it.effect("asks for the token when one is set", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const gemini = yield* fakeGemini(["hi"])
+        const temporary = yield* makeFakeTemporaryFiles()
+        const bridge = yield* runGeminiModelBridge({
+          port: 0,
+          executor: gemini.executor,
+          temporaryFiles: temporary.temporaryFiles,
+          cwd: "/scratch",
+          systemPolicies: [],
+          token: "s3cret"
+        })
+        const url = `${bridge.baseUrl}/v1/chat/completions`
+        const body = JSON.stringify(streamingRequest)
+        const without = yield* Effect.result(
+          nodeHttpClient.postJson(url, body, {}, Duration.seconds(5))
+        )
+        assert.strictEqual(without._tag, "Failure")
+        const withToken = yield* Effect.result(
+          nodeHttpClient.postJson(
+            url,
+            body,
+            { Authorization: "Bearer s3cret" },
+            Duration.seconds(5)
+          )
+        )
+        assert.strictEqual(withToken._tag, "Success")
+      })
+    )
+  )
 })
