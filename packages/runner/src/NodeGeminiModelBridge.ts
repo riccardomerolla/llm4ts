@@ -128,8 +128,8 @@ const geminiTurn = (
           .runStreamingWithStdin(
             [
               "gemini",
-              "-m",
-              model,
+              // Bound to its flag, so it can never read as a flag of its own.
+              `--model=${model}`,
               "--output-format",
               "stream-json",
               "-e",
@@ -197,6 +197,9 @@ const addTokens = (
   cached: (left?.cached ?? 0) + (right?.cached ?? 0)
 })
 
+/** What a Gemini model id looks like: `gemini-3.8-flash`, `gemini-2.5-pro-001`. */
+const modelName = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
+
 export interface ChatCompletionOutcome {
   readonly model: string
   readonly reply: ModelReply
@@ -218,6 +221,12 @@ export const handleChatCompletion = Effect.fn("@llm4ts/runner/NodeGeminiModelBri
       return yield* InvalidRequestError.make({ message: request.reason })
     }
     const model = config.model ?? request.model
+    // The model reaches Gemini CLI's arguments: a name only, never a flag.
+    if (!modelName.test(model)) {
+      return yield* InvalidRequestError.make({
+        message: `"${model}" is not a model name (letters, digits, . _ : -, starting with a letter or digit)`
+      })
+    }
     const system = systemFileFor(request)
     const transcript = transcriptFor(request.messages)
     const toolNames = request.tools.map((tool) => tool.name)
@@ -276,6 +285,16 @@ export const runGeminiModelBridge = Effect.fn("@llm4ts/runner/NodeGeminiModelBri
     const listener = (request: IncomingMessage, response: ServerResponse): void => {
       if (request.method !== "POST" || requestPath(request.url) !== "/v1/chat/completions") {
         writeJson(response, 404, { error: { message: "not found" } })
+        return
+      }
+      // pi posts JSON from Node, with no Origin. A browser page posting to
+      // this loopback port (a cross-site form needs no preflight as
+      // text/plain) is refused before anything runs.
+      const contentType = request.headers["content-type"] ?? ""
+      if (request.headers.origin !== undefined || !contentType.includes("application/json")) {
+        writeJson(response, 403, {
+          error: { message: "the bridge answers JSON requests from local tools only" }
+        })
         return
       }
       const handled = Effect.gen(function* () {

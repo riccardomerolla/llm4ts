@@ -94,8 +94,7 @@ describe("Gemini model bridge (ADR 0037)", () => {
         const [call] = yield* Ref.get(gemini.calls)
         assert.deepStrictEqual(call?.argv, [
           "gemini",
-          "-m",
-          "gemini-3.8-flash",
+          "--model=gemini-3.8-flash",
           "--output-format",
           "stream-json",
           "-e",
@@ -213,4 +212,57 @@ describe("Gemini model bridge (ADR 0037)", () => {
     const unknown = geminiBridgeMode({ LLM4TS_GEMINI_BRIDGE_MODE: "openai" })
     assert.strictEqual(unknown._tag, "Unknown")
   })
+
+  it.effect("refuses a model name that could pass Gemini CLI a flag", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const gemini = yield* fakeGemini(["hi"])
+        const temporary = yield* makeFakeTemporaryFiles()
+        const config = {
+          executor: gemini.executor,
+          temporaryFiles: temporary.temporaryFiles,
+          cwd: "/s"
+        }
+        for (const model of ["--yolo", "-y", "flash --yolo", "a/../b", ""]) {
+          const error = yield* Effect.flip(
+            handleChatCompletion(config, { ...streamingRequest, model })
+          )
+          assert.strictEqual(error._tag, "InvalidRequestError", model)
+        }
+        assert.strictEqual((yield* Ref.get(gemini.calls)).length, 0)
+      })
+    )
+  )
+
+  it.effect("answers only JSON requests without a browser origin", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const gemini = yield* fakeGemini(["hi"])
+        const temporary = yield* makeFakeTemporaryFiles()
+        const bridge = yield* runGeminiModelBridge({
+          port: 0,
+          executor: gemini.executor,
+          temporaryFiles: temporary.temporaryFiles,
+          cwd: "/scratch",
+          systemPolicies: []
+        })
+        const url = `${bridge.baseUrl}/v1/chat/completions`
+        const body = JSON.stringify(streamingRequest)
+        const fromPage = yield* Effect.result(
+          nodeHttpClient.postJson(
+            url,
+            body,
+            { Origin: "https://evil.example" },
+            Duration.seconds(5)
+          )
+        )
+        assert.strictEqual(fromPage._tag, "Failure")
+        const asText = yield* Effect.result(
+          nodeHttpClient.send("POST", url, body, {}, "text/plain", Duration.seconds(5))
+        )
+        assert.strictEqual(asText._tag, "Failure")
+        assert.strictEqual((yield* Ref.get(gemini.calls)).length, 0)
+      })
+    )
+  )
 })
