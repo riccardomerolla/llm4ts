@@ -193,3 +193,16 @@ protocol in 1 call of 10. `gemini-3.8-flash` passed in runs 1 and 3 (10 of
 10 both times). The bridge is built for flash only; `gemini-2.5-pro` is an
 older model, and a newer one is run through the probe before it is used.
 `docs/configuration.md` says so where the mode is set up.
+
+## Fix (2026-10-11): one inert tool stays declared
+
+The first real pi conversation through the bridge failed with a 400 from
+Google: `tools[0].tool_type: required one_of 'tool_type' must have one
+initialized field`. Gemini CLI always sends `tools: [{ functionDeclarations }]`,
+and with every tool denied that list is empty, which the API rejects. The
+probe missed it because its removal check counted a failed call as "no tool
+called". The admin policy now denies `*` at priority 100 and allows
+`update_topic` at 999: one declared tool that only sets a status line, no
+file, shell or network access. The system file tells the model never to
+call a native function. The probe now counts a failed call as a failure,
+tests this policy, and runs its protocol trials with it.

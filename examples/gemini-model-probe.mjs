@@ -123,13 +123,42 @@ writeFileSync(
   denyAllPolicy,
   ["[[rule]]", 'toolName = "*"', 'decision = "deny"', "priority = 999", ""].join("\n")
 )
+/**
+ * What the bridge runs (llm4ts 2.44.1+): every tool denied except
+ * `update_topic`, allowed at a higher priority. Gemini CLI always sends
+ * `tools: [{ functionDeclarations }]`, and Google rejects an empty list
+ * (`tools[0].tool_type: required one_of`), so denying `*` alone breaks
+ * every call — which a check counting tool calls alone cannot see.
+ */
+const oneToolPolicy = join(work, "one-inert-tool.toml")
+writeFileSync(
+  oneToolPolicy,
+  [
+    "[[rule]]",
+    'toolName = "*"',
+    'decision = "deny"',
+    "priority = 100",
+    "",
+    "[[rule]]",
+    'toolName = "update_topic"',
+    'decision = "allow"',
+    "priority = 999",
+    ""
+  ].join("\n")
+)
+const bridgeVariant = {
+  name: "the bridge's policy: only update_topic + agents off",
+  env: settingsVariants[0].env,
+  args: ["--admin-policy", oneToolPolicy]
+}
 const variants = [
   ...settingsVariants,
   {
     name: 'admin policy deny "*" + agents off',
     env: settingsVariants[0].env,
     args: ["--admin-policy", denyAllPolicy]
-  }
+  },
+  bridgeVariant
 ]
 
 /**
@@ -426,11 +455,19 @@ const main = async () => {
     show(listing)
     removal.push({
       variant,
-      removed: forced.toolUses.length === 0 && listing.toolUses.length === 0,
+      // A failed call makes no tool call either: it counts as a failure.
+      removed:
+        forced.errors.length === 0 &&
+        listing.errors.length === 0 &&
+        listing.reply.trim().length > 0 &&
+        forced.toolUses.every((tool) => tool === "update_topic") &&
+        listing.toolUses.every((tool) => tool === "update_topic"),
       tokens: forcedTokens
     })
   }
-  const chosen = removal.find((entry) => entry.removed) ?? removal[removal.length - 1]
+  // The stages below run what the bridge runs, whatever passed above.
+  const chosen =
+    removal.find((entry) => entry.variant === bridgeVariant) ?? removal[removal.length - 1]
   const bareTokens = chosen.tokens
   console.log(
     `\nusing ${chosen.variant.name} for the stages below${chosen.removed ? "" : " (NO variant removed every tool)"}`
@@ -477,7 +514,9 @@ const main = async () => {
     `1 override applies in headless mode (canary returned):   ${verdict(canaryBack(replacedCall.reply))}`
   )
   for (const entry of removal) {
-    console.log(`2 every tool removed with ${entry.variant.name}: ${verdict(entry.removed)}`)
+    console.log(
+      `2 calls succeed and use no tool with ${entry.variant.name}: ${verdict(entry.removed)}`
+    )
   }
   console.log(
     `3 tool-call protocol: ${valid}/${trials} well-formed, ${right}/${trials} the right tool with its argument`

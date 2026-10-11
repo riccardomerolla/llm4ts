@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.44.1
+
+- **The Gemini bridge's model mode works against Google's API.** With every
+  Gemini tool denied, Gemini CLI sent an empty tool list, which Google
+  rejects (`tools[0].tool_type: required one_of`), so every request failed
+  with a 400. The policy now keeps one inert tool, `update_topic`, declared
+  and denies the rest; the model is told never to call it.
+
 ## 2.44.0
 
 The Gemini bridge runs on its own, for pi used directly.
