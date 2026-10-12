@@ -147,6 +147,34 @@ The epic's stories by column (planned, active, waiting, done, failed,
 skipped), or one story's Tasks by column (todo, doing, review, done).
 _Avoid_: kanban, dashboard (that is the whole screen), tree
 
+### Findings and verdicts
+
+**Grounds**:
+How a finding knows what it claims: `observed` (a measurement, such as a
+gate exit or an oracle check), `derived` (computed by code from an
+artifact, such as a transcript or a diff line that exists), or `inferred`
+(a model's reading). Assigned or downgraded by code, never upgraded on a
+model's say-so.
+_Avoid_: confidence (that is a Judgment statistic), authority, trust
+
+**Via**:
+The channel a finding arrived through: gate, oracle, diff, transcript,
+model or human.
+_Avoid_: source, origin (that is a gate failure's triage against the base)
+
+**Verdict status**:
+What a program or rule verdict is worth: `pass`, `fail`, `truncated` (the
+judged context was capped), `unsupported` (a required captured vector was
+missing) or `unknown` (nothing ran). Only `pass` aggregates to pass.
+_Avoid_: green, red, skipped
+
+**Unknown**:
+A question a run could not settle, recorded once per epic with a stable
+id and a status (`open`, `blocked`, `contradicted`, `resolved`), and
+resolved only by citing a run artifact. Raised by a blocked story, a
+deferred finding, a low-confidence trailer or a judge warning.
+_Avoid_: open point (that is a refine overlay's term), issue, ticket, todo
+
 ### Existing evaluation terms (kept distinct from Judgment)
 
 **Judge**:

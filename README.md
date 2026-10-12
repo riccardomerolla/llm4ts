@@ -1,6 +1,6 @@
 # llm4ts
 
-Effect-native LLM workflows for TypeScript: typed connectors for API
+Effect-native, agent-agnostic engineering workflows with explicit review and modernization artifacts. Effect-TS: typed connectors for API
 providers and CLI coding agents, streaming, structured output, tools, plans
 and review loops, repository automation, trace replay, and a Node runner.
 `llm4ts` is the TypeScript implementation of
