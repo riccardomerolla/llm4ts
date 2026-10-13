@@ -1,0 +1,1573 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Agentic Flows in Motion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap"
+    />
+    <script src="https://cdn.tailwindcss.com/3.4.16"></script>
+    <style>
+      /* Layout: a single dark column of "example cards" in the visual-effect idiom: header, live visualization, and what the run left behind.
+     Node colours are states, not decoration: slate waiting, blue running, green done, red failed, orange interrupted, yellow needs a person. */
+      :root {
+        --bg: #09090b;
+        --panel: #121214;
+        --panel-2: #1a1a1d;
+        --line: rgba(255, 255, 255, 0.08);
+        --line-2: rgba(64, 64, 64, 0.5);
+        --fg: #fafafa;
+        --muted: #a1a1aa;
+        --faint: #63636b;
+        --idle: #475569;
+        --run: #3b82f6;
+        --ok: #15803d;
+        --ok-fg: #4ade80;
+        --err: #ef4444;
+        --int: #f97316;
+        --human: #eab308;
+        --font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        color-scheme: dark;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font);
+        font-size: 17px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 68rem;
+        margin-inline: auto;
+        padding-inline: 20px;
+      }
+      h1,
+      h2,
+      h3 {
+        text-wrap: balance;
+        letter-spacing: -0.035em;
+        line-height: 1.04;
+        margin: 0;
+      }
+      p {
+        margin: 0;
+      }
+      .mono {
+        font-family: var(--mono);
+      }
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .lede {
+        color: var(--muted);
+        max-width: 60ch;
+      }
+      section {
+        padding-block: 5rem;
+      }
+      button {
+        font: inherit;
+      }
+      :focus-visible {
+        outline: 2px solid var(--run);
+        outline-offset: 3px;
+        border-radius: 8px;
+      }
+
+      /* ── Example card (after visual-effect's EffectExample) ── */
+      .card {
+        border: 1px solid var(--line-2);
+        border-radius: 18px;
+        background: linear-gradient(to bottom right, rgba(23, 23, 23, 0.85), rgba(23, 23, 23, 0.4));
+        box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.8);
+        min-width: 0;
+      }
+      .card-head {
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--line-2);
+        background: rgba(38, 38, 38, 0.5);
+        border-radius: 18px 18px 0 0;
+        flex-wrap: wrap;
+      }
+      .card-title {
+        font-family: var(--mono);
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--fg);
+      }
+      .card-desc {
+        color: var(--muted);
+        font-size: 15px;
+        margin-top: 4px;
+        max-width: 52ch;
+      }
+      .controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 36px;
+        padding: 0 14px;
+        border-radius: 999px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        color: var(--fg);
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background 0.15s,
+          border-color 0.15s,
+          opacity 0.15s,
+          transform 0.1s;
+      }
+      .btn:hover:not(:disabled) {
+        background: #232327;
+      }
+      .btn:active:not(:disabled) {
+        transform: scale(0.97);
+      }
+      .btn:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      .btn.play {
+        background: var(--fg);
+        color: var(--bg);
+        border-color: var(--fg);
+      }
+      .btn.play:hover:not(:disabled) {
+        background: #e4e4e7;
+      }
+      .btn.human {
+        border-color: var(--human);
+        color: var(--human);
+        background: rgba(234, 179, 8, 0.08);
+      }
+      .btn.human.ready {
+        animation: callout 1.4s ease-in-out infinite;
+      }
+      .btn.resume {
+        border-color: var(--int);
+        color: var(--int);
+        background: rgba(249, 115, 22, 0.08);
+      }
+      .btn.resume.ready {
+        animation: callout-o 1.4s ease-in-out infinite;
+      }
+      @keyframes callout {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(234, 179, 8, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.18);
+        }
+      }
+      @keyframes callout-o {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(249, 115, 22, 0.18);
+        }
+      }
+      .seg {
+        display: inline-flex;
+        padding: 3px;
+        border-radius: 999px;
+        border: 1px solid var(--line-2);
+        background: var(--panel);
+        flex-wrap: wrap;
+      }
+      .seg button {
+        height: 30px;
+        padding: 0 12px;
+        border-radius: 999px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13.5px;
+        cursor: pointer;
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--panel-2);
+        color: var(--fg);
+        box-shadow: inset 0 0 0 1px var(--line-2);
+      }
+      .card-config {
+        padding: 12px 20px;
+        border-bottom: 1px solid var(--line-2);
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .viz {
+        padding: 72px 20px 22px;
+        border-bottom: 1px solid var(--line-2);
+        position: relative;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 14px 10px;
+      }
+      .left {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .left-cap {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .left-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 14px 10px;
+      }
+      .arrow {
+        height: 64px;
+        display: flex;
+        align-items: center;
+        color: #525252;
+        flex: none;
+      }
+      .arrow svg {
+        width: 18px;
+        height: 18px;
+      }
+      .wall {
+        align-self: stretch;
+        width: 12px;
+        min-height: 96px;
+        border-radius: 4px;
+        flex: none;
+        background: repeating-linear-gradient(135deg, #b91c1c 0 5px, transparent 5px 10px);
+        opacity: 0.8;
+        position: relative;
+        margin-inline: 8px;
+      }
+      .wall span {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) rotate(-90deg);
+        white-space: nowrap;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #fca5a5;
+        background: var(--bg);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .left-side {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 14px 10px;
+      }
+
+      .left-out {
+        padding: 16px 20px 20px;
+      }
+      .left-out h4 {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+        margin: 0 0 10px;
+        font-weight: 500;
+      }
+      .arts {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+      }
+      .arts li {
+        display: grid;
+        grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+        gap: 14px;
+        font-size: 14.5px;
+        align-items: baseline;
+      }
+      .arts li .f {
+        font-family: var(--mono);
+        color: var(--fg);
+        font-size: 13.5px;
+        overflow-wrap: anywhere;
+      }
+      .arts li .n {
+        color: var(--muted);
+      }
+      .arts li.empty {
+        display: block;
+        color: var(--faint);
+        font-size: 14px;
+      }
+      .arts li.fresh {
+        animation: arrive 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+      @keyframes arrive {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      /* ── Node (after visual-effect's EffectNode) ── */
+      .ve {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        flex: none;
+      }
+      .ve-box {
+        position: relative;
+        height: 64px;
+        width: 64px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: var(--idle);
+        opacity: 0.6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        transition:
+          background-color 0.1s ease-in-out,
+          opacity 0.3s,
+          width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1),
+          transform 0.35s cubic-bezier(0.34, 1.4, 0.64, 1),
+          box-shadow 0.3s;
+      }
+      .ve-box[data-state="running"] {
+        background: var(--run);
+        opacity: 1;
+        transform: scale(0.95);
+        box-shadow: 0 0 24px rgba(59, 130, 246, 0.25);
+        animation: jitter 0.32s steps(2) infinite;
+      }
+      .ve-box[data-state="done"] {
+        background: var(--ok);
+        opacity: 1;
+      }
+      .ve-box[data-state="failed"] {
+        background: var(--err);
+        opacity: 1;
+      }
+      .ve-box[data-state="interrupted"] {
+        background: var(--int);
+        opacity: 1;
+      }
+      .ve-box[data-state="human"] {
+        background: var(--human);
+        opacity: 1;
+        color: #1c1917;
+        animation: breathe 1.6s ease-in-out infinite;
+      }
+      .ve-shine {
+        position: absolute;
+        inset: 0;
+        width: 200%;
+        opacity: 0;
+        pointer-events: none;
+        mix-blend-mode: lighten;
+        filter: blur(4px);
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          transparent 40%,
+          rgba(255, 255, 255, 0.1) 45%,
+          rgba(255, 255, 255, 0.5) 50%,
+          rgba(255, 255, 255, 0.1) 55%,
+          transparent 60%,
+          transparent 100%
+        );
+      }
+      .ve-box[data-state="running"] .ve-shine {
+        opacity: 1;
+        animation: shine 0.8s cubic-bezier(0.5, 0, 0.1, 1) infinite;
+      }
+      @keyframes shine {
+        from {
+          transform: translateX(-66%);
+        }
+        to {
+          transform: translateX(50%);
+        }
+      }
+      @keyframes jitter {
+        0% {
+          translate: 0.6px -0.3px;
+          rotate: -0.8deg;
+        }
+        50% {
+          translate: -0.8px 0.4px;
+          rotate: 0.9deg;
+        }
+        100% {
+          translate: 0.3px 0.2px;
+          rotate: -0.4deg;
+        }
+      }
+      @keyframes breathe {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.45);
+        }
+        50% {
+          box-shadow: 0 0 0 7px rgba(234, 179, 8, 0);
+        }
+      }
+      .ve-content {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 12px;
+        white-space: nowrap;
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .ve-icon {
+        display: block;
+        width: 30px;
+        height: 30px;
+      }
+      .ve-icon svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+        fill: currentColor;
+        opacity: 0.92;
+      }
+      .ve-label {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 64px;
+      }
+      .ve-name {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: #d4d4d8;
+        white-space: nowrap;
+      }
+      .ve-sub {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+        white-space: nowrap;
+      }
+      .ve-time {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: #60a5fa;
+        font-variant-numeric: tabular-nums;
+        min-height: 1.2em;
+      }
+      .ve-bubble {
+        position: absolute;
+        bottom: calc(100% + 10px);
+        left: 0;
+        z-index: 5;
+        width: max-content;
+        max-width: 230px;
+        padding: 7px 11px;
+        border-radius: 10px;
+        font-size: 13px;
+        line-height: 1.35;
+        font-weight: 500;
+        box-shadow: 0 0 16px rgba(0, 0, 0, 0.5);
+        pointer-events: none;
+      }
+      .ve-bubble::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: var(--tip, 26px);
+        border: 6px solid transparent;
+        border-top-color: inherit;
+        transform: translateX(-50%);
+      }
+      .ve-bubble.fail {
+        background: rgba(239, 68, 68, 0.96);
+        color: #fef2f2;
+        border-color: rgba(239, 68, 68, 0.96);
+      }
+      .ve-bubble.human {
+        background: #facc15;
+        color: #1c1917;
+        border-color: #facc15;
+      }
+      .ve-bubble.interrupted {
+        background: #f97316;
+        color: #fff7ed;
+        border-color: #f97316;
+      }
+      .ve-bubble.note {
+        background: #27272a;
+        color: #e4e4e7;
+        border-color: #27272a;
+      }
+      .ve-bubble::after {
+        border-top-color: currentColor;
+      }
+      .ve-bubble.fail::after {
+        border-top-color: rgba(239, 68, 68, 0.96);
+      }
+      .ve-bubble.human::after {
+        border-top-color: #facc15;
+      }
+      .ve-bubble.interrupted::after {
+        border-top-color: #f97316;
+      }
+      .ve-bubble.note::after {
+        border-top-color: #27272a;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 18px;
+        font-size: 13.5px;
+        color: var(--muted);
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .legend i {
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+        display: inline-block;
+      }
+
+      .idea h3 {
+        font-size: 1.6rem;
+        font-weight: 700;
+      }
+      .idea p.body {
+        color: var(--muted);
+        margin-top: 10px;
+        max-width: 46ch;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        .ve-box[data-state="running"],
+        .ve-box[data-state="running"] .ve-shine,
+        .ve-box[data-state="human"],
+        .btn.ready {
+          animation: none !important;
+        }
+        .ve-box {
+          transition: background-color 0.1s;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="wrap flex items-center justify-between gap-4 py-5">
+      <span class="mono text-sm" style="color: var(--muted)">agentic flows · in motion</span>
+      <nav class="hidden sm:flex gap-6 text-sm" style="color: var(--muted)">
+        <a href="#ideas" class="hover:text-white">Ideas</a>
+        <a href="#modernize" class="hover:text-white">Modernization</a>
+      </nav>
+    </header>
+
+    <main>
+      <!-- Hero -->
+      <section style="padding-block: 3.5rem 4rem">
+        <div class="wrap">
+          <p class="eyebrow mb-5">Agentic engineering, explained</p>
+          <h1 class="text-5xl sm:text-6xl md:text-7xl font-extrabold max-w-4xl">
+            Agents do the volume.<br /><span style="color: var(--human)"
+              >People make the decisions.</span
+            >
+          </h1>
+          <p class="lede text-lg md:text-xl mt-7">
+            Run AI coding agents inside explicit workflows. Every step is visible, every finding is
+            written down, and nothing important happens until a person says yes. Press play on any
+            card below to watch one run.
+          </p>
+
+          <div class="legend mt-8" aria-label="Legend">
+            <span><i style="background: var(--idle); opacity: 0.6"></i>waiting</span>
+            <span><i style="background: var(--run)"></i>an agent is working</span>
+            <span><i style="background: var(--ok)"></i>done</span>
+            <span><i style="background: var(--err)"></i>did not pass review</span>
+            <span><i style="background: var(--int)"></i>interrupted</span>
+            <span><i style="background: var(--human)"></i>needs a person</span>
+          </div>
+
+          <div class="card mt-8" id="loop">
+            <div class="card-head">
+              <div>
+                <p class="card-title">The basic loop</p>
+                <p class="card-desc">
+                  Plan, build, check, review. What review does not accept goes back as a revision,
+                  and only reviewed work is committed.
+                </p>
+              </div>
+              <div class="controls">
+                <button class="btn play" data-run type="button">▶ Run</button>
+              </div>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Ideas -->
+      <section id="ideas" style="border-top: 1px solid var(--line)">
+        <div class="wrap">
+          <p class="eyebrow mb-4">Four ideas, in motion</p>
+          <h2 class="text-4xl md:text-5xl font-bold max-w-3xl">
+            The process lives in code. The agents can change.
+          </h2>
+
+          <div class="grid gap-16 mt-14">
+            <!-- Approval -->
+            <div class="grid lg:grid-cols-5 gap-8 items-start">
+              <div class="idea lg:col-span-2 min-w-0">
+                <p class="eyebrow mb-3" style="color: var(--human)">People approve</p>
+                <h3>The plan is a document. Editing it is the decision.</h3>
+                <p class="body">
+                  Before any code is written, an agent drafts a plan that a person can read. The
+                  flow stops and waits. Approve it and the work starts. Send it back and the agent
+                  revises it, keeping your edits.
+                </p>
+              </div>
+              <div class="card lg:col-span-3" id="approve">
+                <div class="card-head">
+                  <div>
+                    <p class="card-title">Wait for a person</p>
+                    <p class="card-desc">The run pauses on the plan until you answer.</p>
+                  </div>
+                  <div class="controls">
+                    <button class="btn human" data-approve type="button" disabled>
+                      Approve plan
+                    </button>
+                    <button class="btn" data-back type="button" disabled>Send back</button>
+                    <button class="btn play" data-run type="button">▶ Run</button>
+                  </div>
+                </div>
+                <div class="viz" data-viz></div>
+                <div class="left-out">
+                  <h4>Left behind</h4>
+                  <ul class="arts" data-arts></ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Parallel -->
+            <div class="grid lg:grid-cols-5 gap-8 items-start">
+              <div class="idea lg:col-span-2 min-w-0">
+                <p class="eyebrow mb-3" style="color: #60a5fa">Agents in parallel</p>
+                <h3>One epic, many agents, one branch.</h3>
+                <p class="body">
+                  The plan splits an epic into stories that say which files they own and what they
+                  depend on. Independent stories are built at the same time, each in its own copy of
+                  the repository. A judge scores every story before it merges.
+                </p>
+              </div>
+              <div class="card lg:col-span-3" id="parallel">
+                <div class="card-head">
+                  <div>
+                    <p class="card-title">Stories, three at a time</p>
+                    <p class="card-desc">
+                      Story 1 lays the ground. Stories 2 to 4 run together. Story 5 waits for them.
+                    </p>
+                  </div>
+                  <div class="controls">
+                    <button class="btn play" data-run type="button">▶ Run</button>
+                  </div>
+                </div>
+                <div class="viz" data-viz></div>
+                <div class="left-out">
+                  <h4>Left behind</h4>
+                  <ul class="arts" data-arts></ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Resume -->
+            <div class="grid lg:grid-cols-5 gap-8 items-start">
+              <div class="idea lg:col-span-2 min-w-0">
+                <p class="eyebrow mb-3" style="color: var(--int)">Files are the state</p>
+                <h3>Stop at any point. Pick up where it stopped.</h3>
+                <p class="body">
+                  Progress is written to files in the repository, not held in an agent's memory.
+                  When an agent goes offline or a laptop closes, the next run reads the files, keeps
+                  what was done, and continues.
+                </p>
+              </div>
+              <div class="card lg:col-span-3" id="resume">
+                <div class="card-head">
+                  <div>
+                    <p class="card-title">Interrupt and resume</p>
+                    <p class="card-desc">
+                      Halfway through, the agent drops out. Rerun to continue.
+                    </p>
+                  </div>
+                  <div class="controls">
+                    <button class="btn resume" data-rerun type="button" disabled>↻ Rerun</button>
+                    <button class="btn play" data-run type="button">▶ Run</button>
+                  </div>
+                </div>
+                <div class="viz" data-viz></div>
+                <div class="left-out">
+                  <h4>Left behind</h4>
+                  <ul class="arts" data-arts></ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Swap -->
+            <div class="grid lg:grid-cols-5 gap-8 items-start">
+              <div class="idea lg:col-span-2 min-w-0">
+                <p class="eyebrow mb-3" style="color: var(--ok-fg)">Any agent, any seat</p>
+                <h3>Swap the agent. Keep the process.</h3>
+                <p class="body">
+                  A workflow asks for roles: someone to plan and judge, someone to write code. Any
+                  coding agent fills a role, hosted or running on your own machine. The steps, the
+                  checks and the record stay the same.
+                </p>
+              </div>
+              <div class="card lg:col-span-3" id="swap">
+                <div class="card-head">
+                  <div>
+                    <p class="card-title">Pick who writes the code</p>
+                    <p class="card-desc">Change the coder and watch the same flow run again.</p>
+                  </div>
+                  <div class="controls">
+                    <button class="btn play" data-run type="button">▶ Run</button>
+                  </div>
+                </div>
+                <div class="card-config">
+                  <span>Coder</span>
+                  <div class="seg" role="group" aria-label="Coder" data-seg>
+                    <button type="button" aria-pressed="true" data-v="Claude">Claude</button>
+                    <button type="button" aria-pressed="false" data-v="Codex">Codex</button>
+                    <button type="button" aria-pressed="false" data-v="Gemini">Gemini</button>
+                    <button type="button" aria-pressed="false" data-v="local model">
+                      Local model
+                    </button>
+                  </div>
+                </div>
+                <div class="viz" data-viz></div>
+                <div class="left-out">
+                  <h4>Left behind</h4>
+                  <ul class="arts" data-arts></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Modernization -->
+      <section id="modernize" style="border-top: 1px solid var(--line)">
+        <div class="wrap">
+          <p class="eyebrow mb-4">Modernization</p>
+          <h2 class="text-4xl md:text-5xl font-bold max-w-3xl">
+            Read the old system once. Build the new one from what people approved.
+          </h2>
+          <p class="lede text-lg mt-5">
+            Agents turn a legacy code base into a specification: what each program does, as rules
+            and scenarios, each traced to its source. People approve it. The new system is then
+            built from that specification on the other side of a clean-room wall, where the old code
+            cannot be reached, and proven equivalent by replaying recorded behaviour.
+          </p>
+
+          <div class="card mt-10" id="modern">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Legacy to target</p>
+                <p class="card-desc">
+                  The process is the same for every technology. The kit you pick supplies the
+                  knowledge.
+                </p>
+              </div>
+              <div class="controls">
+                <button class="btn human" data-approve type="button" disabled>
+                  Approve specification
+                </button>
+                <button class="btn play" data-run type="button">▶ Run</button>
+              </div>
+            </div>
+            <div class="card-config">
+              <span>Kit</span>
+              <div class="seg" role="group" aria-label="Kit" data-seg>
+                <button type="button" aria-pressed="true" data-v="cobol">COBOL → Java</button>
+                <button type="button" aria-pressed="false" data-v="jsp">JSP → Next.js</button>
+                <button type="button" aria-pressed="false" data-v="soap">SOAP → REST</button>
+              </div>
+              <span class="mono text-xs" style="color: var(--faint)">illustrative figures</span>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-10 mt-14">
+            <div class="min-w-0">
+              <h3 class="text-2xl font-bold">Kit</h3>
+              <p class="mt-2" style="color: var(--muted)">
+                Everything one migration path needs, as files: how to read the old stack, the
+                starter for the new one, and the recipes in between. A team adds a technology by
+                writing a kit, not by changing the engine.
+              </p>
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-2xl font-bold">Pack</h3>
+              <p class="mt-2" style="color: var(--muted)">
+                The contract inside a kit: which files are programs, which checks must pass, how a
+                judge scores, what "equivalent" means. Review adds what it learns back into the
+                pack.
+              </p>
+            </div>
+            <div class="min-w-0">
+              <h3 class="text-2xl font-bold">Pattern card</h3>
+              <p class="mt-2" style="color: var(--muted)">
+                A short recipe that translates one idiom from the old stack to the new. Each agent
+                gets only the cards that match the code in front of it.
+              </p>
+            </div>
+          </div>
+
+          <div
+            class="mt-14 p-6 md:p-8 rounded-2xl"
+            style="border: 1px solid var(--line); background: var(--panel)"
+          >
+            <p class="eyebrow mb-3">Not every program deserves a port</p>
+            <p style="max-width: 70ch">
+              Some legacy code is dead, and some behaviour the new platform already provides. So the
+              specification is first distilled, with a person, into an <b>epic brief</b>: what is in
+              scope, what is dropped, what is deferred. Once it is approved, the parallel stories
+              above build that slice.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Close -->
+      <section style="border-top: 1px solid var(--line)">
+        <div class="wrap">
+          <h2 class="text-4xl md:text-6xl font-extrabold max-w-4xl">
+            The process is code.<br />The agents are replaceable.<br /><span
+              style="color: var(--human)"
+              >The record is yours.</span
+            >
+          </h2>
+        </div>
+      </section>
+    </main>
+
+    <footer
+      class="wrap py-8 text-sm"
+      style="color: var(--faint); border-top: 1px solid var(--line)"
+    >
+      The animations follow the visual language of Kit Langton's
+      <a href="https://github.com/kitlangton/visual-effect" class="underline hover:text-white"
+        >visual-effect</a
+      >
+      (MIT). Runs on this page are simulations; figures are illustrative.
+    </footer>
+
+    <script>
+      ;(() => {
+        const Cancel = Symbol("cancel")
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        const ICONS = {
+          star: '<svg viewBox="0 0 24 24"><path d="M12 1.5c.7 5.6 3.4 8.5 10.5 10.5-7.1 2-9.8 4.9-10.5 10.5C11.3 16.9 8.6 14 1.5 12 8.6 10 11.3 7.1 12 1.5z"/></svg>',
+          fail: '<svg viewBox="0 0 24 24"><path d="M8 2h8l6 6v8l-6 6H8l-6-6V8zm2.1 5L7 10.1 8.9 12 7 13.9 10.1 17 12 15.1 13.9 17 17 13.9 15.1 12 17 10.1 13.9 7 12 8.9z"/></svg>',
+          human:
+            '<svg viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8z"/></svg>',
+          pause:
+            '<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4.2" height="16" rx="1.2"/><rect x="13.8" y="4" width="4.2" height="16" rx="1.2"/></svg>'
+        }
+        const ARROW =
+          '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.3 4.3a1 1 0 0 1 1.4 0l7 7a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4-1.4l5.3-5.3H3a1 1 0 1 1 0-2h15.6l-5.3-5.3a1 1 0 0 1 0-1.4z"/></svg>'
+
+        const el = (tag, cls, html) => {
+          const e = document.createElement(tag)
+          if (cls) e.className = cls
+          if (html != null) e.innerHTML = html
+          return e
+        }
+        const fmt = (simSeconds) => {
+          const s = Math.round(simSeconds)
+          return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`
+        }
+
+        function makeNode(card, name, sub) {
+          const root = el("div", "ve")
+          const bubble = el("div", "ve-bubble")
+          bubble.hidden = true
+          const box = el("div", "ve-box")
+          const shine = el("div", "ve-shine")
+          const content = el("div", "ve-content")
+          box.append(shine, content)
+          const label = el("div", "ve-label")
+          const nm = el("span", "ve-name", name)
+          const sb = el("span", "ve-sub", sub || "")
+          const time = el("span", "ve-time")
+          label.append(nm)
+          if (sub) label.append(sb)
+          label.append(time)
+          root.append(bubble, box, label)
+
+          let raf = 0,
+            t0 = 0,
+            bubbleTimer = 0
+          const stopTimer = () => {
+            cancelAnimationFrame(raf)
+            raf = 0
+          }
+          const tick = () => {
+            time.textContent = fmt(((performance.now() - t0) / 1000) * 240)
+            raf = requestAnimationFrame(tick)
+          }
+          const pop = (node) => {
+            if (reduce) return
+            node.animate(
+              [
+                { transform: "scale(.5)", opacity: 0, filter: "blur(8px)" },
+                { transform: "scale(1)", opacity: 1, filter: "blur(0)" }
+              ],
+              { duration: 460, easing: "cubic-bezier(.34,1.56,.64,1)" }
+            )
+          }
+          const icon = (k) => {
+            content.innerHTML = `<span class="ve-icon">${ICONS[k]}</span>`
+            pop(content.firstChild)
+          }
+          const width = (w) => {
+            box.style.width = `${w}px`
+          }
+          const hideBubble = () => {
+            clearTimeout(bubbleTimer)
+            bubble.hidden = true
+          }
+          const showBubble = (text, kind, ms) => {
+            clearTimeout(bubbleTimer)
+            bubble.className = `ve-bubble ${kind}`
+            bubble.textContent = text
+            bubble.hidden = false
+            // keep the bubble inside the card
+            bubble.style.left = "0px"
+            bubble.style.setProperty("--tip", "32px")
+            const cardRect = card.root.getBoundingClientRect()
+            const r = bubble.getBoundingClientRect()
+            const overflow = r.right - (cardRect.right - 12)
+            if (overflow > 0) {
+              bubble.style.left = `${-overflow}px`
+              bubble.style.setProperty("--tip", `${32 + overflow}px`)
+            }
+            if (!reduce)
+              bubble.animate(
+                [
+                  { opacity: 0, transform: "translateY(6px) scale(.9)" },
+                  { opacity: 1, transform: "none" }
+                ],
+                { duration: 260, easing: "cubic-bezier(.34,1.56,.64,1)" }
+              )
+            if (ms)
+              bubbleTimer = setTimeout(() => {
+                bubble.hidden = true
+              }, ms)
+          }
+          const shake = () => {
+            if (reduce) return
+            box.animate(
+              [0, 8, -8, 6, -6, 3, 0].map((x, i) => ({
+                transform: `translateX(${x}px) rotate(${i % 2 ? 4 : -4}deg)`
+              })),
+              { duration: 480, easing: "ease-out" }
+            )
+          }
+          const api = {
+            root,
+            idle() {
+              stopTimer()
+              hideBubble()
+              time.textContent = ""
+              box.dataset.state = "idle"
+              width(64)
+              icon("star")
+            },
+            run() {
+              hideBubble()
+              box.dataset.state = "running"
+              width(64)
+              content.innerHTML = ""
+              t0 = performance.now()
+              stopTimer()
+              tick()
+            },
+            done(text) {
+              stopTimer()
+              box.dataset.state = "done"
+              const span = el("span", null, text)
+              content.innerHTML = ""
+              content.append(span)
+              width(Math.max(64, span.scrollWidth + 30))
+              pop(span)
+            },
+            fail(msg) {
+              stopTimer()
+              box.dataset.state = "failed"
+              icon("fail")
+              shake()
+              showBubble(msg, "fail")
+            },
+            wait(msg) {
+              stopTimer()
+              time.textContent = ""
+              box.dataset.state = "human"
+              width(64)
+              icon("human")
+              showBubble(msg, "human")
+            },
+            interrupt(msg) {
+              stopTimer()
+              box.dataset.state = "interrupted"
+              icon("pause")
+              shake()
+              showBubble(msg, "interrupted")
+            },
+            note(msg, ms = 1800) {
+              showBubble(msg, "note", ms)
+            },
+            flash() {
+              if (!reduce)
+                box.animate([{ filter: "brightness(1.9)" }, { filter: "brightness(1)" }], {
+                  duration: 520
+                })
+            },
+            label(text) {
+              nm.textContent = text
+            },
+            sublabel(text) {
+              sb.textContent = text
+            }
+          }
+          api.idle()
+          return api
+        }
+
+        function makeCard(id, scenario) {
+          const root = document.getElementById(id)
+          const viz = root.querySelector("[data-viz]")
+          const arts = root.querySelector("[data-arts]")
+          const runBtn = root.querySelector("[data-run]")
+          let gen = 0
+          const nodes = []
+          const card = {
+            root,
+            viz,
+            node(name, sub) {
+              const n = makeNode(card, name, sub)
+              nodes.push(n)
+              return n
+            },
+            arrow() {
+              return el("div", "arrow", ARROW)
+            },
+            sleep(ms) {
+              const g = gen
+              return new Promise((res, rej) =>
+                setTimeout(() => (g === gen ? res() : rej(Cancel)), ms)
+              )
+            },
+            choose(buttons) {
+              const g = gen
+              return new Promise((res, rej) => {
+                const entries = Object.entries(buttons)
+                const handlers = []
+                const poll = setInterval(() => {
+                  if (g !== gen) {
+                    cleanup()
+                    rej(Cancel)
+                  }
+                }, 80)
+                const cleanup = () => {
+                  clearInterval(poll)
+                  entries.forEach(([, b], i) => {
+                    b.removeEventListener("click", handlers[i])
+                    b.disabled = true
+                    b.classList.remove("ready")
+                  })
+                }
+                entries.forEach(([key, b], i) => {
+                  handlers[i] = () => {
+                    cleanup()
+                    res(key)
+                  }
+                  b.disabled = false
+                  b.classList.add("ready")
+                  b.addEventListener("click", handlers[i])
+                })
+              })
+            },
+            art(file, note) {
+              const empty = arts.querySelector(".empty")
+              if (empty) empty.remove()
+              let li = [...arts.children].find((x) => x.dataset.file === file)
+              if (!li) {
+                li = el("li")
+                li.dataset.file = file
+                arts.append(li)
+              }
+              li.innerHTML = `<span class="f">${file}</span><span class="n">${note}</span>`
+              li.classList.remove("fresh")
+              void li.offsetWidth
+              li.classList.add("fresh")
+            },
+            clearArts() {
+              arts.innerHTML = '<li class="empty">Nothing yet. Press Run.</li>'
+            },
+            reset() {
+              gen++
+              nodes.forEach((n) => n.idle())
+              root.querySelectorAll("[data-approve],[data-back],[data-rerun]").forEach((b) => {
+                b.disabled = true
+                b.classList.remove("ready")
+              })
+              card.clearArts()
+            },
+            async play() {
+              card.reset()
+              runBtn.textContent = "■ Reset"
+              const g = gen
+              try {
+                await scenario.run(card)
+              } catch (e) {
+                if (e !== Cancel) console.error(e)
+              }
+              if (g === gen) runBtn.textContent = "▶ Replay"
+            },
+            stop() {
+              card.reset()
+              runBtn.textContent = "▶ Run"
+            },
+            running: () => runBtn.textContent.startsWith("■")
+          }
+          scenario.build(card)
+          card.clearArts()
+          runBtn.addEventListener("click", () => (card.running() ? card.stop() : card.play()))
+          const seg = root.querySelector("[data-seg]")
+          if (seg) {
+            seg.addEventListener("click", (ev) => {
+              const b = ev.target.closest("button")
+              if (!b) return
+              seg
+                .querySelectorAll("button")
+                .forEach((x) => x.setAttribute("aria-pressed", String(x === b)))
+              scenario.select && scenario.select(b.dataset.v, card)
+              card.play()
+            })
+          }
+          return card
+        }
+
+        const chain = (card, parent, nodes) => {
+          nodes.forEach((n, i) => {
+            if (i) parent.append(card.arrow())
+            parent.append(n.root)
+          })
+        }
+
+        /* ── The basic loop ── */
+        const loop = {
+          build(c) {
+            const row = el("div", "row")
+            this.n = ["plan", "code", "checks", "review", "commit"].map((k) => c.node(k))
+            chain(c, row, this.n)
+            c.viz.append(row)
+          },
+          async run(c) {
+            const [plan, code, checks, review, commit] = this.n
+            plan.run()
+            await c.sleep(1000)
+            plan.done("3 tasks")
+            c.art("plan.md", "three tasks, in order")
+            code.run()
+            await c.sleep(1300)
+            code.done("+84 −12")
+            checks.run()
+            await c.sleep(900)
+            checks.done("4/4 ✓")
+            review.run()
+            await c.sleep(1100)
+            review.fail("No test for an empty statement")
+            c.art("findings.md", "round 1: one issue, sent back as a revision")
+            await c.sleep(1900)
+            checks.idle()
+            review.idle()
+            code.run()
+            code.note("Revision: add the missing test", 1600)
+            await c.sleep(1300)
+            code.done("+97 −12")
+            checks.run()
+            await c.sleep(800)
+            checks.done("5/5 ✓")
+            review.run()
+            await c.sleep(1000)
+            review.done("clean")
+            c.art("findings.md", "round 2: cleared")
+            commit.run()
+            await c.sleep(700)
+            commit.done("a1f3c9e")
+            c.art("git commit", "one commit per reviewed task")
+          }
+        }
+
+        /* ── Wait for a person ── */
+        const approve = {
+          build(c) {
+            const row = el("div", "row")
+            this.n = [c.node("draft plan"), c.node("you"), c.node("build")]
+            chain(c, row, this.n)
+            c.viz.append(row)
+            this.yes = c.root.querySelector("[data-approve]")
+            this.no = c.root.querySelector("[data-back]")
+          },
+          async run(c) {
+            const [draft, you, build] = this.n
+            let round = 1
+            draft.run()
+            await c.sleep(1200)
+            draft.done("8 stories")
+            c.art("plan.md", "8 stories, who owns which files, in what order")
+            for (;;) {
+              you.wait("Read the plan, then decide")
+              const answer = await c.choose({ approve: this.yes, back: this.no })
+              if (answer === "approve") break
+              round++
+              you.idle()
+              draft.run()
+              draft.note("Revising, your edits stay", 1500)
+              await c.sleep(1300)
+              draft.done(round === 2 ? "7 stories" : `7 stories · v${round}`)
+              c.art("plan.md", `revision ${round}: one story merged into another`)
+            }
+            you.done("approved")
+            c.art("plan.md ✓", "approved as written")
+            build.run()
+            await c.sleep(1600)
+            build.done("8/8 merged")
+          }
+        }
+
+        /* ── Parallel stories ── */
+        const parallel = {
+          build(c) {
+            const row = el("div", "row")
+            this.s = [
+              c.node("story 1", "account model"),
+              c.node("story 2", "after 1"),
+              c.node("story 3", "after 1"),
+              c.node("story 4", "after 1"),
+              c.node("story 5", "after 2–4")
+            ]
+            this.epic = c.node("epic", "one branch")
+            const inputs = el("div", "left-row")
+            this.s.forEach((n) => inputs.append(n.root))
+            row.append(inputs, c.arrow(), this.epic.root)
+            c.viz.append(row)
+          },
+          async run(c) {
+            const [s1, s2, s3, s4, s5] = this.s
+            const epic = this.epic
+            let merged = 0
+            const merge = (n, label) => {
+              merged++
+              n.done(label || "merged")
+              c.art("epic branch", `${merged} of 5 stories merged`)
+            }
+            c.art("plan.md", "five stories, their files and dependencies")
+            epic.run()
+            s1.run()
+            await c.sleep(1100)
+            merge(s1)
+            await Promise.all([
+              (async () => {
+                s2.run()
+                await c.sleep(1500)
+                merge(s2)
+              })(),
+              (async () => {
+                s3.run()
+                await c.sleep(1000)
+                s3.fail("Judge: statement totals not covered")
+                c.art("story-3 findings", "judge round 1: one gap, revision added")
+                await c.sleep(1500)
+                s3.run()
+                await c.sleep(1000)
+                merge(s3)
+                c.art("story-3 findings", "judge round 2: cleared")
+              })(),
+              (async () => {
+                s4.run()
+                await c.sleep(1900)
+                merge(s4)
+              })()
+            ])
+            s5.run()
+            await c.sleep(1200)
+            merge(s5)
+            epic.done("5/5 merged")
+            c.art("report.md", "what ran, where time went, what it cost")
+          }
+        }
+
+        /* ── Interrupt and resume ── */
+        const resume = {
+          build(c) {
+            const row = el("div", "row")
+            this.n = [1, 2, 3, 4, 5].map((i) => c.node(`task ${i}`))
+            chain(c, row, this.n)
+            c.viz.append(row)
+            this.again = c.root.querySelector("[data-rerun]")
+          },
+          async run(c) {
+            const t = this.n
+            for (let i = 0; i < 2; i++) {
+              t[i].run()
+              await c.sleep(900)
+              t[i].done("✓")
+              c.art("progress file", `${i + 1} of 5 tasks committed`)
+            }
+            t[2].run()
+            await c.sleep(1100)
+            t[2].interrupt("The agent went offline")
+            c.art("progress file", "2 of 5 committed, task 3 unfinished")
+            await c.choose({ rerun: this.again })
+            t[0].flash()
+            t[0].note("Already done, kept", 1200)
+            await c.sleep(250)
+            t[1].flash()
+            await c.sleep(500)
+            for (let i = 2; i < 5; i++) {
+              t[i].run()
+              await c.sleep(950)
+              t[i].done("✓")
+              c.art("progress file", `${i + 1} of 5 tasks committed`)
+            }
+          }
+        }
+
+        /* ── Swap the coder ── */
+        const swap = {
+          coder: "Claude",
+          pace: { Claude: 1, Codex: 0.9, Gemini: 1.1, "local model": 1.6 },
+          build(c) {
+            const row = el("div", "row")
+            this.n = [
+              c.node("plan", "planner"),
+              c.node("code", "Claude"),
+              c.node("checks", "your build"),
+              c.node("review", "reviewer"),
+              c.node("judge", "judge")
+            ]
+            chain(c, row, this.n)
+            c.viz.append(row)
+          },
+          select(v) {
+            this.coder = v
+            this.n[1].sublabel(v)
+          },
+          async run(c) {
+            const [plan, code, checks, review, judge] = this.n
+            const p = this.pace[this.coder]
+            plan.run()
+            await c.sleep(900)
+            plan.done("4 tasks")
+            c.art("plan.md", "same plan format")
+            code.run()
+            await c.sleep(1400 * p)
+            code.done(`by ${this.coder}`)
+            checks.run()
+            await c.sleep(800)
+            checks.done("✓")
+            review.run()
+            await c.sleep(1000)
+            review.done("clean")
+            c.art("findings.md", "same review lenses")
+            judge.run()
+            await c.sleep(900)
+            judge.done("9/10")
+            c.art("verdict", `same rubric, whoever wrote the code (${this.coder})`)
+          }
+        }
+
+        /* ── Modernization ── */
+        const KITS = {
+          cobol: {
+            survey: "412 programs",
+            spec: "spec · 412",
+            impl: "61 services",
+            verify: "1,204 / 1,204",
+            cards: "COBOL idioms → Java"
+          },
+          jsp: {
+            survey: "96 pages",
+            spec: "spec · 96",
+            impl: "41 screens",
+            verify: "388 / 388",
+            cards: "JSP tags → React"
+          },
+          soap: {
+            survey: "38 operations",
+            spec: "spec · 38",
+            impl: "38 endpoints",
+            verify: "212 / 212",
+            cards: "WSDL types → JSON"
+          }
+        }
+        const modern = {
+          kit: "cobol",
+          build(c) {
+            const row = el("div", "row")
+            const legacy = el("div", "left")
+            const lrow = el("div", "left-row")
+            this.l = [c.node("survey"), c.node("extract"), c.node("you", "approve")]
+            chain(c, lrow, this.l)
+            legacy.append(el("span", "left-cap", "legacy side"), lrow)
+            const wall = el("div", "wall", "<span>clean room</span>")
+            const target = el("div", "left")
+            const trow = el("div", "left-row")
+            this.t = [
+              c.node("seed"),
+              c.node("implement"),
+              c.node("verify", "equivalence"),
+              c.node("review")
+            ]
+            chain(c, trow, this.t)
+            target.append(el("span", "left-cap", "new side"), trow)
+            row.append(legacy, wall, target)
+            c.viz.append(row)
+            this.yes = c.root.querySelector("[data-approve]")
+          },
+          select(v) {
+            this.kit = v
+          },
+          async run(c) {
+            const k = KITS[this.kit]
+            const [survey, extract, you] = this.l
+            const [seed, impl, verify, review] = this.t
+            survey.run()
+            await c.sleep(1100)
+            survey.done(k.survey)
+            c.art("inventory", "every program, how they call each other, in waves")
+            extract.run()
+            await c.sleep(1500)
+            extract.done(k.spec)
+            c.art("specification", "rules and scenarios, each traced to its source")
+            you.wait("Approve the specification to cross the wall")
+            await c.choose({ approve: this.yes })
+            you.done("approved")
+            seed.run()
+            await c.sleep(800)
+            seed.done("scaffold")
+            impl.run()
+            impl.note(`Pattern cards: ${k.cards}`, 1800)
+            await c.sleep(1700)
+            impl.done(k.impl)
+            verify.run()
+            await c.sleep(1300)
+            verify.done(k.verify)
+            c.art("equivalence", `recorded behaviour replayed: ${k.verify} identical`)
+            review.run()
+            await c.sleep(1000)
+            review.done("3 lessons")
+            c.art("lessons", "written back into the kit for the next wave")
+          }
+        }
+
+        const cards = [
+          makeCard("loop", loop),
+          makeCard("approve", approve),
+          makeCard("parallel", parallel),
+          makeCard("resume", resume),
+          makeCard("swap", swap),
+          makeCard("modern", modern)
+        ]
+
+        // Each card plays once when it first scrolls into view.
+        const seen = new WeakSet()
+        const io = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((e) => {
+              if (e.isIntersecting && !seen.has(e.target)) {
+                seen.add(e.target)
+                const card = cards.find((c) => c.root === e.target)
+                if (card && !card.running()) card.play()
+              }
+            })
+          },
+          { threshold: 0.35 }
+        )
+        cards.forEach((c) => io.observe(c.root))
+      })()
+    </script>
+  </body>
+</html>
