@@ -1,0 +1,56 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # The deck, and anything placed next to it (images, CSS, fonts).
+      - "docs/presentation/**"
+      # Republish when the workflow that builds the site changes.
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# pages: write and id-token: write are what deploy-pages needs. Enabling
+# Pages itself (Settings → Pages → Source: GitHub Actions) needs a token
+# other than GITHUB_TOKEN, so this workflow cannot flip that setting.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/configure-pages@v6
+
+      - name: Assemble site
+        run: |
+          site="${RUNNER_TEMP}/site"
+          rm -rf "$site"
+          mkdir -p "$site"
+          # Site root is the presentation directory, so a relative image, style,
+          # or script next to the HTML resolves at /llm4ts/<file>. index.html
+          # is the same deck, so the project URL opens it directly.
+          cp -a docs/presentation/. "$site/"
+          cp docs/presentation/agentic-flows-in-motion.html "$site/index.html"
+          : > "$site/.nojekyll"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/site
+          # .nojekyll is a dotfile; the uploader omits those unless asked.
+          include-hidden-files: true
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
