@@ -223,6 +223,7 @@ the packed tarballs, and publishes with provenance.
 
 ## Documentation
 
+- [Agentic Flows in Motion](https://riccardomerolla.github.io/llm4ts/) — the presentation, published from [docs/presentation/agentic-flows-in-motion.html](docs/presentation/agentic-flows-in-motion.html)
 - [Getting started guide](docs/guide/README.md)
 - [Flow authoring guide](docs/flow-authoring.md)
 - [API guide](docs/api.md)
