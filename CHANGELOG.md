@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.45.0
+
+epic-stories takes its gates and worktree setup from the selected pack.
 
 - **epic-stories runs the selected pack's gates.** With `llm4ts run --pack`
   (or `LLM4TS_PACK`), the pack's `## Gates` are the gate commands, in the
