@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+- **epic-stories runs the selected pack's gates.** With `llm4ts run --pack`
+  (or `LLM4TS_PACK`), the pack's `## Gates` are the gate commands, in the
+  order written; an empty section runs none. `LLM4TS_GATES` still overrides
+  them, and with no pack the pnpm defaults are unchanged. A pack that cannot
+  be opened fails the run before planning. If `LLM4TS_PACK` is exported in
+  your shell for the modernize flows, epic-stories now uses that pack's gates
+  too (for `cobol-springboot`, the `mvn` gates instead of pnpm).
+- **Packs declare their worktree setup.** A pack's `setup:` field is the
+  command epic-stories runs in each fresh story worktree before its gates.
+  With a pack selected and no `setup:`, there is no setup step, so an ACE
+  or Maven target no longer fails on `pnpm install --offline`.
+  `LLM4TS_WORKTREE_SETUP` still overrides it, and with no pack the default
+  is unchanged. `j2ee-nextjs-spa` and `scala-ts` declare
+  `pnpm install --offline`, `jsp-nextjs` declares `npm install --offline`, and
+  `soap-epic` now prints `llm4ts run epic-stories --pack ace12-rest` instead
+  of the `LLM4TS_GATES=… LLM4TS_WORKTREE_SETUP=` workaround.
+- **`Pack.gateList`** (`@llm4ts/flow/Pack`) lists a pack's gate commands in
+  the order written. `Pack.gates` is keyed by name, which puts a gate named
+  `1` or `2` first. The field is optional, so a hand-built `Pack` still
+  type-checks.
+
 ## 2.44.1
 
 - **The Gemini bridge's model mode works against Google's API.** With every

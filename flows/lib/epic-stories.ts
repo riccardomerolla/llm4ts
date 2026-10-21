@@ -31,6 +31,7 @@ import {
 } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { nodePreflight } from "@llm4ts/flow/NodePreflight"
+import type { Pack } from "@llm4ts/flow/Pack"
 import { applyApprovedRetros } from "@llm4ts/flow/Retro"
 import { statusPaths, type GitToolShape } from "@llm4ts/flow/GitTool"
 import { TranscriptEntry } from "@llm4ts/flow/Transcript"
@@ -92,6 +93,7 @@ import {
   asReadOnly,
   nodePlainFileStore,
   nodeProcessExecutor,
+  openPack,
   resolveFlowInput,
   runNode,
   stage,
@@ -165,9 +167,11 @@ export const epicUsage = [
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
   "       LLM4TS_CODER (default pi) implements; LLM4TS_REASONING_MODEL / LLM4TS_CODER_MODEL",
   "       pick their models (pi: provider/model); LLM4TS_CODER_FLAGS / LLM4TS_REASONING_FLAGS",
-  "       add CLI flags (key=value;key=value). LLM4TS_GATES overrides the gate commands",
-  "       (default: those of pnpm typecheck|lint|test|build the app's package.json defines);",
-  "       LLM4TS_WORKTREE_SETUP (default: pnpm install --offline) prepares each worktree;",
+  "       add CLI flags (key=value;key=value). LLM4TS_PACK (or llm4ts run --pack) uses",
+  "       that pack's gates; LLM4TS_GATES overrides them (otherwise: pnpm typecheck|lint|",
+  "       test|build, each only when the app's package.json defines that script);",
+  "       LLM4TS_WORKTREE_SETUP prepares each worktree (default: the pack's setup:, or",
+  "       pnpm install --offline with no pack; empty: none);",
   "       LLM4TS_WORKTREE_ROOT (default: <repo>.worktrees beside the repository) holds them;",
   "       LLM4TS_APP_DIR (e.g. frontend) runs setup and gates in that subfolder; unset, a",
   "       repository without a root package.json uses its one subfolder that has one;",
@@ -1615,15 +1619,18 @@ export const defaultWorktreeSetup: ReadonlyArray<string> = ["pnpm", "install", "
 
 /**
  * `LLM4TS_WORKTREE_SETUP="pnpm install --offline"` (the default) prepares
- * each story worktree; an empty value disables the step. Offline by default:
- * the runbook warms the pnpm store once, and a workshop stage has no network.
+ * each story worktree; an empty value disables the step. Unset, a selected
+ * pack's `setup:` is the command, and a pack without one runs none: its
+ * target is not assumed to be a pnpm project. Offline by default: the
+ * runbook warms the pnpm store once, and a workshop stage has no network.
  */
 export const worktreeSetupCommand = (
-  environment: Readonly<Record<string, string | undefined>>
+  environment: Readonly<Record<string, string | undefined>>,
+  pack?: Pick<Pack, "setup">
 ): ReadonlyArray<string> | undefined => {
   const raw = environment.LLM4TS_WORKTREE_SETUP
   if (raw === undefined) {
-    return defaultWorktreeSetup
+    return pack === undefined ? defaultWorktreeSetup : pack.setup
   }
   const parts = raw
     .trim()
@@ -1696,30 +1703,99 @@ export const appScripts = (
   )
 
 /**
- * `LLM4TS_GATES="pnpm typecheck;pnpm test"` overrides the four defaults.
- * Without it, a default gate runs only when the application defines that
- * script: a Next.js app has `lint` and `build` but seldom `typecheck`, and
+ * `LLM4TS_GATES="pnpm typecheck;pnpm test"` wins. Otherwise `packGates` —
+ * the selected pack's `## Gates`, in manifest order — are the commands, and
+ * an empty list stays empty (it is not filled with the defaults). With no
+ * pack, a default gate runs only when the application defines that script:
+ * a Next.js app has `lint` and `build` but seldom `typecheck`, and
  * `pnpm typecheck` there fails with "Command not found", not a red gate.
  */
 export const gateCommands = (
   environment: Readonly<Record<string, string | undefined>>,
-  scripts?: ReadonlySet<string>
+  scripts?: ReadonlySet<string>,
+  packGates?: ReadonlyArray<ReadonlyArray<string>>
 ): ReadonlyArray<ReadonlyArray<string>> => {
   const raw = environment.LLM4TS_GATES?.trim()
-  if (raw === undefined || raw.length === 0) {
-    return scripts === undefined
-      ? defaultGateCommands
-      : defaultGateCommands.filter((command) => scripts.has(command[1] ?? ""))
+  if (raw !== undefined && raw.length > 0) {
+    return raw
+      .split(";")
+      .map((command) =>
+        command
+          .trim()
+          .split(/\s+/)
+          .filter((part) => part.length > 0)
+      )
+      .filter((command) => command.length > 0)
   }
-  return raw
-    .split(";")
-    .map((command) =>
-      command
-        .trim()
-        .split(/\s+/)
-        .filter((part) => part.length > 0)
-    )
-    .filter((command) => command.length > 0)
+  if (packGates !== undefined) {
+    return packGates
+  }
+  return scripts === undefined
+    ? defaultGateCommands
+    : defaultGateCommands.filter((command) => scripts.has(command[1] ?? ""))
+}
+
+/** What one epic-stories run will execute, and where the list came from. */
+export interface EpicGateCommands {
+  readonly commands: ReadonlyArray<ReadonlyArray<string>>
+  readonly source: "override" | "pack" | "defaults"
+  readonly packName?: string
+}
+
+/**
+ * The pack `LLM4TS_PACK` names (what `llm4ts run --pack` forwards), opened
+ * before any seat is resolved so a wrong name fails before the planner
+ * spends anything. Unset, there is none — a pack is never implied:
+ * `openPack` would otherwise load `cobol-springboot`, which is the
+ * modernization flows' default, not an epic's.
+ */
+export const selectedPack = (options: {
+  readonly environment: Readonly<Record<string, string | undefined>>
+  readonly launchDir: string
+  readonly flowDir: string
+}) =>
+  (options.environment.LLM4TS_PACK?.trim() ?? "").length === 0
+    ? Effect.succeed(undefined)
+    : Effect.map(
+        openPack({
+          environment: options.environment,
+          launchDir: options.launchDir,
+          flowDir: options.flowDir
+        }),
+        (opened): Pack => opened.pack
+      )
+
+/** The run's gates: `LLM4TS_GATES`, else the selected pack's `## Gates`, else the defaults. */
+export const epicGateCommands = (options: {
+  readonly environment: Readonly<Record<string, string | undefined>>
+  readonly scripts: ReadonlySet<string> | undefined
+  readonly pack: Pack | undefined
+}): EpicGateCommands => {
+  const override = (options.environment.LLM4TS_GATES?.trim() ?? "").length > 0
+  return {
+    commands: gateCommands(
+      options.environment,
+      options.scripts,
+      options.pack === undefined
+        ? undefined
+        : (options.pack.gateList ?? Object.values(options.pack.gates))
+    ),
+    source: override ? "override" : options.pack === undefined ? "defaults" : "pack",
+    ...(options.pack === undefined ? {} : { packName: options.pack.name })
+  }
+}
+
+/** The line the run prints before the first gate. */
+export const gateListMessage = (resolved: EpicGateCommands): string => {
+  if (resolved.commands.length === 0) {
+    return resolved.source === "pack"
+      ? `gates: none (pack '${resolved.packName ?? ""}' defines none; set LLM4TS_GATES)`
+      : "gates: none (the app defines none of typecheck, lint, test, build; set LLM4TS_GATES)"
+  }
+  const listed = resolved.commands.map((command) => command.join(" ")).join(" · ")
+  return resolved.source === "pack"
+    ? `gates: ${listed} (pack ${resolved.packName})`
+    : `gates: ${listed}`
 }
 
 /** The gate runner lives in `@llm4ts/flow/Gates` (ADR 0027); re-exported for forks and tests. */
@@ -2089,6 +2165,12 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             ? choice.request
             : choice.prompt
     }
+    // The pack whose `## Gates` the run uses; a wrong name fails here, not after planning.
+    const pack = yield* selectedPack({
+      environment: process.env,
+      launchDir: given.workspace,
+      flowDir: import.meta.dirname
+    })
     const coderFlags = flagsFromEnvironment(process.env.LLM4TS_CODER_FLAGS)
     const reasoning = withExtraFlags(
       withOptionalModel(
@@ -2312,18 +2394,13 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               })
             )
           }
-          const commands = gateCommands(
-            process.env,
-            yield* appScripts(files, join(input.workDir, appDir))
-          )
-          yield* events.publish(
-            Info.make({
-              message:
-                commands.length === 0
-                  ? "gates: none (the app defines none of typecheck, lint, test, build; set LLM4TS_GATES)"
-                  : `gates: ${commands.map((command) => command.join(" ")).join(" · ")}`
-            })
-          )
+          const resolvedGates = epicGateCommands({
+            environment: process.env,
+            scripts: yield* appScripts(files, join(input.workDir, appDir)),
+            pack
+          })
+          const commands = resolvedGates.commands
+          yield* events.publish(Info.make({ message: gateListMessage(resolvedGates) }))
           // The Node the gates would run on is the one on PATH, not the one
           // the application pins; a mismatch is a red first story that says
           // nothing about Node. Ask now, and name both.
@@ -2422,7 +2499,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             gatesIn(nodeProcessExecutor, events, commands, gateRunOptions(process.env))
           )
           const testCommand = testGateCommand(commands)
-          const setupCommand = worktreeSetupCommand(process.env)
+          const setupCommand = worktreeSetupCommand(process.env, pack)
           const healthUrl = serverHealthUrl(localServer, process.env)
           // The executor over one unit: the epic's plan or one refine round.
           const runUnit = (work: {

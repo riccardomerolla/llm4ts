@@ -310,8 +310,16 @@ runs.
 
 ## Gates
 
-The target's gate commands (typecheck, lint, test, build, or `LLM4TS_GATES`)
-run after every task and after every merge (ADR 0013). Since ADR 0027 a gate
+The target's gate commands run after every task and after every merge
+(ADR 0013). `epic-stories` (and `epic-stories-board`) takes them from the
+pack selected with `llm4ts run --pack` or `LLM4TS_PACK`: every `## Gates`
+line, in the order written, and an empty section runs none. `LLM4TS_GATES`
+overrides that list. With neither set, the commands are `pnpm typecheck`,
+`pnpm lint`, `pnpm test`, and `pnpm build`, each only when the application's
+`package.json` defines that script. Each story worktree is prepared first by
+the pack's `setup:` command (none when the pack declares none), or by
+`pnpm install --offline` with no pack; `LLM4TS_WORKTREE_SETUP` overrides
+both, and an empty value skips setup. Since ADR 0027 a gate
 has a timeout, a class and a memory: the gates' result on the code a change
 started from is recorded as a baseline under the run's state folder
 (`gates/baselines.json`, keyed by commit, app dir and commands), and a change

@@ -112,9 +112,12 @@ Review `.llm4ts/epics/<epic-id>/plan.md` in the ACE repository (edit it to
 re-plan), then run the command `plan` printed:
 
 ```bash
-LLM4TS_GATES="bash scripts/ace-gates.sh build;bash scripts/ace-gates.sh test" LLM4TS_WORKTREE_SETUP= \
-  llm4ts run epic-stories --repo ~/work/conti-ace -- --concurrency 2 "<the epic sentence>"
+llm4ts run epic-stories --pack ace12-rest --repo ~/work/conti-ace -- \
+  --concurrency 2 "<the epic sentence>"
 ```
+
+The pack supplies the gates (`bash scripts/ace-gates.sh build` and `test`)
+and declares no `setup:`, so the story worktrees skip `pnpm install`.
 
 Each story lands on its own branch and merges into `epic/<epic-id>` after its
 gates and judge pass; nothing reaches `main` without a human. The board and

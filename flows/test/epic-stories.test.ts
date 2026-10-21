@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -54,7 +54,10 @@ import {
   renderEpicList,
   type EpicSummary,
   defaultGateCommands,
+  epicGateCommands,
   epicIdFor,
+  selectedPack,
+  gateListMessage,
   flagsFromEnvironment,
   fixPromptOptions,
   gateCommands,
@@ -103,6 +106,24 @@ const fixture = readFileSync(
   ),
   "utf8"
 )
+
+const epicFlowDir = join(dirname(fileURLToPath(import.meta.url)), "..", "lib")
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
+
+// Scoped, and doubling as XDG_CONFIG_HOME so the developer's global kits stay out of the lookup.
+const tempRoot = Effect.acquireRelease(
+  Effect.promise(() => mkdtemp(join(tmpdir(), "llm4ts-epic-gates-"))),
+  (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true }))
+)
+
+const writePack = (root: string, name: string, sections: string): void => {
+  const directory = join(root, "packs", name)
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(
+    join(directory, "pack.md"),
+    [`# Pack: ${name}`, "", "source: soap", "", sections, ""].join("\n")
+  )
+}
 
 const unused = InvalidRequestError.make({ message: "unused in test" })
 const unusedFlow: Effect.Effect<never, FlowError> = Effect.fail(
@@ -407,6 +428,147 @@ describe("epic-stories flags and seats", () => {
     })
   )
 
+  it("keeps an explicit pack gate list, including an empty one, ahead of the defaults", () => {
+    const pack = [
+      ["bash", "scripts/ace-gates.sh", "build"],
+      ["bash", "scripts/ace-gates.sh", "test"]
+    ]
+    const scripts = new Set(["typecheck", "lint", "test", "build"])
+    assert.deepStrictEqual(gateCommands({}, scripts, pack), pack)
+    assert.deepStrictEqual(gateCommands({}, new Set(["lint"]), []), [])
+    assert.deepStrictEqual(
+      gateCommands({ LLM4TS_GATES: "cargo check --workspace" }, scripts, pack),
+      [["cargo", "check", "--workspace"]]
+    )
+    assert.strictEqual(
+      gateListMessage({ commands: pack, source: "pack", packName: "ace12-rest" }),
+      "gates: bash scripts/ace-gates.sh build · bash scripts/ace-gates.sh test (pack ace12-rest)"
+    )
+    assert.strictEqual(
+      gateListMessage({ commands: [], source: "pack", packName: "ace12-rest" }),
+      "gates: none (pack 'ace12-rest' defines none; set LLM4TS_GATES)"
+    )
+  })
+
+  it.effect("uses the selected pack's gates, not the pnpm defaults", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* tempRoot
+        const scripts = new Set(["typecheck", "lint", "test", "build"])
+        const environment = { XDG_CONFIG_HOME: root }
+        const ace = { ...environment, LLM4TS_PACK: "ace12-rest" }
+        const selected = epicGateCommands({
+          environment: ace,
+          scripts,
+          pack: yield* selectedPack({ environment: ace, launchDir: repoRoot, flowDir: epicFlowDir })
+        })
+        assert.strictEqual(selected.source, "pack")
+        assert.strictEqual(selected.packName, "ace12-rest")
+        assert.deepStrictEqual(selected.commands, [
+          ["bash", "scripts/ace-gates.sh", "build"],
+          ["bash", "scripts/ace-gates.sh", "test"]
+        ])
+        assert.strictEqual(
+          gateListMessage(selected),
+          "gates: bash scripts/ace-gates.sh build · bash scripts/ace-gates.sh test (pack ace12-rest)"
+        )
+
+        writePack(
+          root,
+          "custom",
+          ["## Gates", "", "- zebra: echo zebra", "- 2: echo two", "- alpha: echo alpha"].join("\n")
+        )
+        const custom = { ...environment, LLM4TS_PACK: "packs/custom" }
+        const ordered = epicGateCommands({
+          environment: custom,
+          // A script filter that would keep only `pnpm lint` must not touch pack gates.
+          scripts: new Set(["lint"]),
+          pack: yield* selectedPack({ environment: custom, launchDir: root, flowDir: root })
+        })
+        // Manifest order, though a record would list the integer-like `2` first.
+        assert.deepStrictEqual(ordered.commands, [
+          ["echo", "zebra"],
+          ["echo", "two"],
+          ["echo", "alpha"]
+        ])
+        assert.strictEqual(ordered.source, "pack")
+
+        writePack(root, "empty", "")
+        const emptyEnvironment = { ...environment, LLM4TS_PACK: "packs/empty" }
+        const empty = epicGateCommands({
+          environment: emptyEnvironment,
+          scripts,
+          pack: yield* selectedPack({
+            environment: emptyEnvironment,
+            launchDir: root,
+            flowDir: root
+          })
+        })
+        assert.deepStrictEqual(empty.commands, [])
+        assert.strictEqual(empty.source, "pack")
+        assert.strictEqual(
+          gateListMessage(empty),
+          "gates: none (pack 'empty' defines none; set LLM4TS_GATES)"
+        )
+
+        const both = { ...ace, LLM4TS_GATES: "cargo check --workspace" }
+        const overridden = epicGateCommands({
+          environment: both,
+          scripts,
+          pack: yield* selectedPack({
+            environment: both,
+            launchDir: repoRoot,
+            flowDir: epicFlowDir
+          })
+        })
+        assert.strictEqual(overridden.source, "override")
+        assert.deepStrictEqual(overridden.commands, [["cargo", "check", "--workspace"]])
+      })
+    )
+  )
+
+  it.effect("leaves the pnpm defaults in place when no pack was selected", () =>
+    Effect.gen(function* () {
+      const pack = yield* selectedPack({
+        environment: {},
+        launchDir: repoRoot,
+        flowDir: epicFlowDir
+      })
+      assert.isUndefined(pack)
+      const resolved = epicGateCommands({
+        environment: {},
+        scripts: new Set(["lint", "build"]),
+        pack
+      })
+      assert.strictEqual(resolved.source, "defaults")
+      assert.isUndefined(resolved.packName)
+      assert.deepStrictEqual(resolved.commands, [
+        ["pnpm", "lint"],
+        ["pnpm", "build"]
+      ])
+    })
+  )
+
+  it.effect("fails when the selected pack cannot be opened, even if LLM4TS_GATES is set", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* tempRoot
+        const error = yield* Effect.flip(
+          selectedPack({
+            environment: {
+              XDG_CONFIG_HOME: root,
+              LLM4TS_PACK: "no-such-pack",
+              LLM4TS_GATES: "cargo test"
+            },
+            launchDir: root,
+            flowDir: root
+          })
+        )
+        assert.include(error.message, "no-such-pack")
+      })
+    )
+  )
+
   it.effect("gates stop at the first red command", () =>
     Effect.gen(function* () {
       const events = yield* makeFlowEventHub()
@@ -449,6 +611,16 @@ describe("epic-stories flags and seats", () => {
         "npm",
         "ci"
       ])
+      // A selected pack names its own setup, or none; the variable still wins.
+      const ace = {}
+      const spa = { setup: ["pnpm", "install", "--offline"] }
+      assert.isUndefined(worktreeSetupCommand({}, ace))
+      assert.deepStrictEqual(worktreeSetupCommand({}, spa), ["pnpm", "install", "--offline"])
+      assert.deepStrictEqual(worktreeSetupCommand({ LLM4TS_WORKTREE_SETUP: "npm ci" }, ace), [
+        "npm",
+        "ci"
+      ])
+      assert.isUndefined(worktreeSetupCommand({ LLM4TS_WORKTREE_SETUP: "" }, spa))
       const events = yield* makeFlowEventHub()
       const fake = yield* makeFakeProcessExecutor({
         responses: new Map([

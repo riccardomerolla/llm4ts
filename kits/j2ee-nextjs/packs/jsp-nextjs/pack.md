@@ -6,6 +6,7 @@ sources: .*\.(jsp|java|xml)
 programs: .*\.(jsp|java)
 specs-dir: docs/specs
 features-dir: features
+setup: npm install --offline
 
 ## Gates
 

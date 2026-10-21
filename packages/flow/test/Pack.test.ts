@@ -74,6 +74,41 @@ unit: CALL '([^']+)'
     })
   )
 
+  it.effect("lists gates in manifest order, even when a name looks like a number", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "pack/pack.md",
+        "# Pack: ordered\n\nsource: soap\n\n## Gates\n\n- zebra: echo zebra\n- 2: echo two\n- 1: echo one\n"
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      assert.deepStrictEqual(pack.gateList, [
+        ["echo", "zebra"],
+        ["echo", "two"],
+        ["echo", "one"]
+      ])
+      // The record itself cannot keep that order: integer-like keys come first.
+      assert.deepStrictEqual(Object.keys(pack.gates), ["1", "2", "zebra"])
+    })
+  )
+
+  it.effect("reads an optional setup command; absent means the target needs none", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "spa/pack.md",
+        "# Pack: spa\n\nsource: jsp\nsetup: pnpm install --offline\n\n## Gates\n\n- test: pnpm test\n"
+      )
+      yield* workspace.write("ace/pack.md", "# Pack: ace\n\nsource: soap\n")
+      assert.deepStrictEqual((yield* loadPack(workspace, "spa")).setup, [
+        "pnpm",
+        "install",
+        "--offline"
+      ])
+      assert.isUndefined((yield* loadPack(workspace, "ace")).setup)
+    })
+  )
+
   it.effect("leaves conventions undefined when conventions.md is absent", () =>
     Effect.gen(function* () {
       const workspace = yield* makeMemoryWorkspace()

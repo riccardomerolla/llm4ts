@@ -7,6 +7,7 @@ target: {{dir}}/{{base}}.ts
 comment: //
 specs-dir: docs/port
 features-dir: docs/port/features
+setup: pnpm install --offline
 
 ## Gates
 
