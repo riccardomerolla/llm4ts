@@ -31,6 +31,7 @@ import {
 } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { nodePreflight } from "@llm4ts/flow/NodePreflight"
+import type { Pack } from "@llm4ts/flow/Pack"
 import { applyApprovedRetros } from "@llm4ts/flow/Retro"
 import { statusPaths, type GitToolShape } from "@llm4ts/flow/GitTool"
 import { TranscriptEntry } from "@llm4ts/flow/Transcript"
@@ -1738,38 +1739,45 @@ export interface EpicGateCommands {
 }
 
 /**
- * The run's gates. `LLM4TS_PACK` (what `llm4ts run --pack` forwards) loads
- * that pack and uses its `## Gates`. Unset, the pnpm defaults apply — a
- * pack is never implied. `openPack` would otherwise load `cobol-springboot`,
- * which is the modernization flows' default, not an epic's.
+ * The pack `LLM4TS_PACK` names (what `llm4ts run --pack` forwards), opened
+ * before any seat is resolved so a wrong name fails before the planner
+ * spends anything. Unset, there is none — a pack is never implied:
+ * `openPack` would otherwise load `cobol-springboot`, which is the
+ * modernization flows' default, not an epic's.
  */
-export const epicGateCommands = (options: {
+export const selectedPack = (options: {
   readonly environment: Readonly<Record<string, string | undefined>>
-  readonly scripts: ReadonlySet<string> | undefined
   readonly launchDir: string
   readonly flowDir: string
 }) =>
-  Effect.gen(function* () {
-    const reference = options.environment.LLM4TS_PACK?.trim() ?? ""
-    const opened =
-      reference.length === 0
-        ? undefined
-        : yield* openPack({
-            environment: options.environment,
-            launchDir: options.launchDir,
-            flowDir: options.flowDir
-          })
-    const override = (options.environment.LLM4TS_GATES?.trim() ?? "").length > 0
-    return {
-      commands: gateCommands(
-        options.environment,
-        options.scripts,
-        opened === undefined ? undefined : Object.values(opened.pack.gates)
-      ),
-      source: override ? "override" : opened === undefined ? "defaults" : "pack",
-      ...(opened === undefined ? {} : { packName: opened.pack.name })
-    } satisfies EpicGateCommands
-  })
+  (options.environment.LLM4TS_PACK?.trim() ?? "").length === 0
+    ? Effect.succeed(undefined)
+    : Effect.map(
+        openPack({
+          environment: options.environment,
+          launchDir: options.launchDir,
+          flowDir: options.flowDir
+        }),
+        (opened): Pack => opened.pack
+      )
+
+/** The run's gates: `LLM4TS_GATES`, else the selected pack's `## Gates`, else the defaults. */
+export const epicGateCommands = (options: {
+  readonly environment: Readonly<Record<string, string | undefined>>
+  readonly scripts: ReadonlySet<string> | undefined
+  readonly pack: Pack | undefined
+}): EpicGateCommands => {
+  const override = (options.environment.LLM4TS_GATES?.trim() ?? "").length > 0
+  return {
+    commands: gateCommands(
+      options.environment,
+      options.scripts,
+      options.pack === undefined ? undefined : Object.values(options.pack.gates)
+    ),
+    source: override ? "override" : options.pack === undefined ? "defaults" : "pack",
+    ...(options.pack === undefined ? {} : { packName: options.pack.name })
+  }
+}
 
 /** The line the run prints before the first gate. */
 export const gateListMessage = (resolved: EpicGateCommands): string => {
@@ -2151,6 +2159,12 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             ? choice.request
             : choice.prompt
     }
+    // The pack whose `## Gates` the run uses; a wrong name fails here, not after planning.
+    const pack = yield* selectedPack({
+      environment: process.env,
+      launchDir: given.workspace,
+      flowDir: import.meta.dirname
+    })
     const coderFlags = flagsFromEnvironment(process.env.LLM4TS_CODER_FLAGS)
     const reasoning = withExtraFlags(
       withOptionalModel(
@@ -2374,11 +2388,10 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               })
             )
           }
-          const resolvedGates = yield* epicGateCommands({
+          const resolvedGates = epicGateCommands({
             environment: process.env,
             scripts: yield* appScripts(files, join(input.workDir, appDir)),
-            launchDir: input.workspace,
-            flowDir: import.meta.dirname
+            pack
           })
           const commands = resolvedGates.commands
           yield* events.publish(Info.make({ message: gateListMessage(resolvedGates) }))
