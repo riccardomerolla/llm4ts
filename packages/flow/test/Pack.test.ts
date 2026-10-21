@@ -74,6 +74,24 @@ unit: CALL '([^']+)'
     })
   )
 
+  it.effect("lists gates in manifest order, even when a name looks like a number", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "pack/pack.md",
+        "# Pack: ordered\n\nsource: soap\n\n## Gates\n\n- zebra: echo zebra\n- 2: echo two\n- 1: echo one\n"
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      assert.deepStrictEqual(pack.gateList, [
+        ["echo", "zebra"],
+        ["echo", "two"],
+        ["echo", "one"]
+      ])
+      // The record itself cannot keep that order: integer-like keys come first.
+      assert.deepStrictEqual(Object.keys(pack.gates), ["1", "2", "zebra"])
+    })
+  )
+
   it.effect("leaves conventions undefined when conventions.md is absent", () =>
     Effect.gen(function* () {
       const workspace = yield* makeMemoryWorkspace()

@@ -1772,7 +1772,9 @@ export const epicGateCommands = (options: {
     commands: gateCommands(
       options.environment,
       options.scripts,
-      options.pack === undefined ? undefined : Object.values(options.pack.gates)
+      options.pack === undefined
+        ? undefined
+        : (options.pack.gateList ?? Object.values(options.pack.gates))
     ),
     source: override ? "override" : options.pack === undefined ? "defaults" : "pack",
     ...(options.pack === undefined ? {} : { packName: options.pack.name })

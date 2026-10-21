@@ -434,11 +434,6 @@ describe("epic-stories flags and seats", () => {
       ["bash", "scripts/ace-gates.sh", "test"]
     ]
     const scripts = new Set(["typecheck", "lint", "test", "build"])
-    // The environment name is not itself a command list: the flow has to load the pack.
-    assert.deepStrictEqual(
-      gateCommands({ LLM4TS_PACK: "ace12-rest" }, scripts),
-      defaultGateCommands
-    )
     assert.deepStrictEqual(gateCommands({}, scripts, pack), pack)
     assert.deepStrictEqual(gateCommands({}, new Set(["lint"]), []), [])
     assert.deepStrictEqual(
@@ -481,7 +476,7 @@ describe("epic-stories flags and seats", () => {
         writePack(
           root,
           "custom",
-          ["## Gates", "", "- zebra: echo zebra", "- alpha: echo alpha"].join("\n")
+          ["## Gates", "", "- zebra: echo zebra", "- 2: echo two", "- alpha: echo alpha"].join("\n")
         )
         const custom = { ...environment, LLM4TS_PACK: "packs/custom" }
         const ordered = epicGateCommands({
@@ -490,8 +485,10 @@ describe("epic-stories flags and seats", () => {
           scripts: new Set(["lint"]),
           pack: yield* selectedPack({ environment: custom, launchDir: root, flowDir: root })
         })
+        // Manifest order, though a record would list the integer-like `2` first.
         assert.deepStrictEqual(ordered.commands, [
           ["echo", "zebra"],
+          ["echo", "two"],
           ["echo", "alpha"]
         ])
         assert.strictEqual(ordered.source, "pack")

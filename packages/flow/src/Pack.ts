@@ -33,6 +33,10 @@ export interface Pack {
   readonly specsDir: string
   readonly featuresDir: string
   readonly gates: Readonly<Record<string, ReadonlyArray<string>>>
+  // The `## Gates` commands in the order written. `gates` is keyed by name,
+  // and a record lists integer-like keys ("1", "2") first, whatever the
+  // manifest says. Optional so a hand-built Pack still type-checks.
+  readonly gateList?: ReadonlyArray<ReadonlyArray<string>>
   readonly replay: ReadonlyArray<string> | undefined
   readonly equivalence: ComparisonPolicy
   readonly judgeDimensions: ReadonlyArray<Dimension>
@@ -187,15 +191,16 @@ const section = (sections: ReadonlyArray<string>, title: string): string | undef
     .join("\n")
     .trim()
 
+const namedEntries = (body: string | undefined): ReadonlyArray<readonly [string, string]> =>
+  (body ?? "").split(/\r?\n/).flatMap((line) => {
+    const match = /^- ([^:]+): (.+)$/.exec(line)
+    return match?.[1] === undefined || match[2] === undefined
+      ? []
+      : [[match[1].trim(), match[2].trim()] as const]
+  })
+
 const namedItems = (body: string | undefined): Readonly<Record<string, string>> =>
-  Object.fromEntries(
-    (body ?? "").split(/\r?\n/).flatMap((line) => {
-      const match = /^- ([^:]+): (.+)$/.exec(line)
-      return match?.[1] === undefined || match[2] === undefined
-        ? []
-        : [[match[1].trim(), match[2].trim()]]
-    })
-  )
+  Object.fromEntries(namedEntries(body))
 
 const rules = (sections: ReadonlyArray<string>, prefix: string): ReadonlyArray<CoverageRule> =>
   sections.flatMap((candidate) => {
@@ -277,7 +282,7 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     Effect.map((text) => text.trim()),
     Effect.catch(() => Effect.succeed(undefined))
   )
-  const gateValues = namedItems(section(manifest.sections, "Gates"))
+  const gateEntries = namedEntries(section(manifest.sections, "Gates"))
   const equivalenceValues = namedItems(section(manifest.sections, "Equivalence"))
   const ordering: ComparisonOrdering =
     equivalenceValues.ordering?.toLowerCase() === "unordered"
@@ -285,8 +290,9 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
       : equivalenceValues.ordering?.toLowerCase() === "per-key"
         ? "PerKey"
         : "Ordered"
+  const gateList = gateEntries.map(([, command]) => command.split(/\s+/))
   const gates = Object.fromEntries(
-    Object.entries(gateValues).map(([name, command]) => [name, command.split(/\s+/)])
+    gateEntries.map(([name, command]) => [name, command.split(/\s+/)])
   )
   const reviewRulesBody = section(manifest.sections, "Review rules")
   const reviewRulesValues = namedItems(reviewRulesBody)
@@ -435,6 +441,7 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     specsDir: fields["specs-dir"] ?? "docs/specs",
     featuresDir: fields["features-dir"] ?? "features",
     gates,
+    gateList,
     replay: fields.replay?.split(/\s+/),
     equivalence: ComparisonPolicy.make({
       ordering,

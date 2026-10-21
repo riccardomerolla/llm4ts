@@ -9,6 +9,10 @@
   be opened fails the run before planning. If `LLM4TS_PACK` is exported in
   your shell for the modernize flows, epic-stories now uses that pack's gates
   too (for `cobol-springboot`, the `mvn` gates instead of pnpm).
+- **`Pack.gateList`** (`@llm4ts/flow/Pack`) lists a pack's gate commands in
+  the order written. `Pack.gates` is keyed by name, which puts a gate named
+  `1` or `2` first. The field is optional, so a hand-built `Pack` still
+  type-checks.
 
 ## 2.44.1
 
