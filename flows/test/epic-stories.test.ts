@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -54,7 +54,9 @@ import {
   renderEpicList,
   type EpicSummary,
   defaultGateCommands,
+  epicGateCommands,
   epicIdFor,
+  gateListMessage,
   flagsFromEnvironment,
   fixPromptOptions,
   gateCommands,
@@ -103,6 +105,18 @@ const fixture = readFileSync(
   ),
   "utf8"
 )
+
+const epicFlowDir = join(dirname(fileURLToPath(import.meta.url)), "..", "lib")
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
+
+const writePack = (root: string, name: string, sections: string): void => {
+  const directory = join(root, "packs", name)
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(
+    join(directory, "pack.md"),
+    [`# Pack: ${name}`, "", "source: soap", "", sections, ""].join("\n")
+  )
+}
 
 const unused = InvalidRequestError.make({ message: "unused in test" })
 const unusedFlow: Effect.Effect<never, FlowError> = Effect.fail(
@@ -404,6 +418,137 @@ describe("epic-stories flags and seats", () => {
       assert.isUndefined(yield* appScripts(memory.store, "/repo/broken"))
       assert.deepStrictEqual(gateCommands({}, undefined), defaultGateCommands)
       assert.deepStrictEqual(gateCommands({}, new Set(["dev"])), [])
+    })
+  )
+
+  it("keeps an explicit pack gate list, including an empty one, ahead of the defaults", () => {
+    const pack = [
+      ["bash", "scripts/ace-gates.sh", "build"],
+      ["bash", "scripts/ace-gates.sh", "test"]
+    ]
+    const scripts = new Set(["typecheck", "lint", "test", "build"])
+    // The environment name is not itself a command list: the flow has to load the pack.
+    assert.deepStrictEqual(
+      gateCommands({ LLM4TS_PACK: "ace12-rest" }, scripts),
+      defaultGateCommands
+    )
+    assert.deepStrictEqual(gateCommands({}, scripts, pack), pack)
+    assert.deepStrictEqual(gateCommands({}, new Set(["lint"]), []), [])
+    assert.deepStrictEqual(
+      gateCommands({ LLM4TS_GATES: "cargo check --workspace" }, scripts, pack),
+      [["cargo", "check", "--workspace"]]
+    )
+    assert.strictEqual(
+      gateListMessage({ commands: pack, source: "pack", packName: "ace12-rest" }),
+      "gates: bash scripts/ace-gates.sh build · bash scripts/ace-gates.sh test (pack ace12-rest)"
+    )
+    assert.strictEqual(
+      gateListMessage({ commands: [], source: "pack", packName: "ace12-rest" }),
+      "gates: none (pack 'ace12-rest' defines none; set LLM4TS_GATES)"
+    )
+  })
+
+  it.effect("uses the selected pack's gates, not the pnpm defaults", () =>
+    Effect.gen(function* () {
+      const scripts = new Set(["typecheck", "lint", "test", "build"])
+      const selected = yield* epicGateCommands({
+        environment: { LLM4TS_PACK: "ace12-rest" },
+        scripts,
+        launchDir: repoRoot,
+        flowDir: epicFlowDir
+      })
+      assert.strictEqual(selected.source, "pack")
+      assert.strictEqual(selected.packName, "ace12-rest")
+      assert.deepStrictEqual(selected.commands, [
+        ["bash", "scripts/ace-gates.sh", "build"],
+        ["bash", "scripts/ace-gates.sh", "test"]
+      ])
+      assert.strictEqual(
+        gateListMessage(selected),
+        "gates: bash scripts/ace-gates.sh build · bash scripts/ace-gates.sh test (pack ace12-rest)"
+      )
+
+      const root = mkdtempSync(join(tmpdir(), "llm4ts-epic-gates-"))
+      try {
+        writePack(
+          root,
+          "custom",
+          ["## Gates", "", "- zebra: echo zebra", "- alpha: echo alpha"].join("\n")
+        )
+        const ordered = yield* epicGateCommands({
+          environment: { LLM4TS_PACK: "packs/custom" },
+          // A script filter that would keep only `pnpm lint` must not touch pack gates.
+          scripts: new Set(["lint"]),
+          launchDir: root,
+          flowDir: root
+        })
+        assert.deepStrictEqual(ordered.commands, [
+          ["echo", "zebra"],
+          ["echo", "alpha"]
+        ])
+        assert.strictEqual(ordered.source, "pack")
+
+        writePack(root, "empty", "")
+        const empty = yield* epicGateCommands({
+          environment: { LLM4TS_PACK: "packs/empty" },
+          scripts,
+          launchDir: root,
+          flowDir: root
+        })
+        assert.deepStrictEqual(empty.commands, [])
+        assert.strictEqual(empty.source, "pack")
+        assert.strictEqual(
+          gateListMessage(empty),
+          "gates: none (pack 'empty' defines none; set LLM4TS_GATES)"
+        )
+
+        const overridden = yield* epicGateCommands({
+          environment: { LLM4TS_PACK: "ace12-rest", LLM4TS_GATES: "cargo check --workspace" },
+          scripts,
+          launchDir: repoRoot,
+          flowDir: epicFlowDir
+        })
+        assert.strictEqual(overridden.source, "override")
+        assert.deepStrictEqual(overridden.commands, [["cargo", "check", "--workspace"]])
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+  )
+
+  it.effect("leaves the pnpm defaults in place when no pack was selected", () =>
+    Effect.gen(function* () {
+      const resolved = yield* epicGateCommands({
+        environment: {},
+        scripts: new Set(["lint", "build"]),
+        launchDir: repoRoot,
+        flowDir: epicFlowDir
+      })
+      assert.strictEqual(resolved.source, "defaults")
+      assert.isUndefined(resolved.packName)
+      assert.deepStrictEqual(resolved.commands, [
+        ["pnpm", "lint"],
+        ["pnpm", "build"]
+      ])
+    })
+  )
+
+  it.effect("fails when the selected pack cannot be opened, even if LLM4TS_GATES is set", () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(join(tmpdir(), "llm4ts-epic-gates-"))
+      try {
+        const error = yield* Effect.flip(
+          epicGateCommands({
+            environment: { LLM4TS_PACK: "no-such-pack", LLM4TS_GATES: "cargo test" },
+            scripts: undefined,
+            launchDir: root,
+            flowDir: root
+          })
+        )
+        assert.include(error.message, "no-such-pack")
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
     })
   )
 
