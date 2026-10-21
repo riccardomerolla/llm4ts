@@ -266,8 +266,7 @@ const program = Effect.gen(function* () {
         yield* say(
           [
             "next: review the plan, commit the seed in the ACE repository, then run",
-            `  LLM4TS_GATES="bash scripts/ace-gates.sh build;bash scripts/ace-gates.sh test" LLM4TS_WORKTREE_SETUP= \\`,
-            `    llm4ts run epic-stories --repo ${targetRoot} -- --concurrency 2 ${JSON.stringify(epicSentence(file.design, api, service))}`
+            `  llm4ts run epic-stories --pack ace12-rest --repo ${targetRoot} -- --concurrency 2 ${JSON.stringify(epicSentence(file.design, api, service))}`
           ].join("\n")
         )
       })

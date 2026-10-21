@@ -38,6 +38,10 @@ export interface Pack {
   // manifest says. Optional so a hand-built Pack still type-checks.
   readonly gateList?: ReadonlyArray<ReadonlyArray<string>>
   readonly replay: ReadonlyArray<string> | undefined
+  // `setup:` prepares a fresh checkout of the target (an epic-stories
+  // worktree) before its gates run; absent, the target needs no setup.
+  // Optional so a hand-built Pack still type-checks.
+  readonly setup?: ReadonlyArray<string>
   readonly equivalence: ComparisonPolicy
   readonly judgeDimensions: ReadonlyArray<Dimension>
   readonly coverage: ReadonlyArray<CoverageRule>
@@ -443,6 +447,9 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     gates,
     gateList,
     replay: fields.replay?.split(/\s+/),
+    ...(fields.setup === undefined || fields.setup.trim().length === 0
+      ? {}
+      : { setup: fields.setup.trim().split(/\s+/) }),
     equivalence: ComparisonPolicy.make({
       ordering,
       ignore: new Set(

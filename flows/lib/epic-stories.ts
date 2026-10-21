@@ -170,7 +170,8 @@ export const epicUsage = [
   "       add CLI flags (key=value;key=value). LLM4TS_PACK (or llm4ts run --pack) uses",
   "       that pack's gates; LLM4TS_GATES overrides them (otherwise: pnpm typecheck|lint|",
   "       test|build, each only when the app's package.json defines that script);",
-  "       LLM4TS_WORKTREE_SETUP (default: pnpm install --offline) prepares each worktree;",
+  "       LLM4TS_WORKTREE_SETUP prepares each worktree (default: the pack's setup:, or",
+  "       pnpm install --offline with no pack; empty: none);",
   "       LLM4TS_WORKTREE_ROOT (default: <repo>.worktrees beside the repository) holds them;",
   "       LLM4TS_APP_DIR (e.g. frontend) runs setup and gates in that subfolder; unset, a",
   "       repository without a root package.json uses its one subfolder that has one;",
@@ -1618,15 +1619,18 @@ export const defaultWorktreeSetup: ReadonlyArray<string> = ["pnpm", "install", "
 
 /**
  * `LLM4TS_WORKTREE_SETUP="pnpm install --offline"` (the default) prepares
- * each story worktree; an empty value disables the step. Offline by default:
- * the runbook warms the pnpm store once, and a workshop stage has no network.
+ * each story worktree; an empty value disables the step. Unset, a selected
+ * pack's `setup:` is the command, and a pack without one runs none: its
+ * target is not assumed to be a pnpm project. Offline by default: the
+ * runbook warms the pnpm store once, and a workshop stage has no network.
  */
 export const worktreeSetupCommand = (
-  environment: Readonly<Record<string, string | undefined>>
+  environment: Readonly<Record<string, string | undefined>>,
+  pack?: Pick<Pack, "setup">
 ): ReadonlyArray<string> | undefined => {
   const raw = environment.LLM4TS_WORKTREE_SETUP
   if (raw === undefined) {
-    return defaultWorktreeSetup
+    return pack === undefined ? defaultWorktreeSetup : pack.setup
   }
   const parts = raw
     .trim()
@@ -2495,7 +2499,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             gatesIn(nodeProcessExecutor, events, commands, gateRunOptions(process.env))
           )
           const testCommand = testGateCommand(commands)
-          const setupCommand = worktreeSetupCommand(process.env)
+          const setupCommand = worktreeSetupCommand(process.env, pack)
           const healthUrl = serverHealthUrl(localServer, process.env)
           // The executor over one unit: the epic's plan or one refine round.
           const runUnit = (work: {

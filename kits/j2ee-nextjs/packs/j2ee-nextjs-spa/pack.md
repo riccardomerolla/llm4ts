@@ -9,6 +9,7 @@ specs-dir: docs/modernization/specs
 features-dir: docs/modernization/features
 program-files: (?:src/app/<NAME>(?:/.*)?|src/services/<NAME>(?:/.*)?|contracts/<NAME>\.openapi\.yaml|tests/<NAME>\..*)
 feature-files: (?:src/services/<NAME>(?:/.*)?|contracts/<NAME>\.openapi\.yaml)
+setup: pnpm install --offline
 
 ## Gates
 

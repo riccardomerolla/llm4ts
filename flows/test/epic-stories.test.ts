@@ -611,6 +611,16 @@ describe("epic-stories flags and seats", () => {
         "npm",
         "ci"
       ])
+      // A selected pack names its own setup, or none; the variable still wins.
+      const ace = {}
+      const spa = { setup: ["pnpm", "install", "--offline"] }
+      assert.isUndefined(worktreeSetupCommand({}, ace))
+      assert.deepStrictEqual(worktreeSetupCommand({}, spa), ["pnpm", "install", "--offline"])
+      assert.deepStrictEqual(worktreeSetupCommand({ LLM4TS_WORKTREE_SETUP: "npm ci" }, ace), [
+        "npm",
+        "ci"
+      ])
+      assert.isUndefined(worktreeSetupCommand({ LLM4TS_WORKTREE_SETUP: "" }, spa))
       const events = yield* makeFlowEventHub()
       const fake = yield* makeFakeProcessExecutor({
         responses: new Map([

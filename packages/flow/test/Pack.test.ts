@@ -92,6 +92,23 @@ unit: CALL '([^']+)'
     })
   )
 
+  it.effect("reads an optional setup command; absent means the target needs none", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "spa/pack.md",
+        "# Pack: spa\n\nsource: jsp\nsetup: pnpm install --offline\n\n## Gates\n\n- test: pnpm test\n"
+      )
+      yield* workspace.write("ace/pack.md", "# Pack: ace\n\nsource: soap\n")
+      assert.deepStrictEqual((yield* loadPack(workspace, "spa")).setup, [
+        "pnpm",
+        "install",
+        "--offline"
+      ])
+      assert.isUndefined((yield* loadPack(workspace, "ace")).setup)
+    })
+  )
+
   it.effect("leaves conventions undefined when conventions.md is absent", () =>
     Effect.gen(function* () {
       const workspace = yield* makeMemoryWorkspace()

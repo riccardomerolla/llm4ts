@@ -247,9 +247,11 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   `## Gates` the gate commands, in the order written; an empty section runs
   none. `LLM4TS_GATES="cmd; cmd"` overrides the pack. With no pack, the
   defaults are `pnpm typecheck`, `lint`, `test`, and `build` — each only when the
-  app's `package.json` defines that script, and the run lists them. `LLM4TS_WORKTREE_SETUP` (default `pnpm install --offline`)
-  prepares each story worktree, which starts as a fresh checkout without
-  dependencies.
+  app's `package.json` defines that script, and the run lists them.
+  `LLM4TS_WORKTREE_SETUP` prepares each story worktree, which starts as a
+  fresh checkout without dependencies; unset, the command is the pack's
+  `setup:` (none when the pack declares none) or, with no pack,
+  `pnpm install --offline`. An empty value skips setup.
 - Gates run on the `node` on the PATH that launched `llm4ts`, not on the one
   the app pins (`.nvmrc`, `.node-version`, `package.json` `engines.node`):
   the run checks that node against the pin before its first gate and stops,
