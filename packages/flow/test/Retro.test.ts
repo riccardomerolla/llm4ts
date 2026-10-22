@@ -26,6 +26,7 @@ import {
   loadStoryFiles,
   readRetroIndex,
   renderRetroDigest,
+  renderStoryDigest,
   renderRetroReport,
   retroApprovalOf,
   retroCandidates,
@@ -304,6 +305,28 @@ describe("retro digest", () => {
       assert.include(digest, "transcripts: none (the run was started without --transcript)")
       assert.notInclude(digest, "### Transcript")
       assert.isAtMost(digest.length, 4_600)
+    })
+  )
+})
+
+describe("renderStoryDigest", () => {
+  it.effect("renders one story's section", () =>
+    Effect.gen(function* () {
+      const files = yield* seeded
+      const inputs = yield* loadInputs(files)
+      const digest = renderStoryDigest(inputs, "a")
+      assert.isDefined(digest)
+      assert.isTrue((digest ?? "").startsWith("## Story a — "))
+      assert.include(digest, "- [x] add the route")
+      assert.include(digest, "Revision 1")
+    })
+  )
+
+  it.effect("is undefined for an unknown story", () =>
+    Effect.gen(function* () {
+      const files = yield* seeded
+      const inputs = yield* loadInputs(files)
+      assert.strictEqual(renderStoryDigest(inputs, "zz"), undefined)
     })
   )
 })

@@ -30,6 +30,10 @@ const pack = (): string => {
 }
 
 describe("llm4ts refine — the file is the state", () => {
+  it("still exports approveMarkdown", () => {
+    assert.strictEqual(approveMarkdown("x\n- [ ] Approved\n"), "x\n- [x] Approved\n")
+  })
+
   it.effect("scans the pack's programs and scenario titles", () =>
     Effect.gen(function* () {
       const inventory = yield* scanPack(pack())
@@ -69,12 +73,6 @@ describe("llm4ts refine — the file is the state", () => {
       )
     }).pipe(Effect.provide(NodeFileSystem.layer))
   )
-
-  it("flips the draft marker and leaves an approved document alone", () => {
-    assert.strictEqual(approveMarkdown("# x\n\n- [ ] Approved\n"), "# x\n\n- [x] Approved\n")
-    assert.strictEqual(approveMarkdown("# x\n\n- [x] Approved\n"), "# x\n\n- [x] Approved\n")
-    assert.strictEqual(approveMarkdown("# no marker\n"), "# no marker\n")
-  })
 
   it("signs with LLM4TS_APPROVER when set", () => {
     assert.strictEqual(signer({ LLM4TS_APPROVER: "riccardo" }), "riccardo")

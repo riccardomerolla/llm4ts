@@ -634,3 +634,6 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   2026-10-06): `runQueue` spreads items over worktree shards
   (`LLM4TS_PORT_SHARDS`); `parseDiagnostics` reads javac and Maven error
   lines. llm4ts-only. Additive.
+- MCP operator server (ADR 0041, 2026-10-22): llm4ts mcp over stdio and
+  HTTP, a run supervisor, first SIGINT interrupts a flow; llm4zio has no
+  server and no signal handling. Additive.

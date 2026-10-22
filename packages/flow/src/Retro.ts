@@ -431,6 +431,17 @@ const runLinePrefixes = [
   "retro:"
 ]
 
+/** One story's digest section, whatever its outcome; `undefined` when the plan has no such story. */
+export const renderStoryDigest = (
+  inputs: RetroInputs,
+  storyId: string,
+  share: number = perStoryShare
+): string | undefined => {
+  const trace = traceView(inputs.trace)
+  const entry = inputs.stories.find((candidate) => candidate.story.id === storyId)
+  return entry === undefined ? undefined : storySection(inputs, trace, entry, share)
+}
+
 /** The digest a retro seat is given: code-built, deterministic, capped. */
 export const renderRetroDigest = (inputs: RetroInputs): string => {
   const trace = traceView(inputs.trace)

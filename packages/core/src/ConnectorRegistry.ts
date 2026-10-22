@@ -25,6 +25,8 @@ export interface ConnectorRegistryShape {
   readonly resolveApi: (config: ApiConnectorConfig) => Effect.Effect<ApiConnectorShape, LlmError>
   readonly resolveCli: (config: CliConnectorConfig) => Effect.Effect<CliConnectorShape, LlmError>
   readonly resolveFallback: (chain: FallbackChain) => Effect.Effect<ConnectorShape, LlmError>
+  /** The kind a connector id was registered with, or undefined for an unknown id. */
+  readonly kindOf: (id: ConnectorId) => ConnectorKind | undefined
   readonly available: Effect.Effect<ReadonlyArray<ConnectorId>>
   readonly healthCheckAll: Effect.Effect<ReadonlyMap<ConnectorId, HealthStatus>>
 }
@@ -163,6 +165,7 @@ export const makeConnectorRegistry = (
     resolveApi,
     resolveCli,
     resolveFallback,
+    kindOf: (id) => byId.get(id.value)?.kind,
     available,
     healthCheckAll
   }

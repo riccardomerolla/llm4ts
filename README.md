@@ -65,6 +65,13 @@ OpenTelemetry backend through the `OTEL_*` variables: [observability](docs/obser
 gates, merges, waiting — with the biggest sinks first, and nothing of the
 code or prompts in it, so it can come back from a customer's server.
 
+`llm4ts mcp` serves the same runs to an MCP client such as Grok Bot,
+Claude Code or Cursor: `preflight`, run status, a `run_wait` long poll,
+`diagnose`, `costs`, and with `--allow-run` it starts and stops flows. It
+speaks stdio by default; `--http` serves `/mcp` on loopback behind a bearer
+token. More: [ADR 0041](docs/adr/0041-mcp-operator-server.md) and the
+[Grok Bot operator](docs/grok-bot/operator.md).
+
 ## Write a flow
 
 A flow is one TypeScript file in `.llm4ts/flows/` of the directory you

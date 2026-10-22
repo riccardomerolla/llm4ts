@@ -3,6 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import type { FileSystem } from "effect/FileSystem"
 import * as Option from "effect/Option"
@@ -14,10 +16,12 @@ import {
   renderKitList,
   resolveFlow,
   runEnvironmentFrom,
+  runShellCommand,
   geminiBridgeOptionsFrom,
   watchOptionsFrom
 } from "@llm4ts/shell/Cli"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
+import { mcpOptionsFrom, type McpFlags } from "@llm4ts/shell/OperatorConfig"
 
 const flows: ReadonlyArray<DiscoveredFlow> = [
   {
@@ -284,6 +288,52 @@ describe("watchOptionsFrom", () => {
       assert.match(both.message, /either a trace or --epic/)
       assert.strictEqual(slow._tag, "ShellUsage")
       assert.match(slow.message, /--speed/)
+    })
+  )
+})
+
+describe("the mcp command", () => {
+  // The flags record the `mcp` command builds when only --http and --repo are given.
+  const httpFlags: McpFlags = {
+    stdio: false,
+    http: true,
+    host: Option.none(),
+    port: Option.none(),
+    tokenFile: Option.none(),
+    repo: ["."],
+    allowRun: false,
+    allowApprove: false,
+    parallelRuns: Option.none()
+  }
+  const nothingOnDisk = () => Effect.succeed(undefined)
+
+  it.effect("mcp --http without a token is a usage error", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(mcpOptionsFrom(httpFlags, {}, "/work", nothingOnDisk))
+      assert.strictEqual(error._tag, "ShellUsage")
+      assert.match(error.message, /LLM4TS_MCP_TOKEN or --token-file/)
+    })
+  )
+
+  it.effect("the mcp command is registered", () =>
+    Effect.gen(function* () {
+      const lines: Array<string> = []
+      const capture: Console.Console = Object.assign(Object.create(console), {
+        log: (...args: ReadonlyArray<unknown>) => void lines.push(args.map(String).join(" "))
+      })
+      const exit = yield* Effect.exit(
+        runShellCommand(["mcp", "--help"]).pipe(
+          Effect.provideService(Console.Console, capture),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      if (exit._tag === "Failure") {
+        assert.include(String(exit.cause), "ShowHelp")
+      }
+      const help = lines.join("\n")
+      assert.include(help, "Serve llm4ts to an MCP client")
+      assert.include(help, "--allow-run")
+      assert.include(help, "--token-file")
     })
   )
 })
