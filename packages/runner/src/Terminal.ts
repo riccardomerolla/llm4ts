@@ -460,6 +460,9 @@ export const makeLiveTerminalSurface = Effect.fn("@llm4ts/runner/Terminal.makeLi
 const hideCursor = "\u001b[?25l"
 const showCursor = "\u001b[?25h"
 
+/** Re-raise only when no other listener remains to handle the signal. */
+export const shouldReraise = (otherListeners: number): boolean => otherListeners === 0
+
 /**
  * While the live status block is on screen, keystrokes must not be echoed:
  * an arrow key (or a trackpad scroll the terminal turns into one) echoes as
@@ -490,7 +493,7 @@ const quietTerminalInput = (
     // then let the signal do what it would have done.
     const onSignal = (signal: NodeJS.Signals): void => {
       restore()
-      process.kill(process.pid, signal)
+      if (shouldReraise(process.listenerCount(signal))) process.kill(process.pid, signal)
     }
     yield* Effect.sync(() => {
       stty("-echo")

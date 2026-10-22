@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import type { HealthStatus } from "@llm4ts/core/Models"
+import type { ConnectorKind, HealthStatus } from "@llm4ts/core/Models"
 import { ConnectorIds } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import { nodePreflightReport, type NodePreflightReport } from "@llm4ts/flow/NodePreflight"
@@ -22,22 +22,36 @@ const credentialKeys = [
   "GOOGLE_API_KEY"
 ] as const
 
+/**
+ * How far a connector's health was verified: `"auth"` means the CLI's own
+ * login check answered (`authStatus` is its word); `"version"` means only
+ * `<binary> --version` ran, which proves an install and never a login, so
+ * `authStatus` is `Unknown`; `"unknown"` means no such statement can be made
+ * (an API connector's health is its endpoint's answer).
+ */
+export type DoctorProbe = "version" | "auth" | "unknown"
+
 // The auth column is what the connector's own login check answered. A CLI
 // that is installed but offers no cheap check says so: a version answer is
 // not a login, and "valid" here once hid an expired Claude session until the
 // first turn failed. Nothing is said about the login of a CLI that is absent.
-const authColumn = (status: HealthStatus): string => {
+const authColumn = (status: HealthStatus, probe: DoctorProbe): string => {
   if (status.authStatus !== "Unknown") {
     return `  auth: ${status.authStatus.toLowerCase()}`
   }
-  return status.availability === "Healthy" ? "  auth: unknown (no probe)" : ""
+  return probe === "version" && status.availability === "Healthy"
+    ? "  auth: unknown (no probe)"
+    : ""
 }
 
-const statusLine = (id: string, status: HealthStatus): string => {
+const statusLine = (id: string, status: HealthStatus, probe: DoctorProbe): string => {
   const mark =
     status.availability === "Healthy" ? "✔" : status.availability === "Unknown" ? "?" : "✖"
-  return `  ${mark} ${id.padEnd(14)} ${status.availability.toLowerCase()}${authColumn(status)}`
+  return `  ${mark} ${id.padEnd(14)} ${status.availability.toLowerCase()}${authColumn(status, probe)}`
 }
+
+const probeOf = (kind: ConnectorKind | undefined, status: HealthStatus): DoctorProbe =>
+  kind !== "Cli" ? "unknown" : status.authStatus === "Unknown" ? "version" : "auth"
 
 const isSet = (value: string | undefined): value is string =>
   value !== undefined && value.trim().length > 0
@@ -266,7 +280,19 @@ export const geminiModelModePrerequisites = (
       }
 }
 
-export const makeDoctorProgram = (
+/** What the doctor found, as data; `probe` is how far each health was verified. */
+export interface DoctorReport {
+  readonly connectors: ReadonlyArray<{
+    readonly id: string
+    readonly status: HealthStatus
+    readonly probe: DoctorProbe
+  }>
+  readonly node: NodePreflightReport
+  /** Every line rendered after the connectors block (credentials through coder). */
+  readonly lines: ReadonlyArray<string>
+}
+
+export const collectDoctorReport = (
   registry: ConnectorRegistryShape = nodeFlowRunnerDependencies().registry,
   environment: Readonly<Record<string, string | undefined>> = process.env,
   readPiModelsJson: () => string | undefined = readPiModels,
@@ -282,21 +308,20 @@ export const makeDoctorProgram = (
   probeOtel: (config: OtelConfig) => Effect.Effect<boolean | undefined> = probeOtelEndpoint,
   /** Gemini CLI's system admin policy files (ADR 0037); this machine's by default. */
   systemPolicies: () => ReadonlyArray<string> = systemAdminPolicies
-): Effect.Effect<string> => {
+): Effect.Effect<DoctorReport> => {
   const otel = otelConfig(environment)
   return Effect.map(
     Effect.all([registry.healthCheckAll, nodeCheck, probeOtel(otel)]),
     ([statuses, node, otelAnswers]) => {
-      const lines: Array<string> = []
-      lines.push("llm4ts doctor")
-      lines.push("")
-      lines.push("connectors:")
       const sorted = Array.from(statuses.entries()).sort(([a], [b]) =>
         a.value.localeCompare(b.value)
       )
-      for (const [id, status] of sorted) {
-        lines.push(statusLine(id.value, status))
-      }
+      const connectors = sorted.map(([id, status]) => ({
+        id: id.value,
+        status,
+        probe: probeOf(registry.kindOf(id), status)
+      }))
+      const lines: Array<string> = []
       lines.push("")
       lines.push("credentials:")
       for (const key of credentialKeys) {
@@ -351,7 +376,20 @@ export const makeDoctorProgram = (
       lines.push("")
       lines.push(otelDoctorLine(otel, otelAnswers))
       lines.push(`coder: ${coder}`)
-      return `${lines.join("\n")}\n`
+      return { connectors, node, lines }
     }
   )
 }
+
+export const renderDoctorReport = (report: DoctorReport): string => {
+  const lines: Array<string> = ["llm4ts doctor", "", "connectors:"]
+  for (const connector of report.connectors) {
+    lines.push(statusLine(connector.id, connector.status, connector.probe))
+  }
+  lines.push(...report.lines)
+  return `${lines.join("\n")}\n`
+}
+
+export const makeDoctorProgram = (
+  ...args: Parameters<typeof collectDoctorReport>
+): Effect.Effect<string> => Effect.map(collectDoctorReport(...args), renderDoctorReport)

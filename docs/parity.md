@@ -634,9 +634,12 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   2026-10-06): `runQueue` spreads items over worktree shards
   (`LLM4TS_PORT_SHARDS`); `parseDiagnostics` reads javac and Maven error
   lines. llm4ts-only. Additive.
+- MCP operator server (ADR 0041, 2026-10-22): llm4ts mcp over stdio and
+  HTTP, a run supervisor, first SIGINT interrupts a flow; llm4zio has no
+  server and no signal handling. Additive.
 - CLI auth probes (2026-10-22): a CLI connector's health check asks the
   CLI's own offline login check after `--version` — `claude auth status
---json`, `codex login status`, `pi auth check --model … --no-refresh`,
+  --json`, `codex login status`, `pi auth check --model … --no-refresh`,
   `cursor-agent status --format json` — and reports `authStatus` from its
   answer; a CLI with no such check (gemini, gh copilot, opencode, grok,
   antigravity) reports `Unknown`, which `llm4ts doctor` renders as

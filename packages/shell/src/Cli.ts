@@ -50,13 +50,14 @@ import {
   type FlowTierPaths
 } from "./FlowCatalog.ts"
 import { launchFlow } from "./FlowLaunch.ts"
+import { mcpOptionsFrom } from "./OperatorConfig.ts"
+import { nodeOperatorRuntime, nodeRead, runMcp } from "./OperatorNode.ts"
 import { mainMenu } from "./Menu.ts"
 import { ModDir, refineSession } from "./Refine.ts"
 import { packageVersion } from "./Package.ts"
+import { ShellUsageError } from "./ShellErrors.ts"
 
-export class ShellUsageError extends Schema.TaggedError<ShellUsageError>()("ShellUsage", {
-  message: Schema.String
-}) {}
+export { ShellUsageError }
 
 export class ShellActionError extends Schema.TaggedError<ShellActionError>()("ShellAction", {
   message: Schema.String
@@ -981,6 +982,65 @@ const geminiBridgeCommand = Command.make(
   )
 )
 
+const mcpCommand = Command.make(
+  "mcp",
+  {
+    stdio: Flag.Boolean("stdio").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Speak MCP on stdin/stdout (the default transport)")
+    ),
+    http: Flag.Boolean("http").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription(
+        "Serve MCP over HTTP at /mcp; needs a bearer token from LLM4TS_MCP_TOKEN or --token-file"
+      )
+    ),
+    host: Flag.String("host").pipe(
+      Flag.optional,
+      Flag.withDescription("HTTP host to bind (default 127.0.0.1)")
+    ),
+    port: Flag.Int("port").pipe(Flag.optional, Flag.withDescription("HTTP port (default 4321)")),
+    tokenFile: Flag.String("token-file").pipe(
+      Flag.optional,
+      Flag.withDescription("File holding the HTTP bearer token (when LLM4TS_MCP_TOKEN is unset)")
+    ),
+    repo: Flag.String("repo").pipe(
+      Flag.atLeast(0),
+      Flag.withDescription(
+        "Repository to serve, repeatable (default: the repos in ~/.config/llm4ts/mcp.json)"
+      )
+    ),
+    allowRun: Flag.Boolean("allow-run").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Offer the tools that start, stop and resume flows")
+    ),
+    allowApprove: Flag.Boolean("allow-approve").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Offer the approve tool, which ticks a retro report's approval marker")
+    ),
+    parallelRuns: Flag.Int("parallel-runs").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Flows that write a checkout and may run at once per repository (default 1)"
+      )
+    )
+  },
+  (flags) =>
+    Effect.gen(function* () {
+      const config = yield* mcpOptionsFrom(flags, process.env, process.cwd(), nodeRead)
+      // SIGINT/SIGTERM interrupt the server; runMcp then stops the flows it started.
+      yield* runMcp(
+        config,
+        nodeOperatorRuntime(config, (cwd) => shellTierPaths({ cwd })),
+        process
+      )
+    })
+).pipe(
+  Command.withDescription(
+    "Serve llm4ts to an MCP client (Grok Bot, Claude Code, Cursor): status, diagnosis and, when allowed, runs (ADR 0041)"
+  )
+)
+
 const doctorCommand = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const report = yield* makeDoctorProgram()
@@ -1014,6 +1074,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     graphCommand,
     rosterCommand,
     geminiBridgeCommand,
+    mcpCommand,
     doctorCommand
   ])
 )

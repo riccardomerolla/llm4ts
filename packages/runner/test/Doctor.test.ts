@@ -6,11 +6,13 @@ import { ConnectorIds, HealthStatus } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import {
   bridgeModelRefs,
+  collectDoctorReport,
   geminiBridgePrerequisites,
   geminiPrerequisites,
   makeDoctorProgram,
   piModelRefs,
   piModelsConfig,
+  renderDoctorReport,
   geminiModelModePrerequisites
 } from "@llm4ts/runner/Doctor"
 
@@ -36,6 +38,14 @@ const fakeRegistry: ConnectorRegistryShape = {
   resolveApi: () => unsupported,
   resolveCli: () => unsupported,
   resolveFallback: () => unsupported,
+  kindOf: (id) =>
+    id.value === ConnectorIds.Mock.value
+      ? "Api"
+      : [ConnectorIds.ClaudeCli, ConnectorIds.Codex, ConnectorIds.Pi].some(
+            (cli) => cli.value === id.value
+          )
+        ? "Cli"
+        : undefined,
   available: Effect.succeed([ConnectorIds.Mock]),
   healthCheckAll: Effect.succeed(
     new Map([
@@ -51,6 +61,35 @@ const fakeRegistry: ConnectorRegistryShape = {
 }
 
 describe("doctor", () => {
+  it.effect("collectDoctorReport says how far each connector's auth was checked", () =>
+    Effect.gen(function* () {
+      const report = yield* collectDoctorReport(fakeRegistry, {}, undefined, noNode)
+      const probeOf = (id: string) => report.connectors.find((c) => c.id === id)?.probe
+      // The CLI's own login check answered (here: a stale session).
+      assert.strictEqual(probeOf("codex"), "auth")
+      // Only `--version` ran, so auth is Unknown, never Valid.
+      assert.strictEqual(probeOf("pi"), "version")
+      assert.strictEqual(probeOf("claude-cli"), "version")
+      assert.strictEqual(probeOf("mock"), "unknown")
+      for (const connector of report.connectors) {
+        if (connector.probe === "version") {
+          assert.strictEqual(connector.status.authStatus, "Unknown")
+        }
+      }
+    })
+  )
+
+  it.effect("renderDoctorReport renders what makeDoctorProgram rendered", () =>
+    Effect.gen(function* () {
+      const env = { ANTHROPIC_API_KEY: "set-in-test", LLM4TS_CODER: "codex" }
+      const rendered = renderDoctorReport(
+        yield* collectDoctorReport(fakeRegistry, env, undefined, noNode)
+      )
+      const program = yield* makeDoctorProgram(fakeRegistry, env, undefined, noNode)
+      assert.strictEqual(rendered, program)
+    })
+  )
+
   it.effect("reports connector health, credentials, and the selected coder", () =>
     Effect.gen(function* () {
       const report = yield* makeDoctorProgram(
