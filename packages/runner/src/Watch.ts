@@ -362,7 +362,8 @@ export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function*
 
 // ── node wiring ─────────────────────────────────────────────────────────────
 
-const nodeListEpics = (directory: string): ReadonlyArray<string> =>
+/** Folder names under an `epics/` directory; none when it is absent. */
+export const nodeListEpics = (directory: string): ReadonlyArray<string> =>
   existsSync(directory)
     ? readdirSync(directory).filter((name) => statSync(join(directory, name)).isDirectory())
     : []

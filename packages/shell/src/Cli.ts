@@ -1,6 +1,8 @@
+import { readFileSync, readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, extname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import * as Clock from "effect/Clock"
 import * as Console from "effect/Console"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -12,15 +14,17 @@ import { makeCliProgram } from "@llm4ts/runner/Cli"
 import {
   CostsResult,
   makeCostsProgram,
+  nodeListTraces,
   renderCostsResult,
   type CostsOptions
 } from "@llm4ts/runner/Costs"
-import { makeDoctorProgram } from "@llm4ts/runner/Doctor"
+import { collectDoctorReport, makeDoctorProgram } from "@llm4ts/runner/Doctor"
 import { makeGeminiBridgeProgram, type GeminiBridgeOptions } from "@llm4ts/runner/GeminiBridgeServe"
 import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 import { nodeTemporaryFiles } from "@llm4ts/runner/NodeTemporaryFiles"
 import { geminiBridgePort } from "@llm4ts/runner/PiModels"
 import {
+  httpProbe,
   pauseExecutor,
   renderRosterReport,
   resumeExecutor,
@@ -29,10 +33,12 @@ import {
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import {
   makeWatchProgram,
+  nodeListEpics,
   nodeTraceSources,
   nodeWatchDependencies,
   type WatchOptions
 } from "@llm4ts/runner/Watch"
+import { nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import { makeProfileProgram, type ProfileOptions } from "@llm4ts/runner/Profile"
 import {
   makeGraphProgram,
@@ -50,6 +56,11 @@ import {
   type FlowTierPaths
 } from "./FlowCatalog.ts"
 import { launchFlow } from "./FlowLaunch.ts"
+import { nodeFlowProcess } from "./FlowProcess.ts"
+import { mcpOptionsFrom } from "./OperatorConfig.ts"
+import { runOperatorServer } from "./OperatorServer.ts"
+import type { OperatorDeps } from "./OperatorTools.ts"
+import { makeRunSupervisor } from "./RunSupervisor.ts"
 import { mainMenu } from "./Menu.ts"
 import { ModDir, refineSession } from "./Refine.ts"
 import { packageVersion } from "./Package.ts"
@@ -980,6 +991,130 @@ const geminiBridgeCommand = Command.make(
   )
 )
 
+/** A file's text, or `undefined` when it cannot be read (the `mcp` config and token file). */
+const nodeRead = (path: string): Effect.Effect<string | undefined> =>
+  Effect.sync(() => {
+    try {
+      return readFileSync(path, "utf8")
+    } catch {
+      return undefined
+    }
+  })
+
+/**
+ * Relative paths of every regular file under a directory, recursively; never
+ * directory names, and none when the directory is absent or unreadable.
+ */
+export const nodeListFiles = (directory: string): ReadonlyArray<string> => {
+  const found: Array<string> = []
+  const walk = (relative: string): void => {
+    let names: ReadonlyArray<{
+      readonly name: string
+      isDirectory(): boolean
+      isFile(): boolean
+    }>
+    try {
+      names = readdirSync(join(directory, relative), { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of names) {
+      const path = relative.length === 0 ? entry.name : join(relative, entry.name)
+      if (entry.isDirectory()) {
+        walk(path)
+      } else if (entry.isFile()) {
+        found.push(path)
+      }
+    }
+  }
+  walk("")
+  return found.sort()
+}
+
+const mcpCommand = Command.make(
+  "mcp",
+  {
+    stdio: Flag.Boolean("stdio").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Speak MCP on stdin/stdout (the default transport)")
+    ),
+    http: Flag.Boolean("http").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription(
+        "Serve MCP over HTTP at /mcp; needs a bearer token from LLM4TS_MCP_TOKEN or --token-file"
+      )
+    ),
+    host: Flag.String("host").pipe(
+      Flag.optional,
+      Flag.withDescription("HTTP host to bind (default 127.0.0.1)")
+    ),
+    port: Flag.Int("port").pipe(Flag.optional, Flag.withDescription("HTTP port (default 4321)")),
+    tokenFile: Flag.String("token-file").pipe(
+      Flag.optional,
+      Flag.withDescription("File holding the HTTP bearer token (when LLM4TS_MCP_TOKEN is unset)")
+    ),
+    repo: Flag.String("repo").pipe(
+      Flag.atLeast(0),
+      Flag.withDescription(
+        "Repository to serve, repeatable (default: the repos in ~/.config/llm4ts/mcp.json)"
+      )
+    ),
+    allowRun: Flag.Boolean("allow-run").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Offer the tools that start, stop and resume flows")
+    ),
+    allowApprove: Flag.Boolean("allow-approve").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Offer the tools that approve a plan or a retro")
+    ),
+    parallelRuns: Flag.Int("parallel-runs").pipe(
+      Flag.optional,
+      Flag.withDescription("Flows that may run at once across all repositories (default 1)")
+    )
+  },
+  (flags) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const environment = process.env
+        const config = yield* mcpOptionsFrom(flags, environment, process.cwd(), nodeRead)
+        // Flow discovery reads through the CLI's FileSystem; the tool handlers take none.
+        const fileSystem = yield* FileSystem
+        // The supervisor's scope finalizer stops the flows it started when the server exits.
+        const supervisor = yield* makeRunSupervisor({
+          repos: config.repos,
+          environment,
+          files: nodePlainFileStore,
+          process: nodeFlowProcess,
+          parallelRuns: config.parallelRuns
+        })
+        const deps: OperatorDeps = {
+          config,
+          files: nodePlainFileStore,
+          listTraces: nodeListTraces,
+          listEpics: nodeListEpics,
+          listFiles: nodeListFiles,
+          supervisor,
+          transcripts: nodeTranscriptFiles,
+          doctor: collectDoctorReport(),
+          roster: (repoPath) =>
+            rosterReport({ files: nodePlainFileStore, environment, workDir: repoPath }),
+          probe: httpProbe,
+          flows: (repoPath) =>
+            discoverFlows(shellTierPaths({ cwd: repoPath, environment })).pipe(
+              Effect.provideService(FileSystem, fileSystem)
+            ),
+          now: Clock.currentTimeMillis,
+          environment
+        }
+        return yield* runOperatorServer(config, deps)
+      })
+    )
+).pipe(
+  Command.withDescription(
+    "Serve llm4ts to an MCP client (Grok Bot, Claude Code, Cursor): status, diagnosis and, when allowed, runs (ADR 0041)"
+  )
+)
+
 const doctorCommand = Command.make("doctor", {}, () =>
   Effect.gen(function* () {
     const report = yield* makeDoctorProgram()
@@ -1013,6 +1148,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     graphCommand,
     rosterCommand,
     geminiBridgeCommand,
+    mcpCommand,
     doctorCommand
   ])
 )
