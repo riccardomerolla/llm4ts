@@ -998,11 +998,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
         : `executors ${bundle.roster.executors.map(describeExecutor).join(", ")} (roster in force: the flow's own seat choices are not used)`
     yield* surface.log(palette.info(`${seats} · ${options.workDir}`))
     if (tracePath !== undefined) {
-      yield* surface.log(
-        palette.info(
-          `trace ${tracePath}${options.runId === undefined ? "" : ` · run ${options.runId}`}`
-        )
-      )
+      yield* surface.log(palette.info(`trace ${tracePath} · run ${bundle.runId}`))
     }
     const where = otelSummary(otel)
     if (where !== undefined) {
@@ -1033,7 +1029,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
           const at = new Date(yield* Clock.currentTimeMillis).toISOString()
           yield* checkCostBudget(
             makeCostRecord({
-              runId: options.runId ?? "run",
+              runId: bundle.runId,
               at,
               repo: options.workDir,
               prompt: options.userPrompt,
