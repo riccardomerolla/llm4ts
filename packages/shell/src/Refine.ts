@@ -17,6 +17,9 @@ import {
 import { Domains, parseDomains, renderDomains } from "@llm4ts/flow/Domains"
 import { approveMarkdown } from "@llm4ts/flow/Approval"
 
+// Kept on the published `@llm4ts/shell/Refine` subpath.
+export { approveMarkdown }
+
 /**
  * The interactive front of `modernize-refine` (ADR 0015). The FILE is the
  * state: every beat here reads `docs/modernization/decisions.md` and

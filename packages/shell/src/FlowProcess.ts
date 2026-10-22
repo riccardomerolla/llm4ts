@@ -53,6 +53,13 @@ export interface FlowProcessStart {
    * discards both streams (used by the terminal launcher's tests).
    */
   readonly stdio: "inherit" | "ignore" | { readonly stdout: string; readonly stderr: string }
+  /**
+   * Runs the child in its own process group, so a Ctrl-C on the parent's
+   * terminal or a whole-group kill reaches only the parent, which then stops
+   * the child once. The terminal launcher leaves it off: there the
+   * terminal's SIGINT must keep reaching the child.
+   */
+  readonly detached?: boolean
 }
 
 export interface FlowProcessExit {
@@ -69,6 +76,8 @@ export interface FlowProcessHandle {
 export interface FlowProcessShape {
   readonly start: (options: FlowProcessStart) => Effect.Effect<FlowProcessHandle, FlowLaunchError>
   readonly isAlive: (pid: number) => boolean
+  /** Signals a process this shape did not start (a run left by an earlier server). */
+  readonly signal: (pid: number, signal: "SIGINT" | "SIGTERM") => Effect.Effect<void>
 }
 
 export const flowNodeArgs = (flowPath: string): ReadonlyArray<string> => [
@@ -121,6 +130,7 @@ export const nodeFlowProcess: FlowProcessShape = {
         {
           stdio,
           env: { ...options.environment },
+          ...(options.detached === true ? { detached: true } : {}),
           ...(options.cwd === undefined ? {} : { cwd: options.cwd })
         }
       )
@@ -159,7 +169,15 @@ export const nodeFlowProcess: FlowProcessShape = {
     } catch {
       return false
     }
-  }
+  },
+  signal: (pid, signal) =>
+    Effect.sync(() => {
+      try {
+        process.kill(pid, signal)
+      } catch {
+        // already gone (ESRCH) or not ours to signal
+      }
+    })
 }
 
 export interface FakeFlowProcess {
@@ -201,7 +219,8 @@ export const makeFakeFlowProcess = (): Effect.Effect<FakeFlowProcess> =>
             signal: (signal) => Ref.update(signals, (all) => [...all, { pid, signal }])
           }
         }),
-      isAlive: (pid) => Ref.getUnsafe(alive).has(pid)
+      isAlive: (pid) => Ref.getUnsafe(alive).has(pid),
+      signal: (pid, signal) => Ref.update(signals, (all) => [...all, { pid, signal }])
     }
     return {
       process,

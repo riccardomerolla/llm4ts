@@ -4,7 +4,14 @@ import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as Effect from "effect/Effect"
-import { loadDecisions, loadDomains, saveDecisions, scanPack, signer } from "@llm4ts/shell/Refine"
+import {
+  approveMarkdown,
+  loadDecisions,
+  loadDomains,
+  saveDecisions,
+  scanPack,
+  signer
+} from "@llm4ts/shell/Refine"
 import { Decisions } from "@llm4ts/flow/Decisions"
 
 const pack = (): string => {
@@ -23,6 +30,10 @@ const pack = (): string => {
 }
 
 describe("llm4ts refine — the file is the state", () => {
+  it("still exports approveMarkdown", () => {
+    assert.strictEqual(approveMarkdown("x\n- [ ] Approved\n"), "x\n- [x] Approved\n")
+  })
+
   it.effect("scans the pack's programs and scenario titles", () =>
     Effect.gen(function* () {
       const inventory = yield* scanPack(pack())

@@ -307,6 +307,14 @@ export const validateKnobs = (knobs: OperatorKnobs): Effect.Effect<OperatorKnobs
   if (knobs.land !== undefined && !branchPattern.test(knobs.land)) {
     return invalid("land", "land must be a branch name")
   }
+  const nonNegative = (value: number | undefined) =>
+    value === undefined || (Number.isInteger(value) && value >= 0)
+  if (!nonNegative(knobs.judgeRounds)) {
+    return invalid("judgeRounds", "judgeRounds must be an integer of 0 or more")
+  }
+  if (!nonNegative(knobs.mergeRevisions)) {
+    return invalid("mergeRevisions", "mergeRevisions must be an integer of 0 or more")
+  }
   if (knobs.task !== undefined && (knobs.task.startsWith("-") || knobs.task.startsWith("@"))) {
     return invalid("task", "task must not start with '-' or '@'")
   }

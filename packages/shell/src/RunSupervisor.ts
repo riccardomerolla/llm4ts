@@ -104,6 +104,12 @@ interface LiveRun {
 
 const isActive = (run: OperatorRun): boolean => run.state === "starting" || run.state === "running"
 
+/** The server's own bearer token never reaches a child flow. */
+const childEnvironment = (
+  base: Readonly<Record<string, string | undefined>>
+): Record<string, string | undefined> =>
+  Object.fromEntries(Object.entries(base).filter(([name]) => name !== "LLM4TS_MCP_TOKEN"))
+
 export const makeRunSupervisor = (
   options: SupervisorOptions
 ): Effect.Effect<RunSupervisorShape, PersistenceError, Scope.Scope> =>
@@ -134,13 +140,36 @@ export const makeRunSupervisor = (
     }
 
     const live = new Map<string, LiveRun>()
+    // Runs between their `starting` record and their `live` entry.
+    const launching = new Set<string>()
+    // Orphan runs (alive, left by an earlier server) a `stop` already signalled.
+    const orphansStopping = new Set<string>()
     const lock = yield* Semaphore.make(1)
     const watchers = yield* Scope.make()
+
+    const isOrphan = (run: OperatorRun): boolean =>
+      isActive(run) && !live.has(run.runId) && !launching.has(run.runId)
+
+    // An active record nobody here watches: a run from an earlier server.
+    // Its child is re-checked lazily; once gone the record becomes `lost`.
+    const reconcile = (run: OperatorRun): Effect.Effect<OperatorRun, PersistenceError> =>
+      Effect.gen(function* () {
+        if (!isOrphan(run) || (run.pid !== undefined && options.process.isAlive(run.pid))) {
+          return run
+        }
+        const endedAt = yield* Clock.currentTimeMillis
+        const lost = withState(run, { state: "lost", endedAt })
+        yield* record(lost)
+        return lost
+      })
+
+    const readRepoLive = (repoId: string) =>
+      readRepo(repoId).pipe(Effect.flatMap((runs) => Effect.forEach(runs, reconcile)))
 
     const allRuns = (repoId?: string) =>
       Effect.forEach(
         options.repos.filter((repo) => repoId === undefined || repo.id === repoId),
-        (repo) => readRepo(repo.id)
+        (repo) => readRepoLive(repo.id)
       ).pipe(
         Effect.map((perRepo) => perRepo.flat().sort((a, b) => b.startedAt - a.startedAt)),
         Effect.orDie
@@ -160,15 +189,23 @@ export const makeRunSupervisor = (
           ...(exit.code === undefined ? {} : { exitCode: exit.code }),
           ...(exit.signal === undefined ? {} : { signal: exit.signal })
         })
-        yield* record(final).pipe(Effect.orDie)
-        live.delete(running.runId)
-        yield* Deferred.succeed(entry.final, final)
+        // A failed append leaves the record active; with the child gone, the
+        // next read reconciles it to `lost`. `stop` must not wait on it.
+        yield* record(final).pipe(
+          Effect.ignore,
+          Effect.ensuring(
+            Effect.suspend(() => {
+              live.delete(running.runId)
+              return Deferred.succeed(entry.final, final)
+            })
+          )
+        )
       })
 
     const start = (request: StartRun) =>
       lock.withPermits(1)(
         Effect.gen(function* () {
-          const existing = yield* readRepo(request.repo.id)
+          const existing = yield* readRepoLive(request.repo.id)
           const requestId = request.knobs.requestId
           if (requestId !== undefined) {
             const repeated = existing.find((run) => run.requestId === requestId)
@@ -205,41 +242,73 @@ export const makeRunSupervisor = (
             state: "starting",
             ...(requestId === undefined ? {} : { requestId })
           })
-          yield* record(starting)
-          const handle = yield* options.process
-            .start({
-              flowPath: request.flow.path,
-              args,
-              environment: {
-                ...request.baseEnvironment,
-                ...knobsToEnvironment(request.knobs),
-                LLM4TS_RUN_ID: runId,
-                LLM4TS_TRACE_PATH: tracePath,
-                LLM4TS_FLOW: request.flow.name
-              },
-              cwd: request.repo.path,
-              stdio: { stdout: join(logDir, "stdout.log"), stderr: join(logDir, "stderr.log") }
-            })
-            .pipe(
-              Effect.tapError(() =>
-                Effect.gen(function* () {
-                  const endedAt = yield* Clock.currentTimeMillis
-                  yield* record(withState(starting, { state: "exited", endedAt }))
-                })
+          launching.add(runId)
+          return yield* Effect.gen(function* () {
+            yield* record(starting)
+            const handle = yield* options.process
+              .start({
+                flowPath: request.flow.path,
+                args,
+                environment: {
+                  ...childEnvironment(request.baseEnvironment),
+                  ...knobsToEnvironment(request.knobs),
+                  LLM4TS_RUN_ID: runId,
+                  LLM4TS_TRACE_PATH: tracePath,
+                  LLM4TS_FLOW: request.flow.name
+                },
+                cwd: request.repo.path,
+                stdio: { stdout: join(logDir, "stdout.log"), stderr: join(logDir, "stderr.log") },
+                detached: true
+              })
+              .pipe(
+                Effect.tapError(() =>
+                  Effect.gen(function* () {
+                    const endedAt = yield* Clock.currentTimeMillis
+                    yield* record(withState(starting, { state: "exited", endedAt }))
+                  })
+                )
               )
-            )
-          const running = withState(starting, { state: "running", pid: handle.pid })
-          yield* record(running)
-          const entry: LiveRun = {
-            handle,
-            stopping: yield* Ref.make(false),
-            final: yield* Deferred.make<OperatorRun>()
-          }
-          live.set(runId, entry)
-          yield* Effect.forkIn(watch(running, entry), watchers)
-          return running
+            const running = withState(starting, { state: "running", pid: handle.pid })
+            yield* record(running)
+            const entry: LiveRun = {
+              handle,
+              stopping: yield* Ref.make(false),
+              final: yield* Deferred.make<OperatorRun>()
+            }
+            live.set(runId, entry)
+            yield* Effect.forkIn(watch(running, entry), watchers)
+            return running
+          }).pipe(Effect.ensuring(Effect.sync(() => launching.delete(runId))))
         })
       )
+
+    // Polls until the pid is gone or `ms` elapses; true when it is gone.
+    const awaitGone = (pid: number, ms: number): Effect.Effect<boolean> =>
+      Effect.gen(function* () {
+        const step = Math.max(1, Math.min(250, ms))
+        for (let waited = 0; waited < ms; waited += step) {
+          if (!options.process.isAlive(pid)) return true
+          yield* Effect.sleep(step)
+        }
+        return !options.process.isAlive(pid)
+      })
+
+    const stopOrphan = (run: OperatorRun, pid: number): Effect.Effect<OperatorRun> =>
+      Effect.gen(function* () {
+        const first = !orphansStopping.has(run.runId)
+        orphansStopping.add(run.runId)
+        if (first) yield* options.process.signal(pid, "SIGINT")
+        let gone = yield* awaitGone(pid, graceMs)
+        if (!gone) {
+          if (first) yield* options.process.signal(pid, "SIGTERM")
+          gone = yield* awaitGone(pid, graceMs)
+        }
+        if (!gone) return run
+        const endedAt = yield* Clock.currentTimeMillis
+        const interrupted = withState(run, { state: "interrupted", endedAt })
+        yield* record(interrupted).pipe(Effect.ignore)
+        return interrupted
+      })
 
     const stop = (runId: string): Effect.Effect<OperatorRun, UnknownRun> =>
       Effect.gen(function* () {
@@ -249,13 +318,17 @@ export const makeRunSupervisor = (
           if (known === undefined) {
             return yield* new UnknownRun({ message: `no run ${runId}` })
           }
+          if (isOrphan(known) && known.pid !== undefined) {
+            return yield* stopOrphan(known, known.pid)
+          }
           return known
         }
-        yield* Ref.set(entry.stopping, true)
-        yield* entry.handle.signal("SIGINT")
+        // Only the first stop signals: a second SIGINT kills a flow at once.
+        const already = yield* Ref.getAndSet(entry.stopping, true)
+        if (!already) yield* entry.handle.signal("SIGINT")
         const graceful = yield* Deferred.await(entry.final).pipe(Effect.timeoutOption(graceMs))
         if (graceful._tag === "Some") return graceful.value
-        yield* entry.handle.signal("SIGTERM")
+        if (!already) yield* entry.handle.signal("SIGTERM")
         const forced = yield* Deferred.await(entry.final).pipe(Effect.timeoutOption(graceMs))
         if (forced._tag === "Some") return forced.value
         // The child ignored SIGTERM too: report where the registry stands.

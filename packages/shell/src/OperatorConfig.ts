@@ -36,6 +36,9 @@ export const McpConfigFile = Schema.Struct({
   repos: Schema.Array(Schema.Struct({ id: Schema.String, path: Schema.String }))
 })
 
+/** The same name shape as an epic id: it names the repository's state directory. */
+const repoIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
+
 const usage = (message: string): ShellUsageError => new ShellUsageError({ message })
 
 /**
@@ -134,6 +137,12 @@ const reposFrom = (
     )
     if (file.repos.length === 0) {
       return yield* usage("mcp needs --repo <path> or ~/.config/llm4ts/mcp.json")
+    }
+    const badId = file.repos.find(({ id }) => !repoIdPattern.test(id))
+    if (badId !== undefined) {
+      return yield* usage(
+        `${configPath}: repository id "${badId.id}" must match ${repoIdPattern.source}`
+      )
     }
     return file.repos.map(({ id, path }) => ({ id, path: resolve(cwd, path) }))
   })

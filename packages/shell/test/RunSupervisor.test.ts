@@ -10,7 +10,9 @@ import {
   OperatorRun,
   RunInProgress
 } from "@llm4ts/flow/OperatorSchemas"
+import { PersistenceError } from "@llm4ts/flow/FlowError"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { makeFakeFlowProcess } from "@llm4ts/shell/FlowProcess"
 import {
   knobsToArgs,
@@ -28,18 +30,25 @@ const request = (flow: string, knobs: StartRun["knobs"] = {}): StartRun => ({
   repo,
   flow: { name: flow, path: `/flows/${flow}.ts` },
   knobs,
-  baseEnvironment: { PATH: "/usr/bin" }
+  baseEnvironment: { PATH: "/usr/bin", LLM4TS_MCP_TOKEN: "s3cret" }
 })
 
-const setup = (initial: Readonly<Record<string, string>> = {}) =>
+const setup = (
+  initial: Readonly<Record<string, string>> = {},
+  options: {
+    readonly alive?: ReadonlyArray<number>
+    readonly files?: (store: PlainFileStoreShape) => PlainFileStoreShape
+  } = {}
+) =>
   Effect.gen(function* () {
     const memory = yield* makeMemoryPlainFileStore(initial)
     const fake = yield* makeFakeFlowProcess()
+    for (const pid of options.alive ?? []) yield* fake.setAlive(pid, true)
     let suffix = 0xbeef
     const supervisor = yield* makeRunSupervisor({
       repos: [repo],
       environment,
-      files: memory.store,
+      files: options.files === undefined ? memory.store : options.files(memory.store),
       process: fake.process,
       parallelRuns: 1,
       random: () => (suffix++).toString(16)
@@ -93,6 +102,19 @@ describe("knobs", () => {
   })
 })
 
+const orphan = (pid: number) =>
+  new OperatorRun({
+    runId: "op-1-aaaa",
+    repo: "app",
+    flow: "implement",
+    args: [],
+    knobs: {},
+    startedAt: 1,
+    pid,
+    logDir: "/state/llm4ts/mcp/app/runs/op-1-aaaa",
+    state: "running"
+  })
+
 describe("RunSupervisor", () => {
   it.effect(
     "start spawns the flow with the run id, trace path and knob variables and records running",
@@ -120,8 +142,10 @@ describe("RunSupervisor", () => {
           assert.strictEqual(started.environment.LLM4TS_EXECUTORS, "claude,codex")
           assert.strictEqual(started.environment.LLM4TS_FLOW, "implement")
           assert.strictEqual(started.environment.PATH, "/usr/bin")
+          assert.isFalse("LLM4TS_MCP_TOKEN" in started.environment)
           assert.deepStrictEqual(started.args, ["bump deps", "--judge-rounds", "1"])
           assert.strictEqual(started.cwd, "/work/app")
+          assert.isTrue(started.detached)
           assert.deepStrictEqual(started.stdio, {
             stdout: `/state/llm4ts/mcp/app/runs/${run.runId}/stdout.log`,
             stderr: `/state/llm4ts/mcp/app/runs/${run.runId}/stderr.log`
@@ -246,5 +270,100 @@ describe("RunSupervisor", () => {
       assert.strictEqual(latest?.state, "interrupted")
       assert.strictEqual(latest?.exitCode, 130)
     })
+  )
+  it.effect("concurrent stops send one SIGINT and the scope finalizer sends none", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const { fake, supervisor } = yield* setup().pipe(Scope.provide(scope))
+      const run = yield* supervisor.start(request("implement"))
+      const pid = run.pid ?? 0
+      const first = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+      const second = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+      yield* TestClock.adjust("1 second")
+      assert.deepStrictEqual(yield* fake.signals, [{ pid, signal: "SIGINT" }])
+      const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild)
+      yield* TestClock.adjust("1 second")
+      assert.deepStrictEqual(yield* fake.signals, [{ pid, signal: "SIGINT" }])
+      yield* fake.exit(pid, { code: 130, signal: undefined })
+      const [a, b] = [yield* Fiber.join(first), yield* Fiber.join(second)]
+      yield* Fiber.join(closing)
+      assert.strictEqual(a.state, "interrupted")
+      assert.strictEqual(b.state, "interrupted")
+    })
+  )
+
+  it.effect("a failed final append still releases a pending stop", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let failNext = false
+        const { fake, supervisor } = yield* setup(
+          {},
+          {
+            files: (store) => ({
+              ...store,
+              append: (path, contents) => {
+                if (!failNext) return store.append(path, contents)
+                failNext = false
+                return Effect.fail(new PersistenceError({ message: "disk full" }))
+              }
+            })
+          }
+        )
+        const run = yield* supervisor.start(request("implement"))
+        const pid = run.pid ?? 0
+        const stopping = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        failNext = true
+        yield* fake.exit(pid, { code: 130, signal: undefined })
+        const stopped = yield* Fiber.join(stopping)
+        assert.strictEqual(stopped.state, "interrupted")
+        assert.deepStrictEqual(yield* fake.signals, [{ pid, signal: "SIGINT" }])
+        // The registry kept `running`; with the child gone it reads as lost.
+        assert.strictEqual((yield* supervisor.get(run.runId))?.state, "lost")
+      })
+    )
+  )
+
+  it.effect("a surviving orphan blocks its repo until its pid dies, then reads lost", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fake, supervisor } = yield* setup(
+          { [registryPath]: `${encodeOperatorRunLine(orphan(4242))}\n` },
+          { alive: [4242] }
+        )
+        assert.strictEqual((yield* supervisor.get("op-1-aaaa"))?.state, "running")
+        const refused = yield* supervisor.start(request("implement")).pipe(Effect.flip)
+        assert.instanceOf(refused, RunInProgress)
+        yield* fake.setAlive(4242, false)
+        const run = yield* supervisor.start(request("implement"))
+        assert.strictEqual(run.state, "running")
+        const listed = yield* supervisor.list("app")
+        assert.strictEqual(listed.find((r) => r.runId === "op-1-aaaa")?.state, "lost")
+        yield* fake.exit(run.pid ?? 0, { code: 0, signal: undefined })
+      })
+    )
+  )
+
+  it.effect("stop on a surviving orphan signals its pid once and records interrupted", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fake, supervisor, registry } = yield* setup(
+          { [registryPath]: `${encodeOperatorRunLine(orphan(4242))}\n` },
+          { alive: [4242] }
+        )
+        const first = yield* supervisor.stop("op-1-aaaa").pipe(Effect.forkChild)
+        const second = yield* supervisor.stop("op-1-aaaa").pipe(Effect.forkChild)
+        yield* TestClock.adjust("1 second")
+        assert.deepStrictEqual(yield* fake.signals, [{ pid: 4242, signal: "SIGINT" }])
+        yield* fake.setAlive(4242, false)
+        yield* TestClock.adjust("1 second")
+        assert.strictEqual((yield* Fiber.join(first)).state, "interrupted")
+        assert.strictEqual((yield* Fiber.join(second)).state, "interrupted")
+        assert.deepStrictEqual(yield* fake.signals, [{ pid: 4242, signal: "SIGINT" }])
+        const [latest] = yield* registry
+        assert.strictEqual(latest?.state, "interrupted")
+        assert.isDefined(latest?.endedAt)
+      })
+    )
   )
 })

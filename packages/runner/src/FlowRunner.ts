@@ -1218,30 +1218,46 @@ export interface SignalSource {
 const signalExitCode: Record<InterruptSignal, number> = { SIGINT: 130, SIGTERM: 143 }
 
 /**
- * First signal (SIGINT by default) interrupts the fiber (finalizers run, the
- * trace ends `interrupted`); a second one exits at once, 130 for SIGINT and
- * 143 for SIGTERM. The handler re-arms itself after the first signal. Returns
- * a disposer that removes whichever handler is armed.
+ * The first of the given signals (SIGINT by default) interrupts the fiber
+ * (finalizers run, the trace ends `interrupted`); any later one exits at
+ * once, 130 for SIGINT and 143 for SIGTERM. The handlers re-arm themselves
+ * after the first signal. Returns a disposer that removes whichever handlers
+ * are armed.
  */
 export const interruptOnSignal = <A, E>(
   fiber: Fiber.Fiber<A, E>,
   signals: SignalSource,
-  signal: InterruptSignal = "SIGINT"
+  signal: InterruptSignal | ReadonlyArray<InterruptSignal> = "SIGINT"
 ): (() => void) => {
-  const first = (): void => {
-    signals.once(signal, second)
-    Effect.runFork(Fiber.interrupt(fiber))
-  }
-  const second = (): void => {
-    signals.exit(signalExitCode[signal])
-  }
+  const watched: ReadonlyArray<InterruptSignal> = typeof signal === "string" ? [signal] : signal
+  const seconds = new Map<InterruptSignal, () => void>(
+    watched.map((name) => [name, () => signals.exit(signalExitCode[name])])
+  )
+  const firsts = new Map<InterruptSignal, () => void>(
+    watched.map((name) => [
+      name,
+      () => {
+        for (const other of watched) {
+          const otherFirst = firsts.get(other)
+          if (otherFirst !== undefined) signals.off(other, otherFirst)
+          const second = seconds.get(other)
+          if (second !== undefined) signals.once(other, second)
+        }
+        Effect.runFork(Fiber.interrupt(fiber))
+      }
+    ])
+  )
   const dispose = (): void => {
-    signals.off(signal, first)
-    signals.off(signal, second)
+    for (const name of watched) {
+      const first = firsts.get(name)
+      if (first !== undefined) signals.off(name, first)
+      const second = seconds.get(name)
+      if (second !== undefined) signals.off(name, second)
+    }
   }
-  signals.once(signal, first)
-  // After an interrupt the handler stays: a second Ctrl-C must still kill a
-  // run whose finalizers hang. Otherwise it is removed when the fiber ends.
+  for (const [name, first] of firsts) signals.once(name, first)
+  // After an interrupt the handlers stay: a second signal must still kill a
+  // run whose finalizers hang. Otherwise they are removed when the fiber ends.
   fiber.addObserver((exit) => {
     if (!(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))) {
       dispose()
@@ -1249,6 +1265,12 @@ export const interruptOnSignal = <A, E>(
   })
   return dispose
 }
+
+/**
+ * The signals `runFlowMain` stops on. SIGTERM counts like SIGINT, so a
+ * supervisor's or init system's stop ends the trace `interrupted` too.
+ */
+export const flowMainSignals: ReadonlyArray<InterruptSignal> = ["SIGINT", "SIGTERM"]
 
 const processSignals: SignalSource = {
   once: (signal, handler) => {
@@ -1279,5 +1301,5 @@ export const runFlowMain = <E>(program: Effect.Effect<void, E>): void => {
       process.exitCode = 130
     }
   })
-  interruptOnSignal(fiber, processSignals)
+  interruptOnSignal(fiber, processSignals, flowMainSignals)
 }

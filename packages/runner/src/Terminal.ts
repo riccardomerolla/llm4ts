@@ -460,6 +460,9 @@ export const makeLiveTerminalSurface = Effect.fn("@llm4ts/runner/Terminal.makeLi
 const hideCursor = "\u001b[?25l"
 const showCursor = "\u001b[?25h"
 
+/** Re-raise only when no other listener remains to handle the signal. */
+export const shouldReraise = (otherListeners: number): boolean => otherListeners === 0
+
 /**
  * While the live status block is on screen, keystrokes must not be echoed:
  * an arrow key (or a trackpad scroll the terminal turns into one) echoes as
@@ -468,9 +471,6 @@ const showCursor = "\u001b[?25h"
  * (Ctrl-C still interrupts: only echo changes) and the cursor is hidden;
  * both come back when the surface closes or the process exits.
  */
-/** Re-raise only when no other listener remains to handle the signal. */
-export const shouldReraise = (otherListeners: number): boolean => otherListeners === 0
-
 const quietTerminalInput = (
   write: (text: string) => void
 ): Effect.Effect<void, never, Scope.Scope> =>

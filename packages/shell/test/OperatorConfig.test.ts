@@ -82,6 +82,21 @@ describe("mcpOptionsFrom", () => {
     })
   )
 
+  it.effect("an mcp.json id that is not a plain name is a usage error", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        mcpOptionsFrom(none, { XDG_CONFIG_HOME: "/cfg" }, "/work", (path) =>
+          Effect.succeed(
+            path === "/cfg/llm4ts/mcp.json"
+              ? JSON.stringify({ repos: [{ id: "../escape", path: "/r/a" }] })
+              : undefined
+          )
+        )
+      )
+      assert.include(error.message, "../escape")
+    })
+  )
+
   it.effect("both transports is a usage error", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(

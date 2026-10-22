@@ -388,6 +388,22 @@ describe("OperatorTools", () => {
     })
   )
 
+  it.effect("run_log tails a supervised run's logs and is empty for a discovered run", () =>
+    Effect.gen(function* () {
+      const { deps } = yield* seeded({
+        "/state/llm4ts/mcp/app/runs/op-1/stdout.log": "one\ntwo\nthree\n",
+        "/state/llm4ts/mcp/app/runs/op-1/stderr.log": "warn\n"
+      })
+      const handlers = readHandlers(deps)
+      const tail = yield* handlers.run_log({ runId: "op-1", lines: 2 }, context)
+      assert.deepStrictEqual(tail, { stdout: ["two", "three"], stderr: ["warn"] })
+
+      const discovered = yield* seeded({}, { supervisor: emptySupervisor })
+      const empty = yield* readHandlers(discovered.deps).run_log({ runId: "op-1" }, context)
+      assert.deepStrictEqual(empty, { stdout: [], stderr: [] })
+    })
+  )
+
   it.effect("a supervised run whose trace is not written yet reads as an empty trace", () =>
     Effect.gen(function* () {
       const { deps } = yield* seeded({}, { withoutTrace: true })
@@ -681,6 +697,14 @@ describe("OperatorActTools", () => {
         )
         assert.strictEqual(refused._tag, "InvalidKnob", flags.join(" "))
       }
+      const rounds = yield* Effect.flip(
+        handlers.start_run({ flow: "epic-stories", judgeRounds: -1 }, context)
+      )
+      assert.isTrue(rounds._tag === "InvalidKnob" && rounds.knob === "judgeRounds")
+      const revisions = yield* Effect.flip(
+        handlers.start_run({ flow: "epic-stories", mergeRevisions: -2 }, context)
+      )
+      assert.isTrue(revisions._tag === "InvalidKnob" && revisions.knob === "mergeRevisions")
       const promptFile = yield* Effect.flip(
         handlers.start_run({ flow: "epic-stories", task: "@/etc/passwd" }, context)
       )

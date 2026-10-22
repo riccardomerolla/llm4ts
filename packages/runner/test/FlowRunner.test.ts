@@ -42,6 +42,7 @@ import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryTranscriptSink } from "@llm4ts/flow/Transcript"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import {
+  flowMainSignals,
   interruptOnSignal,
   makeFlowRunnerContext,
   runIdentityFromEnvironment,
@@ -1471,6 +1472,26 @@ describe("interruptOnSignal", () => {
         fake.handlers.get("SIGTERM")?.()
         const exit = yield* Fiber.await(fiber)
         assert.isTrue(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
+        fake.handlers.get("SIGTERM")?.()
+        assert.deepStrictEqual(fake.exitCalls, [143])
+      })
+    )
+  )
+
+  it.effect("with the flow-main signals, SIGTERM ends the trace interrupted", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { state, fiber } = yield* start
+        const fake = fakeSignals()
+        interruptOnSignal(fiber, fake.source, flowMainSignals)
+        assert.isDefined(fake.handlers.get("SIGINT"))
+        fake.handlers.get("SIGTERM")?.()
+        const exit = yield* Fiber.await(fiber)
+        assert.isTrue(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
+        const last = ((yield* Ref.get(state))["trace.jsonl"] ?? "").trim().split("\n").at(-1)
+        const line = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TraceLine))(last ?? "")
+        assert.deepStrictEqual([line.kind, line.fields.outcome], ["RunEnded", "interrupted"])
+        assert.deepStrictEqual(fake.exitCalls, [])
         fake.handlers.get("SIGTERM")?.()
         assert.deepStrictEqual(fake.exitCalls, [143])
       })
