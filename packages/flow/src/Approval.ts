@@ -28,6 +28,12 @@ export class MissingModernizeArtifact extends Schema.TaggedError<MissingModerniz
 export const ApprovedMarker = "- [x] Approved"
 export const DraftApprovalMarker = "- [ ] Approved"
 
+/** `- [ ] Approved` → `- [x] Approved` in a markdown document; unchanged when already approved. */
+export const approveMarkdown = (markdown: string): string =>
+  markdown.includes(ApprovedMarker)
+    ? markdown
+    : markdown.replace(DraftApprovalMarker, ApprovedMarker)
+
 export const withDraftApproval = (markdown: string): string =>
   `${markdown.trimEnd()}\n\n${DraftApprovalMarker}\n`
 

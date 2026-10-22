@@ -5,6 +5,7 @@ import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
 import type * as Scope from "effect/Scope"
 import type { ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
@@ -329,12 +330,33 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
       : config
 })
 
+const nonBlank = (value: string | undefined): string | undefined =>
+  value === undefined || value.trim() === "" ? undefined : value
+
+/**
+ * The run id and trace path a parent process (the MCP operator server) hands
+ * to a child run. Explicit options win; blank variables count as unset.
+ */
+export const runIdentityFromEnvironment = (
+  options: Pick<FlowRunnerOptions, "runId" | "tracePath">,
+  environment: Readonly<Record<string, string | undefined>>
+): { readonly runId?: string; readonly tracePath?: string } => {
+  const runId = nonBlank(options.runId) ?? nonBlank(environment["LLM4TS_RUN_ID"])
+  const tracePath = nonBlank(options.tracePath) ?? nonBlank(environment["LLM4TS_TRACE_PATH"])
+  return {
+    ...(runId === undefined ? {} : { runId }),
+    ...(tracePath === undefined ? {} : { tracePath })
+  }
+}
+
 export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeContext")(function* (
   options: FlowRunnerOptions,
   dependencies: FlowRunnerDependencies
 ): Effect.fn.Return<FlowRunnerBundle, FlowError, Scope.Scope> {
   const events = yield* makeFlowEventHub()
-  const runId = options.runId ?? `run-${(yield* Clock.currentTimeMillis).toString()}`
+  const runId =
+    runIdentityFromEnvironment(options, options.environment ?? process.env).runId ??
+    `run-${(yield* Clock.currentTimeMillis).toString()}`
   // `llm4ts run --transcript`: what each seat is told and answers, per story,
   // in its own files — never in the trace.
   const transcriptOn =
@@ -928,7 +950,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   // per run, flushed when the run's scope closes.
   const otel = otelConfig(environment)
   const tracePath =
-    options.tracePath ??
+    runIdentityFromEnvironment(options, environment).tracePath ??
     (persistRun ? join(options.workDir, ".llm4ts", `trace-${startedAt}.jsonl`) : undefined)
   const costLedgerPath =
     options.costLedgerPath ??
@@ -977,11 +999,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
         : `executors ${bundle.roster.executors.map(describeExecutor).join(", ")} (roster in force: the flow's own seat choices are not used)`
     yield* surface.log(palette.info(`${seats} · ${options.workDir}`))
     if (tracePath !== undefined) {
-      yield* surface.log(
-        palette.info(
-          `trace ${tracePath}${options.runId === undefined ? "" : ` · run ${options.runId}`}`
-        )
-      )
+      yield* surface.log(palette.info(`trace ${tracePath} · run ${bundle.runId}`))
     }
     const where = otelSummary(otel)
     if (where !== undefined) {
@@ -1012,7 +1030,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
           const at = new Date(yield* Clock.currentTimeMillis).toISOString()
           yield* checkCostBudget(
             makeCostRecord({
-              runId: options.runId ?? "run",
+              runId: bundle.runId,
               at,
               repo: options.workDir,
               prompt: options.userPrompt,
@@ -1205,8 +1223,83 @@ export const runNode = <A, E, R>(
 const mainErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message.length > 0 ? error.message : String(error)
 
+export type InterruptSignal = "SIGINT" | "SIGTERM"
+
+export interface SignalSource {
+  readonly once: (signal: InterruptSignal, handler: () => void) => void
+  readonly off: (signal: InterruptSignal, handler: () => void) => void
+  readonly exit: (code: number) => void
+}
+
+const signalExitCode: Record<InterruptSignal, number> = { SIGINT: 130, SIGTERM: 143 }
+
+/**
+ * The first of the given signals (SIGINT by default) interrupts the fiber
+ * (finalizers run, the trace ends `interrupted`); any later one exits at
+ * once, 130 for SIGINT and 143 for SIGTERM. The handlers re-arm themselves
+ * after the first signal. Returns a disposer that removes whichever handlers
+ * are armed.
+ */
+export const interruptOnSignal = <A, E>(
+  fiber: Fiber.Fiber<A, E>,
+  signals: SignalSource,
+  signal: InterruptSignal | ReadonlyArray<InterruptSignal> = "SIGINT"
+): (() => void) => {
+  const watched: ReadonlyArray<InterruptSignal> = typeof signal === "string" ? [signal] : signal
+  const seconds = new Map<InterruptSignal, () => void>(
+    watched.map((name) => [name, () => signals.exit(signalExitCode[name])])
+  )
+  const firsts = new Map<InterruptSignal, () => void>(
+    watched.map((name) => [
+      name,
+      () => {
+        for (const other of watched) {
+          const otherFirst = firsts.get(other)
+          if (otherFirst !== undefined) signals.off(other, otherFirst)
+          const second = seconds.get(other)
+          if (second !== undefined) signals.once(other, second)
+        }
+        Effect.runFork(Fiber.interrupt(fiber))
+      }
+    ])
+  )
+  const dispose = (): void => {
+    for (const name of watched) {
+      const first = firsts.get(name)
+      if (first !== undefined) signals.off(name, first)
+      const second = seconds.get(name)
+      if (second !== undefined) signals.off(name, second)
+    }
+  }
+  for (const [name, first] of firsts) signals.once(name, first)
+  // After an interrupt the handlers stay: a second signal must still kill a
+  // run whose finalizers hang. Otherwise they are removed when the fiber ends.
+  fiber.addObserver((exit) => {
+    if (!(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))) {
+      dispose()
+    }
+  })
+  return dispose
+}
+
+/**
+ * The signals `runFlowMain` stops on. SIGTERM counts like SIGINT, so a
+ * supervisor's or init system's stop ends the trace `interrupted` too.
+ */
+export const flowMainSignals: ReadonlyArray<InterruptSignal> = ["SIGINT", "SIGTERM"]
+
+const processSignals: SignalSource = {
+  once: (signal, handler) => {
+    process.once(signal, handler)
+  },
+  off: (signal, handler) => {
+    process.off(signal, handler)
+  },
+  exit: (code) => process.exit(code)
+}
+
 export const runFlowMain = <E>(program: Effect.Effect<void, E>): void => {
-  Effect.runFork(
+  const fiber = Effect.runFork(
     program.pipe(
       Effect.match({
         onFailure: (error) =>
@@ -1219,4 +1312,10 @@ export const runFlowMain = <E>(program: Effect.Effect<void, E>): void => {
       Effect.flatten
     )
   )
+  fiber.addObserver((exit) => {
+    if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) {
+      process.exitCode = 130
+    }
+  })
+  interruptOnSignal(fiber, processSignals, flowMainSignals)
 }

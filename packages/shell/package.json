@@ -22,9 +22,18 @@
     "./CoderChoice": "./dist/CoderChoice.js",
     "./FlowCatalog": "./dist/FlowCatalog.js",
     "./FlowLaunch": "./dist/FlowLaunch.js",
+    "./FlowProcess": "./dist/FlowProcess.js",
     "./Menu": "./dist/Menu.js",
+    "./OperatorActTools": "./dist/OperatorActTools.js",
+    "./OperatorConfig": "./dist/OperatorConfig.js",
+    "./OperatorNode": "./dist/OperatorNode.js",
+    "./OperatorRuns": "./dist/OperatorRuns.js",
+    "./OperatorServer": "./dist/OperatorServer.js",
+    "./OperatorTools": "./dist/OperatorTools.js",
     "./Refine": "./dist/Refine.js",
+    "./RunSupervisor": "./dist/RunSupervisor.js",
     "./Package": "./dist/Package.js",
+    "./ShellErrors": "./dist/ShellErrors.js",
     "./package.json": "./package.json"
   },
   "scripts": {
