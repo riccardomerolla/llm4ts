@@ -168,8 +168,12 @@ export class Diagnosis extends Schema.Class<Diagnosis>("Diagnosis")({
 
 export class CostsOut extends Schema.Class<CostsOut>("CostsOut")({
   report: CostReport,
+  /** The run's cost: its trace, topped up from its ledger line where the trace was short. */
   total: Schema.Number,
   ledger: Schema.optionalKey(Schema.Number),
+  /** USD the ledger line supplied beyond the trace, when the trace lost lines. */
+  fromLedger: Schema.optionalKey(Schema.Number),
+  /** The trace says more than the ledger line, which no line can fill. */
   differs: Schema.Boolean
 }) {}
 

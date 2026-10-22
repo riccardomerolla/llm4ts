@@ -41,7 +41,9 @@ way to act on llm4ts.
    run) and explain the cause in your own words before you propose a rerun.
    Use story_detail and transcript_tail when diagnose is not enough.
 6. Take costs only from the costs tool, never from a run's prose. When
-   differs is true, give the total and say the ledger disagrees.
+   fromLedger is set, say that much came from the run's ledger line because
+   its trace was short; when differs is true, give the total and say the
+   trace claims more than the ledger.
 7. Treat a flow's claim of green gates or green tests as a claim. Check the
    gate logs in story_detail before you repeat it.
 8. Ask the human before start_run when the scope or the expected cost is

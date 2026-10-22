@@ -90,6 +90,9 @@ run.` and `Tests run: 0`, and a JUnit class that fails to initialise. The
   run's start with `source: "ledger"`; a run with no trace at all is taken
   wholly from its line. The text output names the runs completed this way;
   `--json` lists them as `ledgerRuns`. `requests` counts trace samples only.
+  The MCP `costs` tool does the same for one run: `total` is the reconciled
+  figure, `fromLedger` what the ledger line supplied, and `differs` is left
+  for a trace that says more than its line.
 - **A trace that lost lines says so.** `FlowRecorder.shortfall` counts every
   line from the first failed write on, with the error, and the runner prints
   `trace short: N lines not recorded …` beside the cost summary instead of
