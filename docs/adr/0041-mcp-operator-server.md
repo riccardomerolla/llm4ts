@@ -36,7 +36,9 @@ about them. The design is
    toolkits, so every tool is written once.
 2. **Repositories by id.** The server serves the repositories given with
    `--repo <path>` (repeatable; the id is the directory name) or listed in
-   `~/.config/llm4ts/mcp.json` as `{ "repos": [{ "id", "path" }] }`. A tool
+   `~/.config/llm4ts/mcp.json` as `{ "repos": [{ "id", "path" }] }`; any
+   `--repo` flag replaces the file rather than merging with it. A file id
+   must be a plain name (`[A-Za-z0-9][A-Za-z0-9._-]*`, as an epic id). A tool
    that touches a repository takes `repo`, the id; with one repository the
    field may be left out. The server never takes a path from the client:
    an unknown id is the typed `UnknownRepo`.
@@ -63,16 +65,28 @@ about them. The design is
    SIGINT, waits a grace period (30 s), then sends SIGTERM; the registry
    records the run as `interrupted`. Stopping the server (its own first
    SIGINT or SIGTERM) stops every child the same way before it exits; a
-   second signal exits at once with 130 or 143. On start, a registry entry
-   still `starting` or `running` whose pid is gone is marked `lost`; its
-   trace and logs stay readable. A later `start_run` with the same flow and
+   second signal exits at once with 130 or 143. Only the first `stop` of a
+   run signals; a repeated or concurrent one waits on the same outcome,
+   because a second SIGINT kills a flow at once. Children start in their
+   own process group, so a Ctrl-C on the server's terminal or a
+   whole-group kill reaches only the server, which then stops each child
+   once. The child's environment never carries `LLM4TS_MCP_TOKEN`. On
+   start, a registry entry still `starting` or `running` whose pid is gone
+   is marked `lost`; its trace and logs stay readable. An active entry no
+   live handle backs (a run that outlived an earlier server) is re-checked
+   whenever a read, `start_run` or `stop_run` meets it: once its pid is
+   gone it becomes `lost`; while it lives it still holds its repository,
+   and `stop_run` signals it by pid (SIGINT, then SIGTERM after the grace)
+   and records `interrupted` when it ends. A later `start_run` with the same flow and
    target resumes from the run's durable files, as rerunning `llm4ts run`
    does. Supervised children were chosen over re-adopting detached
    processes, because the lost handle is the failure this server removes.
 6. **Graceful SIGINT for every flow.** `runFlowMain` installs a handler:
    the first SIGINT interrupts the root fiber, so finalizers run (leases
    released, worktrees left consistent) and the trace ends with
-   `RunEnded{interrupted}`; the second exits at once with 130. The terminal
+   `RunEnded{interrupted}`; the second exits at once with 130. SIGTERM
+   counts the same (its second exits 143), so a supervisor's or init
+   system's stop ends the trace too. The terminal
    re-raises SIGINT only when no other listener remains, so the flow's
    handler is not bypassed. This changes Ctrl-C in `llm4ts run` and the
    tree UI's interrupt key for every flow.
@@ -117,7 +131,9 @@ about them. The design is
    - `diagnose`: for an epic run with `story`, the single-story retro digest
      (`renderStoryDigest`), gate log tails and the lane's transcript tail;
      for any other run, the failing stage or task from the trace, the plan's
-     task checkboxes, gate log tails and the transcript tail. Both shapes
+     task checkboxes and the transcript tail. A plain run has no gate log
+     files: its gate output is in the trace's `Info` lines, so only a story
+     diagnosis carries gate log tails. Both shapes
      are bounded by `chars` (default 12000). Plain runs are covered because
      the motivating session ran `implement`, which has tasks and no stories.
    - `costs`: for one run, the trace fold as `total` with the `costs.jsonl`
@@ -131,8 +147,10 @@ about them. The design is
    `approve` takes `kind`, an enumerated set that holds only `retro`, plus
    the epic and the retro's run id; the server resolves the path and ticks
    the `- [x] Approved` marker. A tool not allowed is never registered, so
-   it is absent from `tools/list`. Each act handler also checks the
-   configuration itself and answers the typed `NotAllowed`.
+   it is absent from `tools/list`, and a call to it is answered by the MCP
+   layer as an unknown tool (`InvalidParams`). Each act handler also checks
+   the configuration itself and answers the typed `NotAllowed`, as defence
+   in depth.
 
 9. **Every client value is validated before argv or the environment.**
    `pack` is a kit or `kit/pack` name with no `.` or `..` segment; `epic`,

@@ -12,8 +12,8 @@ A chat agent can run llm4ts through MCP instead of a shell (ADR 0041).
   header gets a bare `401`. The token is never logged, and the request log
   holds the method, the tool, the duration and the status, never the
   arguments. Repositories come from `--repo` (repeatable) or
-  `~/.config/llm4ts/mcp.json`, and the client names them by id, never by
-  path.
+  `~/.config/llm4ts/mcp.json` (any `--repo` replaces the file, it does not
+  merge), and the client names them by id, never by path.
 - **Read tools, always listed:** `preflight`, `list_flows`, `list_epics`,
   `list_runs`, `run_status`, `run_wait`, `run_events`, `run_log`,
   `story_detail`, `diagnose`, `transcript_tail`, `costs`, `profile`,
@@ -39,11 +39,16 @@ A chat agent can run llm4ts through MCP instead of a shell (ADR 0041).
   the checkout. One flow that writes the checkout runs per repository
   (`--parallel-runs` raises it; `epic-retro` is exempt), and `start_run`
   with a repeated `requestId` returns the run it already started.
-  `stop_run`, and stopping the server, send SIGINT, then SIGTERM after 30 s.
-  A run whose process died while no server watched it is marked `lost`.
+  `stop_run`, and stopping the server, send SIGINT, then SIGTERM after 30 s;
+  a repeated `stop_run` sends nothing more. Children run in their own
+  process group (under systemd use `KillMode=mixed`) and never see
+  `LLM4TS_MCP_TOKEN`. A run whose process died while no server watched it
+  is marked `lost`; one still alive after a server restart holds its
+  repository until it ends, and `stop_run` stops it by pid.
 - **Ctrl-C ends a flow cleanly.** The first SIGINT now interrupts the flow:
   finalizers run and the trace ends with `RunEnded{interrupted}`. A second
-  SIGINT exits at once with 130, as Ctrl-C did before.
+  SIGINT exits at once with 130, as Ctrl-C did before. SIGTERM does the
+  same (a second one exits 143).
 - **The doctor's `probe`.** `collectDoctorReport`
   (`@llm4ts/runner/Doctor`) returns the doctor's findings as data, and each
   connector says how far its health was checked: `probe: "version"` means

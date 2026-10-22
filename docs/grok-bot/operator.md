@@ -101,6 +101,14 @@ Do this on the machine that holds the repositories.
    only if the bot may approve retros. Instead of `--repo` you can list the
    repositories in `~/.config/llm4ts/mcp.json` as
    `{ "repos": [{ "id": "nightcall", "path": "/srv/code/nightcall" }] }`.
+   Any `--repo` flag replaces that file; the two are not merged.
+
+   The server starts each flow in its own process group and stops it
+   itself (SIGINT, then SIGTERM after 30 s), so the stop signal must reach
+   the server only. Under systemd, set `KillMode=mixed` (or `process`) in
+   the unit; the default `control-group` signals the flows directly, and
+   the server's own SIGINT then reaches them as a second signal, which
+   kills them without cleanup.
 
 4. From the computer the bot runs on, forward the port over ssh:
 
@@ -155,8 +163,12 @@ client starts itself:
 
 ```json
 {
-  "command": "llm4ts",
-  "args": ["mcp", "--stdio", "--repo", "<path>"]
+  "mcpServers": {
+    "llm4ts": {
+      "command": "llm4ts",
+      "args": ["mcp", "--stdio", "--repo", "<path>"]
+    }
+  }
 }
 ```
 
