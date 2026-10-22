@@ -22,6 +22,7 @@
     "./CoderChoice": "./dist/CoderChoice.js",
     "./FlowCatalog": "./dist/FlowCatalog.js",
     "./FlowLaunch": "./dist/FlowLaunch.js",
+    "./FlowProcess": "./dist/FlowProcess.js",
     "./Menu": "./dist/Menu.js",
     "./Refine": "./dist/Refine.js",
     "./Package": "./dist/Package.js",
