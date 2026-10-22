@@ -25,6 +25,7 @@
     "./FlowProcess": "./dist/FlowProcess.js",
     "./Menu": "./dist/Menu.js",
     "./Refine": "./dist/Refine.js",
+    "./RunSupervisor": "./dist/RunSupervisor.js",
     "./Package": "./dist/Package.js",
     "./package.json": "./package.json"
   },
