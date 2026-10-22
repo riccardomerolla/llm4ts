@@ -226,22 +226,24 @@ const seeded = (extra: Readonly<Record<string, string>> = {}, options: SeedOptio
   })
 
 describe("OperatorTools", () => {
-  it.effect("preflight never reports a bare Valid: a Valid carries probe auth, a version probe Unknown", () =>
-    Effect.gen(function* () {
-      const { deps } = yield* seeded()
-      const result = yield* readHandlers(deps).preflight({}, context)
-      const claude = result.connectors.find((connector) => connector.id === "claude")
-      assert.strictEqual(claude?.authStatus, "Valid")
-      assert.strictEqual(claude?.probe, "auth")
-      const grok = result.connectors.find((connector) => connector.id === "grok")
-      assert.strictEqual(grok?.authStatus, "Unknown")
-      assert.strictEqual(grok?.probe, "version")
-      for (const connector of result.connectors) {
-        assert.include(["version", "auth", "unknown"], connector.probe)
-      }
-      assert.strictEqual(result.node, process.version)
-      assert.deepStrictEqual(result.notes, ["credentials: OPENAI_API_KEY missing"])
-    })
+  it.effect(
+    "preflight never reports a bare Valid: a Valid carries probe auth, a version probe Unknown",
+    () =>
+      Effect.gen(function* () {
+        const { deps } = yield* seeded()
+        const result = yield* readHandlers(deps).preflight({}, context)
+        const claude = result.connectors.find((connector) => connector.id === "claude")
+        assert.strictEqual(claude?.authStatus, "Valid")
+        assert.strictEqual(claude?.probe, "auth")
+        const grok = result.connectors.find((connector) => connector.id === "grok")
+        assert.strictEqual(grok?.authStatus, "Unknown")
+        assert.strictEqual(grok?.probe, "version")
+        for (const connector of result.connectors) {
+          assert.include(["version", "auth", "unknown"], connector.probe)
+        }
+        assert.strictEqual(result.node, process.version)
+        assert.deepStrictEqual(result.notes, ["credentials: OPENAI_API_KEY missing"])
+      })
   )
 
   it.effect("preflight probes executor health", () =>
