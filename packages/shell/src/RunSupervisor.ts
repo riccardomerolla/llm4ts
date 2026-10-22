@@ -142,8 +142,9 @@ export const makeRunSupervisor = (
     const live = new Map<string, LiveRun>()
     // Runs between their `starting` record and their `live` entry.
     const launching = new Set<string>()
-    // Orphan runs (alive, left by an earlier server) a `stop` already signalled.
-    const orphansStopping = new Set<string>()
+    // Orphan runs (alive, left by an earlier server) a `stop` already
+    // signalled, with the outcome of their escalation.
+    const orphansStopping = new Map<string, Deferred.Deferred<OperatorRun>>()
     const lock = yield* Semaphore.make(1)
     const watchers = yield* Scope.make()
 
@@ -293,21 +294,55 @@ export const makeRunSupervisor = (
         return !options.process.isAlive(pid)
       })
 
-    const stopOrphan = (run: OperatorRun, pid: number): Effect.Effect<OperatorRun> =>
+    // A live run's signal-and-escalate sequence. It runs in `watchers`, not
+    // in the caller's fiber, so a cancelled `stop` still sends SIGTERM.
+    const escalate = (entry: LiveRun): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const first = !orphansStopping.has(run.runId)
-        orphansStopping.add(run.runId)
-        if (first) yield* options.process.signal(pid, "SIGINT")
+        if (yield* Deferred.isDone(entry.final)) return
+        yield* entry.handle.signal("SIGINT")
+        const graceful = yield* Deferred.await(entry.final).pipe(Effect.timeoutOption(graceMs))
+        if (graceful._tag === "None") yield* entry.handle.signal("SIGTERM")
+      })
+
+    // The same for an orphan, by pid. It records `interrupted` once the pid
+    // is gone and always completes `outcome`, even when interrupted.
+    const escalateOrphan = (
+      run: OperatorRun,
+      pid: number,
+      outcome: Deferred.Deferred<OperatorRun>
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        yield* options.process.signal(pid, "SIGINT")
         let gone = yield* awaitGone(pid, graceMs)
         if (!gone) {
-          if (first) yield* options.process.signal(pid, "SIGTERM")
+          yield* options.process.signal(pid, "SIGTERM")
           gone = yield* awaitGone(pid, graceMs)
         }
-        if (!gone) return run
+        if (!gone) return
         const endedAt = yield* Clock.currentTimeMillis
         const interrupted = withState(run, { state: "interrupted", endedAt })
         yield* record(interrupted).pipe(Effect.ignore)
-        return interrupted
+        yield* Deferred.succeed(outcome, interrupted)
+      }).pipe(Effect.ensuring(Deferred.succeed(outcome, run)))
+
+    const stopOrphan = (run: OperatorRun, pid: number): Effect.Effect<OperatorRun> =>
+      Effect.gen(function* () {
+        const candidate = yield* Deferred.make<OperatorRun>()
+        // Check-and-set and fork with no interruption point between them:
+        // only the first stop signals, and its escalation always starts.
+        const outcome = yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const existing = orphansStopping.get(run.runId)
+            if (existing !== undefined) return existing
+            orphansStopping.set(run.runId, candidate)
+            yield* Effect.forkIn(escalateOrphan(run, pid, candidate), watchers)
+            return candidate
+          })
+        )
+        const result = yield* Deferred.await(outcome)
+        if (!isActive(result)) return result
+        // The child ignored SIGTERM too: report where the registry stands.
+        return (yield* get(run.runId)) ?? result
       })
 
     const stop = (runId: string): Effect.Effect<OperatorRun, UnknownRun> =>
@@ -324,11 +359,16 @@ export const makeRunSupervisor = (
           return known
         }
         // Only the first stop signals: a second SIGINT kills a flow at once.
-        const already = yield* Ref.getAndSet(entry.stopping, true)
-        if (!already) yield* entry.handle.signal("SIGINT")
+        // The winner forks the escalation into `watchers`; every caller,
+        // the winner included, only awaits the outcome.
+        yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            const already = yield* Ref.getAndSet(entry.stopping, true)
+            if (!already) yield* Effect.forkIn(escalate(entry), watchers)
+          })
+        )
         const graceful = yield* Deferred.await(entry.final).pipe(Effect.timeoutOption(graceMs))
         if (graceful._tag === "Some") return graceful.value
-        if (!already) yield* entry.handle.signal("SIGTERM")
         const forced = yield* Deferred.await(entry.final).pipe(Effect.timeoutOption(graceMs))
         if (forced._tag === "Some") return forced.value
         // The child ignored SIGTERM too: report where the registry stands.
@@ -336,11 +376,22 @@ export const makeRunSupervisor = (
         return latest ?? (yield* new UnknownRun({ message: `no run ${runId}` }))
       })
 
+    // Live runs are stopped (their escalations finish within the stop's
+    // wait) and pending orphan escalations awaited before `watchers` closes.
     yield* Effect.addFinalizer(() =>
-      Effect.forEach([...live.keys()], (runId) => Effect.ignore(stop(runId)), {
-        concurrency: "unbounded",
-        discard: true
-      }).pipe(Effect.andThen(Scope.close(watchers, Exit.void)))
+      Effect.all(
+        [
+          Effect.forEach([...live.keys()], (runId) => Effect.ignore(stop(runId)), {
+            concurrency: "unbounded",
+            discard: true
+          }),
+          Effect.forEach([...orphansStopping.values()], Deferred.await, {
+            concurrency: "unbounded",
+            discard: true
+          })
+        ],
+        { concurrency: "unbounded", discard: true }
+      ).pipe(Effect.andThen(Scope.close(watchers, Exit.void)))
     )
 
     return {

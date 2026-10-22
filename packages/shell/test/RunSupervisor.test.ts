@@ -216,6 +216,83 @@ describe("RunSupervisor", () => {
     )
   )
 
+  it.effect("a cancelled stop still escalates to SIGTERM", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fake, supervisor, registry } = yield* setup()
+        const run = yield* supervisor.start(request("implement"))
+        const pid = run.pid ?? 0
+        const cancelled = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+        yield* TestClock.adjust("1 second")
+        yield* Fiber.interrupt(cancelled)
+        yield* TestClock.adjust("30 seconds")
+        assert.deepStrictEqual(yield* fake.signals, [
+          { pid, signal: "SIGINT" },
+          { pid, signal: "SIGTERM" }
+        ])
+        // A later stop does not re-signal and returns the final record.
+        const again = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* fake.exit(pid, { code: undefined, signal: "SIGTERM" })
+        const stopped = yield* Fiber.join(again)
+        assert.strictEqual(stopped.state, "interrupted")
+        assert.deepStrictEqual(yield* fake.signals, [
+          { pid, signal: "SIGINT" },
+          { pid, signal: "SIGTERM" }
+        ])
+        const [latest] = yield* registry
+        assert.strictEqual(latest?.state, "interrupted")
+      })
+    )
+  )
+
+  it.effect("a second stop after a cancelled one does not re-signal", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fake, supervisor } = yield* setup()
+        const run = yield* supervisor.start(request("implement"))
+        const pid = run.pid ?? 0
+        const cancelled = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+        yield* TestClock.adjust("1 second")
+        yield* Fiber.interrupt(cancelled)
+        const again = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+        yield* TestClock.adjust("1 second")
+        assert.deepStrictEqual(yield* fake.signals, [{ pid, signal: "SIGINT" }])
+        yield* fake.exit(pid, { code: 130, signal: undefined })
+        const stopped = yield* Fiber.join(again)
+        assert.strictEqual(stopped.state, "interrupted")
+        assert.strictEqual(stopped.exitCode, 130)
+        assert.deepStrictEqual(yield* fake.signals, [{ pid, signal: "SIGINT" }])
+      })
+    )
+  )
+
+  it.effect("the scope finalizer completes a pending escalation", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      const { fake, supervisor, registry } = yield* setup().pipe(Scope.provide(scope))
+      const run = yield* supervisor.start(request("implement"))
+      const pid = run.pid ?? 0
+      const cancelled = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.interrupt(cancelled)
+      const closing = yield* Scope.close(scope, Exit.void).pipe(Effect.forkChild)
+      yield* TestClock.adjust("31 seconds")
+      assert.deepStrictEqual(yield* fake.signals, [
+        { pid, signal: "SIGINT" },
+        { pid, signal: "SIGTERM" }
+      ])
+      yield* fake.exit(pid, { code: undefined, signal: "SIGTERM" })
+      yield* Fiber.join(closing)
+      assert.deepStrictEqual(yield* fake.signals, [
+        { pid, signal: "SIGINT" },
+        { pid, signal: "SIGTERM" }
+      ])
+      const [latest] = yield* registry
+      assert.strictEqual(latest?.state, "interrupted")
+    })
+  )
+
   it.effect("a running record whose pid is dead is marked lost on construction", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -312,6 +389,8 @@ describe("RunSupervisor", () => {
         const run = yield* supervisor.start(request("implement"))
         const pid = run.pid ?? 0
         const stopping = yield* supervisor.stop(run.runId).pipe(Effect.forkChild)
+        // One turn for the stop to fork its escalation, one for the SIGINT.
+        yield* Effect.yieldNow
         yield* Effect.yieldNow
         failNext = true
         yield* fake.exit(pid, { code: 130, signal: undefined })
@@ -363,6 +442,32 @@ describe("RunSupervisor", () => {
         const [latest] = yield* registry
         assert.strictEqual(latest?.state, "interrupted")
         assert.isDefined(latest?.endedAt)
+      })
+    )
+  )
+
+  it.effect("a cancelled stop on an orphan still escalates to SIGTERM", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fake, supervisor, registry } = yield* setup(
+          { [registryPath]: `${encodeOperatorRunLine(orphan(4242))}\n` },
+          { alive: [4242] }
+        )
+        const cancelled = yield* supervisor.stop("op-1-aaaa").pipe(Effect.forkChild)
+        yield* TestClock.adjust("1 second")
+        yield* Fiber.interrupt(cancelled)
+        yield* TestClock.adjust("30 seconds")
+        assert.deepStrictEqual(yield* fake.signals, [
+          { pid: 4242, signal: "SIGINT" },
+          { pid: 4242, signal: "SIGTERM" }
+        ])
+        yield* fake.setAlive(4242, false)
+        yield* TestClock.adjust("1 second")
+        const [latest] = yield* registry
+        assert.strictEqual(latest?.state, "interrupted")
+        const again = yield* supervisor.stop("op-1-aaaa")
+        assert.strictEqual(again.state, "interrupted")
+        assert.strictEqual((yield* fake.signals).length, 2)
       })
     )
   )
