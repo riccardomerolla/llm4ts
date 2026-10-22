@@ -53,10 +53,9 @@ import { launchFlow } from "./FlowLaunch.ts"
 import { mainMenu } from "./Menu.ts"
 import { ModDir, refineSession } from "./Refine.ts"
 import { packageVersion } from "./Package.ts"
+import { ShellUsageError } from "./ShellErrors.ts"
 
-export class ShellUsageError extends Schema.TaggedError<ShellUsageError>()("ShellUsage", {
-  message: Schema.String
-}) {}
+export { ShellUsageError }
 
 export class ShellActionError extends Schema.TaggedError<ShellActionError>()("ShellAction", {
   message: Schema.String

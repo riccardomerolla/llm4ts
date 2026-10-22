@@ -24,9 +24,11 @@
     "./FlowLaunch": "./dist/FlowLaunch.js",
     "./FlowProcess": "./dist/FlowProcess.js",
     "./Menu": "./dist/Menu.js",
+    "./OperatorConfig": "./dist/OperatorConfig.js",
     "./Refine": "./dist/Refine.js",
     "./RunSupervisor": "./dist/RunSupervisor.js",
     "./Package": "./dist/Package.js",
+    "./ShellErrors": "./dist/ShellErrors.js",
     "./package.json": "./package.json"
   },
   "scripts": {
