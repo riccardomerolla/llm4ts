@@ -661,11 +661,33 @@ describe("OperatorActTools", () => {
         handlers.start_run({ flow: "epic-stories", flags: ["--repo", "/etc"] }, context)
       )
       assert.strictEqual(repo._tag, "InvalidKnob")
-      const repoEq = yield* Effect.flip(
-        handlers.start_run({ flow: "epic-stories", flags: ["--repo=/etc"] }, context)
+      const refusedFlags: ReadonlyArray<ReadonlyArray<string>> = [
+        ["--repo=/etc"],
+        ["--epic", "x"],
+        ["-x"],
+        ["--concurrency", "2; rm -rf"],
+        ["value-first"],
+        ["--prompt-file", "/etc/passwd"],
+        ["--prompt-file=/etc/passwd"],
+        ["-C", "/"]
+      ]
+      for (const flags of refusedFlags) {
+        const refused = yield* Effect.flip(
+          handlers.start_run({ flow: "epic-stories", flags }, context)
+        )
+        assert.strictEqual(refused._tag, "InvalidKnob", flags.join(" "))
+      }
+      const promptFile = yield* Effect.flip(
+        handlers.start_run({ flow: "epic-stories", task: "@/etc/passwd" }, context)
       )
-      assert.strictEqual(repoEq._tag, "InvalidKnob")
+      assert.isTrue(promptFile._tag === "InvalidKnob" && promptFile.knob === "task")
       assert.deepStrictEqual(fake.started, [])
+      yield* handlers.start_run({ flow: "epic-stories", flags: ["--fail-fast"] }, context)
+      yield* handlers.start_run({ flow: "epic-stories", flags: ["--concurrency", "2"] }, context)
+      assert.deepStrictEqual(
+        fake.started.map((request) => request.knobs.flags),
+        [["--fail-fast"], ["--concurrency", "2"]]
+      )
     })
   )
 

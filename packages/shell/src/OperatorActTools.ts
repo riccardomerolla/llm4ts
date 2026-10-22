@@ -220,13 +220,60 @@ const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
 const packPattern = /^[\w.-]+(\/[\w.-]+)?$/u
 const branchPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
 
+const flagPattern = /^--[a-z][a-z0-9-]*(=[A-Za-z0-9][A-Za-z0-9._/-]*)?$/u
+const flagValuePattern = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
+/**
+ * Flags a client may never pass through `flags`, with or without `=value`.
+ * `--repo` and its alias `-C` point the flow at another directory and
+ * `--prompt-file` reads any file on the server (`FlowArgs.ts`); `--epic`,
+ * `--land`, `--judge-rounds` and `--merge-revisions` belong to typed knobs.
+ * `-C` already fails the shape pattern; it is named so a looser pattern
+ * cannot reopen it.
+ */
+const reservedFlags: ReadonlyArray<string> = [
+  "--repo",
+  "-C",
+  "--prompt-file",
+  "--epic",
+  "--land",
+  "--judge-rounds",
+  "--merge-revisions"
+]
+
+const reservedFlagOf = (entry: string): string | undefined =>
+  reservedFlags.find((flag) => entry === flag || entry.startsWith(`${flag}=`))
+
+/** Why a flags list is refused, or undefined when every entry has a safe shape. */
+const flagsProblem = (flags: ReadonlyArray<string>): string | undefined => {
+  let previousWasFlag = false
+  for (const entry of flags) {
+    const reserved = reservedFlagOf(entry)
+    if (reserved !== undefined) return `${reserved} may not be passed through flags`
+    const flag = flagPattern.exec(entry)
+    if (flag !== null) {
+      previousWasFlag = flag[1] === undefined
+      continue
+    }
+    if (!previousWasFlag || !flagValuePattern.test(entry)) {
+      return "every entry must be a --flag[=value] or a plain value right after a flag"
+    }
+    previousWasFlag = false
+  }
+  return undefined
+}
+
 const invalid = (knob: string, message: string): Effect.Effect<never, InvalidKnob> =>
   Effect.fail(InvalidKnob.make({ knob, message }))
 
 /**
  * Every client value that reaches the flow's argv or environment, checked
- * before the supervisor sees it: names stay names, never paths or flags, and
- * no flag may point the flow at another directory.
+ * before the supervisor sees it. Names stay names, never paths or flags:
+ * `pack` is a kit or kit/pack name (no `.`/`..` segment), `epic`, `coder` and
+ * executors are ids, `land` is a branch name. `task` is the flow's first
+ * positional argument, so it may not start with `-` (it would parse as a
+ * flag) or `@` (the flow parser reads `@<path>` as a prompt file on the
+ * server). `flags` is an allowlist of shapes: `--flag[=value]`, or a plain
+ * value right after a flag, never a reserved flag (`reservedFlags`).
  */
 export const validateKnobs = (knobs: OperatorKnobs): Effect.Effect<OperatorKnobs, InvalidKnob> => {
   if (
@@ -248,12 +295,11 @@ export const validateKnobs = (knobs: OperatorKnobs): Effect.Effect<OperatorKnobs
   if (knobs.land !== undefined && !branchPattern.test(knobs.land)) {
     return invalid("land", "land must be a branch name")
   }
-  if (knobs.task?.startsWith("-") === true) {
-    return invalid("task", "task must not start with '-'")
+  if (knobs.task !== undefined && (knobs.task.startsWith("-") || knobs.task.startsWith("@"))) {
+    return invalid("task", "task must not start with '-' or '@'")
   }
-  if (knobs.flags?.some((flag) => flag === "--repo" || flag.startsWith("--repo=")) === true) {
-    return invalid("flags", "flags must not set --repo")
-  }
+  const problem = knobs.flags === undefined ? undefined : flagsProblem(knobs.flags)
+  if (problem !== undefined) return invalid("flags", problem)
   return Effect.succeed(knobs)
 }
 
@@ -270,9 +316,8 @@ export const actHandlers = (
     ? Effect.void
     : Effect.fail(NotAllowed.make({ message: "this server was not started with --allow-approve" }))
 
-  const startFlow = (repo: Repo, name: string, requested: OperatorKnobs) =>
+  const startFlow = (repo: Repo, name: string, knobs: OperatorKnobs) =>
     Effect.gen(function* () {
-      const knobs = yield* validateKnobs(requested)
       const flows = yield* deps.flows(repo.path).pipe(Effect.mapError(readFailed))
       const flow = flows.find((candidate) => candidate.name === name)
       if (flow === undefined) {
@@ -298,7 +343,8 @@ export const actHandlers = (
       Effect.gen(function* () {
         yield* requireRun
         const repo = yield* resolveRepo(deps.config, params.repo)
-        return yield* startFlow(repo, params.flow, knobsOf(params))
+        const knobs = yield* validateKnobs(knobsOf(params))
+        return yield* startFlow(repo, params.flow, knobs)
       }),
 
     stop_run: ({ runId }) => Effect.andThen(requireRun, deps.supervisor.stop(runId)),
@@ -316,6 +362,8 @@ export const actHandlers = (
             })
           }
         }
+        // The client's values, checked like start_run's; the --epic flag itself is ours.
+        yield* validateKnobs({ epic, ...(run === undefined ? {} : { flags: ["--run", run] }) })
         return yield* startFlow(repo, "epic-retro", {
           flags: ["--epic", epic, ...(run === undefined ? [] : ["--run", run])]
         })
