@@ -25,6 +25,7 @@
     "./FlowProcess": "./dist/FlowProcess.js",
     "./Menu": "./dist/Menu.js",
     "./OperatorConfig": "./dist/OperatorConfig.js",
+    "./OperatorRuns": "./dist/OperatorRuns.js",
     "./OperatorTools": "./dist/OperatorTools.js",
     "./Refine": "./dist/Refine.js",
     "./RunSupervisor": "./dist/RunSupervisor.js",

@@ -197,3 +197,13 @@ export class RunInProgress extends Schema.TaggedError<RunInProgress>()("RunInPro
   message: Schema.String,
   runId: Schema.String
 }) {}
+
+/** An epic id that is not a folder under the repository's `.llm4ts/epics/`. */
+export class UnknownEpic extends Schema.TaggedError<UnknownEpic>()("UnknownEpic", {
+  message: Schema.String
+}) {}
+
+/** A state file that exists but could not be read or parsed; the message names its path. */
+export class ReadFailed extends Schema.TaggedError<ReadFailed>()("ReadFailed", {
+  message: Schema.String
+}) {}

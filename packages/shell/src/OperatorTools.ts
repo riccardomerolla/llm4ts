@@ -1,13 +1,12 @@
 import { join } from "node:path"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import { Board, BoardStatus, BoardVersion } from "@llm4ts/flow/BoardSync"
 import { CostLedgerFileName } from "@llm4ts/flow/CostLedger"
-import { readEpicRuns, type EpicRun } from "@llm4ts/flow/EpicRuns"
+import { buildCostReport } from "@llm4ts/flow/CostReport"
 import { describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import {
@@ -15,22 +14,22 @@ import {
   Diagnosis,
   OperatorRun,
   PreflightResult,
+  ReadFailed,
   RunStatus,
   StoryDetail,
+  UnknownEpic,
   UnknownRepo,
   UnknownRun,
   UnknownStory,
   type ConnectorHealthOut,
-  type ExecutorHealthOut,
-  type OperatorRunState
+  type ExecutorHealthOut
 } from "@llm4ts/flow/OperatorSchemas"
-import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { loadVersioned } from "@llm4ts/flow/Persistence"
 import { defaultPlanPath } from "@llm4ts/flow/Plan"
 import { readRetroIndex, retroApprovalOf, retroPaths } from "@llm4ts/flow/Retro"
-import { readTrace } from "@llm4ts/flow/Replay"
 import { rolesOf } from "@llm4ts/flow/Roster"
 import { makeStoryPlanStore } from "@llm4ts/flow/StoryPlan"
-import { treeInputsOfTrace } from "@llm4ts/runner/AgentTree"
+import { emptyTree, treeInputsOfTrace } from "@llm4ts/runner/AgentTree"
 import { CostsResult, makeCostsProgram } from "@llm4ts/runner/Costs"
 import type { DoctorReport } from "@llm4ts/runner/Doctor"
 import type { RosterReport } from "@llm4ts/runner/ExecutorRoster"
@@ -48,56 +47,42 @@ import { storyDetailOf, storyDiagnosisOf } from "@llm4ts/runner/StoryReaders"
 import { loadTranscript, tailLinesOf, type TranscriptFiles } from "@llm4ts/runner/Transcripts"
 import type { DiscoveredFlow } from "./FlowCatalog.ts"
 import type { OperatorConfig } from "./OperatorConfig.ts"
+import {
+  discoveredRuns,
+  epicDirOf,
+  epicOfRun,
+  epicsDir,
+  readEpicRunsStrict,
+  readFailed,
+  resolveRun,
+  runTraceLines,
+  stateRoot,
+  tracePending,
+  transcriptsDir,
+  type RunLookupDeps
+} from "./OperatorRuns.ts"
 import { packageVersion } from "./Package.ts"
-import type { RunSupervisorShape } from "./RunSupervisor.ts"
 
 /**
  * The operator's read-only MCP tools (`llm4ts mcp`, ADR 0041): answers about
  * repositories, epics and runs from the files they write, over an
  * `OperatorDeps` record so tests call the handlers directly on memory stores
  * and fakes. A client never names a path: repositories, epics and runs are
- * ids resolved against the configuration and the files found on disk.
+ * ids resolved against the configuration and the files found on disk
+ * (`OperatorRuns.ts`).
  */
 
-// ---- Errors -----------------------------------------------------------------------------
-
-/** An epic id that is not a folder under the repository's `.llm4ts/epics/`. */
-export class UnknownEpic extends Schema.TaggedError<UnknownEpic>()("UnknownEpic", {
-  message: Schema.String
-}) {}
-
-/** A state file that exists but could not be read or parsed. */
-export class ReadFailed extends Schema.TaggedError<ReadFailed>()("ReadFailed", {
-  message: Schema.String
-}) {}
-
-const readFailed = (error: unknown): ReadFailed =>
-  ReadFailed.make({ message: describeFlowError(error) })
-
-// ---- Dependencies -----------------------------------------------------------------------
-
-export interface OperatorDeps {
+export interface OperatorDeps extends RunLookupDeps {
   readonly config: OperatorConfig
-  readonly files: PlainFileStoreShape
   /** Relative paths of every regular file under a directory, recursively; none when absent. */
   readonly listFiles: (directory: string) => ReadonlyArray<string>
-  /** Absolute trace paths under one `.llm4ts/` directory. */
-  readonly listTraces: (directory: string) => ReadonlyArray<string>
-  /** Folder names under `.llm4ts/epics/`. */
-  readonly listEpics: (directory: string) => ReadonlyArray<string>
   readonly transcripts: TranscriptFiles
-  readonly supervisor: RunSupervisorShape
   readonly doctor: Effect.Effect<DoctorReport>
   readonly roster: (repoPath: string) => Effect.Effect<RosterReport, FlowError>
   readonly probe: (url: string) => Effect.Effect<boolean>
   readonly flows: (repoPath: string) => Effect.Effect<ReadonlyArray<DiscoveredFlow>, unknown>
   readonly now: Effect.Effect<number>
   readonly environment: Readonly<Record<string, string | undefined>>
-}
-
-interface Repo {
-  readonly id: string
-  readonly path: string
 }
 
 /** The repository a tool call means; the id may be left out when the server serves one. */
@@ -120,166 +105,18 @@ export const resolveRepo = (
     : Effect.succeed({ id: repo.id, path: repo.path })
 }
 
-// ---- Locations --------------------------------------------------------------------------
-
-const stateRoot = (repo: Repo): string => join(repo.path, ".llm4ts")
-const epicsDir = (repo: Repo): string => join(stateRoot(repo), "epics")
-const transcriptsDir = (repo: Repo, runId: string): string =>
-  join(stateRoot(repo), "transcripts", runId)
+/** A state file that exists but does not parse, named in the message. */
+const readFailedAt =
+  (path: string) =>
+  (error: unknown): ReadFailed => {
+    const message = describeFlowError(error)
+    return ReadFailed.make({ message: message.includes(path) ? message : `${path}: ${message}` })
+  }
 
 const sourcesOf = (deps: OperatorDeps): RunSources => ({
   files: deps.files,
   listFiles: deps.listFiles
 })
-
-/** The epic's state folder, only for an id found on disk, so no client text becomes a path. */
-const epicDirOf = (
-  deps: OperatorDeps,
-  repo: Repo,
-  epic: string
-): Effect.Effect<string, UnknownEpic> =>
-  deps.listEpics(epicsDir(repo)).includes(epic)
-    ? Effect.succeed(join(epicsDir(repo), epic))
-    : Effect.fail(UnknownEpic.make({ message: `unknown epic '${epic}' in ${repo.id}` }))
-
-interface EpicRunEntry {
-  readonly epic: string
-  readonly dir: string
-  readonly run: EpicRun
-}
-
-const epicRunsOf = (deps: OperatorDeps, repo: Repo): Effect.Effect<ReadonlyArray<EpicRunEntry>> =>
-  Effect.forEach(deps.listEpics(epicsDir(repo)), (epic) => {
-    const dir = join(epicsDir(repo), epic)
-    return readEpicRuns(deps.files, dir).pipe(
-      Effect.catch(() => Effect.succeed([])),
-      Effect.map((runs) => runs.map((run) => ({ epic, dir, run })))
-    )
-  }).pipe(Effect.map((all) => all.flat()))
-
-const decodeTraceLine = Schema.decodeUnknownOption(Schema.fromJsonString(TraceLine))
-
-interface TraceHead {
-  readonly runId: string
-  readonly startedAt: number
-  readonly ended: boolean
-}
-
-/** The run a trace belongs to and whether it ended, from its first and last lines. */
-const traceHead = (
-  files: PlainFileStoreShape,
-  path: string
-): Effect.Effect<TraceHead | undefined> =>
-  files.read(path).pipe(
-    Effect.catch(() => Effect.succeed(undefined)),
-    Effect.map((contents) => {
-      const rows = (contents ?? "").split(/\r?\n/u).filter((row) => row.trim().length > 0)
-      const first = Option.getOrUndefined(decodeTraceLine(rows[0] ?? ""))
-      if (first === undefined) return undefined
-      const last = Option.getOrUndefined(decodeTraceLine(rows[rows.length - 1] ?? ""))
-      return { runId: first.runId, startedAt: first.timestamp, ended: last?.kind === "RunEnded" }
-    })
-  )
-
-const traceState = (head: TraceHead | undefined): OperatorRunState =>
-  head === undefined ? "lost" : head.ended ? "exited" : "running"
-
-interface ResolvedRun {
-  readonly runId: string
-  readonly repo: Repo
-  readonly flow: string
-  readonly state: OperatorRunState
-  readonly tracePath: string
-  readonly supervised?: OperatorRun
-}
-
-/** A run id through the supervisor first, then each repository's epic runs and traces. */
-const resolveRun = (deps: OperatorDeps, runId: string): Effect.Effect<ResolvedRun, UnknownRun> =>
-  Effect.gen(function* () {
-    const supervised = yield* deps.supervisor.get(runId)
-    if (supervised !== undefined) {
-      const repo = deps.config.repos.find((candidate) => candidate.id === supervised.repo)
-      if (repo === undefined) {
-        return yield* UnknownRun.make({
-          message: `run ${runId} belongs to repo '${supervised.repo}', which this server does not serve`
-        })
-      }
-      if (supervised.tracePath === undefined) {
-        return yield* UnknownRun.make({ message: `run ${runId} has no trace yet` })
-      }
-      return {
-        runId,
-        repo,
-        flow: supervised.flow,
-        state: supervised.state,
-        tracePath: supervised.tracePath,
-        supervised
-      }
-    }
-    for (const repo of deps.config.repos) {
-      for (const entry of yield* epicRunsOf(deps, repo)) {
-        if (entry.run.runId === runId) {
-          const head = yield* traceHead(deps.files, entry.run.tracePath)
-          return {
-            runId,
-            repo,
-            flow: "?",
-            state: traceState(head),
-            tracePath: entry.run.tracePath
-          }
-        }
-      }
-      for (const path of deps.listTraces(stateRoot(repo))) {
-        const head = yield* traceHead(deps.files, path)
-        if (head?.runId === runId) {
-          return { runId, repo, flow: "?", state: traceState(head), tracePath: path }
-        }
-      }
-    }
-    return yield* UnknownRun.make({ message: `unknown run '${runId}'` })
-  })
-
-/** The epic a run worked on: the epic whose `runs.jsonl` lists it. */
-const epicOfRun = (deps: OperatorDeps, run: ResolvedRun): Effect.Effect<EpicRunEntry | undefined> =>
-  Effect.map(epicRunsOf(deps, run.repo), (entries) =>
-    entries.find((entry) => entry.run.runId === run.runId || entry.run.tracePath === run.tracePath)
-  )
-
-/** Runs found on disk (epic run lists and traces) that the supervisor does not hold. */
-const discoveredRuns = (
-  deps: OperatorDeps,
-  repo: Repo,
-  known: ReadonlySet<string>
-): Effect.Effect<ReadonlyArray<OperatorRun>> =>
-  Effect.gen(function* () {
-    const found = new Map<string, OperatorRun>()
-    const add = (runId: string, tracePath: string, startedAt: number, state: OperatorRunState) => {
-      if (known.has(runId) || found.has(runId)) return
-      found.set(
-        runId,
-        new OperatorRun({
-          runId,
-          repo: repo.id,
-          flow: "?",
-          args: [],
-          knobs: {},
-          startedAt,
-          tracePath,
-          logDir: "",
-          state
-        })
-      )
-    }
-    for (const entry of yield* epicRunsOf(deps, repo)) {
-      const head = yield* traceHead(deps.files, entry.run.tracePath)
-      add(entry.run.runId, entry.run.tracePath, entry.run.startedAt, traceState(head))
-    }
-    for (const path of deps.listTraces(stateRoot(repo))) {
-      const head = yield* traceHead(deps.files, path)
-      if (head !== undefined) add(head.runId, path, head.startedAt, traceState(head))
-    }
-    return [...found.values()]
-  })
 
 const lastLines = (text: string | undefined, count: number): ReadonlyArray<string> => {
   if (text === undefined || count <= 0) return []
@@ -334,7 +171,7 @@ export const list_epics = Tool.make("list_epics", {
   description: "Epics under .llm4ts/epics/ with title, story count, board and last run.",
   parameters: Schema.Struct({ repo: repoParam }),
   success: Schema.Array(EpicOut),
-  failure: Schema.Union([UnknownRepo])
+  failure: Schema.Union([UnknownRepo, ReadFailed])
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
@@ -348,7 +185,7 @@ export const list_runs = Tool.make("list_runs", {
     limit: Schema.optional(Schema.Int)
   }),
   success: Schema.Array(OperatorRun),
-  failure: Schema.Union([UnknownRepo, UnknownEpic])
+  failure: Schema.Union([UnknownRepo, UnknownEpic, ReadFailed])
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
@@ -358,7 +195,7 @@ export const run_status = Tool.make("run_status", {
     "One run now: state, elapsed, lanes, stories board, tokens and cost so far, warnings, and a one-line summary.",
   parameters: Schema.Struct({ runId: Schema.String }),
   success: RunStatus,
-  failure: Schema.Union([UnknownRun, TraceUnreadable])
+  failure: Schema.Union([UnknownRun, TraceUnreadable, ReadFailed])
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
@@ -373,7 +210,7 @@ export const run_events = Tool.make("run_events", {
     limit: Schema.optional(Schema.Int)
   }),
   success: Schema.Array(TraceLine),
-  failure: Schema.Union([UnknownRun, TraceUnreadable])
+  failure: Schema.Union([UnknownRun, TraceUnreadable, ReadFailed])
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
@@ -427,7 +264,7 @@ export const transcript_tail = Tool.make("transcript_tail", {
     role: Schema.optional(Schema.String)
   }),
   success: Schema.Array(Schema.String),
-  failure: Schema.Union([UnknownRun])
+  failure: Schema.Union([UnknownRun, ReadFailed])
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
@@ -437,7 +274,7 @@ export const costs = Tool.make("costs", {
     "What one run cost (trace total, the ledger's figure and whether they differ), or the repository's costs over every trace when runId is left out.",
   parameters: Schema.Struct({ repo: repoParam, runId: Schema.optional(Schema.String) }),
   success: Schema.Union([CostsOut, CostsResult]),
-  failure: Schema.Union([UnknownRepo, UnknownRun, TraceUnreadable])
+  failure: Schema.Union([UnknownRepo, UnknownRun, TraceUnreadable, ReadFailed])
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
@@ -446,7 +283,7 @@ export const profile = Tool.make("profile", {
   description: "Where a run's time went: per story, model, gate and tool.",
   parameters: Schema.Struct({ runId: Schema.String }),
   success: ProfileReport,
-  failure: Schema.Union([UnknownRun, TraceUnreadable])
+  failure: Schema.Union([UnknownRun, TraceUnreadable, ReadFailed])
 })
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
@@ -519,14 +356,6 @@ const executorsOf = (
     )
   })
 
-const readTraceLines = (
-  files: PlainFileStoreShape,
-  path: string
-): Effect.Effect<ReadonlyArray<TraceLine>, TraceUnreadable> =>
-  readTrace(files, path).pipe(
-    Effect.mapError((error) => TraceUnreadable.make({ path, message: describeFlowError(error) }))
-  )
-
 const firstLine = (text: string): string => text.split("\n")[0]?.trim() ?? ""
 
 export const readHandlers = (
@@ -582,18 +411,15 @@ export const readHandlers = (
         return yield* Effect.forEach(deps.listEpics(epicsDir(repo)), (id) =>
           Effect.gen(function* () {
             const dir = join(epicsDir(repo), id)
+            const planPath = join(dir, "plan.md")
             const plan = yield* makeStoryPlanStore(deps.files)
-              .load(join(dir, "plan.md"))
-              .pipe(Effect.catch(() => Effect.succeed(undefined)))
-            const board = yield* loadVersioned(
-              deps.files,
-              join(dir, "board.json"),
-              BoardVersion,
-              Board
-            ).pipe(Effect.catch(() => Effect.succeed(undefined)))
-            const runs = yield* readEpicRuns(deps.files, dir).pipe(
-              Effect.catch(() => Effect.succeed([]))
+              .load(planPath)
+              .pipe(Effect.mapError(readFailedAt(planPath)))
+            const boardPath = join(dir, "board.json")
+            const board = yield* loadVersioned(deps.files, boardPath, BoardVersion, Board).pipe(
+              Effect.mapError(readFailedAt(boardPath))
             )
+            const runs = yield* readEpicRunsStrict(deps.files, dir)
             const last = runs[runs.length - 1]
             const planTitle = plan === undefined ? "" : firstLine(plan.epic)
             return {
@@ -623,9 +449,7 @@ export const readHandlers = (
         let runs = [...supervised, ...discovered]
         if (epic !== undefined) {
           const dir = yield* epicDirOf(deps, repo, epic)
-          const epicRuns = yield* readEpicRuns(deps.files, dir).pipe(
-            Effect.catch(() => Effect.succeed([]))
-          )
+          const epicRuns = yield* readEpicRunsStrict(deps.files, dir)
           const ids = new Set(epicRuns.map((run) => run.runId))
           runs = runs.filter((run) => run.knobs.epic === epic || ids.has(run.runId))
         }
@@ -638,14 +462,16 @@ export const readHandlers = (
       Effect.gen(function* () {
         const run = yield* resolveRun(deps, runId)
         const epic = yield* epicOfRun(deps, run)
-        const fold = yield* foldTrace(deps.files, run.tracePath, epic?.dir)
+        const fold = (yield* tracePending(deps.files, run))
+          ? { lines: [], state: emptyTree(), seq: 0 }
+          : yield* foldTrace(deps.files, run.tracePath, epic?.dir)
         return runStatusOf(fold, run, yield* deps.now)
       }),
 
     run_events: ({ runId, sinceSeq, kinds, limit }) =>
       Effect.gen(function* () {
         const run = yield* resolveRun(deps, runId)
-        const lines = yield* readTraceLines(deps.files, run.tracePath)
+        const lines = yield* runTraceLines(deps.files, run)
         return eventsAfter(
           lines,
           sinceSeq ?? 0,
@@ -741,6 +567,9 @@ export const readHandlers = (
       Effect.gen(function* () {
         if (runId !== undefined) {
           const run = yield* resolveRun(deps, runId)
+          if (yield* tracePending(deps.files, run)) {
+            return CostsOut.make({ report: buildCostReport([]), total: 0, differs: false })
+          }
           return yield* costsOfRun(
             deps.files,
             run.tracePath,
@@ -758,7 +587,7 @@ export const readHandlers = (
     profile: ({ runId }) =>
       Effect.gen(function* () {
         const run = yield* resolveRun(deps, runId)
-        const lines = yield* readTraceLines(deps.files, run.tracePath)
+        const lines = yield* runTraceLines(deps.files, run)
         return profileOf(treeInputsOfTrace(lines))
       }),
 

@@ -47,15 +47,14 @@ const plan = StoryPlan.make({
   stories: [story("a"), story("b")]
 })
 
-const line = (seq: number, kind: string, fields: TraceLine["fields"]): TraceLine =>
-  TraceLine.make({
-    schemaVersion: 1,
-    seq,
-    timestamp: t0 + seq * 1_000,
-    runId: "op-1",
-    kind,
-    fields
-  })
+const line = (
+  seq: number,
+  kind: string,
+  fields: TraceLine["fields"],
+  runId = "op-1",
+  start = t0
+): TraceLine =>
+  TraceLine.make({ schemaVersion: 1, seq, timestamp: start + seq * 1_000, runId, kind, fields })
 
 const event = (seq: number, value: FlowEvent): TraceLine =>
   line(seq, value._tag, { event: JSON.stringify(value) })
@@ -99,6 +98,12 @@ const supervisor: RunSupervisorShape = {
   list: () => Effect.succeed([run])
 }
 
+const emptySupervisor: RunSupervisorShape = {
+  ...supervisor,
+  get: () => Effect.succeed(undefined),
+  list: () => Effect.succeed([])
+}
+
 const doctorReport: DoctorReport = {
   connectors: [
     {
@@ -116,9 +121,21 @@ const doctorReport: DoctorReport = {
   lines: ["credentials: OPENAI_API_KEY missing"]
 }
 
-const seeded = (extra: Readonly<Record<string, string>> = {}) =>
+interface SeedOptions {
+  readonly supervisor?: RunSupervisorShape
+  /** Leave the supervised run's trace unwritten, as right after `start_run`. */
+  readonly withoutTrace?: boolean
+  /** The epic's `runs.jsonl` verbatim, instead of one record naming `op-1`. */
+  readonly epicRuns?: string
+  readonly traces?: ReadonlyArray<string>
+}
+
+const seeded = (extra: Readonly<Record<string, string>> = {}, options: SeedOptions = {}) =>
   Effect.gen(function* () {
-    const memory = yield* makeMemoryPlainFileStore({ [tracePath]: encode(trace), ...extra })
+    const memory = yield* makeMemoryPlainFileStore({
+      ...(options.withoutTrace === true ? {} : { [tracePath]: encode(trace) }),
+      ...extra
+    })
     const files = memory.store
     yield* makeStoryPlanStore(files).save(`${stateDir}/plan.md`, plan)
     yield* saveVersioned(
@@ -147,20 +164,25 @@ const seeded = (extra: Readonly<Record<string, string>> = {}) =>
         status: "failed"
       })
     )
-    yield* appendEpicRun(
-      files,
-      stateDir,
-      EpicRun.make({ runId: "op-1", tracePath, action: "RunPlan", startedAt: t0 })
-    )
+    if (options.epicRuns === undefined) {
+      yield* appendEpicRun(
+        files,
+        stateDir,
+        EpicRun.make({ runId: "op-1", tracePath, action: "RunPlan", startedAt: t0 })
+      )
+    } else {
+      yield* files.writeAtomic(`${stateDir}/runs.jsonl`, options.epicRuns)
+    }
     const probed: Array<string> = []
     const deps: OperatorDeps = {
       config,
       files,
       listFiles: () => [],
-      listTraces: (directory) => (directory === "/repo/.llm4ts" ? [tracePath] : []),
+      listTraces: (directory) =>
+        directory === "/repo/.llm4ts" ? (options.traces ?? [tracePath]) : [],
       listEpics: (directory) => (directory === "/repo/.llm4ts/epics" ? ["conto"] : []),
       transcripts: { read: () => Effect.succeed(undefined), list: () => [] },
-      supervisor,
+      supervisor: options.supervisor ?? supervisor,
       doctor: Effect.succeed(doctorReport),
       roster: () =>
         Effect.succeed({
@@ -289,6 +311,117 @@ describe("OperatorTools", () => {
       assert.deepStrictEqual(
         since.map((entry) => entry.seq),
         [1_196, 1_197, 1_198, 1_199, 1_200]
+      )
+    })
+  )
+
+  it.effect("runs found on disk: list_runs states, order and limit; run_status; UnknownRun", () =>
+    Effect.gen(function* () {
+      const oldTrace = "/repo/.llm4ts/trace-1790000100000.jsonl"
+      const newTrace = "/repo/.llm4ts/trace-1790000200000.jsonl"
+      const ended = [
+        line(
+          1,
+          "Event",
+          { event: JSON.stringify(Info.make({ message: "hi" })) },
+          "run-old",
+          t0 + 100_000
+        ),
+        line(2, "RunEnded", { outcome: "completed" }, "run-old", t0 + 100_000)
+      ]
+      const open = [
+        line(
+          1,
+          "StoryStatusChanged",
+          {
+            event: JSON.stringify(StoryStatusChanged.make({ id: "a", status: "active" }))
+          },
+          "run-new",
+          t0 + 200_000
+        )
+      ]
+      const { deps } = yield* seeded(
+        { [oldTrace]: encode(ended), [newTrace]: encode(open) },
+        {
+          supervisor: emptySupervisor,
+          traces: [oldTrace, newTrace],
+          epicRuns: `${JSON.stringify({
+            runId: "run-old",
+            tracePath: oldTrace,
+            action: "RunPlan",
+            startedAt: t0 + 100_000
+          })}\n`
+        }
+      )
+      const handlers = readHandlers(deps)
+      const runs = yield* handlers.list_runs({}, context)
+      assert.deepStrictEqual(
+        runs.map((run) => `${run.runId}:${run.state}:${run.flow}`),
+        ["run-new:running:?", "run-old:exited:?"]
+      )
+      const limited = yield* handlers.list_runs({ limit: 1 }, context)
+      assert.deepStrictEqual(
+        limited.map((run) => run.runId),
+        ["run-new"]
+      )
+      const ofEpic = yield* handlers.list_runs({ epic: "conto" }, context)
+      assert.deepStrictEqual(
+        ofEpic.map((run) => run.runId),
+        ["run-old"]
+      )
+      const status = yield* handlers.run_status({ runId: "run-new" }, context)
+      assert.strictEqual(status.state, "running")
+      assert.strictEqual(status.seq, 1)
+      const old = yield* handlers.run_status({ runId: "run-old" }, context)
+      assert.strictEqual(old.state, "exited")
+      const unknown = yield* Effect.flip(handlers.run_status({ runId: "nope" }, context))
+      assert.strictEqual(unknown._tag, "UnknownRun")
+    })
+  )
+
+  it.effect("a supervised run whose trace is not written yet reads as an empty trace", () =>
+    Effect.gen(function* () {
+      const { deps } = yield* seeded({}, { withoutTrace: true })
+      const handlers = readHandlers(deps)
+      const status = yield* handlers.run_status({ runId: "op-1" }, context)
+      assert.strictEqual(status.state, "running")
+      assert.strictEqual(status.seq, 0)
+      assert.deepStrictEqual(status.lanes, [])
+      assert.deepStrictEqual(yield* handlers.run_events({ runId: "op-1" }, context), [])
+      const profiled = yield* handlers.profile({ runId: "op-1" }, context)
+      assert.isDefined(profiled)
+      const cost = yield* handlers.costs({ runId: "op-1" }, context)
+      assert.isTrue("total" in cost && cost.total === 0)
+
+      const corrupt = yield* seeded({ [tracePath]: "not json\n" })
+      const failed = yield* Effect.flip(
+        readHandlers(corrupt.deps).run_status({ runId: "op-1" }, context)
+      )
+      assert.strictEqual(failed._tag, "TraceUnreadable")
+    })
+  )
+
+  it.effect("a corrupt runs.jsonl fails ReadFailed naming it, a missing one reads as no runs", () =>
+    Effect.gen(function* () {
+      const valid = JSON.stringify({ runId: "op-1", tracePath, action: "RunPlan", startedAt: t0 })
+      const { deps } = yield* seeded(
+        {},
+        { supervisor: emptySupervisor, epicRuns: `garbage\n${valid}\n` }
+      )
+      const handlers = readHandlers(deps)
+      const listed = yield* Effect.flip(handlers.list_runs({}, context))
+      assert.strictEqual(listed._tag, "ReadFailed")
+      assert.include(listed.message, `${stateDir}/runs.jsonl`)
+      const looked = yield* Effect.flip(handlers.run_status({ runId: "op-1" }, context))
+      assert.strictEqual(looked._tag, "ReadFailed")
+      const epics = yield* Effect.flip(handlers.list_epics({}, context))
+      assert.strictEqual(epics._tag, "ReadFailed")
+
+      const missing = yield* seeded({}, { supervisor: emptySupervisor, epicRuns: "" })
+      const found = yield* readHandlers(missing.deps).list_runs({}, context)
+      assert.deepStrictEqual(
+        found.map((run) => `${run.runId}:${run.state}`),
+        ["op-1:running"]
       )
     })
   )
