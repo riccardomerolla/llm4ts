@@ -224,20 +224,32 @@ const flagPattern = /^--[a-z][a-z0-9-]*(=[A-Za-z0-9][A-Za-z0-9._/-]*)?$/u
 const flagValuePattern = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
 /**
  * Flags a client may never pass through `flags`, with or without `=value`.
- * `--repo` and its alias `-C` point the flow at another directory and
- * `--prompt-file` reads any file on the server (`FlowArgs.ts`); `--epic`,
- * `--land`, `--judge-rounds` and `--merge-revisions` belong to typed knobs.
  * `-C` already fails the shape pattern; it is named so a looser pattern
  * cannot reopen it.
  */
 const reservedFlags: ReadonlyArray<string> = [
+  // Points the flow at another directory (`FlowArgs.ts`).
   "--repo",
+  // Alias of --repo in the flow argument parser.
   "-C",
+  // Reads the prompt from any file on the server.
   "--prompt-file",
+  // Typed knob: epic.
   "--epic",
+  // Typed knob: land.
   "--land",
+  // Typed knob: judgeRounds.
   "--judge-rounds",
-  "--merge-revisions"
+  // Typed knob: mergeRevisions.
+  "--merge-revisions",
+  // Lets soap flows send mutating calls to a real ESB.
+  "--allow-mutating",
+  // Auto-confirms prompts a human is meant to answer.
+  "--yes",
+  // Selects which environment's credentials a flow uses.
+  "--env",
+  // A filesystem path in epic-design.
+  "--target"
 ]
 
 const reservedFlagOf = (entry: string): string | undefined =>

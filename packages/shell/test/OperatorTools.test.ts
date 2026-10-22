@@ -669,7 +669,11 @@ describe("OperatorActTools", () => {
         ["value-first"],
         ["--prompt-file", "/etc/passwd"],
         ["--prompt-file=/etc/passwd"],
-        ["-C", "/"]
+        ["-C", "/"],
+        ["--allow-mutating"],
+        ["--yes"],
+        ["--env", "uat"],
+        ["--target=/x"]
       ]
       for (const flags of refusedFlags) {
         const refused = yield* Effect.flip(
