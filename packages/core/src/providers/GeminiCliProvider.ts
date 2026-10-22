@@ -221,13 +221,18 @@ const tomlString = (text: string): string =>
  * a shard worktree under `.llm4ts/port/shards/` therefore keeps its own
  * tree: its paths pass through `.llm4ts` deeper down, under another root.
  * Separators match either way, as the JSON doubles a Windows backslash.
+ * It is a match over the argument text: a path reached through `..`, a
+ * variable or a glob slips past it, which is why the grade is `partial`.
  */
 export const geminiDeniedPathPattern = (glob: string, cwd: string | undefined): string => {
   const separator = "[\\\\/]+"
   const name = regexEscape(glob.replace(/\/\*\*$/u, ""))
-  // The working directory as it appears in an argument: anchored at a
-  // quote or a space like the relative form, so `/repo` never matches
-  // inside `/other/repo/`.
+  // A path starts after a quote, whitespace, `=` or a shell operator, and
+  // may be spelled `./name`. The working directory as it appears in an
+  // argument is anchored the same way, so `/repo` never matches inside
+  // `/other/repo/`.
+  const boundary = `["'\\s=;&|(\`$]`
+  const dot = `(?:\\.${separator})?`
   const under =
     cwd === undefined
       ? ""
@@ -236,7 +241,7 @@ export const geminiDeniedPathPattern = (glob: string, cwd: string | undefined): 
           .filter((segment) => segment.length > 0)
           .map(regexEscape)
           .join(separator)}${separator})?`
-  return `["\\s=]${under}${name}(?=${separator}|["'\\s]|$)`
+  return `${boundary}${dot}${under}${name}(?=${separator}|["'\\s;&|)]|$)`
 }
 
 /**
@@ -1020,8 +1025,10 @@ export const makeGeminiCliProvider = (
       readOnlyEnforcement: "enforced",
       isolatedHeadless: "partial",
       // An admin-tier policy rule over every tool (`geminiHarnessPolicyFor`)
-      // on a CLI that takes `--admin-policy`; older CLIs run without it.
-      pathDeny: "enforced"
+      // on a CLI that takes `--admin-policy` (older CLIs run without it),
+      // matched over the argument text: a path spelled another way (`..`,
+      // a variable, a glob) slips past, so the grade is partial.
+      pathDeny: "partial"
     })
   })
 

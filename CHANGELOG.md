@@ -21,12 +21,16 @@ The run's state stays out of the repository and out of the coder's reach.
   (ADR 0027, `full` and `minimal` profiles) names `.llm4ts/` as the run's
   own state, never to be read, modified, deleted or committed unless the
   task names a path there. Every CLI seat is configured with
-  `deniedPaths: [".llm4ts/**"]`: Claude Code gets
-  `--settings '{"permissions":{"deny":[Read, Edit and Bash rules]}}'`,
-  Gemini CLI an admin-tier policy rule that denies every tool whose
-  arguments name the directory under the seat's working directory. Codex
-  and pi have no per-path deny rule, so such a seat publishes
-  `CapabilityUnenforceable` saying only the contract text keeps it out.
+  `deniedPaths: [".llm4ts/**"]`: Claude Code gets `--disallowed-tools`
+  with Read, Edit and Bash rules for the path (appended to any the
+  operator passes, so a `--settings` file of theirs is untouched), Gemini
+  CLI an admin-tier policy rule that denies every tool whose arguments
+  name the directory under the seat's working directory. Both are graded
+  `partial`: the file tools check the path, the shell rule matches the
+  command text, so a path spelled another way can slip, and the run says
+  so once at the start. Codex and pi have no per-path deny rule, so such
+  a seat publishes `CapabilityUnenforceable` saying only the contract text
+  keeps it out.
   `ConnectorCapabilities.pathDeny` (`enforced | partial | ignored`) and
   `FlowRunnerOptions.deniedPaths` are new; `port-guide` passes `[]`
   because its trial ports are written under `.llm4ts/port/trial/` by the

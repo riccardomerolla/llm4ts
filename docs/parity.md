@@ -642,9 +642,10 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   `commitPaths` force-adds what it is named (a forked pack, a port ledger).
   The autonomy contract names `.llm4ts/` as off limits in the `full` and
   `minimal` profiles, every CLI seat is configured with
-  `deniedPaths: [".llm4ts/**"]` (a `permissions.deny` settings block on
-  Claude Code, an admin-tier policy rule on Gemini CLI; Codex and pi have
-  no per-path rule and publish `CapabilityUnenforceable`), and
+  `deniedPaths: [".llm4ts/**"]` (`--disallowed-tools` rules on Claude
+  Code, an admin-tier policy rule on Gemini CLI, both graded `partial`
+  as text-matching shell rules; Codex and pi have no per-path rule and
+  publish `CapabilityUnenforceable`), and
   `ConnectorCapabilities.pathDeny` grades it. llm4zio commits its plan
   files and has no run-state rule. A repository that wants its own flows or
   forked packs under `.llm4ts/` committed keeps its own ignore file with

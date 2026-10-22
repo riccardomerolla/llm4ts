@@ -159,6 +159,12 @@ const problem = (result: ProcessResult): string => {
  */
 export const runStatePaths: ReadonlyArray<string> = [RunStateDirectory]
 
+/** Whether a repository-relative path is the run state or inside it. */
+export const isRunStatePath = (path: string): boolean => {
+  const normalized = path.replaceAll("\\", "/").replace(/^\.\//u, "")
+  return normalized === RunStateDirectory || normalized.startsWith(`${RunStateDirectory}/`)
+}
+
 export const makeGitTool = (
   process: ProcessExecutorShape,
   workDir: string,
@@ -319,15 +325,27 @@ export const makeGitTool = (
   // `add -A -- <paths>` stages additions, modifications, AND deletions of
   // exactly those paths; a plain `add` would refuse a deleted file. `--only`
   // on commit would also work but ignores paths that were never tracked.
-  // `-f`: a path named here is wanted even where an ignore file (the run
-  // state's own, a forked pack under it) would otherwise refuse it.
+  // A path under the run state is force-added: it is wanted (a forked
+  // pack, a port ledger) where the runner's own ignore file would refuse
+  // it. Any other path keeps the repository's ignore rules.
   const commitPathsEffect = (
     message: string,
     paths: ReadonlyArray<string>
-  ): Effect.Effect<CommitResult, FlowError> =>
-    paths.length === 0
+  ): Effect.Effect<CommitResult, FlowError> => {
+    const underRunState = paths.filter(isRunStatePath)
+    const elsewhere = paths.filter((path) => !isRunStatePath(path))
+    return paths.length === 0
       ? Effect.succeed(new NothingToCommit())
-      : runOrFail(["add", "-A", "-f", "--", ...paths]).pipe(Effect.andThen(commitStaged(message)))
+      : Effect.gen(function* () {
+          if (elsewhere.length > 0) {
+            yield* runOrFail(["add", "-A", "--", ...elsewhere])
+          }
+          if (underRunState.length > 0) {
+            yield* runOrFail(["add", "-A", "-f", "--", ...underRunState])
+          }
+          return yield* commitStaged(message)
+        })
+  }
 
   return {
     init: write(

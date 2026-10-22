@@ -462,7 +462,8 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         `'${name}' is asked to keep out of ${paths} (the run's own state: traces, plans, ` +
           "transcripts), but its harness " +
           (connector.capabilities.pathDeny === "partial"
-            ? "denies only its file tools there — its shell can still reach it"
+            ? "denies it by rule, not at the filesystem — a shell command that spells the path " +
+              "another way can still reach it"
             : "has no per-path deny rule — only the contract text in its prompt keeps it out")
       )
     }

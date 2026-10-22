@@ -297,9 +297,11 @@ export type IsolationEnforcement = typeof IsolationEnforcement.Type
  * How a CLI connector keeps the harness out of the paths a seat is denied
  * (`CliConnectorConfig.deniedPaths`; by default the run's own state under
  * `.llm4ts/`):
- * - "enforced": the harness documents a deny rule the model cannot lift,
- *   applied to its file tools and its shell alike.
- * - "partial": the file tools are denied; the shell can still reach the path.
+ * - "enforced": the harness denies the path at the filesystem (a sandbox
+ *   mount, a path check on every tool, the shell included).
+ * - "partial": the harness denies what its rule can see — the file tools by
+ *   path, the shell by matching the command text — so a path spelled
+ *   another way (`..`, a variable, a glob) can slip past.
  * - "ignored": the harness has no per-path rule; nothing reaches argv and
  *   only the contract text in the prompt keeps the model out.
  */

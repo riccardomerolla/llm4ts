@@ -154,6 +154,12 @@ describe("GitTool", () => {
         )
         const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).trim()
         assert.strictEqual(tracked, ".llm4ts/kits/forked/packs/mine/pack.md")
+        // Elsewhere the repository's own ignore rules still hold: a named
+        // path that is ignored is refused, not forced in.
+        yield* Effect.promise(() => writeFile(join(root, ".gitignore"), "*.log\n", "utf8"))
+        yield* Effect.promise(() => writeFile(join(root, "build.log"), "x\n", "utf8"))
+        const refused = yield* Effect.exit(git.commitPaths("log", ["build.log"]))
+        assert.strictEqual(refused._tag, "Failure")
       })
     )
   )

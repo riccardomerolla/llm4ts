@@ -123,6 +123,12 @@ describe("Gemini CLI configuration", () => {
     // Relative and absolute forms under the working directory, the shell included.
     assert.isTrue(pattern.test(args({ command: "rm -rf .llm4ts" })))
     assert.isTrue(pattern.test(args({ command: "cat .llm4ts/trace-1.jsonl | head" })))
+    assert.isTrue(pattern.test(args({ command: "rm -rf ./.llm4ts" })))
+    assert.isTrue(pattern.test(args({ command: "cd src;rm -r ../.llm4ts" })) === false)
+    assert.isTrue(pattern.test(args({ command: "ls;rm -rf .llm4ts;ls" })))
+    assert.isTrue(pattern.test(args({ command: "true && rm -rf '.llm4ts'" })))
+    assert.isTrue(pattern.test(args({ command: "(cat .llm4ts/costs.jsonl)" })))
+    assert.isTrue(pattern.test(args({ command: "ls -la $PWD/.llm4ts" })) === false)
     assert.isTrue(pattern.test(args({ absolute_path: "/repo/.llm4ts/trace-1.jsonl" })))
     // Another root of the same name is not this working directory.
     assert.isFalse(pattern.test(args({ file_path: "/other/repo/.llm4ts/plan.md" })))
