@@ -468,6 +468,9 @@ const showCursor = "\u001b[?25h"
  * (Ctrl-C still interrupts: only echo changes) and the cursor is hidden;
  * both come back when the surface closes or the process exits.
  */
+/** Re-raise only when no other listener remains to handle the signal. */
+export const shouldReraise = (otherListeners: number): boolean => otherListeners === 0
+
 const quietTerminalInput = (
   write: (text: string) => void
 ): Effect.Effect<void, never, Scope.Scope> =>
@@ -490,7 +493,7 @@ const quietTerminalInput = (
     // then let the signal do what it would have done.
     const onSignal = (signal: NodeJS.Signals): void => {
       restore()
-      process.kill(process.pid, signal)
+      if (shouldReraise(process.listenerCount(signal))) process.kill(process.pid, signal)
     }
     yield* Effect.sync(() => {
       stty("-echo")

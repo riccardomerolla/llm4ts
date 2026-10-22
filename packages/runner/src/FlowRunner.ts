@@ -1237,39 +1237,15 @@ export const interruptOnSignal = <A, E>(fiber: Fiber.Fiber<A, E>, signals: Signa
   })
 }
 
-// The terminal surface restores the tty on SIGINT and re-raises the signal;
-// that echo reaches us a moment after the real one and must not count as a
-// second Ctrl-C.
-const signalEchoWindowMs = 250
-
-const processSignals: SignalSource = (() => {
-  let lastAt = Number.NEGATIVE_INFINITY
-  const wrapped = new Map<() => void, () => void>()
-  return {
-    once: (signal, handler) => {
-      const guarded = (): void => {
-        const now = Date.now()
-        if (now - lastAt < signalEchoWindowMs) {
-          process.once(signal, guarded)
-          return
-        }
-        lastAt = now
-        wrapped.delete(handler)
-        handler()
-      }
-      wrapped.set(handler, guarded)
-      process.once(signal, guarded)
-    },
-    off: (signal, handler) => {
-      const guarded = wrapped.get(handler)
-      if (guarded !== undefined) {
-        process.off(signal, guarded)
-        wrapped.delete(handler)
-      }
-    },
-    exit: (code) => process.exit(code)
-  }
-})()
+const processSignals: SignalSource = {
+  once: (signal, handler) => {
+    process.once(signal, handler)
+  },
+  off: (signal, handler) => {
+    process.off(signal, handler)
+  },
+  exit: (code) => process.exit(code)
+}
 
 export const runFlowMain = <E>(program: Effect.Effect<void, E>): void => {
   const fiber = Effect.runFork(
