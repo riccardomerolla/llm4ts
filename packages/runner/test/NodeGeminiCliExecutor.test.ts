@@ -5,6 +5,7 @@ import { makeFakeTemporaryFiles } from "@llm4ts/core/TemporaryFiles"
 import { LlmConfig } from "@llm4ts/core/Models"
 import {
   GeminiCliExecutionContext,
+  geminiHarnessPolicyFor,
   geminiHarnessPolicyToml
 } from "@llm4ts/core/providers/GeminiCliProvider"
 import { makeNodeGeminiCliExecutor } from "@llm4ts/runner/NodeGeminiCliExecutor"
@@ -129,12 +130,15 @@ describe("NodeGeminiCliExecutor", () => {
       })
       const temporary = yield* makeFakeTemporaryFiles("/tmp/gemini-policy.toml")
       const executor = makeNodeGeminiCliExecutor(fake.executor, temporary.temporaryFiles)
-      const context = GeminiCliExecutionContext.make({ cwd: "/repo" })
+      const context = GeminiCliExecutionContext.make({ cwd: "/repo", deniedPaths: [".llm4ts/**"] })
       assert.strictEqual(yield* executor.runGeminiProcess("code", config, context), "ok")
       assert.strictEqual(yield* executor.runGeminiProcess("again", config, context), "ok")
+      const policy = geminiHarnessPolicyFor(context)
+      assert.isTrue(policy.startsWith(geminiHarnessPolicyToml))
+      assert.include(policy, "run state")
       assert.deepStrictEqual(yield* temporary.files, [
-        { path: "/tmp/gemini-policy.toml", contents: geminiHarnessPolicyToml },
-        { path: "/tmp/gemini-policy.toml", contents: geminiHarnessPolicyToml }
+        { path: "/tmp/gemini-policy.toml", contents: policy },
+        { path: "/tmp/gemini-policy.toml", contents: policy }
       ])
       // `--help` is asked once, not before every turn.
       const helps = (yield* fake.recorded).filter((run) => run.argv[1] === "--help")

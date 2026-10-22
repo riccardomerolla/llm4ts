@@ -131,6 +131,23 @@ describe("runner connector presets", () => {
     )
   })
 
+  it("denies every CLI seat the run state unless the seat or the run says otherwise", () => {
+    const denied = (config: ReturnType<typeof prepareConnector>) =>
+      config instanceof CliConnectorConfig ? config.deniedPaths : undefined
+    assert.deepStrictEqual(denied(prepareConnector(codex, "/work/repo", {})), [".llm4ts/**"])
+    assert.deepStrictEqual(
+      denied(
+        prepareConnector(
+          CliConnectorConfig.make({ ...codex, deniedPaths: ["secrets/**"] }),
+          "/work/repo",
+          {}
+        )
+      ),
+      ["secrets/**"]
+    )
+    assert.deepStrictEqual(denied(prepareConnector(codex, "/work/repo", {}, [])), [])
+  })
+
   it("selects from LLM4TS_CODER, retains the legacy name, and defaults to Claude", () => {
     assert.strictEqual(coderFromEnv({}), claude)
     assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "codex" }), codex)

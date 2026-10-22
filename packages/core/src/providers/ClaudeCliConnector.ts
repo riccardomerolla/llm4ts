@@ -46,6 +46,25 @@ import {
  */
 export const claudeReadOnlyTools = "Read,Grep,Glob,Skill"
 
+/** A glob's directory, for the shell rule: `.llm4ts/**` names `.llm4ts`. */
+const deniedDirectory = (glob: string): string => glob.replace(/\/\*\*$/u, "")
+
+/**
+ * The deny rules that keep the harness out of `deniedPaths`, for
+ * `--disallowed-tools`: one per path for the file tools (`Read` covers Glob
+ * and Grep and also blocks Edit and Write on the same path; `Edit` covers
+ * every built-in tool that edits files) and one for the shell, matched on
+ * the command text (`*` can go anywhere in a Bash rule). Deny rules hold
+ * in every permission mode, `bypassPermissions` included, and `./` anchors
+ * at the current directory. Empty when nothing is denied.
+ */
+export const claudeDenyRules = (deniedPaths: ReadonlyArray<string>): ReadonlyArray<string> =>
+  deniedPaths.flatMap((glob) => [
+    `Read(./${glob})`,
+    `Edit(./${glob})`,
+    `Bash(*${deniedDirectory(glob)}*)`
+  ])
+
 export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => {
   const effectiveFlags = config.readOnly
     ? {
@@ -53,6 +72,15 @@ export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<st
         ...config.flags
       }
     : config.flags
+  // The deny rules ride on `--disallowed-tools`, appended to whatever the
+  // operator already disallows, so a `--settings` file of theirs never
+  // displaces them.
+  const denyRules = claudeDenyRules(config.deniedPaths ?? [])
+  const disallowed = [effectiveFlags["disallowed-tools"], ...denyRules]
+    .filter((rule): rule is string => rule !== undefined && rule.length > 0)
+    .join(",")
+  const flagsWithDeny =
+    disallowed.length === 0 ? effectiveFlags : { ...effectiveFlags, "disallowed-tools": disallowed }
   return [
     ...optionalModelArgs(config.model),
     // `--effort` is Claude Code's own vocabulary: low, medium, high, max.
@@ -61,7 +89,7 @@ export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<st
     // auto memory and CLAUDE.md discovery: the documented headless mode for
     // a repository the run does not trust (ADR 0029).
     ...(config.isolated ? ["--bare"] : []),
-    ...sortedFlagArgs(effectiveFlags)
+    ...sortedFlagArgs(flagsWithDeny)
   ]
 }
 
@@ -291,7 +319,12 @@ export const makeClaudeCliConnector = (
       resumableSessions: true,
       readOnlyEnforcement: "enforced",
       effort: "mapped",
-      isolatedHeadless: "enforced"
+      isolatedHeadless: "enforced",
+      // Deny rules (`claudeDenyRules`) hold in every mode: the file tools
+      // check the path itself, the shell rule matches the command text
+      // (`cat`, `sed`, redirections are recognised; `rm` and a path spelled
+      // another way are not), so the grade is partial.
+      pathDeny: "partial"
     }),
     buildArgv: (prompt, _context) => ["claude", "--print", ...extraArgs, prompt],
     buildInteractiveArgv: (_context) => ["claude", ...extraArgs],
