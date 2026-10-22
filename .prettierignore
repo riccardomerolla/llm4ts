@@ -24,3 +24,6 @@ examples/internet-banking/portal
 
 # Executing-plans scratch workspace (git-ignored); not source.
 .superpowers
+
+# Worktrees the Claude desktop app creates for sessions inside the checkout.
+.claude/worktrees
