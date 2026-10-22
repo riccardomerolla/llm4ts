@@ -655,7 +655,7 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   the exceptions (`*` then `!flows/`), or commits them with `git add -f`.
 - CLI auth probes (2026-10-22): a CLI connector's health check asks the
   CLI's own offline login check after `--version` — `claude auth status
-  --json`, `codex login status`, `pi auth check --model … --no-refresh`,
+--json`, `codex login status`, `pi auth check --model … --no-refresh`,
   `cursor-agent status --format json` — and reports `authStatus` from its
   answer; a CLI with no such check (gemini, gh copilot, opencode, grok,
   antigravity) reports `Unknown`, which `llm4ts doctor` renders as
