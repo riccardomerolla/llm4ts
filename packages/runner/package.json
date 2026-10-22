@@ -44,6 +44,7 @@
     "./ReviewFingerprint": "./dist/ReviewFingerprint.js",
     "./RunReaders": "./dist/RunReaders.js",
     "./RunSummary": "./dist/RunSummary.js",
+    "./StoryReaders": "./dist/StoryReaders.js",
     "./Terminal": "./dist/Terminal.js",
     "./TerminalInteraction": "./dist/TerminalInteraction.js",
     "./Transcripts": "./dist/Transcripts.js",

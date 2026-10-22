@@ -244,6 +244,57 @@ const quiet = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A | undefined> 
 
 const capText = (text: string, remaining: number): string => text.slice(0, Math.max(0, remaining))
 
+/** The last rows of each log in a directory, within what is left of a character budget. */
+export const tailGateLogs = (
+  sources: RunSources,
+  directory: string | undefined,
+  budget: number
+): Effect.Effect<{
+  readonly tails: ReadonlyArray<{ readonly path: string; readonly tail: string }>
+  readonly remaining: number
+}> =>
+  Effect.gen(function* () {
+    const tails: Array<{ path: string; tail: string }> = []
+    let remaining = budget
+    if (directory !== undefined) {
+      for (const name of sources.listFiles(directory)) {
+        const path = join(directory, name)
+        const text = yield* quiet(sources.files.read(path))
+        if (text === undefined || remaining <= 0) continue
+        const tail = capText(text.trimEnd().split(/\r?\n/u).slice(-tailRows).join("\n"), remaining)
+        remaining -= tail.length
+        tails.push({ path, tail })
+      }
+    }
+    return { tails, remaining }
+  })
+
+/** The last rows of one lane's transcript, capped to what is left of a character budget. */
+export const tailTranscript = (
+  sources: RunSources,
+  directory: string | undefined,
+  lane: string,
+  budget: number
+): Effect.Effect<ReadonlyArray<string>> =>
+  Effect.gen(function* () {
+    const out: Array<string> = []
+    if (directory === undefined) return out
+    let remaining = budget
+    const transcriptFiles: TranscriptFiles = {
+      read: (path) => quiet(sources.files.read(path)),
+      list: sources.listFiles
+    }
+    const entries = yield* loadTranscript(transcriptFiles, directory, { lane })
+    const rows = tailLinesOf(entries, { lane }, undefined, tailWidth, tailRows) ?? []
+    for (const row of rows) {
+      if (remaining <= 0) break
+      const kept = capText(row, remaining)
+      remaining -= kept.length
+      out.push(kept)
+    }
+    return out
+  })
+
 export const runDiagnosisOf = (
   sources: RunSources,
   args: {
@@ -294,42 +345,22 @@ export const runDiagnosisOf = (
       )
       .slice(-digestTail)
     const digest = capText([...taskLines, ...recent].join("\n"), args.budget)
-    let remaining = args.budget - digest.length
+    const remaining = args.budget - digest.length
 
-    const gateLogTails: Array<{ path: string; tail: string }> = []
-    if (args.gateLogDir !== undefined) {
-      for (const name of sources.listFiles(args.gateLogDir)) {
-        const path = join(args.gateLogDir, name)
-        const text = yield* quiet(sources.files.read(path))
-        if (text === undefined || remaining <= 0) continue
-        const tail = capText(text.trimEnd().split(/\r?\n/u).slice(-tailRows).join("\n"), remaining)
-        remaining -= tail.length
-        gateLogTails.push({ path, tail })
-      }
-    }
-
-    const transcriptTail: Array<string> = []
-    if (args.transcriptsDir !== undefined) {
-      const transcriptFiles: TranscriptFiles = {
-        read: (path) => quiet(sources.files.read(path)),
-        list: sources.listFiles
-      }
-      const entries = yield* loadTranscript(transcriptFiles, args.transcriptsDir, { lane: "run" })
-      const rows = tailLinesOf(entries, { lane: "run" }, undefined, tailWidth, tailRows) ?? []
-      for (const row of rows) {
-        if (remaining <= 0) break
-        const kept = capText(row, remaining)
-        remaining -= kept.length
-        transcriptTail.push(kept)
-      }
-    }
+    const gateTails = yield* tailGateLogs(sources, args.gateLogDir, remaining)
+    const transcript = yield* tailTranscript(
+      sources,
+      args.transcriptsDir,
+      "run",
+      gateTails.remaining
+    )
 
     return Diagnosis.make({
       runId: args.runId,
       digest,
       ...(failure === undefined ? {} : { failure }),
-      gateLogTails,
-      transcriptTail
+      gateLogTails: gateTails.tails,
+      transcriptTail: transcript
     })
   })
 
