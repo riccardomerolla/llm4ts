@@ -60,7 +60,7 @@ describe("GitTool", () => {
     )
   )
 
-  it.effect("commitAll stages everything except the runner's trace and cost ledger", () =>
+  it.effect("commitAll never stages the run state, with or without its ignore file", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const root = yield* temporaryRepository
@@ -70,29 +70,96 @@ describe("GitTool", () => {
         yield* git.config("user.name", "llm4ts test")
         yield* git.config("user.email", "llm4ts@example.invalid")
         yield* Effect.promise(() =>
-          mkdir(join(root, ".llm4ts", "kits", "forked"), { recursive: true })
+          mkdir(join(root, ".llm4ts", "transcripts", "run-1"), { recursive: true })
         )
+        // A repository from before the ignore file: a plan already committed.
+        yield* Effect.promise(() =>
+          writeFile(join(root, ".llm4ts", "plan-abc.md"), "# plan\n", "utf8")
+        )
+        yield* Effect.promise(() => writeFile(join(root, "value.txt"), "one\n", "utf8"))
+        assert.strictEqual(
+          (yield* git.commitPaths("legacy plan", [".llm4ts/plan-abc.md", "value.txt"]))._tag,
+          "Committed"
+        )
+        // The run writes, then the flow commits: nothing of the run state
+        // rides along — not a new trace, not a transcript, not the change
+        // to the plan that is already tracked.
         for (const [path, contents] of [
-          ["value.txt", "one\n"],
+          ["value.txt", "two\n"],
+          [".llm4ts/plan-abc.md", "# plan, revised\n"],
           [".llm4ts/trace-1700000000000.jsonl", "{}\n"],
           [".llm4ts/costs.jsonl", "{}\n"],
-          [".llm4ts/plan-abc.md", "# plan\n"],
-          [".llm4ts/kits/forked/pack.md", "# Pack\n"]
+          [".llm4ts/transcripts/run-1/coder.md", "hi\n"]
         ]) {
           yield* Effect.promise(() => writeFile(join(root, path), contents, "utf8"))
         }
-        assert.strictEqual((yield* git.commitAll("first"))._tag, "Committed")
+        assert.strictEqual((yield* git.commitAll("work"))._tag, "Committed")
+        const shown = execFileSync("git", ["show", "--stat", "--format=", "HEAD"], {
+          cwd: root,
+          encoding: "utf8"
+        })
+        assert.include(shown, "value.txt")
+        assert.notInclude(shown, ".llm4ts")
+        assert.match(yield* git.status, /trace-1700000000000\.jsonl/)
+
+        // With the runner's ignore file in place the run state is not even
+        // untracked, and the flow commit is as clean.
+        yield* Effect.promise(() => writeFile(join(root, ".llm4ts", ".gitignore"), "*\n", "utf8"))
+        yield* Effect.promise(() => writeFile(join(root, "value.txt"), "three\n", "utf8"))
+        assert.strictEqual((yield* git.commitAll("more work"))._tag, "Committed")
         const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
           .trim()
           .split("\n")
           .sort()
+        assert.deepStrictEqual(tracked, [".llm4ts/plan-abc.md", "value.txt"])
+        // The tracked plan keeps its HEAD version; the new trace is ignored.
+        assert.strictEqual(yield* git.status, "M .llm4ts/plan-abc.md")
+        // The run state alone is `NothingToCommit`, not a commit of it.
+        yield* Effect.promise(() =>
+          writeFile(join(root, ".llm4ts", "trace-1700000000001.jsonl"), "{}\n", "utf8")
+        )
+        assert.strictEqual((yield* git.commitAll("only state"))._tag, "NothingToCommit")
+      })
+    )
+  )
 
-        assert.deepStrictEqual(tracked, [
-          ".llm4ts/kits/forked/pack.md",
-          ".llm4ts/plan-abc.md",
-          "value.txt"
-        ])
-        assert.match(yield* git.status, /trace-1700000000000\.jsonl/)
+  it.effect("commitPaths stages a named path under the run state despite its ignore file", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        yield* git.config("user.name", "llm4ts test")
+        yield* git.config("user.email", "llm4ts@example.invalid")
+        yield* Effect.promise(() =>
+          mkdir(join(root, ".llm4ts", "kits", "forked", "packs", "mine"), { recursive: true })
+        )
+        yield* Effect.promise(() => writeFile(join(root, ".llm4ts", ".gitignore"), "*\n", "utf8"))
+        yield* Effect.promise(() =>
+          writeFile(
+            join(root, ".llm4ts", "kits", "forked", "packs", "mine", "pack.md"),
+            "# P\n",
+            "utf8"
+          )
+        )
+        yield* Effect.promise(() =>
+          writeFile(join(root, ".llm4ts", "trace-1700000000000.jsonl"), "{}\n", "utf8")
+        )
+        // pack-fork keeps its fork on purpose: the named path is committed,
+        // the trace beside it is not.
+        assert.strictEqual(
+          (yield* git.commitPaths("fork", [".llm4ts/kits/forked/packs/mine"]))._tag,
+          "Committed"
+        )
+        const tracked = execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).trim()
+        assert.strictEqual(tracked, ".llm4ts/kits/forked/packs/mine/pack.md")
+        // Elsewhere the repository's own ignore rules still hold: a named
+        // path that is ignored is refused, not forced in.
+        yield* Effect.promise(() => writeFile(join(root, ".gitignore"), "*.log\n", "utf8"))
+        yield* Effect.promise(() => writeFile(join(root, "build.log"), "x\n", "utf8"))
+        const refused = yield* Effect.exit(git.commitPaths("log", ["build.log"]))
+        assert.strictEqual(refused._tag, "Failure")
       })
     )
   )

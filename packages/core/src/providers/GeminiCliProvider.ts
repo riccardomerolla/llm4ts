@@ -129,6 +129,10 @@ export class GeminiCliExecutionContext extends Schema.Class<GeminiCliExecutionCo
   /** The seat's own environment (a roster `env`), under llm4ts's own keys. */
   envVars: Schema.Record(Schema.String, Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed<Readonly<Record<string, string>>>({}))
+  ),
+  /** Globs under `cwd` the policy denies every tool (`CliConnectorConfig.deniedPaths`). */
+  deniedPaths: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(Effect.succeed(emptyDirectories))
   )
 }) {}
 
@@ -141,6 +145,7 @@ export const geminiCliExecutionContextFrom = (
     readOnly: config.readOnly,
     isolated: config.isolated,
     envVars: config.envVars,
+    deniedPaths: config.deniedPaths ?? emptyDirectories,
     ...(config.sandbox === undefined
       ? {}
       : {
@@ -201,6 +206,66 @@ export const geminiHarnessPolicyToml = [
   'denyMessage = "That is llm4ts, the tool running you, not part of your task. Work in your working directory; what llm4ts expects of you is in your instructions."',
   ""
 ].join("\n")
+
+const regexEscape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+
+/** A TOML basic string: backslashes and quotes escaped. */
+const tomlString = (text: string): string =>
+  `"${text.replace(/\\/gu, "\\\\").replace(/"/gu, '\\"')}"`
+
+/**
+ * The pattern that catches `glob` (a directory glob such as `.llm4ts/**`)
+ * in a tool call's arguments: the name as a path segment at the start of
+ * a relative path (after a quote, a space or `=` in the JSON) or
+ * right under `cwd` as an absolute one. A seat whose working directory is
+ * a shard worktree under `.llm4ts/port/shards/` therefore keeps its own
+ * tree: its paths pass through `.llm4ts` deeper down, under another root.
+ * Separators match either way, as the JSON doubles a Windows backslash.
+ * It is a match over the argument text: a path reached through `..`, a
+ * variable or a glob slips past it, which is why the grade is `partial`.
+ */
+export const geminiDeniedPathPattern = (glob: string, cwd: string | undefined): string => {
+  const separator = "[\\\\/]+"
+  const name = regexEscape(glob.replace(/\/\*\*$/u, ""))
+  // A path starts after a quote, whitespace, `=` or a shell operator, and
+  // may be spelled `./name`. The working directory as it appears in an
+  // argument is anchored the same way, so `/repo` never matches inside
+  // `/other/repo/`.
+  const boundary = `["'\\s=;&|(\`$]`
+  const dot = `(?:\\.${separator})?`
+  const under =
+    cwd === undefined
+      ? ""
+      : `(?:${/^[\\/]/u.test(cwd) ? separator : ""}${cwd
+          .split(/[\\/]+/u)
+          .filter((segment) => segment.length > 0)
+          .map(regexEscape)
+          .join(separator)}${separator})?`
+  return `${boundary}${dot}${under}${name}(?=${separator}|["'\\s;&|)]|$)`
+}
+
+/**
+ * The harness policy with one admin-tier deny per denied path on top: any
+ * tool call — the shell included — whose arguments name the run's own
+ * state is refused with a message that says whose it is.
+ */
+export const geminiHarnessPolicyFor = (context: GeminiCliExecutionContext): string =>
+  [
+    geminiHarnessPolicyToml,
+    ...context.deniedPaths.map((glob) =>
+      [
+        "[[rule]]",
+        'toolName = "*"',
+        `argsPattern = ${tomlString(geminiDeniedPathPattern(glob, context.cwd))}`,
+        'decision = "deny"',
+        "priority = 999",
+        `denyMessage = ${tomlString(
+          `${glob} is the run state of llm4ts, the tool running you: traces, plans and transcripts that are not part of your task. Do not read, change or delete it.`
+        )}`,
+        ""
+      ].join("\n")
+    )
+  ].join("\n")
 
 /** Whether `gemini --help` lists `--admin-policy`, the flag the harness policy needs. */
 export const geminiSupportsAdminPolicy = (help: string): boolean => help.includes("--admin-policy")
@@ -962,7 +1027,12 @@ export const makeGeminiCliProvider = (
     capabilities: ConnectorCapabilities.make({
       interactiveSessions: true,
       readOnlyEnforcement: "enforced",
-      isolatedHeadless: "partial"
+      isolatedHeadless: "partial",
+      // An admin-tier policy rule over every tool (`geminiHarnessPolicyFor`)
+      // on a CLI that takes `--admin-policy` (older CLIs run without it),
+      // matched over the argument text: a path spelled another way (`..`,
+      // a variable, a glob) slips past, so the grade is partial.
+      pathDeny: "partial"
     })
   })
 

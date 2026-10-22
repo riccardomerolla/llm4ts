@@ -637,9 +637,25 @@ profile`, transcripts on by default and compacted on land. llm4zio's
 - MCP operator server (ADR 0041, 2026-10-22): llm4ts mcp over stdio and
   HTTP, a run supervisor, first SIGINT interrupts a flow; llm4zio has no
   server and no signal handling. Additive.
+- Run state kept out of the repository and of the coder (ADR 0027
+  amendment, 2026-10-22): the first write under any `.llm4ts/` leaves a
+  `.gitignore` there (`*`, kept as found when one exists), `commitAll`
+  never stages the directory (previously only the trace and the cost
+  ledger were taken back out; plans and archived runs were committed), and
+  `commitPaths` force-adds what it is named (a forked pack, a port ledger).
+  The autonomy contract names `.llm4ts/` as off limits in the `full` and
+  `minimal` profiles, every CLI seat is configured with
+  `deniedPaths: [".llm4ts/**"]` (`--disallowed-tools` rules on Claude
+  Code, an admin-tier policy rule on Gemini CLI, both graded `partial`
+  as text-matching shell rules; Codex and pi have no per-path rule and
+  publish `CapabilityUnenforceable`), and
+  `ConnectorCapabilities.pathDeny` grades it. llm4zio commits its plan
+  files and has no run-state rule. A repository that wants its own flows or
+  forked packs under `.llm4ts/` committed keeps its own ignore file with
+  the exceptions (`*` then `!flows/`), or commits them with `git add -f`.
 - CLI auth probes (2026-10-22): a CLI connector's health check asks the
   CLI's own offline login check after `--version` — `claude auth status
---json`, `codex login status`, `pi auth check --model … --no-refresh`,
+  --json`, `codex login status`, `pi auth check --model … --no-refresh`,
   `cursor-agent status --format json` — and reports `authStatus` from its
   answer; a CLI with no such check (gemini, gh copilot, opencode, grok,
   antigravity) reports `Unknown`, which `llm4ts doctor` renders as

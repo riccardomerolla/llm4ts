@@ -690,10 +690,14 @@ describe("runner cost ledger", () => {
         )
         const written = Object.keys(yield* Ref.get(state)).sort()
 
+        // The first write under `.llm4ts/` leaves the ignore file that keeps
+        // the run state out of every commit (`RunState`).
         assert.deepStrictEqual(written, [
+          "/repo/.llm4ts/.gitignore",
           "/repo/.llm4ts/costs.jsonl",
           "/repo/.llm4ts/trace-1700000000000.jsonl"
         ])
+        assert.strictEqual((yield* Ref.get(state))["/repo/.llm4ts/.gitignore"], "*\n")
       })
     )
   )
@@ -1123,7 +1127,9 @@ describe("judgment observation logging", () => {
           } else {
             // The run still leaves its default trace; only the judgment log is absent.
             assert.deepStrictEqual(
-              Object.keys(stored).filter((path) => !path.includes("/trace-")),
+              Object.keys(stored).filter(
+                (path) => !path.includes("/trace-") && !path.endsWith("/.gitignore")
+              ),
               []
             )
           }

@@ -17,6 +17,12 @@ const workspace = [
   "files only where your instructions name them. What it expects of you is in your instructions."
 ]
 
+const runState = [
+  "The directory `.llm4ts/` at the root of your working directory is the run's own state — traces,",
+  "plans, transcripts and costs that belong to the tool running you. Never read, modify, delete or",
+  "commit anything under it; the one exception is a path there that your instructions name as yours."
+]
+
 const noGaming = [
   "Never edit, skip, delete or weaken a test to make a gate pass. A test you believe is wrong is a",
   "finding to report, not a line to change; a pre-existing bug outside your task is a finding, not",
@@ -41,8 +47,8 @@ const evidence = [
 
 /**
  * The contract for a profile. `full` is the default; `minimal` keeps scope,
- * the workspace rule and the no-gaming rule for a model that over-verifies
- * under the full text;
+ * the workspace rule, the run-state rule and the no-gaming rule for a model
+ * that over-verifies under the full text;
  * `off` is the empty string, for a flow that writes its own rules.
  */
 export const autonomyContract = (profile: ContractProfile = "full"): string => {
@@ -50,12 +56,13 @@ export const autonomyContract = (profile: ContractProfile = "full"): string => {
     case "off":
       return ""
     case "minimal":
-      return [...scope, ...workspace, ...noGaming].join("\n")
+      return [...scope, ...workspace, ...runState, ...noGaming].join("\n")
     case "full":
       return [
         ...unattended,
         ...scope,
         ...workspace,
+        ...runState,
         ...minimalChange,
         ...noGaming,
         ...evidence

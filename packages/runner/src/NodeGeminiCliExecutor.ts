@@ -8,7 +8,7 @@ import {
   GeminiCliExecutor,
   buildGeminiArgs,
   extractGeminiCliResponse,
-  geminiHarnessPolicyToml,
+  geminiHarnessPolicyFor,
   geminiProcessEnv,
   geminiSupportsAdminPolicy,
   geminiTurnLimitSettingsJson,
@@ -39,7 +39,7 @@ export const makeNodeGeminiCliExecutor = (
           ),
           (path) => geminiProcessEnv(context, path)
         )
-  // The harness policy (`geminiHarnessPolicyToml`) goes in with
+  // The harness policy (`geminiHarnessPolicyFor`) goes in with
   // `--admin-policy` on a CLI that lists the flag: `gemini --help` is asked
   // once, and an older CLI simply runs without it — an unknown flag would
   // fail every turn.
@@ -68,7 +68,7 @@ export const makeNodeGeminiCliExecutor = (
     Effect.flatMap(supportsAdminPolicy, (supported) =>
       supported
         ? Effect.map(
-            temporaryFiles.write("gemini-policy-", ".toml", geminiHarnessPolicyToml),
+            temporaryFiles.write("gemini-policy-", ".toml", geminiHarnessPolicyFor(context)),
             (path) => buildGeminiArgs(config, context, outputFormat, path)
           )
         : Effect.succeed(buildGeminiArgs(config, context, outputFormat))

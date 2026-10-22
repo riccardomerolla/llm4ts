@@ -18,6 +18,8 @@ import {
   buildGeminiArgs,
   extractGeminiCliResponse,
   geminiCliExecutionContextFrom,
+  geminiDeniedPathPattern,
+  geminiHarnessPolicyFor,
   geminiLoopDiagnostic,
   geminiProcessEnv,
   geminiQuotaDiagnostic,
@@ -105,6 +107,58 @@ describe("Gemini CLI configuration", () => {
       "stream-json"
     )
     assert.deepStrictEqual(isolated.slice(-2), ["-e", "none"])
+  })
+
+  it("denies the run state to every tool through the harness policy", () => {
+    const context = geminiCliExecutionContextFrom(
+      CliConnectorConfig.make({
+        connectorId: ConnectorIds.GeminiCli,
+        workingDir: "/repo",
+        deniedPaths: [".llm4ts/**"]
+      })
+    )
+    assert.deepStrictEqual(context.deniedPaths, [".llm4ts/**"])
+    const pattern = new RegExp(geminiDeniedPathPattern(".llm4ts/**", "/repo"), "u")
+    const args = (value: Record<string, string>): string => JSON.stringify(value)
+    // Relative and absolute forms under the working directory, the shell included.
+    assert.isTrue(pattern.test(args({ command: "rm -rf .llm4ts" })))
+    assert.isTrue(pattern.test(args({ command: "cat .llm4ts/trace-1.jsonl | head" })))
+    assert.isTrue(pattern.test(args({ command: "rm -rf ./.llm4ts" })))
+    assert.isTrue(pattern.test(args({ command: "cd src;rm -r ../.llm4ts" })) === false)
+    assert.isTrue(pattern.test(args({ command: "ls;rm -rf .llm4ts;ls" })))
+    assert.isTrue(pattern.test(args({ command: "true && rm -rf '.llm4ts'" })))
+    assert.isTrue(pattern.test(args({ command: "(cat .llm4ts/costs.jsonl)" })))
+    assert.isTrue(pattern.test(args({ command: "ls -la $PWD/.llm4ts" })) === false)
+    assert.isTrue(pattern.test(args({ absolute_path: "/repo/.llm4ts/trace-1.jsonl" })))
+    // Another root of the same name is not this working directory.
+    assert.isFalse(pattern.test(args({ file_path: "/other/repo/.llm4ts/plan.md" })))
+    assert.isFalse(pattern.test(args({ file_path: "C:\\repo\\.llm4ts\\plan.md" })))
+    assert.isTrue(
+      new RegExp(geminiDeniedPathPattern(".llm4ts/**", "C:\\repo"), "u").test(
+        args({ file_path: "C:\\repo\\.llm4ts\\plan.md" })
+      )
+    )
+    // A seat whose working directory is a shard worktree under the run
+    // state keeps its own tree.
+    assert.isFalse(
+      new RegExp(geminiDeniedPathPattern(".llm4ts/**", "/repo/.llm4ts/port/shards/1"), "u").test(
+        args({ command: "cat /repo/.llm4ts/port/shards/1/src/a.ts" })
+      )
+    )
+    assert.isFalse(pattern.test(args({ command: "pnpm test" })))
+    assert.isFalse(pattern.test(args({ file_path: "/repo/src/llm4ts.ts" })))
+    assert.isFalse(pattern.test(args({ file_path: "/repo/src/.llm4tsx/a" })))
+    // The policy carries the base rule and one admin-tier deny per path.
+    const policy = geminiHarnessPolicyFor(context)
+    assert.strictEqual(policy.split("[[rule]]").length - 1, 2)
+    assert.include(policy, "node_modules")
+    assert.include(policy, "run state of llm4ts")
+    const denyLine = policy.split("\n").find((line) => line.includes("run state"))
+    assert.isTrue(denyLine?.startsWith('denyMessage = "'))
+    assert.strictEqual(
+      geminiHarnessPolicyFor(GeminiCliExecutionContext.make({})).split("[[rule]]").length - 1,
+      1
+    )
   })
 
   it("maps read-only to headless default mode, and to plan mode only under a sandbox", () => {

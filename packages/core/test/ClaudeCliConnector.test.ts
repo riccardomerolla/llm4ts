@@ -23,6 +23,7 @@ import {
 import {
   claudeAuthProbe,
   claudeCliExtraArgs,
+  claudeDenyRules,
   makeClaudeCliConnector,
   parseClaudeCliStreamLine
 } from "@llm4ts/core/providers/ClaudeCliConnector"
@@ -91,6 +92,39 @@ describe("ClaudeCliConnector", () => {
     assert.strictEqual(connector.capabilities.readOnlyEnforcement, "enforced")
     assert.strictEqual(connector.capabilities.effort, "mapped")
     assert.strictEqual(connector.capabilities.isolatedHeadless, "enforced")
+    assert.strictEqual(connector.capabilities.pathDeny, "partial")
+  })
+
+  it("denies the paths a seat must keep out of through --disallowed-tools", () => {
+    const shaped = CliConnectorConfig.make({
+      connectorId: ConnectorIds.ClaudeCli,
+      deniedPaths: [".llm4ts/**"]
+    })
+    assert.deepStrictEqual(claudeCliExtraArgs(shaped), [
+      "--disallowed-tools",
+      "Read(./.llm4ts/**),Edit(./.llm4ts/**),Bash(*.llm4ts*)"
+    ])
+    // Nothing denied, nothing sent.
+    assert.deepStrictEqual(
+      claudeCliExtraArgs(CliConnectorConfig.make({ ...shaped, deniedPaths: [] })),
+      []
+    )
+    assert.deepStrictEqual(claudeDenyRules([]), [])
+    // The operator's own disallow list and settings file both survive.
+    assert.deepStrictEqual(
+      claudeCliExtraArgs(
+        CliConnectorConfig.make({
+          ...shaped,
+          flags: { settings: "/s.json", "disallowed-tools": "WebFetch" }
+        })
+      ),
+      [
+        "--disallowed-tools",
+        "WebFetch,Read(./.llm4ts/**),Edit(./.llm4ts/**),Bash(*.llm4ts*)",
+        "--settings",
+        "/s.json"
+      ]
+    )
   })
 
   it("maps effort to --effort and isolation to --bare (ADR 0029)", () => {
