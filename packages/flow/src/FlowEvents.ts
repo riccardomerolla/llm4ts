@@ -312,6 +312,28 @@ export class TaskCompleted extends Schema.TaggedClass<TaskCompleted>()("TaskComp
   executor: Schema.optionalKey(Schema.String)
 }) {}
 
+/**
+ * An MVP acceptance criterion's test evidence (ADR 0042): `red` after the
+ * story's red phase proved its tests fail, `green` once they all pass.
+ */
+export class CriterionChecked extends Schema.TaggedClass<CriterionChecked>()("CriterionChecked", {
+  story: Schema.String,
+  /** The criterion's tag, `[story-id#n]`. */
+  tag: Schema.String,
+  status: Schema.Literals(["missing", "red", "green"]),
+  lane: Schema.optionalKey(Schema.String)
+}) {}
+
+/** An outcome left for a later iteration, with why (ADR 0042): written to `parked.md`. */
+export class Parked extends Schema.TaggedClass<Parked>()("Parked", {
+  story: Schema.String,
+  item: Schema.String,
+  reason: Schema.String,
+  /** It was part of the MVP: the run cannot call the MVP reached. */
+  mvp: Schema.Boolean,
+  lane: Schema.optionalKey(Schema.String)
+}) {}
+
 /** A story moved on the epic's board (ADR 0033); the statuses are `BoardSync`'s. */
 export class StoryStatusChanged extends Schema.TaggedClass<StoryStatusChanged>()(
   "StoryStatusChanged",
@@ -458,7 +480,9 @@ export const FlowEvent = Schema.Union([
   TasksPlanned,
   TaskStarted,
   TaskCompleted,
-  StoryStatusChanged
+  StoryStatusChanged,
+  CriterionChecked,
+  Parked
 ])
 export type FlowEvent = typeof FlowEvent.Type
 

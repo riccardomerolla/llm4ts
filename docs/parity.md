@@ -634,6 +634,14 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   2026-10-06): `runQueue` spreads items over worktree shards
   (`LLM4TS_PORT_SHARDS`); `parseDiagnostics` reads javac and Maven error
   lines. llm4ts-only. Additive.
+- `epic-mvp` (ADR 0042, 2026-10-22): an epic flow on the epic-stories
+  engine. It plans an MVP cut (`later` on a story, `mvp-cut.json`), runs a
+  red phase per story (`StoriesOptions.redPhase`, frozen tests), and lets
+  green tagged tests (`[story#n]`, from a JUnit report or a command per
+  outcome) replace the review lenses and the story judge. It writes
+  `parked.md` and `mvp.json`, and `--land` refuses until the MVP is
+  reached. llm4zio has no epic flow to mirror. Additive: epic-stories is
+  unchanged.
 - MCP operator server (ADR 0041, 2026-10-22): llm4ts mcp over stdio and
   HTTP, a run supervisor, first SIGINT interrupts a flow; llm4zio has no
   server and no signal handling. Additive.

@@ -46,6 +46,12 @@ export class Story extends Schema.Class<Story>("Story")({
     Schema.withDecodingDefaultKey(Effect.succeed([]))
   ),
   /**
+   * Outcomes cut from this iteration (ADR 0042, epic-mvp): planned, shown,
+   * never built now. `acceptance` is the MVP; a story with only `later`
+   * outcomes is parked whole. Absent outside epic-mvp.
+   */
+  later: Schema.optionalKey(Schema.Array(Schema.String)),
+  /**
    * The story may delete, skip or rewrite tests (ADR 0027): the oracle guard
    * stays silent for it. Absent or false, a deleted test file, an added skip
    * marker or a passed-count drop is a gate failure.
@@ -376,6 +382,7 @@ export const storyHash = (story: Story): string =>
         ? {}
         : { readFirst: [...story.readFirst].map(normalizePath) }),
       ...(story.acceptance.length === 0 ? {} : { acceptance: [...story.acceptance] }),
+      ...(story.later === undefined || story.later.length === 0 ? {} : { later: [...story.later] }),
       ...(story.testsChange ? { testsChange: true } : {})
     })
   )

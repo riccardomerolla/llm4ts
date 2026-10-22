@@ -1,0 +1,39 @@
+{
+  "executors": [
+    {
+      "id": "claude-planner",
+      "harness": "claude",
+      "roles": ["planner", "verifier"],
+      "effort": "high",
+      "slots": 1,
+      "priority": 1
+    },
+    {
+      "id": "claude-reviewer",
+      "harness": "claude",
+      "model": "claude-haiku-5-5",
+      "roles": ["reviewer"],
+      "effort": "low",
+      "slots": 2,
+      "priority": 1
+    },
+    {
+      "id": "pi-codex",
+      "harness": "pi",
+      "model": "openai-codex/gpt-5.3-codex",
+      "roles": ["coder"],
+      "effort": "medium",
+      "slots": 2,
+      "priority": 1
+    },
+    {
+      "id": "claude-sonnet",
+      "harness": "claude",
+      "model": "claude-sonnet-5-5",
+      "roles": ["coder"],
+      "effort": "medium",
+      "slots": 2,
+      "priority": 2
+    }
+  ]
+}

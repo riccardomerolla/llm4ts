@@ -16,7 +16,9 @@ copies.
 ## When to use
 
 - The user wants a new flow, a hello/skeleton flow, or a variant of a
-  built-in flow (`implement`, `sdd`, `issue-pr`, `epic-stories`, ...).
+  built-in flow (`implement`, `sdd`, `issue-pr`, `epic-stories`, `epic-mvp`, ...).
+  An epic flow with its own policy runs on `runEpicStories` with an
+  `EpicStoriesOptions` policy (see `flows/lib/epic-mvp.ts`), not a copy of it.
 - NOT for running an existing flow on a task: that is the `using-llm4ts`
   skill. NOT for modernization packs and kits: that is
   `authoring-llm4ts-packs`.

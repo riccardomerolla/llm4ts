@@ -12,6 +12,7 @@ one-line description. These scripts double as the built-in flows of the
 | `implement.ts`              | Persistent plan, branch, task review/fix, and commits                                                                               | selected CLI + Git                |
 | `epic-design.ts`            | Legacy extract pack + target repo → an approved epic brief for `epic-stories`                                                       | reasoner CLI                      |
 | `epic-stories.ts`           | Epic → story DAG → parallel coders in worktrees → epic branch                                                                       | reasoner CLI + pi + Git           |
+| `epic-mvp.ts`               | Epic → MVP cut → red tests first → coders make them green; the rest parked for `--iterate`                                          | reasoner CLI + pi + Git           |
 | `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                      | reasoner CLI                      |
 | `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                                 | selected CLI + GitHub             |
 | `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                              | selected CLI + Maven              |
@@ -366,6 +367,46 @@ llm4ts run epic-stories --repo /path/to/portal -- --refine \
   `--list` shows each round (`round 1: 3/3 merged, 1 not planned`).
 - Gates, seats, roster, concurrency and the story judge are the ones of the
   epic. `epic-stories-board` refines the same way.
+
+### Reaching an MVP sooner: `epic-mvp`
+
+`epic-mvp` (ADR 0042) runs on the `epic-stories` engine with a test-first
+policy that gets to an MVP sooner. Same flags, seats and environment, plus
+the per-test evidence each MVP outcome needs:
+
+```bash
+LLM4TS_TEST_REPORT=reports/junit.xml \
+  llm4ts run epic-mvp --repo ~/work/portal -- "Add the current account and wire transfers"
+llm4ts run epic-mvp --repo ~/work/portal -- --land      # only once the MVP is reached
+llm4ts run epic-mvp --repo ~/work/portal -- --iterate   # plan what was parked
+```
+
+- **The cut.** The planner gives each story one to four MVP outcomes
+  (`acceptance`) and puts the rest in `later`. Stories the MVP does not need
+  go to `mvp-cut.json` beside the plan. Edit `plan.md` to change the cut,
+  as with epic-stories.
+- **Red first.** Before any code, each story's coder writes tests named
+  with the outcome's tag, `[story-id#n]`. One review lens reads the tests
+  once, and the run proves them red. The executor then commits and freezes
+  them: changing a frozen test is a gate failure.
+- **Green replaces review.** Each story is one task: make the frozen tests
+  pass. There are no review lenses and no story judge; the gates, the
+  perimeter and the oracle guard still run. `--review` adds one
+  correctness lens back.
+- **Evidence.** `LLM4TS_TEST_REPORT` is the JUnit XML the test gate writes,
+  relative to the app directory (vitest `--reporter=junit --outputFile=…`,
+  jest-junit, `pytest --junitxml`, Surefire, cargo nextest). Add the report
+  path to `.gitignore`: a report git can see stops the run.
+  `LLM4TS_TEST_ONE` is the alternative: one run per outcome, with `{tag}` or
+  `{tagRegex}` filled in (`pnpm vitest run -t {tagRegex}`). The run refuses
+  to start without one of them.
+- **Verdict.** After the run, every finished story's tags are checked on
+  the epic branch. `parked.md` lists what is left, split into what blocks
+  the MVP and what can wait, and `mvp.json` says whether the MVP is
+  reached. `--land` refuses until it is.
+- **When to pick it.** Use epic-mvp for greenfield or additive work, where
+  a test can say what done means. Use epic-stories for refactors,
+  cross-cutting changes, and work that needs judgment on house style.
 
 ### The story judge as a ruleset (fork)
 

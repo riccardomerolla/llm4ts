@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.47.0
+
+A lighter epic flow that reaches an MVP sooner, test-first (ADR 0042).
+
+- **`llm4ts run epic-mvp`** runs on the epic-stories engine with its own
+  policy. The planner gives each story one to four testable MVP outcomes
+  (`acceptance`) and puts the rest in `later`. Stories the MVP does not need
+  go to `mvp-cut.json`. Each story's coder first writes tests named with the
+  outcome's tag, `[story-id#n]`. One review lens reads them once, the run
+  proves them red, and the executor commits and freezes them. The story is
+  then one task: make them pass. There are no review lenses and no story
+  judge (`--review` adds one lens back); the gates, the perimeter and the
+  oracle guard still run.
+- **Per-test evidence.** `LLM4TS_TEST_REPORT` is the JUnit report the test
+  gate writes. The alternative, `LLM4TS_TEST_ONE`, is a command run once per
+  outcome, with `{tag}` or `{tagRegex}` filled in. An outcome is green only
+  when every tagged test passed. The run refuses to start without one of
+  them. The report must be git-ignored. Parsing lives in
+  `@llm4ts/flow/TestEvidence`.
+- **MVP verdict.** After the run, `parked.md` lists what is left, split into
+  what blocks the MVP and what can wait, and `mvp.json` says whether the MVP
+  is reached. `--land` refuses until it is. `--iterate` plans the parked
+  items, or the ones its text names, as the next round. The typed
+  `CriterionChecked` and `Parked` events show in the terminal and in
+  `run_wait`.
+- **Executor seam.** `StoriesOptions.redPhase` runs once per story before
+  its tasks. A change to a test it froze is a Critical gate failure
+  (`frozenTestsGate`, `stories/<id>.red.json`). `Story.later` is optional
+  and enters the story hash only when set.
+- **epic-stories as a spine.** `runEpicStories` takes a policy: an optional
+  story judge, `preflight`, `generatePlan`, `checkPlan`, executor options
+  per unit, `afterUnit`, `beforeLand`, `refineFeedback` and `argv`.
+  `storyJsonSchema` is exported. epic-stories itself behaves as before.
+- `examples/epic-mvp.roster.json` (planner high effort, reviewer low,
+  coders medium). Live rehearsal against epic-stories:
+  `specs/pending/epic-mvp-rehearsal.md`.
+
 ## 2.46.0
 
 A chat agent can run llm4ts through MCP instead of a shell (ADR 0041).

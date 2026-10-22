@@ -27,7 +27,9 @@ import {
   EpicCheckoutDirty,
   LandingFailed,
   RefineRefused,
-  type FlowError
+  type FlowError,
+  type PersistenceError,
+  type StoryPlanInvalid
 } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { nodePreflight } from "@llm4ts/flow/NodePreflight"
@@ -1051,40 +1053,40 @@ export const epicIdFor = (epic: string): string => {
   return `${slug.length === 0 ? "epic" : slug}-${stableHash(epic).slice(0, 6)}`
 }
 
+/** One story of the plan as the planner writes it; flows extend its properties (ADR 0042). */
+export const storyJsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    title: { type: "string" },
+    description: { type: "string" },
+    dependsOn: { type: "array", items: { type: "string" } },
+    owned: { type: "array", items: { type: "string" } },
+    sharedReadOnly: { type: "array", items: { type: "string" } },
+    readFirst: { type: "array", items: { type: "string" } },
+    acceptance: { type: "array", items: { type: "string" } },
+    provides: { type: "array", items: { type: "string" } },
+    testsChange: { type: "boolean" }
+  },
+  required: [
+    "id",
+    "title",
+    "description",
+    "dependsOn",
+    "owned",
+    "sharedReadOnly",
+    "readFirst",
+    "acceptance",
+    "provides"
+  ]
+} as const satisfies JsonSchema
+
 export const storyPlanJsonSchema: JsonSchema = {
   type: "object",
   properties: {
     epicId: { type: "string" },
     epic: { type: "string" },
-    stories: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          title: { type: "string" },
-          description: { type: "string" },
-          dependsOn: { type: "array", items: { type: "string" } },
-          owned: { type: "array", items: { type: "string" } },
-          sharedReadOnly: { type: "array", items: { type: "string" } },
-          readFirst: { type: "array", items: { type: "string" } },
-          acceptance: { type: "array", items: { type: "string" } },
-          provides: { type: "array", items: { type: "string" } },
-          testsChange: { type: "boolean" }
-        },
-        required: [
-          "id",
-          "title",
-          "description",
-          "dependsOn",
-          "owned",
-          "sharedReadOnly",
-          "readFirst",
-          "acceptance",
-          "provides"
-        ]
-      }
-    }
+    stories: { type: "array", items: storyJsonSchema }
   },
   required: ["epicId", "epic", "stories"]
 }
@@ -2052,8 +2054,72 @@ export const rubricStoryJudge =
       subject
     )
 
+/** What a policy sees of one unit the executor runs: the epic's plan or one refine round. */
+export interface EpicUnitContext {
+  readonly plan: StoryPlan
+  /** The unit's state folder (the epic's, or `rounds/<n>`). */
+  readonly stateDir: string
+  /** The epic's own state folder, where `plan.md` lives. */
+  readonly epicStateDir: string
+  /** The epic checkout. */
+  readonly workDir: string
+  readonly appDir: string
+  readonly files: PlainFileStoreShape
+  readonly events: FlowEventsShape
+  /** The test gate alone, in a directory; absent when the gates name none. */
+  readonly testGate:
+    | ((workDir: string, events?: FlowEventsShape) => Effect.Effect<ReviewResult, FlowError>)
+    | undefined
+}
+
+/** What the planner is given; a policy's own generator reads the same. */
+export interface PlanInputs {
+  readonly reasoning: LlmServiceShape
+  readonly events: FlowEventsShape
+  readonly epic: string
+  readonly epicId: string
+  readonly guidance: string
+  readonly brief: string | undefined
+  readonly orientation: string | undefined
+  readonly files: PlainFileStoreShape
+  readonly stateDir: string
+}
+
+/** The executor options a flow built on this spine may set (ADR 0042). */
+export type StoriesPolicy = Partial<
+  Pick<StoriesOptions, "redPhase" | "planTasks" | "reviewers" | "maxRounds" | "taskConcurrency">
+>
+
 export interface EpicStoriesOptions {
-  readonly storyJudge: (context: StoryJudgeContext) => StoryJudge
+  /** The flags to parse; default the process's own. */
+  readonly argv?: ReadonlyArray<string>
+  /** The story judge; absent, stories merge on their gates alone (epic-mvp). */
+  readonly storyJudge?: (context: StoryJudgeContext) => StoryJudge
+  /** Checks the environment before any seat is resolved. */
+  readonly preflight?: (
+    environment: Readonly<Record<string, string | undefined>>
+  ) => Effect.Effect<void, ScriptUsage>
+  /** Writes the story plan in place of the default planner. */
+  readonly generatePlan?: (
+    inputs: PlanInputs
+  ) => Effect.Effect<StoryPlan, FlowLlmError | PersistenceError>
+  /** Rules on top of the plan's own, checked on every run (a hand-edited plan too). */
+  readonly checkPlan?: (plan: StoryPlan) => Effect.Effect<StoryPlan, StoryPlanInvalid>
+  /** Executor options for each unit, over the defaults. */
+  readonly stories?: (unit: EpicUnitContext) => StoriesPolicy
+  /** After the executor finishes a unit: the flow's own verdict on it. */
+  readonly afterUnit?: (unit: EpicUnitContext, report: EpicReport) => Effect.Effect<void, FlowError>
+  /** Before `--land`: refuse when the flow's own bar is not met. */
+  readonly beforeLand?: (
+    epicStateDir: string,
+    files: PlainFileStoreShape
+  ) => Effect.Effect<void, FlowError>
+  /** With `--refine`: the feedback planned, from the epic's folder and the text given. */
+  readonly refineFeedback?: (
+    epicStateDir: string,
+    text: string,
+    files: PlainFileStoreShape
+  ) => Effect.Effect<string, PersistenceError>
   /**
    * Resolve the judgment seat from LLM4TS_JUDGMENT_PROVIDER / _MODEL (ADR
    * 0017) and pass it to the runner. Off, the runner derives one from the
@@ -2106,7 +2172,7 @@ export const defaultEpic =
 
 export const runEpicStories = (options: EpicStoriesOptions) =>
   Effect.gen(function* () {
-    const flags = yield* parseEpicArgs(process.argv.slice(2))
+    const flags = yield* parseEpicArgs(options.argv ?? process.argv.slice(2))
     // The epic is chosen before any seat is resolved: the text given, `--epic`,
     // or the one epic not landed yet (`chooseEpic`); `--list` only lists.
     const given = yield* resolveFlowInput("", flags.rest)
@@ -2117,7 +2183,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
       return
     }
     // With `--refine` the text is feedback on a finished epic, never an epic's text.
-    const feedback = flags.refine ? given.prompt.trim() : ""
+    let feedback = flags.refine ? given.prompt.trim() : ""
     const choice = yield* chooseEpic({
       text: flags.refine ? "" : given.prompt,
       epic: flags.epic,
@@ -2126,7 +2192,14 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
       defaultEpic
     })
     if (flags.refine) {
-      yield* refineEpic(choice)
+      const refined = yield* refineEpic(choice)
+      if (options.refineFeedback !== undefined) {
+        feedback = yield* options.refineFeedback(
+          join(epicsDir(given.workDir), refined.dir),
+          feedback,
+          files
+        )
+      }
     }
     // What this run does (ADR 0021): the plan's stories, the open refine round,
     // a new round, or the landing. Refusals come before any seat is resolved.
@@ -2164,6 +2237,9 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
           : choice._tag === "Brief"
             ? choice.request
             : choice.prompt
+    }
+    if (options.preflight !== undefined) {
+      yield* options.preflight(process.env)
     }
     // The pack whose `## Gates` the run uses; a wrong name fails here, not after planning.
     const pack = yield* selectedPack({
@@ -2265,19 +2341,37 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             store
               .recoverOrCreate(
                 planPath,
-                generateStoryPlan(
-                  reasoningMeter.service,
-                  events,
-                  input.prompt,
-                  epicId,
-                  guidance,
-                  brief,
-                  orientation
+                (options.generatePlan === undefined
+                  ? generateStoryPlan(
+                      reasoningMeter.service,
+                      events,
+                      input.prompt,
+                      epicId,
+                      guidance,
+                      brief,
+                      orientation
+                    )
+                  : options.generatePlan({
+                      reasoning: reasoningMeter.service,
+                      events,
+                      epic: input.prompt,
+                      epicId,
+                      guidance,
+                      brief,
+                      orientation,
+                      files,
+                      stateDir
+                    })
                 ).pipe(
                   Effect.flatMap((generated) => pruneUnknownAnchors(generated, context.git, events))
                 )
               )
-              .pipe(Effect.flatMap(validateStoryPlan))
+              .pipe(
+                Effect.flatMap(validateStoryPlan),
+                Effect.flatMap((valid) =>
+                  options.checkPlan === undefined ? Effect.succeed(valid) : options.checkPlan(valid)
+                )
+              )
           )
           yield* events.publish(
             Info.make({
@@ -2414,6 +2508,9 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             )
           }
           if (flags.land !== undefined) {
+            if (options.beforeLand !== undefined) {
+              yield* options.beforeLand(stateDir, files)
+            }
             const landed = yield* landEpic(context, {
               plan,
               files,
@@ -2499,6 +2596,26 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             gatesIn(nodeProcessExecutor, events, commands, gateRunOptions(process.env))
           )
           const testCommand = testGateCommand(commands)
+          const testGate =
+            testCommand === undefined
+              ? undefined
+              : inAppDir(
+                  appDir,
+                  gatesIn(nodeProcessExecutor, events, [testCommand], gateRunOptions(process.env))
+                )
+          const unitContext = (work: {
+            readonly plan: StoryPlan
+            readonly stateDir: string
+          }): EpicUnitContext => ({
+            plan: work.plan,
+            stateDir: work.stateDir,
+            epicStateDir: stateDir,
+            workDir: input.workDir,
+            appDir,
+            files,
+            events,
+            testGate
+          })
           const setupCommand = worktreeSetupCommand(process.env, pack)
           const healthUrl = serverHealthUrl(localServer, process.env)
           // The executor over one unit: the epic's plan or one refine round.
@@ -2548,19 +2665,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                 // the failing lines it added to the epic head it started from.
                 gateCommands: commands,
                 appDir,
-                ...(testCommand === undefined
-                  ? {}
-                  : {
-                      testGate: inAppDir(
-                        appDir,
-                        gatesIn(
-                          nodeProcessExecutor,
-                          events,
-                          [testCommand],
-                          gateRunOptions(process.env)
-                        )
-                      )
-                    }),
+                ...(testGate === undefined ? {} : { testGate }),
                 fix: fixPromptOptions(process.env),
                 ...reviewVotes(process.env),
                 ...reviewFixer(process.env),
@@ -2586,14 +2691,18 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                 // With a roster, the judge and the verifier are leased per story,
                 // away from the executor coding it (ADR 0019).
                 ...storyContextChars(process.env),
-                judge: options.storyJudge({
-                  plan: work.plan,
-                  budget: contextBudget,
-                  reasoning: reasoningMeter.service,
-                  events,
-                  files,
-                  houseRules: guidance
-                }),
+                ...(options.storyJudge === undefined
+                  ? {}
+                  : {
+                      judge: options.storyJudge({
+                        plan: work.plan,
+                        budget: contextBudget,
+                        reasoning: reasoningMeter.service,
+                        events,
+                        files,
+                        houseRules: guidance
+                      })
+                    }),
                 verifyBlocked: (story, need, workDir, seats) =>
                   verifyBlockedOn(
                     seats.context.roster?.forRole("verifier") ?? seats.context.reasoning,
@@ -2626,7 +2735,8 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                 ...taskConcurrencyOption(flags.taskConcurrency, process.env),
                 concurrency,
                 ...(deferring ? { deferNonBlocking: true } : {}),
-                failFast: flags.failFast
+                failFast: flags.failFast,
+                ...(options.stories === undefined ? {} : options.stories(unitContext(work)))
               }
             )
           const summarize = (
@@ -2640,6 +2750,9 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             )
           const report = yield* runUnit(unit)
           yield* summarize(unit, report)
+          if (options.afterUnit !== undefined) {
+            yield* options.afterUnit(unitContext(unit), report)
+          }
           const hint = retroHint(report, input.workDir, epicId)
           if (hint !== undefined) {
             yield* events.publish(Info.make({ message: hint }))
@@ -2722,6 +2835,9 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
           )
           const roundReport = yield* runUnit(roundUnit)
           yield* summarize(roundUnit, roundReport)
+          if (options.afterUnit !== undefined) {
+            yield* options.afterUnit(unitContext(roundUnit), roundReport)
+          }
           const roundHint = retroHint(roundReport, input.workDir, epicId)
           if (roundHint !== undefined) {
             yield* events.publish(Info.make({ message: roundHint }))

@@ -155,7 +155,9 @@ export const meaningfulKinds: ReadonlySet<string> = new Set([
   "ExecutorHandedOver",
   "StoryJudged",
   "Began",
-  "RunEnded"
+  "RunEnded",
+  "CriterionChecked",
+  "Parked"
 ])
 
 const textOf = (
@@ -164,6 +166,10 @@ const textOf = (
   switch (event._tag) {
     case "StoryStatusChanged":
       return { text: `story ${event.id} ${event.status}`, lane: event.id }
+    case "CriterionChecked":
+      return { text: `criterion ${event.tag} ${event.status}`, lane: event.story }
+    case "Parked":
+      return { text: `parked ${event.item}: ${event.reason}`, lane: event.story }
     case "StageFailed":
       return {
         text: `${event.stage} failed: ${event.message}`,

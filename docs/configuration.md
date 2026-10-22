@@ -372,6 +372,13 @@ Info, each as a `ReviewFindingDemoted` event.
 | `LLM4TS_REVIEW_VOTES` | Independent votes of the adversarial lens per round; any Critical blocks. Default `1`                                 |
 | `LLM4TS_REVIEW_FIXER` | `separate`: findings go to a fresh fixer chat briefed to apply them and nothing else. Default: the implementer's chat |
 
+`epic-mvp` (ADR 0042) needs per-test evidence for each MVP outcome, one of:
+
+| Variable             | Effect                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_TEST_REPORT` | The JUnit XML report the test gate writes, relative to the app directory; an outcome is green when every test tagged `[story#n]` passed |
+| `LLM4TS_TEST_ONE`    | A command run once per outcome, `{tag}` or `{tagRegex}` replaced by its tag (`pnpm vitest run -t {tagRegex}`); green when it exits 0    |
+
 `epic-stories --defer-findings` (or `LLM4TS_DEFER_FINDINGS=1`) makes review
 lighter (ADR 0031). A task's review settles once only non-Critical findings
 are left (a red gate still loops). The judge clears a story whose findings

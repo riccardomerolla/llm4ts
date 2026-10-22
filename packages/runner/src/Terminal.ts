@@ -273,6 +273,12 @@ export const terminalLine = (
       return palette.fail(`aborted: ${safe(event.message)}`)
     case "Info":
       return palette.info(safe(event.message))
+    case "CriterionChecked":
+      return palette.info(`criterion ${safe(event.tag)}: ${event.status}`)
+    case "Parked":
+      return palette.info(
+        `parked${event.mvp ? " (MVP)" : ""}: ${safe(event.story)} — ${safe(event.item)} (${safe(event.reason)})`
+      )
     case "ToolUse":
       return palette.toolCall(safe(event.tool), safe(event.args))
     case "AssistantMessage":

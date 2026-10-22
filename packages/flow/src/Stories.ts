@@ -148,6 +148,50 @@ export class StoryState extends Schema.Class<StoryState>("StoryState")({
   executor: Schema.optionalKey(Schema.String)
 }) {}
 
+/**
+ * What a story's red phase left (ADR 0042): the test paths it froze, the
+ * commit that holds them, and what it parked on the way. Written once; its
+ * presence is what tells a resumed story the red phase is done.
+ */
+export const RedTestsVersion = 1
+
+export class RedTests extends Schema.Class<RedTests>("RedTests")({
+  frozen: Schema.Array(Schema.String),
+  commit: Schema.String,
+  /** Criteria the red phase could not prove red, each with why: parked for the operator. */
+  parked: Schema.Array(Schema.String)
+}) {}
+
+/** What a red phase answers: the test paths to freeze and the criteria it parked. */
+export interface RedPhase {
+  readonly frozen: ReadonlyArray<string>
+  readonly parked: ReadonlyArray<string>
+}
+
+/** Where a story's red phase is recorded, beside its task plan. */
+export const redTestsPath = (stateDir: string, storyId: string): string =>
+  join(stateDir, `stories/${storyId}.red.json`)
+
+/** A change to a test the red phase froze: a gate failure, whatever the change. */
+export const frozenTestsGate = (
+  changed: ReadonlyArray<string>,
+  frozen: ReadonlyArray<string>
+): ReviewResult => {
+  const touched = changed.filter((path) => frozen.includes(path))
+  return ReviewResult.make({
+    issues: touched.map((path) =>
+      ReviewIssue.make({
+        severity: "Critical",
+        title: `frozen red test changed: ${path}`,
+        description:
+          "The red phase froze this test: make it pass by changing production code, and put the test back as it was.",
+        file: path
+      })
+    ),
+    summary: touched.length === 0 ? "" : "frozen red tests"
+  })
+}
+
 export const EpicReportVersion = 1
 
 /** `waiting`: on hold behind a failed predecessor, runs once that is fixed. */
@@ -724,6 +768,19 @@ export interface StoriesOptions {
   readonly contextChars?: number
   /** Extra system context per story (house rules, shared read-only excerpts). */
   readonly system?: (story: Story) => Effect.Effect<string, FlowError>
+  /**
+   * Test-first (ADR 0042): runs once per story, in its worktree, before its
+   * tasks are planned — writes the red tests and proves them red. The
+   * executor commits what it wrote and freezes the paths it names: a later
+   * change to any of them is a gate failure. Omit for no red phase.
+   */
+  readonly redPhase?: (
+    story: Story,
+    seats: StorySeats,
+    workDir: string,
+    system: string,
+    events: FlowEventsShape
+  ) => Effect.Effect<RedPhase, FlowError>
   /** How a story's task plan is produced. Default: the story's own coder plans it. */
   readonly planTasks?: (
     seats: StorySeats,
@@ -1145,6 +1202,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       // The notes its tasks carried describe the old definition: gone too.
       yield* files.remove(planPath(story))
       yield* files.remove(notesPath(story))
+      yield* files.remove(redTestsPath(options.stateDir, story.id))
       stored = undefined
     }
     if (stored !== undefined && stored.status === "merged") {
@@ -1394,6 +1452,13 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             )
             return ReviewResult.make({ issues, summary: issues.length === 0 ? "" : "oracle guard" })
           })
+    // The red phase's tests, once written (ADR 0042): frozen for every later change.
+    let redTests = yield* loadVersioned(
+      files,
+      redTestsPath(options.stateDir, story.id),
+      RedTestsVersion,
+      RedTests
+    )
     /**
      * The gates in a worktree of the story: the target's, the story's
      * perimeter, the oracle guard and — for a task run aside — the paths the
@@ -1420,12 +1485,28 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
                 ],
                 task.owns
               )
+        const frozen =
+          redTests === undefined
+            ? ReviewResult.make({ issues: [] })
+            : frozenTestsGate(
+                [
+                  ...(yield* where.changedFilesVsBase(redTests.commit)),
+                  ...(yield* where.uncommittedFiles)
+                ],
+                redTests.frozen
+              )
         return combined(
           combined(
-            combined(target, perimeterGate([...changed.sharedReadOnly, ...changed.outside], story)),
-            yield* oracleGate(target, where)
+            combined(
+              combined(
+                target,
+                perimeterGate([...changed.sharedReadOnly, ...changed.outside], story)
+              ),
+              yield* oracleGate(target, where)
+            ),
+            owned
           ),
-          owned
+          frozen
         )
       })
     const gates = gatesAt(state.worktree, git, storyGateLogDir(options.stateDir, story.id))
@@ -1598,6 +1679,35 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           })
         )
       })
+
+    // Test-first (ADR 0042): the red tests before any task is planned, once.
+    // A story whose task plan exists already ran it, or predates it.
+    if (
+      options.redPhase !== undefined &&
+      redTests === undefined &&
+      (yield* files.read(planPath(story))) === undefined
+    ) {
+      const red = yield* stage(
+        laneOf(story),
+        `story ${story.id}: red tests`,
+        options.redPhase(story, watchedSeats, state.worktree, system, laneOf(story))
+      )
+      if ((yield* git.uncommittedFiles).length > 0) {
+        yield* git.commitAll(`${story.id}: red tests`)
+      }
+      redTests = RedTests.make({
+        frozen: [...red.frozen],
+        commit: yield* git.checkpoint,
+        parked: [...red.parked]
+      })
+      yield* saveVersioned(
+        files,
+        redTestsPath(options.stateDir, story.id),
+        RedTestsVersion,
+        RedTests,
+        redTests
+      )
+    }
 
     const planTasks = options.planTasks ?? defaultPlanTasks
     // Taken after catch-up and setup: the code as the first task finds it.

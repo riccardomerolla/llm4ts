@@ -28,6 +28,13 @@ Requires Node.js 22+; no install needed:
 npx -y @llm4ts/shell run implement "<task description>"
 ```
 
+For an epic, `epic-stories` plans stories and reviews and judges each one.
+`epic-mvp` is the lighter path to an MVP for greenfield or additive work:
+red tests first, green tests in place of review, and the rest parked for
+`--iterate`. It needs `LLM4TS_TEST_REPORT` (the JUnit report the tests
+write) or `LLM4TS_TEST_ONE`. Pick `epic-stories` for refactors,
+cross-cutting changes, or work that needs judgment on house style.
+
 `implement` is the default flow; run `npx -y @llm4ts/shell list` to see
 other flows across the project (`.llm4ts/flows/`), global
 (`~/.config/llm4ts/flows/`), and built-in tiers. With a global install

@@ -26,7 +26,9 @@ import {
   blockedOnIn,
   blockedRebuttal,
   deferredPath,
+  frozenTestsGate,
   implementStoriesFlow,
+  redTestsPath,
   launchSummary,
   setupRecoveryPrompt,
   perimeterRules,
@@ -2490,6 +2492,75 @@ describe("Stories executor with tasks aside: conflicts and red merges (ADR 0034)
         "[x] Revision 1: make the story gates green after merging its parallel tasks"
       )
       assert.include(planText, "combined red")
+    })
+  )
+})
+
+describe("Stories executor: test-first red phase (ADR 0042)", () => {
+  it("a change to a frozen test is a Critical gate failure; other paths pass", () => {
+    const result = frozenTestsGate(
+      ["src/features/a/index.ts", "src/features/a/a.test.ts"],
+      ["src/features/a/a.test.ts"]
+    )
+    assert.isFalse(result.isClean)
+    assert.deepStrictEqual(
+      result.issues.map((issue) => [issue.severity, issue.title]),
+      [["Critical", "frozen red test changed: src/features/a/a.test.ts"]]
+    )
+    assert.isTrue(
+      frozenTestsGate(["src/features/a/index.ts"], ["src/features/a/a.test.ts"]).isClean
+    )
+  })
+
+  it.effect("runs once before the tasks, records the frozen tests, and resume skips it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ changedFor: () => ["src/features/a/index.ts"] })
+      const context = yield* makeContext(harness)
+      const calls = yield* Ref.make(0)
+      const options = yield* makeOptions(harness, single, context, {
+        redPhase: (story) =>
+          Ref.update(calls, (count) => count + 1).pipe(
+            Effect.andThen(record(harness, `red:${story.id}`)),
+            Effect.as({
+              frozen: ["src/features/a/a.test.ts"],
+              parked: ["[a#2] already holds — its tests pass before implementation"]
+            })
+          )
+      })
+
+      const report = yield* implementStoriesFlow(context, options)
+      assert.deepStrictEqual(
+        report.stories.map((outcome) => outcome.status),
+        ["done"]
+      )
+      const log = yield* Ref.get(harness.log)
+      assert.isBelow(
+        log.indexOf("red:a"),
+        log.indexOf("commit:/repo/.llm4ts/worktrees/a:a: a task")
+      )
+      const files = yield* memoryFilesOf(options)
+      const red = files[redTestsPath(options.stateDir, "a")] ?? ""
+      assert.include(red, "src/features/a/a.test.ts")
+      assert.include(red, "already holds")
+
+      // The story is merged; a second run of the unchanged plan asks nothing.
+      yield* implementStoriesFlow(context, options)
+      assert.strictEqual(yield* Ref.get(calls), 1)
+    })
+  )
+
+  it.effect("a task that changes a frozen test cannot commit: the story fails on its gates", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ changedFor: () => ["src/features/a/a.test.ts"] })
+      const context = yield* makeContext(harness)
+      const options = yield* makeOptions(harness, single, context, {
+        maxRounds: 1,
+        redPhase: () => Effect.succeed({ frozen: ["src/features/a/a.test.ts"], parked: [] })
+      })
+
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "failed")
+      assert.include(report.stories[0]?.reason ?? "", "frozen red test changed")
     })
   )
 })
