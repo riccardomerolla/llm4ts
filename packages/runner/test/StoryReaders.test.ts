@@ -11,6 +11,7 @@ const recording = Effect.gen(function* () {
   const files = yield* seeded
   yield* files.writeAtomic(tracePath, trace.map((line) => JSON.stringify(line)).join("\n") + "\n")
   yield* files.writeAtomic(`${stateDir}/stories/a/gates/test.log`, "FAIL route\nexit 1\n")
+  yield* files.writeAtomic(`${stateDir}/stories/a/gates/merge/1-pnpm-test.log`, "merge red\n")
   const reads: Array<string> = []
   const store: PlainFileStoreShape = {
     ...files,
@@ -24,7 +25,7 @@ const recording = Effect.gen(function* () {
     sources: {
       files: store,
       listFiles: (directory: string) =>
-        directory === `${stateDir}/stories/a/gates` ? ["test.log"] : []
+        directory === `${stateDir}/stories/a/gates` ? ["test.log", "merge/1-pnpm-test.log"] : []
     }
   }
 })
@@ -50,7 +51,10 @@ describe("story readers", () => {
         [true, false]
       )
       assert.include(detail.findings ?? "", "judge round 1")
-      assert.deepStrictEqual(detail.gateLogs, [`${stateDir}/stories/a/gates/test.log`])
+      assert.deepStrictEqual(detail.gateLogs, [
+        `${stateDir}/stories/a/gates/test.log`,
+        `${stateDir}/stories/a/gates/merge/1-pnpm-test.log`
+      ])
     })
   )
 
@@ -81,6 +85,7 @@ describe("story readers", () => {
       assert.include(diagnosis.digest, "no test for the route")
       assert.strictEqual(diagnosis.failure?.message, "judge not cleared after 1 revision")
       assert.strictEqual(diagnosis.gateLogTails[0]?.tail, "FAIL route\nexit 1")
+      assert.strictEqual(diagnosis.gateLogTails[1]?.tail, "merge red")
     })
   )
 })

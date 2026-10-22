@@ -37,7 +37,10 @@ export class TraceUnreadable extends Schema.TaggedError<TraceUnreadable>()("Trac
 
 export interface RunSources {
   readonly files: PlainFileStoreShape
-  /** File names in a directory; none when it does not exist. */
+  /**
+   * Relative paths of every regular file under a directory, recursively (e.g.
+   * "task-2/1-pnpm-test.log"), never directory names; none when it does not exist.
+   */
   readonly listFiles: (directory: string) => ReadonlyArray<string>
 }
 
