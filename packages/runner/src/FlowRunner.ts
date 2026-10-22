@@ -83,6 +83,7 @@ import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
 import { makeGitTool } from "@llm4ts/flow/GitTool"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { ignoringRunState } from "@llm4ts/flow/RunState"
 import { makeTransientRetry } from "@llm4ts/flow/TransientRetry"
 import {
   Exclusion,
@@ -147,6 +148,16 @@ export interface NodeConnectorDependencies {
   readonly temporaryFiles: TemporaryFilesShape
   readonly geminiCli: GeminiCliExecutorShape
 }
+
+/**
+ * The dependencies with the run-state rule on their file store: the first
+ * write under any `.llm4ts/` leaves a `.gitignore` there, so a trace, a
+ * plan or a transcript is never staged by a flow commit (`RunState`).
+ */
+const withRunStateIgnore = (dependencies: FlowRunnerDependencies): FlowRunnerDependencies => ({
+  ...dependencies,
+  files: ignoringRunState(dependencies.files)
+})
 
 export const nodeFlowRunnerDependencies = (): FlowRunnerDependencies => ({
   process: nodeProcessExecutor,
@@ -224,6 +235,14 @@ export interface FlowRunnerOptions {
    * roster files); `"none"` runs with one executor per seat.
    */
   readonly roster?: RosterDocument | "none"
+  /**
+   * Globs, relative to each seat's working directory, every CLI seat of
+   * the run is denied (`CliConnectorConfig.deniedPaths`). Default: the
+   * run's own state, `.llm4ts/**`. A flow whose coder writes there on
+   * purpose (port-guide's trial ports) passes `[]`; a seat that names its
+   * own list keeps it.
+   */
+  readonly deniedPaths?: ReadonlyArray<string>
 }
 
 export interface FlowRunnerBundle {
@@ -351,8 +370,9 @@ export const runIdentityFromEnvironment = (
 
 export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeContext")(function* (
   options: FlowRunnerOptions,
-  dependencies: FlowRunnerDependencies
+  given: FlowRunnerDependencies
 ): Effect.fn.Return<FlowRunnerBundle, FlowError, Scope.Scope> {
+  const dependencies = withRunStateIgnore(given)
   const events = yield* makeFlowEventHub()
   const runId =
     runIdentityFromEnvironment(options, options.environment ?? process.env).runId ??
@@ -413,6 +433,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         readonly readOnlyEnforcement: string
         readonly effort: string
         readonly isolatedHeadless: string
+        readonly pathDeny: string
       }
     }
   ): Effect.Effect<void> => {
@@ -448,6 +469,24 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
           (connector.capabilities.isolatedHeadless === "partial"
             ? "the repository's own instruction file is still read"
             : "nothing reaches the harness")
+      )
+    }
+    // The run state (ADR 0027 amendment): a harness with no per-path deny
+    // rule keeps the model out of `.llm4ts/` by the contract text alone.
+    if (
+      configuration instanceof CliConnectorConfig &&
+      configuration.deniedPaths !== undefined &&
+      configuration.deniedPaths.length > 0 &&
+      connector.capabilities.pathDeny !== "enforced"
+    ) {
+      const paths = configuration.deniedPaths.join(", ")
+      notes.push(
+        `'${name}' is asked to keep out of ${paths} (the run's own state: traces, plans, ` +
+          "transcripts), but its harness " +
+          (connector.capabilities.pathDeny === "partial"
+            ? "denies it by rule, not at the filesystem — a shell command that spells the path " +
+              "another way can still reach it"
+            : "has no per-path deny rule — only the contract text in its prompt keeps it out")
       )
     }
     return Effect.forEach(
@@ -567,12 +606,16 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     Scope.Scope
   > {
     const environment = options.environment ?? process.env
-    const coder = yield* resolveSeat(prepareConnector(bridged(options.coder), workDir, environment))
+    const coder = yield* resolveSeat(
+      prepareConnector(bridged(options.coder), workDir, environment, options.deniedPaths)
+    )
     const reasoningService = yield* resolveSeat(
-      prepareConnector(bridged(reasoning), workDir, environment)
+      prepareConnector(bridged(reasoning), workDir, environment, options.deniedPaths)
     )
     const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
-      resolveSeat(prepareConnector(bridged(configuration), workDir, environment))
+      resolveSeat(
+        prepareConnector(bridged(configuration), workDir, environment, options.deniedPaths)
+      )
     )
     // The judgment seat is the reasoner with its tools taken away: a judge
     // reads, it does not act. Over an API reasoner (no tools to take) it is
@@ -583,7 +626,9 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     const judgmentSeat =
       judgmentConfig === undefined
         ? reasoningService
-        : yield* resolveSeat(prepareConnector(bridged(judgmentConfig), workDir, environment))
+        : yield* resolveSeat(
+            prepareConnector(bridged(judgmentConfig), workDir, environment, options.deniedPaths)
+          )
     const judgment = yield* judgmentFor(judgmentSeat, judgmentConfig ?? reasoning, environment)
     return { coder, reasoning: reasoningService, reviewers, judge: judgmentSeat, judgment }
   })
@@ -742,7 +787,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             })
           }
           const seat: RosterSeat = yield* resolveSeat(
-            prepareConnector(bridged(configuration), workDir, runEnvironment)
+            prepareConnector(bridged(configuration), workDir, runEnvironment, options.deniedPaths)
           ).pipe(ScopeModule.provide(runScope))
           seatCache.set(key, seat)
           return seat
@@ -940,8 +985,9 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   bundle: FlowRunnerBundle,
   options: FlowRunnerOptions,
   body: (context: FlowContextShape) => Effect.Effect<A, E, R>,
-  dependencies: FlowRunnerDependencies = nodeFlowRunnerDependencies()
+  given: FlowRunnerDependencies = nodeFlowRunnerDependencies()
 ): Effect.fn.Return<A, E | FlowError, R | Scope.Scope> {
+  const dependencies = withRunStateIgnore(given)
   const startedAt = yield* Clock.currentTimeMillis
   const environment = options.environment ?? process.env
   const verbosity = options.verbosity ?? "Normal"

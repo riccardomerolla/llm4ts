@@ -7,6 +7,7 @@ import {
   type ConnectorConfig
 } from "@llm4ts/core/ConnectorConfig"
 import { ConnectorIds, connectorDefaultBaseUrl } from "@llm4ts/core/Models"
+import { runStateDeniedPaths } from "@llm4ts/flow/RunState"
 import { ScriptUsage } from "./FlowArgs.ts"
 
 export const claude = CliConnectorConfig.make({
@@ -168,7 +169,8 @@ const switchedOn = (value: string | undefined): boolean =>
 export const prepareConnector = (
   config: ConnectorConfig,
   workDir: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  deniedPaths: ReadonlyArray<string> = runStateDeniedPaths
 ): ConnectorConfig =>
   config instanceof ApiConnectorConfig
     ? enrichApiConnector(config, environment)
@@ -177,7 +179,11 @@ export const prepareConnector = (
         workingDir: workDir,
         // `LLM4TS_ISOLATED=1` asks every CLI seat of the run to leave the
         // repository's own harness material unloaded (ADR 0029).
-        ...(switchedOn(environment.LLM4TS_ISOLATED) ? { isolated: true } : {})
+        ...(switchedOn(environment.LLM4TS_ISOLATED) ? { isolated: true } : {}),
+        // Every CLI seat keeps out of the run's own state unless the seat
+        // (or the run) says otherwise; the connector maps it to a deny
+        // rule where its harness has one (`capabilities.pathDeny`).
+        deniedPaths: config.deniedPaths ?? deniedPaths
       })
 
 /** The API provider a name stands for (`LLM4TS_PROVIDER`, a roster executor's `harness`). */

@@ -113,7 +113,10 @@ const program = Effect.gen(function* () {
       coder,
       reasoning: asReadOnly(coder),
       reviewers: [asReadOnly(coder)],
-      environment: process.env
+      environment: process.env,
+      // The trial ports are written under `.llm4ts/port/trial/` by the
+      // coder itself, so this run lifts the default deny of the run state.
+      deniedPaths: []
     },
     (context) =>
       Effect.gen(function* () {

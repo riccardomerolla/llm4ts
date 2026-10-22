@@ -63,6 +63,38 @@ A chat agent can run llm4ts through MCP instead of a shell (ADR 0041).
   `@llm4ts/shell/FlowProcess`, `OperatorActTools`, `OperatorConfig`,
   `OperatorNode`, `OperatorRuns`, `OperatorServer`, `OperatorTools`,
   `RunSupervisor`, `ShellErrors`.
+- **`.llm4ts/` is never committed by a flow.** The first write under
+  `<repo>/.llm4ts/` leaves a `.gitignore` there containing `*` (an ignore
+  file already present is kept as it is), so traces, plans, transcripts
+  and archived runs never show up in `git status`; and a flow commit
+  (`commitAll`, used by the story executor and every modernize flow) takes
+  the whole directory back out of the index, where it used to keep only
+  the trace and the cost ledger out — a committed 249 kB trace was being
+  read by every reviewer. `commitPaths` force-adds the paths it is named,
+  so `pack-fork` and `port-ledger` still commit theirs. A run that only
+  revised a tracked plan is `NothingToCommit`, not a failed commit. To keep
+  hand-written flows or forked packs under `.llm4ts/` in the repository,
+  write the ignore file yourself (`*` then `!flows/`) before the first run,
+  or `git add -f` them.
+- **The coder is kept away from the run state.** The autonomy contract
+  (ADR 0027, `full` and `minimal` profiles) names `.llm4ts/` as the run's
+  own state, never to be read, modified, deleted or committed unless the
+  task names a path there. Every CLI seat is configured with
+  `deniedPaths: [".llm4ts/**"]`: Claude Code gets `--disallowed-tools`
+  with Read, Edit and Bash rules for the path (appended to any the
+  operator passes, so a `--settings` file of theirs is untouched), Gemini
+  CLI an admin-tier policy rule that denies every tool whose arguments
+  name the directory under the seat's working directory. Both are graded
+  `partial`: the file tools check the path, the shell rule matches the
+  command text, so a path spelled another way can slip, and the run says
+  so once at the start. Codex and pi have no per-path deny rule, so such
+  a seat publishes `CapabilityUnenforceable` saying only the contract text
+  keeps it out.
+  `ConnectorCapabilities.pathDeny` (`enforced | partial | ignored`) and
+  `FlowRunnerOptions.deniedPaths` are new; `port-guide` passes `[]`
+  because its trial ports are written under `.llm4ts/port/trial/` by the
+  coder. A roster seat or a connector config that sets `deniedPaths`
+  itself keeps it.
 - **A test gate that ran zero tests, or whose test files failed to load, is
   red whatever the runner exited with.** `lintCommand` reads the runner's
   output after every gate (`GateTriage.testGateReasonOf`): Vitest's
@@ -102,9 +134,6 @@ Known, not fixed here:
 
 - `llm4ts doctor` reports a CLI healthy when its login has expired; the
   probe checks the binary, not the session.
-- A coder can delete `.llm4ts/` and the trace of an earlier run with it.
-- Flows can commit run artefacts (plans, traces), which reviewers then read
-  at real cost. `.llm4ts/` should carry its own `.gitignore`.
 - Steering a running story (retry, skip, add a story, approve mid-run)
   needs a control inbox the scheduler polls. It is the next project, and
   its tools will register on this server.

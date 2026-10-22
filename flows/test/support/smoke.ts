@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { runnerBookkeeping } from "@llm4ts/flow/GitTool"
+import { RunStateDirectory } from "@llm4ts/flow/RunState"
 
 /**
  * Shared harness for the offline modernization smokes.
@@ -39,8 +39,13 @@ export const git = (cwd: string, ...args: ReadonlyArray<string>): string =>
  */
 export const smokeTimeout = 30_000
 
-/** What a target repository ignores: the runner's trace and cost ledger. */
-export const runnerStateIgnore = `${runnerBookkeeping.join("\n")}\n`
+/**
+ * What a target repository ignores: the run's own state. The runner leaves
+ * the same rule inside `.llm4ts/.gitignore` on its first write there; the
+ * fixture writes it at the root so a smoke that commits before any run
+ * also sees a clean tree.
+ */
+export const runnerStateIgnore = `${RunStateDirectory}/\n`
 
 export const initRepo = (path: string): void => {
   mkdirSync(path, { recursive: true })
