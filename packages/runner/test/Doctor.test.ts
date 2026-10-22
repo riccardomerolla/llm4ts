@@ -6,11 +6,13 @@ import { ConnectorIds, HealthStatus } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import {
   bridgeModelRefs,
+  collectDoctorReport,
   geminiBridgePrerequisites,
   geminiPrerequisites,
   makeDoctorProgram,
   piModelRefs,
   piModelsConfig,
+  renderDoctorReport,
   geminiModelModePrerequisites
 } from "@llm4ts/runner/Doctor"
 
@@ -36,6 +38,12 @@ const fakeRegistry: ConnectorRegistryShape = {
   resolveApi: () => unsupported,
   resolveCli: () => unsupported,
   resolveFallback: () => unsupported,
+  kindOf: (id) =>
+    id.value === ConnectorIds.ClaudeCli.value
+      ? "Cli"
+      : id.value === ConnectorIds.Mock.value
+        ? "Api"
+        : undefined,
   available: Effect.succeed([ConnectorIds.Mock]),
   healthCheckAll: Effect.succeed(
     new Map([
@@ -49,6 +57,26 @@ const fakeRegistry: ConnectorRegistryShape = {
 }
 
 describe("doctor", () => {
+  it.effect("collectDoctorReport labels a CLI connector's auth as a version probe", () =>
+    Effect.gen(function* () {
+      const report = yield* collectDoctorReport(fakeRegistry, {}, undefined, noNode)
+      const probeOf = (id: string) => report.connectors.find((c) => c.id === id)?.probe
+      assert.strictEqual(probeOf("claude-cli"), "version")
+      assert.strictEqual(probeOf("mock"), "unknown")
+    })
+  )
+
+  it.effect("renderDoctorReport renders what makeDoctorProgram rendered", () =>
+    Effect.gen(function* () {
+      const env = { ANTHROPIC_API_KEY: "set-in-test", LLM4TS_CODER: "codex" }
+      const rendered = renderDoctorReport(
+        yield* collectDoctorReport(fakeRegistry, env, undefined, noNode)
+      )
+      const program = yield* makeDoctorProgram(fakeRegistry, env, undefined, noNode)
+      assert.strictEqual(rendered, program)
+    })
+  )
+
   it.effect("reports connector health, credentials, and the selected coder", () =>
     Effect.gen(function* () {
       const report = yield* makeDoctorProgram(

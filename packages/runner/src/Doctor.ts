@@ -256,7 +256,23 @@ export const geminiModelModePrerequisites = (
       }
 }
 
-export const makeDoctorProgram = (
+/**
+ * What the doctor found, as data. `probe` says how far a connector's health was
+ * verified: `"version"` means only `<binary> --version` ran (the CLI may still be
+ * logged out), `"unknown"` means no such statement can be made.
+ */
+export interface DoctorReport {
+  readonly connectors: ReadonlyArray<{
+    readonly id: string
+    readonly status: HealthStatus
+    readonly probe: "version" | "unknown"
+  }>
+  readonly node: NodePreflightReport
+  /** Every line rendered after the connectors block (credentials through coder). */
+  readonly lines: ReadonlyArray<string>
+}
+
+export const collectDoctorReport = (
   registry: ConnectorRegistryShape = nodeFlowRunnerDependencies().registry,
   environment: Readonly<Record<string, string | undefined>> = process.env,
   readPiModelsJson: () => string | undefined = readPiModels,
@@ -272,21 +288,20 @@ export const makeDoctorProgram = (
   probeOtel: (config: OtelConfig) => Effect.Effect<boolean | undefined> = probeOtelEndpoint,
   /** Gemini CLI's system admin policy files (ADR 0037); this machine's by default. */
   systemPolicies: () => ReadonlyArray<string> = systemAdminPolicies
-): Effect.Effect<string> => {
+): Effect.Effect<DoctorReport> => {
   const otel = otelConfig(environment)
   return Effect.map(
     Effect.all([registry.healthCheckAll, nodeCheck, probeOtel(otel)]),
     ([statuses, node, otelAnswers]) => {
-      const lines: Array<string> = []
-      lines.push("llm4ts doctor")
-      lines.push("")
-      lines.push("connectors:")
       const sorted = Array.from(statuses.entries()).sort(([a], [b]) =>
         a.value.localeCompare(b.value)
       )
-      for (const [id, status] of sorted) {
-        lines.push(statusLine(id.value, status))
-      }
+      const connectors = sorted.map(([id, status]) => ({
+        id: id.value,
+        status,
+        probe: registry.kindOf(id) === "Cli" ? ("version" as const) : ("unknown" as const)
+      }))
+      const lines: Array<string> = []
       lines.push("")
       lines.push("credentials:")
       for (const key of credentialKeys) {
@@ -341,7 +356,20 @@ export const makeDoctorProgram = (
       lines.push("")
       lines.push(otelDoctorLine(otel, otelAnswers))
       lines.push(`coder: ${coder}`)
-      return `${lines.join("\n")}\n`
+      return { connectors, node, lines }
     }
   )
 }
+
+export const renderDoctorReport = (report: DoctorReport): string => {
+  const lines: Array<string> = ["llm4ts doctor", "", "connectors:"]
+  for (const connector of report.connectors) {
+    lines.push(statusLine(connector.id, connector.status))
+  }
+  lines.push(...report.lines)
+  return `${lines.join("\n")}\n`
+}
+
+export const makeDoctorProgram = (
+  ...args: Parameters<typeof collectDoctorReport>
+): Effect.Effect<string> => Effect.map(collectDoctorReport(...args), renderDoctorReport)
