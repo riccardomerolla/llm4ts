@@ -39,7 +39,11 @@ import { JudgmentObservation, judgmentLogPath } from "@llm4ts/flow/JudgmentLog"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryTranscriptSink } from "@llm4ts/flow/Transcript"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
-import { makeFlowRunnerContext, runWithBundle } from "@llm4ts/runner/FlowRunner"
+import {
+  makeFlowRunnerContext,
+  runIdentityFromEnvironment,
+  runWithBundle
+} from "@llm4ts/runner/FlowRunner"
 import { stage } from "@llm4ts/flow/PlanExecution"
 import { attr, kindAttribute } from "@llm4ts/flow/Spans"
 import { recordingTracer } from "./support/RecordingTracer.ts"
@@ -55,6 +59,53 @@ const files = (state: Ref.Ref<Readonly<Record<string, string>>>): PlainFileStore
     })),
   remove: (_path) => Effect.void,
   hashSha256: (_path) => Effect.succeed("hash")
+})
+
+describe("runIdentityFromEnvironment", () => {
+  it("takes LLM4TS_RUN_ID and LLM4TS_TRACE_PATH when the options give none", () => {
+    assert.deepStrictEqual(
+      runIdentityFromEnvironment({}, { LLM4TS_RUN_ID: "op-1", LLM4TS_TRACE_PATH: "/t/op-1.jsonl" }),
+      { runId: "op-1", tracePath: "/t/op-1.jsonl" }
+    )
+  })
+
+  it("explicit options win and blank variables are ignored", () => {
+    assert.deepStrictEqual(
+      runIdentityFromEnvironment(
+        { runId: "given" },
+        { LLM4TS_RUN_ID: "op-1", LLM4TS_TRACE_PATH: "  " }
+      ),
+      { runId: "given" }
+    )
+  })
+
+  it.effect("the context's runId comes from the environment", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const registry = makeConnectorRegistry([
+          {
+            connectorId: ConnectorIds.OpenAI,
+            kind: "Api",
+            create: (_c) =>
+              Effect.succeed(makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" })))
+          }
+        ])
+        const bundle = yield* makeFlowRunnerContext(
+          {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "do it",
+            coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.OpenAI }),
+            environment: { LLM4TS_RUN_ID: "op-2" }
+          },
+          { registry, process: process.executor, files: files(state) }
+        )
+        assert.strictEqual(bundle.runId, "op-2")
+      })
+    )
+  )
 })
 
 describe("embedded runner", () => {

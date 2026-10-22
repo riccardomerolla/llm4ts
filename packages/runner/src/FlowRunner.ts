@@ -329,12 +329,33 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
       : config
 })
 
+const nonBlank = (value: string | undefined): string | undefined =>
+  value === undefined || value.trim() === "" ? undefined : value
+
+/**
+ * The run id and trace path a parent process (the MCP operator server) hands
+ * to a child run. Explicit options win; blank variables count as unset.
+ */
+export const runIdentityFromEnvironment = (
+  options: Pick<FlowRunnerOptions, "runId" | "tracePath">,
+  environment: Readonly<Record<string, string | undefined>>
+): { readonly runId?: string; readonly tracePath?: string } => {
+  const runId = nonBlank(options.runId) ?? nonBlank(environment["LLM4TS_RUN_ID"])
+  const tracePath = nonBlank(options.tracePath) ?? nonBlank(environment["LLM4TS_TRACE_PATH"])
+  return {
+    ...(runId === undefined ? {} : { runId }),
+    ...(tracePath === undefined ? {} : { tracePath })
+  }
+}
+
 export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeContext")(function* (
   options: FlowRunnerOptions,
   dependencies: FlowRunnerDependencies
 ): Effect.fn.Return<FlowRunnerBundle, FlowError, Scope.Scope> {
   const events = yield* makeFlowEventHub()
-  const runId = options.runId ?? `run-${(yield* Clock.currentTimeMillis).toString()}`
+  const runId =
+    runIdentityFromEnvironment(options, options.environment ?? process.env).runId ??
+    `run-${(yield* Clock.currentTimeMillis).toString()}`
   // `llm4ts run --transcript`: what each seat is told and answers, per story,
   // in its own files — never in the trace.
   const transcriptOn =
@@ -928,7 +949,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   // per run, flushed when the run's scope closes.
   const otel = otelConfig(environment)
   const tracePath =
-    options.tracePath ??
+    runIdentityFromEnvironment(options, environment).tracePath ??
     (persistRun ? join(options.workDir, ".llm4ts", `trace-${startedAt}.jsonl`) : undefined)
   const costLedgerPath =
     options.costLedgerPath ??
