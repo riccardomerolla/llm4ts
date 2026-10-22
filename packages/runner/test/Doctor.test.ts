@@ -39,10 +39,12 @@ const fakeRegistry: ConnectorRegistryShape = {
   resolveCli: () => unsupported,
   resolveFallback: () => unsupported,
   kindOf: (id) =>
-    id.value === ConnectorIds.ClaudeCli.value
-      ? "Cli"
-      : id.value === ConnectorIds.Mock.value
-        ? "Api"
+    id.value === ConnectorIds.Mock.value
+      ? "Api"
+      : [ConnectorIds.ClaudeCli, ConnectorIds.Codex, ConnectorIds.Pi].some(
+            (cli) => cli.value === id.value
+          )
+        ? "Cli"
         : undefined,
   available: Effect.succeed([ConnectorIds.Mock]),
   healthCheckAll: Effect.succeed(
@@ -51,18 +53,29 @@ const fakeRegistry: ConnectorRegistryShape = {
       [
         ConnectorIds.ClaudeCli,
         HealthStatus.make({ availability: "Unhealthy", authStatus: "Unknown" })
-      ]
+      ],
+      [ConnectorIds.Codex, HealthStatus.make({ availability: "Healthy", authStatus: "Invalid" })],
+      [ConnectorIds.Pi, HealthStatus.make({ availability: "Healthy", authStatus: "Unknown" })]
     ])
   )
 }
 
 describe("doctor", () => {
-  it.effect("collectDoctorReport labels a CLI connector's auth as a version probe", () =>
+  it.effect("collectDoctorReport says how far each connector's auth was checked", () =>
     Effect.gen(function* () {
       const report = yield* collectDoctorReport(fakeRegistry, {}, undefined, noNode)
       const probeOf = (id: string) => report.connectors.find((c) => c.id === id)?.probe
+      // The CLI's own login check answered (here: a stale session).
+      assert.strictEqual(probeOf("codex"), "auth")
+      // Only `--version` ran, so auth is Unknown, never Valid.
+      assert.strictEqual(probeOf("pi"), "version")
       assert.strictEqual(probeOf("claude-cli"), "version")
       assert.strictEqual(probeOf("mock"), "unknown")
+      for (const connector of report.connectors) {
+        if (connector.probe === "version") {
+          assert.strictEqual(connector.status.authStatus, "Unknown")
+        }
+      }
     })
   )
 
@@ -95,6 +108,21 @@ describe("doctor", () => {
       assert.include(report, "✖ OPENAI_API_KEY")
       assert.include(report, "coder: codex")
       assert.include(report, "otel: off")
+    })
+  )
+
+  it.effect("says what each connector's own auth probe answered, and when there was none", () =>
+    Effect.gen(function* () {
+      const report = yield* makeDoctorProgram(fakeRegistry, {}, undefined, noNode)
+      const line = (id: string): string =>
+        report.split("\n").find((text) => text.includes(` ${id} `)) ?? ""
+      assert.include(line("mock"), "auth: valid")
+      // A stale login is the whole point of the probe: a healthy binary, an invalid session.
+      assert.include(line("codex"), "healthy  auth: invalid")
+      // A CLI with no cheap login check says so instead of claiming a login.
+      assert.include(line("pi"), "healthy  auth: unknown (no probe)")
+      // Nothing to say about the login of a CLI that is not installed.
+      assert.notInclude(line("claude-cli"), "auth:")
     })
   )
 

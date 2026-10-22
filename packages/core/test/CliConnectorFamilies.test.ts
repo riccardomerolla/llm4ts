@@ -8,10 +8,13 @@ import { ConnectorIds } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 import {
   ProcessResult,
+  makeFakeProcessExecutor,
   makeProcessExecutor,
+  processCommandKey,
   type ProcessExecutorShape
 } from "@llm4ts/core/ProcessExecutor"
 import {
+  cursorAuthProbe,
   cursorExtraArgs,
   makeCursorConnector,
   parseCursorStreamLine
@@ -29,6 +32,7 @@ import {
 import {
   makePiConnector,
   parsePiStreamLine,
+  piAuthProbe,
   piExtraArgs,
   piReadOnlyFloor,
   piReadOnlyProblem
@@ -531,6 +535,170 @@ describe("CursorConnector", () => {
       const error = yield* Effect.flip(Stream.runCollect(connector.completeStream("go")))
 
       assert.strictEqual(error._tag, "UsageLimitError")
+    })
+  )
+})
+
+describe("CLI auth probes", () => {
+  it("pi: `pi auth check` for the configured model, without refreshing a token", () => {
+    const probe = piAuthProbe("anthropic/claude-sonnet-4-6")
+    assert.deepStrictEqual(probe.args, [
+      "auth",
+      "check",
+      "--model",
+      "anthropic/claude-sonnet-4-6",
+      "--no-refresh",
+      "--json"
+    ])
+    assert.strictEqual(
+      probe.interpret(
+        ProcessResult.make({
+          stdout: ['{"status":"ready","provider":"anthropic","authType":"oauth"}'],
+          exitCode: 0
+        })
+      ),
+      "Valid"
+    )
+    assert.strictEqual(
+      probe.interpret(
+        ProcessResult.make({
+          stdout: [
+            '{"status":"not_ready","provider":"openai","reason":"credentials_not_configured"}'
+          ],
+          exitCode: 1
+        })
+      ),
+      "Missing"
+    )
+    assert.strictEqual(
+      probe.interpret(
+        ProcessResult.make({
+          stdout: ['{"status":"not_ready","provider":"openai-codex","reason":"oauth_expired"}'],
+          exitCode: 1
+        })
+      ),
+      "Invalid"
+    )
+    assert.strictEqual(
+      probe.interpret(
+        ProcessResult.make({ stdout: [], stderr: ["Unknown auth command"], exitCode: 1 })
+      ),
+      "Unknown"
+    )
+  })
+
+  it.effect("pi: with no model configured there is nothing to ask, so auth stays Unknown", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["pi", "--version"]),
+            ProcessResult.make({ stdout: ["1.1.0"], exitCode: 0 })
+          ]
+        ])
+      })
+      const connector = makePiConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.Pi }),
+        fake.executor
+      )
+      const health = yield* connector.healthCheck
+      const recorded = yield* fake.recorded
+      assert.strictEqual(health.availability, "Healthy")
+      assert.strictEqual(health.authStatus, "Unknown")
+      assert.strictEqual(recorded.length, 1)
+    })
+  )
+
+  it.effect("pi: with a model, the health check asks pi about that model's provider", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["pi", "--version"]),
+            ProcessResult.make({ stdout: ["1.1.0"], exitCode: 0 })
+          ],
+          [
+            processCommandKey([
+              "pi",
+              "auth",
+              "check",
+              "--model",
+              "openai/gpt-5",
+              "--no-refresh",
+              "--json"
+            ]),
+            ProcessResult.make({
+              stdout: [
+                '{"status":"not_ready","provider":"openai","reason":"credentials_not_configured"}'
+              ],
+              exitCode: 1
+            })
+          ]
+        ])
+      })
+      const connector = makePiConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.Pi, model: "openai/gpt-5" }),
+        fake.executor
+      )
+      const health = yield* connector.healthCheck
+      assert.strictEqual(health.availability, "Healthy")
+      assert.strictEqual(health.authStatus, "Missing")
+    })
+  )
+
+  it("cursor: `cursor-agent status --format json` answers isAuthenticated", () => {
+    assert.deepStrictEqual(cursorAuthProbe.args, ["status", "--format", "json"])
+    assert.strictEqual(
+      cursorAuthProbe.interpret(
+        ProcessResult.make({
+          stdout: ['{"status":"authenticated","isAuthenticated":true,"hasAccessToken":true}'],
+          exitCode: 0
+        })
+      ),
+      "Valid"
+    )
+    assert.strictEqual(
+      cursorAuthProbe.interpret(
+        ProcessResult.make({
+          stdout: ['{"status":"not_authenticated","isAuthenticated":false}'],
+          exitCode: 1
+        })
+      ),
+      "Invalid"
+    )
+    assert.strictEqual(
+      cursorAuthProbe.interpret(ProcessResult.make({ stdout: ["Logged in"], exitCode: 0 })),
+      "Unknown"
+    )
+  })
+
+  it.effect("opencode and grok offer no offline login check, so their auth stays Unknown", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["opencode", "--version"]),
+            ProcessResult.make({ stdout: ["1.0.0"], exitCode: 0 })
+          ],
+          [
+            processCommandKey(["grok", "--version"]),
+            ProcessResult.make({ stdout: ["1.0.0"], exitCode: 0 })
+          ]
+        ])
+      })
+      const opencode = yield* makeOpenCodeCliConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.OpenCode }),
+        fake.executor
+      ).healthCheck
+      const grok = yield* makeGrokCliConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.Grok }),
+        fake.executor
+      ).healthCheck
+      assert.strictEqual(opencode.availability, "Healthy")
+      assert.strictEqual(opencode.authStatus, "Unknown")
+      assert.strictEqual(grok.availability, "Healthy")
+      assert.strictEqual(grok.authStatus, "Unknown")
+      assert.strictEqual((yield* fake.recorded).length, 2)
     })
   )
 })

@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import type { HealthStatus } from "@llm4ts/core/Models"
+import type { ConnectorKind, HealthStatus } from "@llm4ts/core/Models"
 import { ConnectorIds } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import { nodePreflightReport, type NodePreflightReport } from "@llm4ts/flow/NodePreflight"
@@ -22,12 +22,36 @@ const credentialKeys = [
   "GOOGLE_API_KEY"
 ] as const
 
-const statusLine = (id: string, status: HealthStatus): string => {
+/**
+ * How far a connector's health was verified: `"auth"` means the CLI's own
+ * login check answered (`authStatus` is its word); `"version"` means only
+ * `<binary> --version` ran, which proves an install and never a login, so
+ * `authStatus` is `Unknown`; `"unknown"` means no such statement can be made
+ * (an API connector's health is its endpoint's answer).
+ */
+export type DoctorProbe = "version" | "auth" | "unknown"
+
+// The auth column is what the connector's own login check answered. A CLI
+// that is installed but offers no cheap check says so: a version answer is
+// not a login, and "valid" here once hid an expired Claude session until the
+// first turn failed. Nothing is said about the login of a CLI that is absent.
+const authColumn = (status: HealthStatus, probe: DoctorProbe): string => {
+  if (status.authStatus !== "Unknown") {
+    return `  auth: ${status.authStatus.toLowerCase()}`
+  }
+  return probe === "version" && status.availability === "Healthy"
+    ? "  auth: unknown (no probe)"
+    : ""
+}
+
+const statusLine = (id: string, status: HealthStatus, probe: DoctorProbe): string => {
   const mark =
     status.availability === "Healthy" ? "✔" : status.availability === "Unknown" ? "?" : "✖"
-  const auth = status.authStatus === "Unknown" ? "" : `  auth: ${status.authStatus.toLowerCase()}`
-  return `  ${mark} ${id.padEnd(14)} ${status.availability.toLowerCase()}${auth}`
+  return `  ${mark} ${id.padEnd(14)} ${status.availability.toLowerCase()}${authColumn(status, probe)}`
 }
+
+const probeOf = (kind: ConnectorKind | undefined, status: HealthStatus): DoctorProbe =>
+  kind !== "Cli" ? "unknown" : status.authStatus === "Unknown" ? "version" : "auth"
 
 const isSet = (value: string | undefined): value is string =>
   value !== undefined && value.trim().length > 0
@@ -256,16 +280,12 @@ export const geminiModelModePrerequisites = (
       }
 }
 
-/**
- * What the doctor found, as data. `probe` says how far a connector's health was
- * verified: `"version"` means only `<binary> --version` ran (the CLI may still be
- * logged out), `"unknown"` means no such statement can be made.
- */
+/** What the doctor found, as data; `probe` is how far each health was verified. */
 export interface DoctorReport {
   readonly connectors: ReadonlyArray<{
     readonly id: string
     readonly status: HealthStatus
-    readonly probe: "version" | "unknown"
+    readonly probe: DoctorProbe
   }>
   readonly node: NodePreflightReport
   /** Every line rendered after the connectors block (credentials through coder). */
@@ -299,7 +319,7 @@ export const collectDoctorReport = (
       const connectors = sorted.map(([id, status]) => ({
         id: id.value,
         status,
-        probe: registry.kindOf(id) === "Cli" ? ("version" as const) : ("unknown" as const)
+        probe: probeOf(registry.kindOf(id), status)
       }))
       const lines: Array<string> = []
       lines.push("")
@@ -364,7 +384,7 @@ export const collectDoctorReport = (
 export const renderDoctorReport = (report: DoctorReport): string => {
   const lines: Array<string> = ["llm4ts doctor", "", "connectors:"]
   for (const connector of report.connectors) {
-    lines.push(statusLine(connector.id, connector.status))
+    lines.push(statusLine(connector.id, connector.status, connector.probe))
   }
   lines.push(...report.lines)
   return `${lines.join("\n")}\n`

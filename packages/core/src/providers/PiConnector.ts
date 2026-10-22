@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
+import { makeCliConnector, type CliAuthProbe, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { InvalidRequestError, ProviderError, type LlmError } from "../Errors.ts"
 import { ConnectorCapabilities, ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
@@ -16,6 +16,7 @@ import {
   jsonStringField,
   optionalModelArgs,
   parseJsonLine,
+  parseJsonOutput,
   sortedFlagArgs,
   toolEventChunk,
   toolResultChunk,
@@ -24,6 +25,31 @@ import {
   versionTriple,
   statusChunk
 } from "./CliSupport.ts"
+
+/**
+ * `pi auth check --model <model> --no-refresh --json` says whether pi holds
+ * credentials for the provider that model resolves to:
+ * `{"status":"ready"}` or `{"status":"not_ready","reason":...}`. pi needs a
+ * provider or model to answer, so a seat with no model configured has no
+ * probe. `--no-refresh` keeps an expired OAuth token where it is: the check
+ * stays offline and reports it as not ready.
+ */
+export const piAuthProbe = (model: string): CliAuthProbe => ({
+  args: ["auth", "check", "--model", model, "--no-refresh", "--json"],
+  interpret: (result) => {
+    const json = parseJsonOutput(result.stdout)
+    switch (jsonStringField(json, "status")) {
+      case "ready":
+        return "Valid"
+      case "not_ready":
+        return jsonStringField(json, "reason") === "credentials_not_configured"
+          ? "Missing"
+          : "Invalid"
+      default:
+        return "Unknown"
+    }
+  }
+})
 
 /**
  * The first pi whose `--tools` allowlist can be kept free of MCP tools: from
@@ -284,6 +310,11 @@ export const makePiConnector = (
     buildInteractiveArgv: (_context) => ["pi", ...extraArgs],
     complete,
     completeStream,
-    versionProbe: { executor, binary: "pi", cwd }
+    versionProbe: {
+      executor,
+      binary: "pi",
+      cwd,
+      ...(config.model === undefined ? {} : { authProbe: piAuthProbe(config.model) })
+    }
   })
 }

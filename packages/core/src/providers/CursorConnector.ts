@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
+import { makeCliConnector, type CliAuthProbe, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { ConnectorCapabilities, ConnectorIds, LlmChunk } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
@@ -13,10 +13,23 @@ import {
   jsonStringField,
   optionalModelArgs,
   parseJsonLine,
+  parseJsonOutput,
   sortedFlagArgs,
   toolEventChunk,
   type JsonValue
 } from "./CliSupport.ts"
+
+/**
+ * `cursor-agent status --format json` (alias `whoami`) answers
+ * `{"isAuthenticated": true|false, ...}` from the stored tokens.
+ */
+export const cursorAuthProbe: CliAuthProbe = {
+  args: ["status", "--format", "json"],
+  interpret: (result) => {
+    const authenticated = jsonBooleanField(parseJsonOutput(result.stdout), "isAuthenticated")
+    return authenticated === undefined ? "Unknown" : authenticated ? "Valid" : "Invalid"
+  }
+}
 
 export const cursorExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => [
   ...optionalModelArgs(config.model),
@@ -123,6 +136,6 @@ export const makeCursorConnector = (
     buildInteractiveArgv: (_context) => ["cursor-agent", ...extraArgs],
     complete,
     completeStream,
-    versionProbe: { executor, binary: "cursor-agent", cwd }
+    versionProbe: { executor, binary: "cursor-agent", cwd, authProbe: cursorAuthProbe }
   })
 }

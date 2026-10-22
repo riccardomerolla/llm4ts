@@ -24,6 +24,13 @@ export const parseJsonLine = (line: string): JsonValue | undefined => {
   )
 }
 
+/**
+ * A CLI's whole stdout as one JSON value — for subcommands that pretty-print
+ * a single object over several lines (`claude auth status --json`).
+ */
+export const parseJsonOutput = (lines: ReadonlyArray<string>): JsonValue | undefined =>
+  parseJsonLine(lines.join("\n"))
+
 export const jsonField = (value: JsonValue | undefined, name: string): JsonValue | undefined =>
   value !== undefined && isJsonRecord(value) ? value[name] : undefined
 

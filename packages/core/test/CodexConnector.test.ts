@@ -8,6 +8,7 @@ import { ConnectorIds, type JsonSchema } from "@llm4ts/core/Models"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import { makeFakeTemporaryFiles } from "@llm4ts/core/TemporaryFiles"
 import {
+  codexAuthProbe,
   codexExtraArgs,
   codexSchemaEnforceable,
   codexStrictSchema,
@@ -239,5 +240,33 @@ describe("CodexConnector sub-agents (ADR 0033)", () => {
       '{"type":"item.completed","item":{"id":"c2","type":"collab_tool_call","tool":"wait","status":"failed"}}'
     )[0]
     assert.strictEqual(failed?.metadata.tool_failed, "true")
+  })
+})
+
+describe("CodexConnector auth probe", () => {
+  it("reads `codex login status`: exit 0 is a login, 'Not logged in' is Invalid, else Unknown", () => {
+    assert.deepStrictEqual(codexAuthProbe.args, ["login", "status"])
+    assert.strictEqual(
+      codexAuthProbe.interpret(
+        ProcessResult.make({ stdout: ["Logged in using ChatGPT"], exitCode: 0 })
+      ),
+      "Valid"
+    )
+    assert.strictEqual(
+      codexAuthProbe.interpret(
+        ProcessResult.make({ stdout: [], stderr: ["Not logged in"], exitCode: 1 })
+      ),
+      "Invalid"
+    )
+    assert.strictEqual(
+      codexAuthProbe.interpret(
+        ProcessResult.make({
+          stdout: [],
+          stderr: ["error: unrecognized subcommand 'status'"],
+          exitCode: 2
+        })
+      ),
+      "Unknown"
+    )
   })
 })

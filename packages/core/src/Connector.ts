@@ -10,6 +10,7 @@ import type { LlmServiceShape, StructuredResult } from "./LlmService.ts"
 import {
   ConnectorCapabilities,
   HealthStatus,
+  type AuthStatus,
   type ConnectorId,
   type ConnectorKind,
   type InteractionSupport,
@@ -19,7 +20,7 @@ import {
   type ToolCallResponse,
   type ToolDefinition
 } from "./Models.ts"
-import type { ProcessExecutorShape } from "./ProcessExecutor.ts"
+import type { ProcessExecutorShape, ProcessResult } from "./ProcessExecutor.ts"
 import { parseFromText, withSchemaHint } from "./StructuredOutput.ts"
 
 export interface ConnectorShape extends LlmServiceShape {
@@ -137,25 +138,58 @@ export const flattenHistory = (messages: ReadonlyArray<Message>): string => {
   return `${systemBlock.length === 0 ? "" : `${systemBlock}\n\n`}${turns}`
 }
 
+/**
+ * How a CLI reports its own login without a model call: a subcommand such as
+ * `claude auth status --json` or `codex login status`, run right after the
+ * version probe, and how its answer maps to an `AuthStatus`. The probe must be
+ * cheap and offline-safe — it reads the CLI's credential store, it never
+ * refreshes a token or bills a request. `interpret` answers "Unknown" for
+ * output it does not recognise (an older CLI without the subcommand).
+ */
+export interface CliAuthProbe {
+  /** Arguments after the binary. */
+  readonly args: ReadonlyArray<string>
+  readonly interpret: (result: ProcessResult) => AuthStatus
+}
+
 export interface CliVersionProbe {
   readonly executor: ProcessExecutorShape
   readonly binary: string
   readonly versionArgs?: ReadonlyArray<string>
   readonly cwd?: string
+  /**
+   * The CLI's own login check, when it offers a cheap one. Without it the
+   * health check reports `authStatus: "Unknown"`: a version answer proves the
+   * binary is installed, not that its session is alive.
+   */
+  readonly authProbe?: CliAuthProbe
 }
 
-const cliProbeHealthy = HealthStatus.make({ availability: "Healthy", authStatus: "Valid" })
 const cliProbeUnhealthy = HealthStatus.make({ availability: "Unhealthy", authStatus: "Unknown" })
 
+/**
+ * Availability from `<binary> --version`, authentication from the CLI's own
+ * login check. A version probe alone never yields "Valid": on 2026-10-21
+ * doctor called a `claude` healthy whose OAuth session had expired, and the
+ * flow died five seconds later on the first turn.
+ */
 export const cliVersionProbeHealthCheck = (
   probe: CliVersionProbe
-): Effect.Effect<HealthStatus, LlmError> =>
-  probe.executor
-    .run([probe.binary, ...(probe.versionArgs ?? ["--version"])], probe.cwd ?? ".", {})
-    .pipe(
-      Effect.as(cliProbeHealthy),
-      Effect.catch(() => Effect.succeed(cliProbeUnhealthy))
-    )
+): Effect.Effect<HealthStatus, LlmError> => {
+  const cwd = probe.cwd ?? "."
+  const authStatus: Effect.Effect<AuthStatus> =
+    probe.authProbe === undefined
+      ? Effect.succeed("Unknown")
+      : probe.executor.run([probe.binary, ...probe.authProbe.args], cwd, {}).pipe(
+          Effect.map(probe.authProbe.interpret),
+          Effect.catch(() => Effect.succeed<AuthStatus>("Unknown"))
+        )
+  return probe.executor.run([probe.binary, ...(probe.versionArgs ?? ["--version"])], cwd, {}).pipe(
+    Effect.andThen(authStatus),
+    Effect.map((auth) => HealthStatus.make({ availability: "Healthy", authStatus: auth })),
+    Effect.catch(() => Effect.succeed(cliProbeUnhealthy))
+  )
+}
 
 export interface CliConnectorPrimitives {
   readonly id: ConnectorId

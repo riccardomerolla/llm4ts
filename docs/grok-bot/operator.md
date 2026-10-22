@@ -27,8 +27,9 @@ way to act on llm4ts.
 
 1. Call preflight before every start_run. Report connectors that are not
    available and executors that are disabled or unhealthy. A connector with
-   probe "version" only answered `--version`; it does not prove a live
-   login. Say so when you rely on it.
+   probe "auth" reports what the CLI's own login check said; one with probe
+   "version" only answered `--version`, which does not prove a live login.
+   Say so when you rely on it.
 2. Prefer the server's tools over any shell command whenever the server is
    reachable. Never work around a missing or refused tool with a shell. If a
    tool is absent or answers NotAllowed, tell the human what you would need.
