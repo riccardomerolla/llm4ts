@@ -6,6 +6,8 @@ import * as Toolkit from "effect/ai/Toolkit"
 import { approveMarkdown } from "@llm4ts/flow/Approval"
 import { PersistenceError } from "@llm4ts/flow/FlowError"
 import {
+  InvalidKnob,
+  NotAllowed,
   OperatorRun,
   ReadFailed,
   RunInProgress,
@@ -31,6 +33,7 @@ import { resolveRepo, type OperatorDeps } from "./OperatorTools.ts"
 import {
   epicDirOf,
   epicOfRun,
+  readEpicRunsStrict,
   readFailed,
   resolveRun,
   tracePending,
@@ -103,7 +106,7 @@ export const waitHandlers = (
             const status = runStatusOf(fold, { ...run, state }, yield* deps.now)
             return RunWaitResult.make({
               events,
-              seq: fold.seq,
+              seq: Math.max(fold.seq, since),
               ...(status.ended === undefined ? {} : { ended: status.ended }),
               exited,
               summary: status.summary
@@ -119,11 +122,15 @@ export const waitHandlers = (
 export const StartedRun = Schema.Struct({
   runId: Schema.String,
   tracePath: Schema.optionalKey(Schema.String),
-  pid: Schema.Int
+  pid: Schema.optionalKey(Schema.Int)
 })
 
 const startFailures = Schema.Union([
+  NotAllowed,
+  InvalidKnob,
   UnknownRepo,
+  UnknownEpic,
+  UnknownRun,
   UnknownFlow,
   ReadFailed,
   FlowLaunchError,
@@ -148,40 +155,30 @@ const StartRunParams = Schema.Struct({
 
 export const startRunTool = Tool.make("start_run", {
   description:
-    "Start a flow by name in the background with typed knobs; returns the run id at once. A repeated requestId returns the run it already started.",
+    "Start a flow by name in the background with typed knobs; returns the run id at once. Repeating a call is safe only with the same requestId, which returns the run it already started; without one, every call starts a new run.",
   parameters: StartRunParams,
   success: StartedRun,
   failure: startFailures
-})
-  .annotate(Tool.Idempotent, true)
-  .annotate(Tool.Destructive, false)
+}).annotate(Tool.Destructive, false)
 
 export const stopRunTool = Tool.make("stop_run", {
   description:
     "Stop a run this server started: SIGINT, then SIGTERM after a grace period; returns its final record.",
   parameters: Schema.Struct({ runId: Schema.String }),
   success: OperatorRun,
-  failure: Schema.Union([UnknownRun])
+  failure: Schema.Union([NotAllowed, UnknownRun])
 }).annotate(Tool.Destructive, true)
 
 export const retroStartTool = Tool.make("retro_start", {
   description:
-    "Start epic-retro for an epic, optionally for one of its runs; the retro report then waits for approve.",
+    "Start epic-retro for an epic, optionally for one of its recorded runs; the retro report then waits for approve.",
   parameters: Schema.Struct({
     repo: repoParam,
     epic: Schema.String,
     run: Schema.optional(Schema.String)
   }),
   success: StartedRun,
-  failure: Schema.Union([
-    UnknownRepo,
-    UnknownEpic,
-    UnknownFlow,
-    ReadFailed,
-    FlowLaunchError,
-    RunInProgress,
-    PersistenceError
-  ])
+  failure: startFailures
 }).annotate(Tool.Destructive, false)
 
 export const approveTool = Tool.make("approve", {
@@ -194,7 +191,14 @@ export const approveTool = Tool.make("approve", {
     id: Schema.String
   }),
   success: Schema.Struct({ path: Schema.String, approved: Schema.Boolean }),
-  failure: Schema.Union([UnknownRepo, UnknownEpic, UnknownRun, ReadFailed, PersistenceError])
+  failure: Schema.Union([
+    NotAllowed,
+    UnknownRepo,
+    UnknownEpic,
+    UnknownRun,
+    ReadFailed,
+    PersistenceError
+  ])
 }).annotate(Tool.Destructive, false)
 
 export const actToolkit = Toolkit.make(startRunTool, stopRunTool, retroStartTool, approveTool)
@@ -212,14 +216,63 @@ const knobsOf = (params: typeof StartRunParams.Type): OperatorKnobs => ({
   ...(params.requestId === undefined ? {} : { requestId: params.requestId })
 })
 
+const namePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u
+const packPattern = /^[\w.-]+(\/[\w.-]+)?$/u
+const branchPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
+
+const invalid = (knob: string, message: string): Effect.Effect<never, InvalidKnob> =>
+  Effect.fail(InvalidKnob.make({ knob, message }))
+
+/**
+ * Every client value that reaches the flow's argv or environment, checked
+ * before the supervisor sees it: names stay names, never paths or flags, and
+ * no flag may point the flow at another directory.
+ */
+export const validateKnobs = (knobs: OperatorKnobs): Effect.Effect<OperatorKnobs, InvalidKnob> => {
+  if (
+    knobs.pack !== undefined &&
+    (!packPattern.test(knobs.pack) ||
+      knobs.pack.split("/").some((segment) => segment === "." || segment === ".."))
+  ) {
+    return invalid("pack", "pack must be a kit or kit/pack name, not a path")
+  }
+  if (knobs.epic !== undefined && !namePattern.test(knobs.epic)) {
+    return invalid("epic", "epic must be an epic id")
+  }
+  if (knobs.coder !== undefined && !namePattern.test(knobs.coder)) {
+    return invalid("coder", "coder must be an executor or connector id")
+  }
+  if (knobs.executors?.some((id) => !namePattern.test(id)) === true) {
+    return invalid("executors", "every executor must be an executor id")
+  }
+  if (knobs.land !== undefined && !branchPattern.test(knobs.land)) {
+    return invalid("land", "land must be a branch name")
+  }
+  if (knobs.task?.startsWith("-") === true) {
+    return invalid("task", "task must not start with '-'")
+  }
+  if (knobs.flags?.some((flag) => flag === "--repo" || flag.startsWith("--repo=")) === true) {
+    return invalid("flags", "flags must not set --repo")
+  }
+  return Effect.succeed(knobs)
+}
+
 /** A run or retro id names one file, never a path. */
 const isPlainId = (id: string): boolean => /^[\w.-]+$/u.test(id) && id !== "." && id !== ".."
 
 export const actHandlers = (
   deps: OperatorDeps
 ): Toolkit.HandlersFrom<Toolkit.Tools<typeof actToolkit>> => {
-  const startFlow = (repo: Repo, name: string, knobs: OperatorKnobs) =>
+  const requireRun = deps.config.allowRun
+    ? Effect.void
+    : Effect.fail(NotAllowed.make({ message: "this server was not started with --allow-run" }))
+  const requireApprove = deps.config.allowApprove
+    ? Effect.void
+    : Effect.fail(NotAllowed.make({ message: "this server was not started with --allow-approve" }))
+
+  const startFlow = (repo: Repo, name: string, requested: OperatorKnobs) =>
     Effect.gen(function* () {
+      const knobs = yield* validateKnobs(requested)
       const flows = yield* deps.flows(repo.path).pipe(Effect.mapError(readFailed))
       const flow = flows.find((candidate) => candidate.name === name)
       if (flow === undefined) {
@@ -236,23 +289,33 @@ export const actHandlers = (
       return {
         runId: run.runId,
         ...(run.tracePath === undefined ? {} : { tracePath: run.tracePath }),
-        pid: run.pid ?? 0
+        ...(run.pid === undefined ? {} : { pid: run.pid })
       }
     })
 
   return actToolkit.of({
     start_run: (params) =>
       Effect.gen(function* () {
+        yield* requireRun
         const repo = yield* resolveRepo(deps.config, params.repo)
         return yield* startFlow(repo, params.flow, knobsOf(params))
       }),
 
-    stop_run: ({ runId }) => deps.supervisor.stop(runId),
+    stop_run: ({ runId }) => Effect.andThen(requireRun, deps.supervisor.stop(runId)),
 
     retro_start: ({ repo: repoId, epic, run }) =>
       Effect.gen(function* () {
+        yield* requireRun
         const repo = yield* resolveRepo(deps.config, repoId)
-        yield* epicDirOf(deps, repo, epic)
+        const dir = yield* epicDirOf(deps, repo, epic)
+        if (run !== undefined) {
+          const recorded = yield* readEpicRunsStrict(deps.files, dir)
+          if (!recorded.some((entry) => entry.runId === run)) {
+            return yield* UnknownRun.make({
+              message: `epic '${epic}' has no recorded run '${run}'`
+            })
+          }
+        }
         return yield* startFlow(repo, "epic-retro", {
           flags: ["--epic", epic, ...(run === undefined ? [] : ["--run", run])]
         })
@@ -260,6 +323,7 @@ export const actHandlers = (
 
     approve: ({ repo: repoId, epic, id }) =>
       Effect.gen(function* () {
+        yield* requireApprove
         const repo = yield* resolveRepo(deps.config, repoId)
         const dir = yield* epicDirOf(deps, repo, epic)
         const unknown = UnknownRun.make({ message: `no retro '${id}' for epic '${epic}'` })

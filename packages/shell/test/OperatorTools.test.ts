@@ -136,6 +136,7 @@ interface SeedOptions {
   readonly traces?: ReadonlyArray<string>
   readonly flows?: ReadonlyArray<DiscoveredFlow>
   readonly environment?: Readonly<Record<string, string | undefined>>
+  readonly config?: OperatorConfig
 }
 
 const seeded = (extra: Readonly<Record<string, string>> = {}, options: SeedOptions = {}) =>
@@ -183,7 +184,7 @@ const seeded = (extra: Readonly<Record<string, string>> = {}, options: SeedOptio
     }
     const probed: Array<string> = []
     const deps: OperatorDeps = {
-      config,
+      config: options.config ?? config,
       files,
       listFiles: () => [],
       listTraces: (directory) =>
@@ -466,6 +467,9 @@ const controllable = () => {
   return { shape, started, exit }
 }
 
+/** A server started with --allow-run and --allow-approve. */
+const allowed: OperatorConfig = { ...config, allowRun: true, allowApprove: true }
+
 const flowsFound: ReadonlyArray<DiscoveredFlow> = [
   { name: "epic-stories", path: "/flows/epic-stories.js", tier: "builtin", shadows: [] },
   { name: "epic-retro", path: "/flows/epic-retro.js", tier: "builtin", shadows: [] }
@@ -532,7 +536,10 @@ describe("OperatorActTools", () => {
     Effect.gen(function* () {
       const fake = controllable()
       const environment = { PATH: "/usr/bin" }
-      const { deps } = yield* seeded({}, { supervisor: fake.shape, flows: flowsFound, environment })
+      const { deps } = yield* seeded(
+        {},
+        { supervisor: fake.shape, flows: flowsFound, environment, config: allowed }
+      )
       const handlers = actHandlers(deps)
       const started = yield* handlers.start_run(
         { flow: "epic-stories", epic: "conto", judgeRounds: 2, executors: ["lm"], land: "main" },
@@ -560,7 +567,10 @@ describe("OperatorActTools", () => {
   it.effect("approve ticks the retro report's marker and refuses an unknown retro", () =>
     Effect.gen(function* () {
       const report = `${stateDir}/retro/op-1.md`
-      const { deps, memory } = yield* seeded({ [report]: withDraftApproval("# Retro of op-1") })
+      const { deps, memory } = yield* seeded(
+        { [report]: withDraftApproval("# Retro of op-1") },
+        { config: allowed }
+      )
       const handlers = actHandlers(deps)
       const approved = yield* handlers.approve(
         { kind: "retro", epic: "conto", id: "op-1" },
@@ -583,8 +593,16 @@ describe("OperatorActTools", () => {
   it.effect("retro_start starts epic-retro with --epic and --run", () =>
     Effect.gen(function* () {
       const fake = controllable()
-      const { deps } = yield* seeded({}, { supervisor: fake.shape, flows: flowsFound })
+      const { deps } = yield* seeded(
+        {},
+        { supervisor: fake.shape, flows: flowsFound, config: allowed }
+      )
       const handlers = actHandlers(deps)
+      const injected = yield* Effect.flip(
+        handlers.retro_start({ epic: "conto", run: "--land=main" }, context)
+      )
+      assert.strictEqual(injected._tag, "UnknownRun")
+      assert.strictEqual(fake.started.length, 0)
       const started = yield* handlers.retro_start({ epic: "conto", run: "op-1" }, context)
       assert.strictEqual(started.runId, "op-2")
       assert.deepStrictEqual(
@@ -605,9 +623,87 @@ describe("OperatorActTools", () => {
   it.effect("stop_run returns the supervisor's record", () =>
     Effect.gen(function* () {
       const fake = controllable()
-      const { deps } = yield* seeded({}, { supervisor: fake.shape })
+      const { deps } = yield* seeded({}, { supervisor: fake.shape, config: allowed })
       const stopped = yield* actHandlers(deps).stop_run({ runId: "op-1" }, context)
       assert.strictEqual(stopped.runId, "op-1")
+    })
+  )
+
+  it.effect("start_run passes a requestId through to the supervisor's knobs", () =>
+    Effect.gen(function* () {
+      const fake = controllable()
+      const { deps } = yield* seeded(
+        {},
+        { supervisor: fake.shape, flows: flowsFound, config: allowed }
+      )
+      yield* actHandlers(deps).start_run({ flow: "epic-stories", requestId: "req-7" }, context)
+      assert.deepStrictEqual(
+        fake.started.map((request) => request.knobs),
+        [{ requestId: "req-7" }]
+      )
+    })
+  )
+
+  it.effect("start_run refuses a pack path and a --repo flag before the supervisor", () =>
+    Effect.gen(function* () {
+      const fake = controllable()
+      const { deps } = yield* seeded(
+        {},
+        { supervisor: fake.shape, flows: flowsFound, config: allowed }
+      )
+      const handlers = actHandlers(deps)
+      const pack = yield* Effect.flip(
+        handlers.start_run({ flow: "epic-stories", pack: "../x" }, context)
+      )
+      assert.strictEqual(pack._tag, "InvalidKnob")
+      assert.isTrue(pack._tag === "InvalidKnob" && pack.knob === "pack")
+      const repo = yield* Effect.flip(
+        handlers.start_run({ flow: "epic-stories", flags: ["--repo", "/etc"] }, context)
+      )
+      assert.strictEqual(repo._tag, "InvalidKnob")
+      const repoEq = yield* Effect.flip(
+        handlers.start_run({ flow: "epic-stories", flags: ["--repo=/etc"] }, context)
+      )
+      assert.strictEqual(repoEq._tag, "InvalidKnob")
+      assert.deepStrictEqual(fake.started, [])
+    })
+  )
+
+  it.effect("run tools fail NotAllowed without --allow-run", () =>
+    Effect.gen(function* () {
+      const fake = controllable()
+      const { deps } = yield* seeded(
+        {},
+        {
+          supervisor: fake.shape,
+          flows: flowsFound,
+          config: { ...config, allowRun: false, allowApprove: true }
+        }
+      )
+      const handlers = actHandlers(deps)
+      const start = yield* Effect.flip(handlers.start_run({ flow: "epic-stories" }, context))
+      assert.strictEqual(start._tag, "NotAllowed")
+      const stop = yield* Effect.flip(handlers.stop_run({ runId: "op-1" }, context))
+      assert.strictEqual(stop._tag, "NotAllowed")
+      const retro = yield* Effect.flip(handlers.retro_start({ epic: "conto" }, context))
+      assert.strictEqual(retro._tag, "NotAllowed")
+      assert.deepStrictEqual(fake.started, [])
+    })
+  )
+
+  it.effect("approve fails NotAllowed without --allow-approve", () =>
+    Effect.gen(function* () {
+      const report = `${stateDir}/retro/op-1.md`
+      const draft = withDraftApproval("# Retro of op-1")
+      const { deps, memory } = yield* seeded(
+        { [report]: draft },
+        { config: { ...config, allowRun: true, allowApprove: false } }
+      )
+      const refused = yield* Effect.flip(
+        actHandlers(deps).approve({ kind: "retro", epic: "conto", id: "op-1" }, context)
+      )
+      assert.strictEqual(refused._tag, "NotAllowed")
+      assert.strictEqual(yield* memory.store.read(report), draft)
     })
   )
 })

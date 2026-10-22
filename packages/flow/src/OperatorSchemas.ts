@@ -193,6 +193,12 @@ export class NotAllowed extends Schema.TaggedError<NotAllowed>()("NotAllowed", {
   message: Schema.String
 }) {}
 
+/** A start knob that would reach the flow's argv or environment in an unsafe shape. */
+export class InvalidKnob extends Schema.TaggedError<InvalidKnob>()("InvalidKnob", {
+  knob: Schema.String,
+  message: Schema.String
+}) {}
+
 export class RunInProgress extends Schema.TaggedError<RunInProgress>()("RunInProgress", {
   message: Schema.String,
   runId: Schema.String
