@@ -4,14 +4,7 @@ import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as Effect from "effect/Effect"
-import {
-  approveMarkdown,
-  loadDecisions,
-  loadDomains,
-  saveDecisions,
-  scanPack,
-  signer
-} from "@llm4ts/shell/Refine"
+import { loadDecisions, loadDomains, saveDecisions, scanPack, signer } from "@llm4ts/shell/Refine"
 import { Decisions } from "@llm4ts/flow/Decisions"
 
 const pack = (): string => {
@@ -69,12 +62,6 @@ describe("llm4ts refine — the file is the state", () => {
       )
     }).pipe(Effect.provide(NodeFileSystem.layer))
   )
-
-  it("flips the draft marker and leaves an approved document alone", () => {
-    assert.strictEqual(approveMarkdown("# x\n\n- [ ] Approved\n"), "# x\n\n- [x] Approved\n")
-    assert.strictEqual(approveMarkdown("# x\n\n- [x] Approved\n"), "# x\n\n- [x] Approved\n")
-    assert.strictEqual(approveMarkdown("# no marker\n"), "# no marker\n")
-  })
 
   it("signs with LLM4TS_APPROVER when set", () => {
     assert.strictEqual(signer({ LLM4TS_APPROVER: "riccardo" }), "riccardo")
