@@ -1,7 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import { TestClock } from "effect/testing"
 import { HealthStatus } from "@llm4ts/core/Models"
+import { withDraftApproval } from "@llm4ts/flow/Approval"
 import { Board, BoardItem } from "@llm4ts/flow/BoardSync"
 import { EpicRun, appendEpicRun } from "@llm4ts/flow/EpicRuns"
 import {
@@ -14,13 +17,16 @@ import {
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { OperatorRun } from "@llm4ts/flow/OperatorSchemas"
 import { makeMemoryPlainFileStore, saveVersioned } from "@llm4ts/flow/Persistence"
+import { retroApprovalOf } from "@llm4ts/flow/Retro"
 import { ExecutorSpec, RosterDocument } from "@llm4ts/flow/Roster"
 import { StoryState, StoryStateVersion } from "@llm4ts/flow/Stories"
 import { Story, StoryPlan, makeStoryPlanStore, storyHash } from "@llm4ts/flow/StoryPlan"
 import type { DoctorReport } from "@llm4ts/runner/Doctor"
+import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
+import { actHandlers, waitHandlers } from "@llm4ts/shell/OperatorActTools"
 import type { OperatorConfig } from "@llm4ts/shell/OperatorConfig"
 import { readHandlers, resolveRepo, type OperatorDeps } from "@llm4ts/shell/OperatorTools"
-import type { RunSupervisorShape } from "@llm4ts/shell/RunSupervisor"
+import type { RunSupervisorShape, StartRun } from "@llm4ts/shell/RunSupervisor"
 
 const t0 = 1_790_000_000_000
 const repoPath = "/repo"
@@ -128,6 +134,8 @@ interface SeedOptions {
   /** The epic's `runs.jsonl` verbatim, instead of one record naming `op-1`. */
   readonly epicRuns?: string
   readonly traces?: ReadonlyArray<string>
+  readonly flows?: ReadonlyArray<DiscoveredFlow>
+  readonly environment?: Readonly<Record<string, string | undefined>>
 }
 
 const seeded = (extra: Readonly<Record<string, string>> = {}, options: SeedOptions = {}) =>
@@ -204,9 +212,9 @@ const seeded = (extra: Readonly<Record<string, string>> = {}, options: SeedOptio
           probed.push(url)
           return url === healthUrl
         }),
-      flows: () => Effect.succeed([]),
+      flows: () => Effect.succeed(options.flows ?? []),
       now: Effect.succeed(t0 + 60_000),
-      environment: {}
+      environment: options.environment ?? {}
     }
     return { deps, probed, memory }
   })
@@ -423,6 +431,183 @@ describe("OperatorTools", () => {
         found.map((run) => `${run.runId}:${run.state}`),
         ["op-1:running"]
       )
+    })
+  )
+})
+
+/** A supervisor whose one run a test can flip to another state, recording every start. */
+const controllable = () => {
+  let current = run
+  const started: Array<StartRun> = []
+  const shape: RunSupervisorShape = {
+    start: (request) =>
+      Effect.sync(() => {
+        started.push(request)
+        return new OperatorRun({
+          runId: "op-2",
+          repo: request.repo.id,
+          flow: request.flow.name,
+          args: [],
+          knobs: request.knobs,
+          startedAt: t0,
+          pid: 777,
+          tracePath: "/repo/.llm4ts/trace-2.jsonl",
+          logDir: "/state/llm4ts/mcp/app/runs/op-2",
+          state: "running"
+        })
+      }),
+    stop: () => Effect.sync(() => current),
+    get: (runId) => Effect.sync(() => (runId === current.runId ? current : undefined)),
+    list: () => Effect.sync(() => [current])
+  }
+  const exit = () => {
+    current = new OperatorRun({ ...current, state: "exited", endedAt: t0 + 90_000 })
+  }
+  return { shape, started, exit }
+}
+
+const flowsFound: ReadonlyArray<DiscoveredFlow> = [
+  { name: "epic-stories", path: "/flows/epic-stories.js", tier: "builtin", shadows: [] },
+  { name: "epic-retro", path: "/flows/epic-retro.js", tier: "builtin", shadows: [] }
+]
+
+describe("OperatorActTools", () => {
+  it.effect("run_wait returns on the first meaningful event", () =>
+    Effect.gen(function* () {
+      const { deps, memory } = yield* seeded({}, { withoutTrace: true })
+      const fiber = yield* Effect.forkChild(
+        waitHandlers(deps).run_wait({ runId: "op-1", sinceSeq: 0 }, context)
+      )
+      yield* TestClock.adjust("500 millis")
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* memory.store.append(
+        tracePath,
+        encode([event(1, StoryStatusChanged.make({ id: "a", status: "active" }))])
+      )
+      yield* TestClock.adjust("500 millis")
+      const result = yield* Fiber.join(fiber)
+      assert.strictEqual(result.events.length, 1)
+      assert.strictEqual(result.events[0]?.kind, "StoryStatusChanged")
+      assert.strictEqual(result.seq, 1)
+      assert.isFalse(result.exited)
+      assert.isTrue(result.summary.length > 0)
+    })
+  )
+
+  it.effect("run_wait returns exited when the supervisor's run is no longer running", () =>
+    Effect.gen(function* () {
+      const fake = controllable()
+      const { deps } = yield* seeded({}, { supervisor: fake.shape })
+      const fiber = yield* Effect.forkChild(
+        waitHandlers(deps).run_wait({ runId: "op-1", sinceSeq: 5 }, context)
+      )
+      yield* TestClock.adjust("500 millis")
+      assert.isUndefined(fiber.pollUnsafe())
+      fake.exit()
+      yield* TestClock.adjust("500 millis")
+      const result = yield* Fiber.join(fiber)
+      assert.isTrue(result.exited)
+      assert.deepStrictEqual(result.events, [])
+      assert.strictEqual(result.seq, 5)
+    })
+  )
+
+  it.effect("run_wait times out empty", () =>
+    Effect.gen(function* () {
+      const { deps } = yield* seeded()
+      const fiber = yield* Effect.forkChild(
+        waitHandlers(deps).run_wait({ runId: "op-1", sinceSeq: 5, timeoutSeconds: 5 }, context)
+      )
+      yield* TestClock.adjust("4500 millis")
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* TestClock.adjust("500 millis")
+      const result = yield* Fiber.join(fiber)
+      assert.deepStrictEqual(result.events, [])
+      assert.strictEqual(result.seq, 5)
+      assert.isFalse(result.exited)
+    })
+  )
+
+  it.effect("start_run resolves the flow and passes typed knobs to the supervisor", () =>
+    Effect.gen(function* () {
+      const fake = controllable()
+      const environment = { PATH: "/usr/bin" }
+      const { deps } = yield* seeded({}, { supervisor: fake.shape, flows: flowsFound, environment })
+      const handlers = actHandlers(deps)
+      const started = yield* handlers.start_run(
+        { flow: "epic-stories", epic: "conto", judgeRounds: 2, executors: ["lm"], land: "main" },
+        context
+      )
+      assert.deepStrictEqual(started, {
+        runId: "op-2",
+        tracePath: "/repo/.llm4ts/trace-2.jsonl",
+        pid: 777
+      })
+      assert.deepStrictEqual(fake.started, [
+        {
+          repo: { id: "app", path: repoPath },
+          flow: { name: "epic-stories", path: "/flows/epic-stories.js" },
+          knobs: { epic: "conto", judgeRounds: 2, executors: ["lm"], land: "main" },
+          baseEnvironment: environment
+        }
+      ])
+      const unknown = yield* Effect.flip(handlers.start_run({ flow: "nope" }, context))
+      assert.strictEqual(unknown._tag, "UnknownFlow")
+      assert.strictEqual(fake.started.length, 1)
+    })
+  )
+
+  it.effect("approve ticks the retro report's marker and refuses an unknown retro", () =>
+    Effect.gen(function* () {
+      const report = `${stateDir}/retro/op-1.md`
+      const { deps, memory } = yield* seeded({ [report]: withDraftApproval("# Retro of op-1") })
+      const handlers = actHandlers(deps)
+      const approved = yield* handlers.approve(
+        { kind: "retro", epic: "conto", id: "op-1" },
+        context
+      )
+      assert.deepStrictEqual(approved, { path: report, approved: true })
+      const written = yield* memory.store.read(report)
+      assert.isTrue(retroApprovalOf(written ?? "").approved)
+      const unknown = yield* Effect.flip(
+        handlers.approve({ kind: "retro", epic: "conto", id: "op-9" }, context)
+      )
+      assert.strictEqual(unknown._tag, "UnknownRun")
+      const noEpic = yield* Effect.flip(
+        handlers.approve({ kind: "retro", epic: "../x", id: "op-1" }, context)
+      )
+      assert.strictEqual(noEpic._tag, "UnknownEpic")
+    })
+  )
+
+  it.effect("retro_start starts epic-retro with --epic and --run", () =>
+    Effect.gen(function* () {
+      const fake = controllable()
+      const { deps } = yield* seeded({}, { supervisor: fake.shape, flows: flowsFound })
+      const handlers = actHandlers(deps)
+      const started = yield* handlers.retro_start({ epic: "conto", run: "op-1" }, context)
+      assert.strictEqual(started.runId, "op-2")
+      assert.deepStrictEqual(
+        fake.started.map((request) => [request.flow, request.knobs]),
+        [
+          [
+            { name: "epic-retro", path: "/flows/epic-retro.js" },
+            { flags: ["--epic", "conto", "--run", "op-1"] }
+          ]
+        ]
+      )
+      const noEpic = yield* Effect.flip(handlers.retro_start({ epic: "nope" }, context))
+      assert.strictEqual(noEpic._tag, "UnknownEpic")
+      assert.strictEqual(fake.started.length, 1)
+    })
+  )
+
+  it.effect("stop_run returns the supervisor's record", () =>
+    Effect.gen(function* () {
+      const fake = controllable()
+      const { deps } = yield* seeded({}, { supervisor: fake.shape })
+      const stopped = yield* actHandlers(deps).stop_run({ runId: "op-1" }, context)
+      assert.strictEqual(stopped.runId, "op-1")
     })
   )
 })

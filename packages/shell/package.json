@@ -24,6 +24,7 @@
     "./FlowLaunch": "./dist/FlowLaunch.js",
     "./FlowProcess": "./dist/FlowProcess.js",
     "./Menu": "./dist/Menu.js",
+    "./OperatorActTools": "./dist/OperatorActTools.js",
     "./OperatorConfig": "./dist/OperatorConfig.js",
     "./OperatorRuns": "./dist/OperatorRuns.js",
     "./OperatorTools": "./dist/OperatorTools.js",

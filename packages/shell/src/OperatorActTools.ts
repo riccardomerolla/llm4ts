@@ -1,0 +1,275 @@
+import * as Clock from "effect/Clock"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
+import { approveMarkdown } from "@llm4ts/flow/Approval"
+import { PersistenceError } from "@llm4ts/flow/FlowError"
+import {
+  OperatorRun,
+  ReadFailed,
+  RunInProgress,
+  RunWaitResult,
+  UnknownEpic,
+  UnknownFlow,
+  UnknownRepo,
+  UnknownRun,
+  type OperatorKnobs,
+  type OperatorRunState
+} from "@llm4ts/flow/OperatorSchemas"
+import { retroApprovalOf, retroPaths } from "@llm4ts/flow/Retro"
+import { emptyTree } from "@llm4ts/runner/AgentTree"
+import {
+  TraceUnreadable,
+  foldTrace,
+  meaningfulEventsAfter,
+  runStatusOf,
+  type TraceFold
+} from "@llm4ts/runner/RunReaders"
+import { FlowLaunchError } from "./FlowProcess.ts"
+import { resolveRepo, type OperatorDeps } from "./OperatorTools.ts"
+import {
+  epicDirOf,
+  epicOfRun,
+  readFailed,
+  resolveRun,
+  tracePending,
+  type Repo
+} from "./OperatorRuns.ts"
+
+/**
+ * The operator's `run_wait` and act tools (`llm4ts mcp`, ADR 0041): waiting on
+ * a run without polling from the client, and starting, stopping, retro-ing and
+ * approving through the run supervisor. `run_wait` only reads, so it has its
+ * own toolkit the server registers beside the read tools; the act toolkit is
+ * registered only when the configuration allows runs or approvals.
+ */
+
+const repoParam = Schema.optional(Schema.String)
+
+// ---- run_wait -----------------------------------------------------------------------------
+
+export const runWaitTool = Tool.make("run_wait", {
+  description:
+    "Wait for a run's next meaningful events after sinceSeq: returns as soon as one appears or the run is no longer running, else after timeoutSeconds (default 120, at most 300) with no events.",
+  parameters: Schema.Struct({
+    runId: Schema.String,
+    sinceSeq: Schema.optional(Schema.Int),
+    timeoutSeconds: Schema.optional(Schema.Int)
+  }),
+  success: RunWaitResult,
+  failure: Schema.Union([UnknownRun, TraceUnreadable, ReadFailed])
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+
+export const waitToolkit = Toolkit.make(runWaitTool)
+
+const pollInterval = "500 millis"
+const defaultWaitSeconds = 120
+const maxWaitSeconds = 300
+
+const isActive = (state: OperatorRunState): boolean => state === "starting" || state === "running"
+
+const emptyFold = (): TraceFold => ({ lines: [], state: emptyTree(), seq: 0 })
+
+export const waitHandlers = (
+  deps: OperatorDeps
+): Toolkit.HandlersFrom<Toolkit.Tools<typeof waitToolkit>> =>
+  waitToolkit.of({
+    run_wait: ({ runId, sinceSeq, timeoutSeconds }) =>
+      Effect.gen(function* () {
+        const since = sinceSeq ?? 0
+        const timeoutMs =
+          Math.min(Math.max(0, timeoutSeconds ?? defaultWaitSeconds), maxWaitSeconds) * 1_000
+        const run = yield* resolveRun(deps, runId)
+        const epic = yield* epicOfRun(deps, run)
+        const startedAt = yield* Clock.currentTimeMillis
+        for (;;) {
+          const fold = (yield* tracePending(deps.files, run))
+            ? emptyFold()
+            : yield* foldTrace(deps.files, run.tracePath, epic?.dir)
+          // A supervised run's state is the supervisor's; a run found on disk ends with its trace.
+          const state: OperatorRunState =
+            run.supervised === undefined
+              ? fold.lines.some((line) => line.kind === "RunEnded")
+                ? "exited"
+                : run.state
+              : ((yield* deps.supervisor.get(runId))?.state ?? run.state)
+          const events = meaningfulEventsAfter(fold.lines, since)
+          const exited = !isActive(state)
+          const elapsed = (yield* Clock.currentTimeMillis) - startedAt
+          if (events.length > 0 || exited || elapsed >= timeoutMs) {
+            const status = runStatusOf(fold, { ...run, state }, yield* deps.now)
+            return RunWaitResult.make({
+              events,
+              seq: fold.seq,
+              ...(status.ended === undefined ? {} : { ended: status.ended }),
+              exited,
+              summary: status.summary
+            })
+          }
+          yield* Effect.sleep(pollInterval)
+        }
+      })
+  })
+
+// ---- Act tools ----------------------------------------------------------------------------
+
+export const StartedRun = Schema.Struct({
+  runId: Schema.String,
+  tracePath: Schema.optionalKey(Schema.String),
+  pid: Schema.Int
+})
+
+const startFailures = Schema.Union([
+  UnknownRepo,
+  UnknownFlow,
+  ReadFailed,
+  FlowLaunchError,
+  RunInProgress,
+  PersistenceError
+])
+
+const StartRunParams = Schema.Struct({
+  repo: repoParam,
+  flow: Schema.String,
+  task: Schema.optional(Schema.String),
+  epic: Schema.optional(Schema.String),
+  pack: Schema.optional(Schema.String),
+  executors: Schema.optional(Schema.Array(Schema.String)),
+  coder: Schema.optional(Schema.String),
+  judgeRounds: Schema.optional(Schema.Int),
+  mergeRevisions: Schema.optional(Schema.Int),
+  land: Schema.optional(Schema.String),
+  flags: Schema.optional(Schema.Array(Schema.String)),
+  requestId: Schema.optional(Schema.String)
+})
+
+export const startRunTool = Tool.make("start_run", {
+  description:
+    "Start a flow by name in the background with typed knobs; returns the run id at once. A repeated requestId returns the run it already started.",
+  parameters: StartRunParams,
+  success: StartedRun,
+  failure: startFailures
+})
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.Destructive, false)
+
+export const stopRunTool = Tool.make("stop_run", {
+  description:
+    "Stop a run this server started: SIGINT, then SIGTERM after a grace period; returns its final record.",
+  parameters: Schema.Struct({ runId: Schema.String }),
+  success: OperatorRun,
+  failure: Schema.Union([UnknownRun])
+}).annotate(Tool.Destructive, true)
+
+export const retroStartTool = Tool.make("retro_start", {
+  description:
+    "Start epic-retro for an epic, optionally for one of its runs; the retro report then waits for approve.",
+  parameters: Schema.Struct({
+    repo: repoParam,
+    epic: Schema.String,
+    run: Schema.optional(Schema.String)
+  }),
+  success: StartedRun,
+  failure: Schema.Union([
+    UnknownRepo,
+    UnknownEpic,
+    UnknownFlow,
+    ReadFailed,
+    FlowLaunchError,
+    RunInProgress,
+    PersistenceError
+  ])
+}).annotate(Tool.Destructive, false)
+
+export const approveTool = Tool.make("approve", {
+  description:
+    "Approve a retro report: ticks its approval marker so the next epic run applies its fixes.",
+  parameters: Schema.Struct({
+    repo: repoParam,
+    kind: Schema.Literals(["retro"]),
+    epic: Schema.String,
+    id: Schema.String
+  }),
+  success: Schema.Struct({ path: Schema.String, approved: Schema.Boolean }),
+  failure: Schema.Union([UnknownRepo, UnknownEpic, UnknownRun, ReadFailed, PersistenceError])
+}).annotate(Tool.Destructive, false)
+
+export const actToolkit = Toolkit.make(startRunTool, stopRunTool, retroStartTool, approveTool)
+
+const knobsOf = (params: typeof StartRunParams.Type): OperatorKnobs => ({
+  ...(params.task === undefined ? {} : { task: params.task }),
+  ...(params.epic === undefined ? {} : { epic: params.epic }),
+  ...(params.pack === undefined ? {} : { pack: params.pack }),
+  ...(params.executors === undefined ? {} : { executors: params.executors }),
+  ...(params.coder === undefined ? {} : { coder: params.coder }),
+  ...(params.judgeRounds === undefined ? {} : { judgeRounds: params.judgeRounds }),
+  ...(params.mergeRevisions === undefined ? {} : { mergeRevisions: params.mergeRevisions }),
+  ...(params.land === undefined ? {} : { land: params.land }),
+  ...(params.flags === undefined ? {} : { flags: params.flags }),
+  ...(params.requestId === undefined ? {} : { requestId: params.requestId })
+})
+
+/** A run or retro id names one file, never a path. */
+const isPlainId = (id: string): boolean => /^[\w.-]+$/u.test(id) && id !== "." && id !== ".."
+
+export const actHandlers = (
+  deps: OperatorDeps
+): Toolkit.HandlersFrom<Toolkit.Tools<typeof actToolkit>> => {
+  const startFlow = (repo: Repo, name: string, knobs: OperatorKnobs) =>
+    Effect.gen(function* () {
+      const flows = yield* deps.flows(repo.path).pipe(Effect.mapError(readFailed))
+      const flow = flows.find((candidate) => candidate.name === name)
+      if (flow === undefined) {
+        return yield* UnknownFlow.make({
+          message: `unknown flow '${name}' in ${repo.id}: list_flows names the flows it can start`
+        })
+      }
+      const run = yield* deps.supervisor.start({
+        repo,
+        flow: { name: flow.name, path: flow.path },
+        knobs,
+        baseEnvironment: deps.environment
+      })
+      return {
+        runId: run.runId,
+        ...(run.tracePath === undefined ? {} : { tracePath: run.tracePath }),
+        pid: run.pid ?? 0
+      }
+    })
+
+  return actToolkit.of({
+    start_run: (params) =>
+      Effect.gen(function* () {
+        const repo = yield* resolveRepo(deps.config, params.repo)
+        return yield* startFlow(repo, params.flow, knobsOf(params))
+      }),
+
+    stop_run: ({ runId }) => deps.supervisor.stop(runId),
+
+    retro_start: ({ repo: repoId, epic, run }) =>
+      Effect.gen(function* () {
+        const repo = yield* resolveRepo(deps.config, repoId)
+        yield* epicDirOf(deps, repo, epic)
+        return yield* startFlow(repo, "epic-retro", {
+          flags: ["--epic", epic, ...(run === undefined ? [] : ["--run", run])]
+        })
+      }),
+
+    approve: ({ repo: repoId, epic, id }) =>
+      Effect.gen(function* () {
+        const repo = yield* resolveRepo(deps.config, repoId)
+        const dir = yield* epicDirOf(deps, repo, epic)
+        const unknown = UnknownRun.make({ message: `no retro '${id}' for epic '${epic}'` })
+        if (!isPlainId(id)) return yield* unknown
+        const path = retroPaths(dir, id).report
+        const markdown = yield* deps.files.read(path).pipe(Effect.mapError(readFailed))
+        if (markdown === undefined) return yield* unknown
+        const approved = approveMarkdown(markdown)
+        if (approved !== markdown) yield* deps.files.writeAtomic(path, approved)
+        return { path, approved: retroApprovalOf(approved).approved }
+      })
+  })
+}
