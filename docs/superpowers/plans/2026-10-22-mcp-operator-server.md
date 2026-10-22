@@ -34,34 +34,36 @@
 
 ## File structure
 
-| Package | File | Responsibility |
-| --- | --- | --- |
-| flow | `src/OperatorSchemas.ts` (new) | Tool input/output schemas, `OperatorRun` registry record, `OperatorKnobs`, `latestRuns` |
-| flow | `src/Retro.ts` | Export `renderStoryDigest` over the existing private `storySection` |
-| flow | `src/Approval.ts` | Gains `approveMarkdown` (moved from shell `Refine.ts`) |
-| runner | `src/FlowRunner.ts` | Reads `LLM4TS_RUN_ID` / `LLM4TS_TRACE_PATH`; `runFlowMain` interrupts on SIGINT |
-| runner | `src/RunSummary.ts` (new) | `summarizeTree(state): string` |
-| runner | `src/RunReaders.ts` (new) | Run-level folds: status, meaningful events, run diagnosis, costs for one run |
-| runner | `src/StoryReaders.ts` (new) | Story detail and story diagnosis over `stories/<id>.*` |
-| runner | `src/Doctor.ts` | Split into `collectDoctorReport` + `renderDoctorReport`; `makeDoctorProgram` composes them |
-| shell | `src/FlowProcess.ts` (new) | Spawn service: start / signal / exit handle, Node impl and fake |
-| shell | `src/FlowLaunch.ts` | Terminal wrapper over `FlowProcess` |
-| shell | `src/RunSupervisor.ts` (new) | Registry, start with run id and knobs, stop with grace, lost detection, idempotency, concurrency rule |
-| shell | `src/OperatorConfig.ts` (new) | `mcpOptionsFrom` flags+env → `OperatorConfig`; `mcp.json`; token loading |
-| shell | `src/OperatorTools.ts` (new) | `readToolkit`, `actToolkit`, their handlers over `OperatorDeps` |
-| shell | `src/OperatorServer.ts` (new) | Server layer: stdio or HTTP, bearer middleware, tool registration by allow flags |
-| shell | `src/Cli.ts` | `mcp` command |
-| docs | `docs/adr/0041-mcp-operator-server.md`, `docs/grok-bot/operator.md`, `docs/parity.md`, `CHANGELOG.md`, `skills/using-llm4ts/SKILL.md` | Decisions, template, notes |
+| Package | File                                                                                                                                  | Responsibility                                                                                        |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| flow    | `src/OperatorSchemas.ts` (new)                                                                                                        | Tool input/output schemas, `OperatorRun` registry record, `OperatorKnobs`, `latestRuns`               |
+| flow    | `src/Retro.ts`                                                                                                                        | Export `renderStoryDigest` over the existing private `storySection`                                   |
+| flow    | `src/Approval.ts`                                                                                                                     | Gains `approveMarkdown` (moved from shell `Refine.ts`)                                                |
+| runner  | `src/FlowRunner.ts`                                                                                                                   | Reads `LLM4TS_RUN_ID` / `LLM4TS_TRACE_PATH`; `runFlowMain` interrupts on SIGINT                       |
+| runner  | `src/RunSummary.ts` (new)                                                                                                             | `summarizeTree(state): string`                                                                        |
+| runner  | `src/RunReaders.ts` (new)                                                                                                             | Run-level folds: status, meaningful events, run diagnosis, costs for one run                          |
+| runner  | `src/StoryReaders.ts` (new)                                                                                                           | Story detail and story diagnosis over `stories/<id>.*`                                                |
+| runner  | `src/Doctor.ts`                                                                                                                       | Split into `collectDoctorReport` + `renderDoctorReport`; `makeDoctorProgram` composes them            |
+| shell   | `src/FlowProcess.ts` (new)                                                                                                            | Spawn service: start / signal / exit handle, Node impl and fake                                       |
+| shell   | `src/FlowLaunch.ts`                                                                                                                   | Terminal wrapper over `FlowProcess`                                                                   |
+| shell   | `src/RunSupervisor.ts` (new)                                                                                                          | Registry, start with run id and knobs, stop with grace, lost detection, idempotency, concurrency rule |
+| shell   | `src/OperatorConfig.ts` (new)                                                                                                         | `mcpOptionsFrom` flags+env → `OperatorConfig`; `mcp.json`; token loading                              |
+| shell   | `src/OperatorTools.ts` (new)                                                                                                          | `readToolkit`, `actToolkit`, their handlers over `OperatorDeps`                                       |
+| shell   | `src/OperatorServer.ts` (new)                                                                                                         | Server layer: stdio or HTTP, bearer middleware, tool registration by allow flags                      |
+| shell   | `src/Cli.ts`                                                                                                                          | `mcp` command                                                                                         |
+| docs    | `docs/adr/0041-mcp-operator-server.md`, `docs/grok-bot/operator.md`, `docs/parity.md`, `CHANGELOG.md`, `skills/using-llm4ts/SKILL.md` | Decisions, template, notes                                                                            |
 
 ---
 
 ### Task 1: The flow runner takes its run id and trace path from the environment
 
 **Files:**
+
 - Modify: `packages/runner/src/FlowRunner.ts:332-337` (`makeFlowRunnerContext`), `:923-932` (trace path)
 - Test: `packages/runner/test/FlowRunner.test.ts`
 
 **Interfaces:**
+
 - Produces: `export const runIdentityFromEnvironment = (options: Pick<FlowRunnerOptions, "runId" | "tracePath">, environment: Readonly<Record<string, string | undefined>>): { readonly runId?: string; readonly tracePath?: string }` in `FlowRunner.ts`. Explicit options win over the environment; empty strings count as unset. Variables: `LLM4TS_RUN_ID`, `LLM4TS_TRACE_PATH`.
 
 - [ ] **Step 1: Write the failing tests** in `FlowRunner.test.ts`, a new `describe("runIdentityFromEnvironment")`:
@@ -76,10 +78,12 @@
 ### Task 2: Graceful SIGINT for every flow
 
 **Files:**
+
 - Modify: `packages/runner/src/FlowRunner.ts:1192-1206` (`runFlowMain`)
 - Test: `packages/runner/test/FlowRunner.test.ts`
 
 **Interfaces:**
+
 - Produces: `export interface SignalSource { readonly once: (signal: "SIGINT", handler: () => void) => void; readonly off: (signal: "SIGINT", handler: () => void) => void; readonly exit: (code: number) => void }` and `export const interruptOnSignal = <A, E>(fiber: Fiber.Fiber<A, E>, signals: SignalSource): void` in `FlowRunner.ts`. First SIGINT interrupts the fiber (`Effect.runFork(Fiber.interrupt(fiber))`) and re-arms; the second calls `signals.exit(130)`. `runFlowMain` calls it with `process` and sets `process.exitCode = 130` when the program's exit is an interruption (`Cause.hasInterruptsOnly`).
 
 - [ ] **Step 1: Write the failing tests**, `describe("interruptOnSignal")`:
@@ -93,11 +97,13 @@
 ### Task 3: Operator schemas in flow
 
 **Files:**
+
 - Create: `packages/flow/src/OperatorSchemas.ts`
 - Modify: `packages/flow/package.json` (`exports`: `"./OperatorSchemas": "./dist/OperatorSchemas.js"`)
 - Test: `packages/flow/test/OperatorSchemas.test.ts`
 
 **Interfaces (all exported, `Schema.Class` unless noted):**
+
 - `OperatorRunState = Schema.Literals(["starting", "running", "exited", "interrupted", "lost"])`
 - `OperatorKnobs` (`Schema.Struct`, every field `Schema.optionalKey`): `task: String`, `epic: String`, `pack: String`, `executors: Array(String)`, `coder: String`, `judgeRounds: Int`, `mergeRevisions: Int`, `land: String` (the branch), `flags: Array(String)`, `requestId: String`.
 - `OperatorRun`: `runId: String, repo: String, flow: String, args: Array(String), knobs: OperatorKnobs, startedAt: Number, pid: optionalKey(Int), tracePath: optionalKey(String), logDir: String, state: OperatorRunState, exitCode: optionalKey(Int), signal: optionalKey(String), endedAt: optionalKey(Number), requestId: optionalKey(String)`.
@@ -124,10 +130,12 @@
 ### Task 4: A per-story retro digest
 
 **Files:**
+
 - Modify: `packages/flow/src/Retro.ts` (after `renderRetroDigest`, `:435`)
 - Test: `packages/flow/test/Retro.test.ts`
 
 **Interfaces:**
+
 - Produces: `export const renderStoryDigest = (inputs: RetroInputs, storyId: string, share: number = perStoryShare): string | undefined`: `traceView(inputs.trace)` then `storySection(inputs, view, entry, share)` for the `StoryFiles` whose `story.id === storyId`; `undefined` when the plan has no such story. No candidate filter: a merged story still gets a digest.
 
 - [ ] **Step 1: Write the failing tests** using the file's `seeded` and `loadInputs`: `"renderStoryDigest renders one story's section"` (`renderStoryDigest(inputs, "a")` starts with `"## Story a — "`, contains `"- [x] add the route"` and `"Revision 1"`), `"renderStoryDigest is undefined for an unknown story"` (`renderStoryDigest(inputs, "zz") === undefined`).
@@ -139,10 +147,12 @@
 ### Task 5: `approveMarkdown` moves to flow
 
 **Files:**
+
 - Modify: `packages/flow/src/Approval.ts`, `packages/shell/src/Refine.ts:84-88,399`, `packages/shell/test/Refine.test.ts:8,74-76`
 - Test: `packages/flow/test/Approval.test.ts` (create if absent)
 
 **Interfaces:**
+
 - Produces: `export const approveMarkdown = (markdown: string): string` in `Approval.ts`, the body of today's `Refine.ts:85-88`. `Refine.ts` imports it from `@llm4ts/flow/Approval` and stops exporting its own.
 
 - [ ] **Step 1: Write the failing test** in flow: the three assertions from `Refine.test.ts:74-76`, under `describe("approveMarkdown")`.
@@ -153,10 +163,12 @@
 ### Task 6: The doctor as a report
 
 **Files:**
+
 - Modify: `packages/runner/src/Doctor.ts:259-347`
 - Test: `packages/runner/test/Doctor.test.ts`
 
 **Interfaces:**
+
 - Produces: `export interface DoctorReport { readonly connectors: ReadonlyArray<{ readonly id: string; readonly status: HealthStatus; readonly probe: "version" | "unknown" }>; readonly node: NodePreflightReport; readonly lines: ReadonlyArray<string> }` where `lines` is every line today's program renders after the connectors block (coder, credentials, pi, gemini, otel). `export const collectDoctorReport = (registry?, environment?, readPiModelsJson?, nodeCheck?, probeOtel?, systemPolicies?): Effect.Effect<DoctorReport>` with the same parameters and defaults as `makeDoctorProgram` today. `export const renderDoctorReport = (report: DoctorReport): string` produces exactly today's text. `makeDoctorProgram` becomes `Effect.map(collectDoctorReport(...), renderDoctorReport)`.
 - `probe` is `"version"` for a `Cli` connector (its health is `cliVersionProbeHealthCheck`, `Connector.ts:147`) and `"unknown"` for an `Api` one. The kind comes from the registry's registered entries (`kind: "Api" | "Cli"` as `makeConnectorRegistry` receives them); if `ConnectorRegistryShape` does not expose it, add a `kindOf(id): "Api" | "Cli" | undefined` to the registry shape in core and its fake.
 
@@ -169,11 +181,13 @@
 ### Task 7: The status sentence
 
 **Files:**
+
 - Create: `packages/runner/src/RunSummary.ts`
 - Modify: `packages/runner/package.json` (`exports`)
 - Test: `packages/runner/test/RunSummary.test.ts`
 
 **Interfaces:**
+
 - Produces: `export const summarizeTree = (state: TreeState, flow: string | undefined): string`. Format, exactly: `"<flow or title>, <elapsed>: <n> stories done, <n> active (<lane id>, <executor or ?>, <innermost stage or activity>), <n> failed (<lane id>: <last log text for that lane or 'failed'>), $<costUsd to 2 decimals>"`, where elapsed is `<m> min` under an hour, `<h> h <m> min` after; story counts come from `state.stories` (board) when present, otherwise from lanes; the active and failed parentheticals list at most three lanes each, more become `+<n>`; the `ended` run prefixes `"<outcome>, "`. A state with no lanes and no stories renders `"<flow>, 0 min: no stories yet, $0.00"`.
 
 - [ ] **Step 1: Write the failing tests** by folding events with `reduceTree(emptyTree({ stories: [...] }), { _tag: "Event", at, event })` built from `StoryStatusChanged`, `StageStarted`, `ExecutorLeased` and `TokensUsed` instances (construct with `new StoryStatusChanged({...})` etc. from `@llm4ts/flow/FlowEvents`):
@@ -185,11 +199,13 @@
 ### Task 8: Run readers
 
 **Files:**
+
 - Create: `packages/runner/src/RunReaders.ts`
 - Modify: `packages/runner/package.json` (`exports`)
 - Test: `packages/runner/test/RunReaders.test.ts`
 
 **Interfaces:**
+
 - Consumes: `readTrace` (`@llm4ts/flow/Replay`), `treeInputsOfTrace`, `reduceTree`, `emptyTree` (`./AgentTree.ts`), `summarizeTree` (Task 7), `loadVersioned`/`Board` (board seeding as `Watch.ts:167-190`), `profileOf`, `usageSamplesFromTrace`/`buildCostReport` (`@llm4ts/flow/CostReport`), `CostRecord` (`@llm4ts/flow/CostLedger`), `RunStatus`, `MeaningfulEvent`, `Diagnosis`, `CostsOut` (Task 3).
 - Produces:
   - `export class TraceUnreadable extends Schema.TaggedError<TraceUnreadable>()("TraceUnreadable", { path: Schema.String, message: Schema.String }) {}`
@@ -210,11 +226,13 @@
 ### Task 9: Story readers
 
 **Files:**
+
 - Create: `packages/runner/src/StoryReaders.ts`
 - Modify: `packages/runner/package.json` (`exports`)
 - Test: `packages/runner/test/StoryReaders.test.ts`
 
 **Interfaces:**
+
 - Consumes: `loadStoryFiles`, `loadEpicFiles`, `renderStoryDigest` (Task 4), `RetroInputs` (`@llm4ts/flow/Retro`); `makeStoryPlanStore` (`@llm4ts/flow/StoryPlan`); `readTrace`; `loadTranscript`, `tailLinesOf` (`./Transcripts.ts`); `RunSources` (Task 8); `StoryDetail`, `Diagnosis`, `UnknownStory` (Task 3).
 - Produces:
   - `export const isSafeStoryId = (id: string): boolean` — `/^[A-Za-z0-9][A-Za-z0-9._-]*$/u`.
@@ -228,11 +246,13 @@
 ### Task 10: The spawn service
 
 **Files:**
+
 - Create: `packages/shell/src/FlowProcess.ts`
 - Modify: `packages/shell/src/FlowLaunch.ts`, `packages/shell/package.json` (`exports`: `./FlowProcess`)
 - Test: `packages/shell/test/FlowProcess.test.ts`; `packages/shell/test/FlowLaunch.test.ts` unchanged and green
 
 **Interfaces:**
+
 - Produces, in `FlowProcess.ts`:
   - `export interface FlowProcessStart { readonly flowPath: string; readonly args: ReadonlyArray<string>; readonly environment: Readonly<Record<string, string | undefined>>; readonly cwd?: string; readonly stdio: "inherit" | { readonly stdout: string; readonly stderr: string } }` (file paths are opened append by the Node implementation).
   - `export interface FlowProcessExit { readonly code: number | undefined; readonly signal: string | undefined }`
@@ -250,11 +270,13 @@
 ### Task 11: The run supervisor
 
 **Files:**
+
 - Create: `packages/shell/src/RunSupervisor.ts`
 - Modify: `packages/shell/package.json` (`exports`)
 - Test: `packages/shell/test/RunSupervisor.test.ts`
 
 **Interfaces:**
+
 - Consumes: `FlowProcessShape`, `FlowProcessStart` (Task 10); `OperatorRun`, `OperatorKnobs`, `latestRuns`, `encodeOperatorRunLine`, `RunInProgress`, `UnknownRun` (Task 3); `PlainFileStoreShape`.
 - Produces:
   - `export const operatorStateDir = (environment: Readonly<Record<string, string | undefined>>, repoId: string): string` — `${XDG_STATE_HOME or ~/.local/state}/llm4ts/mcp/<repoId>` (empty `XDG_STATE_HOME` counts as unset, like `FlowCatalog.ts:57-60`).
@@ -277,11 +299,13 @@
 ### Task 12: Operator configuration
 
 **Files:**
+
 - Create: `packages/shell/src/OperatorConfig.ts`
 - Modify: `packages/shell/package.json` (`exports`)
 - Test: `packages/shell/test/OperatorConfig.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `export interface McpFlags { readonly stdio: boolean; readonly http: boolean; readonly host: Option.Option<string>; readonly port: Option.Option<number>; readonly tokenFile: Option.Option<string>; readonly repo: ReadonlyArray<string>; readonly allowRun: boolean; readonly allowApprove: boolean; readonly parallelRuns: Option.Option<number> }`
   - `export interface OperatorConfig { readonly transport: { readonly _tag: "stdio" } | { readonly _tag: "http"; readonly host: string; readonly port: number; readonly token: string }; readonly repos: ReadonlyArray<{ readonly id: string; readonly path: string }>; readonly allowRun: boolean; readonly allowApprove: boolean; readonly parallelRuns: number }`
@@ -295,11 +319,13 @@
 ### Task 13: Read tools
 
 **Files:**
+
 - Create: `packages/shell/src/OperatorTools.ts`
 - Modify: `packages/shell/package.json` (`exports`)
 - Test: `packages/shell/test/OperatorTools.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Tool.make`, `Toolkit.make` (`effect/unstable/ai/Tool`, `Toolkit`); Tasks 3, 6, 7, 8, 9, 11, 12; `discoverFlows`, `defaultTierPaths` (`./FlowCatalog.ts`); `rosterReport`, `httpProbe` (`@llm4ts/runner/ExecutorRoster`); `listEpics` is the runner's `nodeListEpics` shape `(directory) => ReadonlyArray<string>`; `readEpicRuns` (`@llm4ts/flow/EpicRuns`); `loadTranscript`, `tailLinesOf`, `TranscriptFiles` (`@llm4ts/runner/Transcripts`); `makeProfileProgram`/`profileOf` (`@llm4ts/runner/Profile`); `readRetroIndex`, `retroPaths`, `retroApprovalOf` (`@llm4ts/flow/Retro`); `packageVersion` (`./Package.ts`).
 - Produces:
   - `export interface OperatorDeps { readonly config: OperatorConfig; readonly files: PlainFileStoreShape; readonly listFiles: (directory: string) => ReadonlyArray<string>; readonly listTraces: (directory: string) => ReadonlyArray<string>; readonly listEpics: (directory: string) => ReadonlyArray<string>; readonly transcripts: TranscriptFiles; readonly supervisor: RunSupervisorShape; readonly doctor: Effect.Effect<DoctorReport>; readonly roster: (repoPath: string) => Effect.Effect<RosterReport, FlowError>; readonly probe: (url: string) => Effect.Effect<boolean>; readonly flows: (repoPath: string) => Effect.Effect<ReadonlyArray<DiscoveredFlow>, unknown>; readonly now: Effect.Effect<number>; readonly environment: Readonly<Record<string, string | undefined>> }`
@@ -329,10 +355,12 @@
 ### Task 14: Act tools and `run_wait`
 
 **Files:**
+
 - Modify: `packages/shell/src/OperatorTools.ts`
 - Test: `packages/shell/test/OperatorTools.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `run_wait { runId, sinceSeq?: Int, timeoutSeconds?: Int }` added to `readToolkit` → `RunWaitResult`: polls every `500 ms` (`Effect.sleep`), returns as soon as `meaningfulEventsAfter(lines, sinceSeq)` is non-empty or the supervisor says the run is no longer `running` (`exited: true`), else after `min(timeoutSeconds, 300)` seconds (default `120`) with empty `events`; `seq` is the last seen line's `seq`, `ended` from the trace, `summary` from `runStatusOf`.
   - `export const actToolkit = Toolkit.make(start_run, stop_run, retro_start, approve)`, annotated `Tool.Destructive` true for `stop_run`, `Tool.Idempotent` true for `start_run`:
@@ -349,11 +377,13 @@
 ### Task 15: The server layer
 
 **Files:**
+
 - Create: `packages/shell/src/OperatorServer.ts`
 - Modify: `packages/shell/package.json` (`exports`)
 - Test: `packages/shell/test/OperatorServer.test.ts`
 
 **Interfaces:**
+
 - Consumes: `McpServer.layerStdio`, `McpServer.layerHttp`, `McpServer.toolkit`, `McpProtocol.v2025_06_18` (`effect/unstable/ai/McpServer`, `McpProtocol`); `HttpRouter.middleware`, `HttpRouter.toWebHandler` (`effect/unstable/http/HttpRouter`); `HttpServerRequest`, `HttpServerResponse` (`effect/unstable/http/*`); `NodeStdio.layer`, `NodeHttpServer.layer` (`@effect/platform-node/*`); Tasks 12–14.
 - Produces:
   - `export const serverName = "llm4ts"`; version = `packageVersion`.
@@ -369,10 +399,12 @@
 ### Task 16: The `mcp` command
 
 **Files:**
+
 - Modify: `packages/shell/src/Cli.ts` (new command before `doctorCommand`, added to `withSubcommands`)
 - Test: `packages/shell/test/Cli.test.ts`
 
 **Interfaces:**
+
 - Produces: `mcpCommand = Command.make("mcp", { stdio: Flag.Boolean("stdio"), http: Flag.Boolean("http"), host: Flag.String("host").pipe(Flag.optional), port: Flag.Int("port").pipe(Flag.optional), tokenFile: Flag.String("token-file").pipe(Flag.optional), repo: Flag.String("repo").pipe(Flag.atLeast(0)), allowRun: Flag.Boolean("allow-run"), allowApprove: Flag.Boolean("allow-approve"), parallelRuns: Flag.Int("parallel-runs").pipe(Flag.optional) }, ...)` with descriptions; the handler calls `mcpOptionsFrom(config, process.env, process.cwd(), nodeRead)`, builds `OperatorDeps` with `nodeFlowProcess`, `nodePlainFileStore`, `nodeListTraces`, `nodeListEpics`, `nodeTranscriptFiles`, `collectDoctorReport()`, `rosterReport`, `httpProbe`, `discoverFlows(defaultTierPaths(...))` (provided `NodeFileSystem.layer`), `makeRunSupervisor` in a scope, then `runOperatorServer`. Description: `"Serve llm4ts to an MCP client (Grok Bot, Claude Code, Cursor): status, diagnosis and, when allowed, runs (ADR 0041)"`.
 - `export const nodeListEpics` must be exported from `@llm4ts/runner/Watch` if it is not already (it is module-private today at `Watch.ts`; export it).
 
@@ -384,6 +416,7 @@
 ### Task 17: Docs, ADR, template, release notes, verification
 
 **Files:**
+
 - Create: `docs/adr/0041-mcp-operator-server.md`, `docs/grok-bot/operator.md`
 - Modify: `docs/parity.md`, `CHANGELOG.md`, `skills/using-llm4ts/SKILL.md`, `README.md` (one paragraph under the CLI verbs, if the README lists them)
 
