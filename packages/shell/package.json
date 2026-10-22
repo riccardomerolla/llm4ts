@@ -27,6 +27,7 @@
     "./OperatorActTools": "./dist/OperatorActTools.js",
     "./OperatorConfig": "./dist/OperatorConfig.js",
     "./OperatorRuns": "./dist/OperatorRuns.js",
+    "./OperatorServer": "./dist/OperatorServer.js",
     "./OperatorTools": "./dist/OperatorTools.js",
     "./Refine": "./dist/Refine.js",
     "./RunSupervisor": "./dist/RunSupervisor.js",
