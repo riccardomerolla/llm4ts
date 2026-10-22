@@ -5,6 +5,7 @@ import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
 import type * as Scope from "effect/Scope"
 import type { ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
@@ -1206,8 +1207,72 @@ export const runNode = <A, E, R>(
 const mainErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message.length > 0 ? error.message : String(error)
 
+export interface SignalSource {
+  readonly once: (signal: "SIGINT", handler: () => void) => void
+  readonly off: (signal: "SIGINT", handler: () => void) => void
+  readonly exit: (code: number) => void
+}
+
+/**
+ * First SIGINT interrupts the fiber (finalizers run, the trace ends
+ * `interrupted`); a second one exits 130 at once. The handler re-arms itself
+ * after the first signal.
+ */
+export const interruptOnSignal = <A, E>(fiber: Fiber.Fiber<A, E>, signals: SignalSource): void => {
+  const first = (): void => {
+    signals.once("SIGINT", second)
+    Effect.runFork(Fiber.interrupt(fiber))
+  }
+  const second = (): void => {
+    signals.exit(130)
+  }
+  signals.once("SIGINT", first)
+  // After an interrupt the handler stays: a second Ctrl-C must still kill a
+  // run whose finalizers hang. Otherwise it is removed when the fiber ends.
+  fiber.addObserver((exit) => {
+    if (!(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))) {
+      signals.off("SIGINT", first)
+      signals.off("SIGINT", second)
+    }
+  })
+}
+
+// The terminal surface restores the tty on SIGINT and re-raises the signal;
+// that echo reaches us a moment after the real one and must not count as a
+// second Ctrl-C.
+const signalEchoWindowMs = 250
+
+const processSignals: SignalSource = (() => {
+  let lastAt = Number.NEGATIVE_INFINITY
+  const wrapped = new Map<() => void, () => void>()
+  return {
+    once: (signal, handler) => {
+      const guarded = (): void => {
+        const now = Date.now()
+        if (now - lastAt < signalEchoWindowMs) {
+          process.once(signal, guarded)
+          return
+        }
+        lastAt = now
+        wrapped.delete(handler)
+        handler()
+      }
+      wrapped.set(handler, guarded)
+      process.once(signal, guarded)
+    },
+    off: (signal, handler) => {
+      const guarded = wrapped.get(handler)
+      if (guarded !== undefined) {
+        process.off(signal, guarded)
+        wrapped.delete(handler)
+      }
+    },
+    exit: (code) => process.exit(code)
+  }
+})()
+
 export const runFlowMain = <E>(program: Effect.Effect<void, E>): void => {
-  Effect.runFork(
+  const fiber = Effect.runFork(
     program.pipe(
       Effect.match({
         onFailure: (error) =>
@@ -1220,4 +1285,10 @@ export const runFlowMain = <E>(program: Effect.Effect<void, E>): void => {
       Effect.flatten
     )
   )
+  fiber.addObserver((exit) => {
+    if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) {
+      process.exitCode = 130
+    }
+  })
+  interruptOnSignal(fiber, processSignals)
 }

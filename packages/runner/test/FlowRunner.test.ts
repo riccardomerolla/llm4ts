@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
+import * as Cause from "effect/Cause"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
@@ -40,6 +42,7 @@ import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryTranscriptSink } from "@llm4ts/flow/Transcript"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import {
+  interruptOnSignal,
   makeFlowRunnerContext,
   runIdentityFromEnvironment,
   runWithBundle
@@ -1362,6 +1365,98 @@ describe("seat usage metering", () => {
         const plain = yield* setupWith(silent)
         const plainBundle = yield* makeFlowRunnerContext(plain.options, plain.dependencies)
         assert.isUndefined(plainBundle.context.coder.scoreLabelSequence)
+      })
+    )
+  )
+})
+
+describe("interruptOnSignal", () => {
+  const fakeSignals = () => {
+    const handlers = new Map<string, () => void>()
+    const exitCalls: Array<number> = []
+    return {
+      handlers,
+      exitCalls,
+      source: {
+        once: (signal: "SIGINT", handler: () => void) => {
+          handlers.set(signal, handler)
+        },
+        off: (signal: "SIGINT", handler: () => void) => {
+          if (handlers.get(signal) === handler) handlers.delete(signal)
+        },
+        exit: (code: number) => {
+          exitCalls.push(code)
+        }
+      }
+    }
+  }
+
+  const start = Effect.gen(function* () {
+    const process = yield* makeFakeProcessExecutor()
+    const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+    const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+    const dependencies = {
+      registry: makeConnectorRegistry([
+        {
+          connectorId: ConnectorIds.Mock,
+          kind: "Api",
+          create: (_configuration) => Effect.succeed(mock)
+        }
+      ]),
+      process: process.executor,
+      files: files(state)
+    }
+    const options = {
+      workDir: "/repo",
+      workspace: "/repo",
+      userPrompt: "do it",
+      coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+      surface: {
+        palette: plainTerminalPalette,
+        log: (_line: string) => Effect.void,
+        setStatus: (_label: string | undefined) => Effect.void,
+        suspend: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+      },
+      tracePath: "trace.jsonl",
+      runId: "run-1"
+    }
+    const bundle = yield* makeFlowRunnerContext(options, dependencies)
+    const fiber = yield* Effect.forkChild(
+      runWithBundle(bundle, options, () => Effect.never, dependencies)
+    )
+    yield* Effect.yieldNow
+    return { state, fiber }
+  })
+
+  it.effect("the first SIGINT interrupts the fiber and the trace ends interrupted", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { state, fiber } = yield* start
+        const fake = fakeSignals()
+        interruptOnSignal(fiber, fake.source)
+        const handler = fake.handlers.get("SIGINT")
+        assert.isDefined(handler)
+        handler?.()
+        const exit = yield* Fiber.await(fiber)
+        assert.isTrue(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
+        const last = ((yield* Ref.get(state))["trace.jsonl"] ?? "").trim().split("\n").at(-1)
+        const line = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TraceLine))(last ?? "")
+        assert.deepStrictEqual([line.kind, line.fields.outcome], ["RunEnded", "interrupted"])
+        assert.deepStrictEqual(fake.exitCalls, [])
+      })
+    )
+  )
+
+  it.effect("the second SIGINT exits 130", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fiber } = yield* start
+        const fake = fakeSignals()
+        interruptOnSignal(fiber, fake.source)
+        fake.handlers.get("SIGINT")?.()
+        fake.handlers.get("SIGINT")?.()
+        yield* Fiber.await(fiber)
+        assert.deepStrictEqual(fake.exitCalls, [130])
       })
     )
   )
