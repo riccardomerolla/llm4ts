@@ -42,6 +42,7 @@
     "./Profile": "./dist/Profile.js",
     "./PiModels": "./dist/PiModels.js",
     "./ReviewFingerprint": "./dist/ReviewFingerprint.js",
+    "./RunSummary": "./dist/RunSummary.js",
     "./Terminal": "./dist/Terminal.js",
     "./TerminalInteraction": "./dist/TerminalInteraction.js",
     "./Transcripts": "./dist/Transcripts.js",
