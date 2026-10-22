@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import type * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
+import { makeCliConnector, type CliAuthProbe, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import type { LlmError } from "../Errors.ts"
 import type { StructuredResult } from "../LlmService.ts"
@@ -25,6 +25,7 @@ import {
   jsonStringField,
   optionalModelArgs,
   parseJsonLine,
+  parseJsonOutput,
   sortedFlagArgs,
   toolEventChunk,
   toolResultChunk,
@@ -32,8 +33,22 @@ import {
   usageEventChunk,
   type JsonValue,
   effortWord,
+  jsonBooleanField,
   jsonObjectEntries
 } from "./CliSupport.ts"
+
+/**
+ * `claude auth status --json` reads the credential store and answers
+ * `{"loggedIn": true|false, ...}` without a request to Anthropic. A claude
+ * too old for the subcommand prints no JSON, so its login stays Unknown.
+ */
+export const claudeAuthProbe: CliAuthProbe = {
+  args: ["auth", "status", "--json"],
+  interpret: (result) => {
+    const loggedIn = jsonBooleanField(parseJsonOutput(result.stdout), "loggedIn")
+    return loggedIn === undefined ? "Unknown" : loggedIn ? "Valid" : "Invalid"
+  }
+}
 
 /**
  * Read-only is a `--tools` ALLOWLIST, not a permission mode or a denylist
@@ -330,7 +345,7 @@ export const makeClaudeCliConnector = (
     buildInteractiveArgv: (_context) => ["claude", ...extraArgs],
     complete,
     completeStream,
-    versionProbe: { executor, binary: "claude", cwd }
+    versionProbe: { executor, binary: "claude", cwd, authProbe: claudeAuthProbe }
   })
 
   const executeStructuredWithUsage = <A, E, RD, RE>(

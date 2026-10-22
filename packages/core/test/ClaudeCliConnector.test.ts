@@ -8,7 +8,12 @@ import { CliContext } from "@llm4ts/core/Connector"
 import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { ProviderError } from "@llm4ts/core/Errors"
 import { ConnectorIds } from "@llm4ts/core/Models"
-import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
+import {
+  ProcessResult,
+  makeFakeProcessExecutor,
+  makeProcessExecutor,
+  processCommandKey
+} from "@llm4ts/core/ProcessExecutor"
 import {
   claudeSessionArgv,
   claudeUserMessageJson,
@@ -16,6 +21,7 @@ import {
   parseClaudeSessionLine
 } from "@llm4ts/core/providers/ClaudeAgentSession"
 import {
+  claudeAuthProbe,
   claudeCliExtraArgs,
   claudeDenyRules,
   makeClaudeCliConnector,
@@ -326,5 +332,69 @@ describe("ClaudeAgentSession", () => {
         assert.strictEqual(result.model, "claude-sonnet-4-6")
       })
     )
+  )
+})
+
+describe("ClaudeCliConnector auth probe", () => {
+  it("reads `claude auth status --json`: loggedIn decides, anything else is Unknown", () => {
+    assert.deepStrictEqual(claudeAuthProbe.args, ["auth", "status", "--json"])
+    assert.strictEqual(
+      claudeAuthProbe.interpret(
+        ProcessResult.make({
+          stdout: ["{", '  "loggedIn": true,', '  "authMethod": "claude.ai"', "}"],
+          exitCode: 0
+        })
+      ),
+      "Valid"
+    )
+    assert.strictEqual(
+      claudeAuthProbe.interpret(
+        ProcessResult.make({ stdout: ['{"loggedIn":false}'], exitCode: 1 })
+      ),
+      "Invalid"
+    )
+    // An older claude without the subcommand says so on stderr and prints no JSON.
+    assert.strictEqual(
+      claudeAuthProbe.interpret(
+        ProcessResult.make({
+          stdout: [],
+          stderr: ["error: unknown command 'auth'"],
+          exitCode: 1
+        })
+      ),
+      "Unknown"
+    )
+  })
+
+  it.effect("the health check reports a stale login as Invalid, after the version probe", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["claude", "--version"]),
+            ProcessResult.make({ stdout: ["2.1.306 (Claude Code)"], exitCode: 0 })
+          ],
+          [
+            processCommandKey(["claude", "auth", "status", "--json"]),
+            ProcessResult.make({ stdout: ['{"loggedIn":false}'], exitCode: 1 })
+          ]
+        ])
+      })
+      const connector = makeClaudeCliConnector(
+        CliConnectorConfig.make({ connectorId: ConnectorIds.ClaudeCli }),
+        fake.executor
+      )
+      const health = yield* connector.healthCheck
+      const recorded = yield* fake.recorded
+      assert.strictEqual(health.availability, "Healthy")
+      assert.strictEqual(health.authStatus, "Invalid")
+      assert.deepStrictEqual(
+        recorded.map((invocation) => invocation.argv),
+        [
+          ["claude", "--version"],
+          ["claude", "auth", "status", "--json"]
+        ]
+      )
+    })
   )
 })

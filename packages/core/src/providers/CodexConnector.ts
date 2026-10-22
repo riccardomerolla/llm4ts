@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect"
 import type * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
+import { makeCliConnector, type CliAuthProbe, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { ProviderError, type LlmError } from "../Errors.ts"
 import type { StructuredResult } from "../LlmService.ts"
@@ -197,6 +197,21 @@ export const parseCodexStreamLine = (line: string): ReadonlyArray<LlmChunk> => {
   }
 }
 
+/**
+ * `codex login status` reads `~/.codex/auth.json` and exits 0 with
+ * "Logged in using ChatGPT" (or an API key), 1 with "Not logged in". A codex
+ * without the subcommand exits with a usage error, which stays Unknown.
+ */
+export const codexAuthProbe: CliAuthProbe = {
+  args: ["login", "status"],
+  interpret: (result) =>
+    result.exitCode === 0
+      ? "Valid"
+      : [...result.stdout, ...result.stderr].join("\n").toLowerCase().includes("not logged in")
+        ? "Invalid"
+        : "Unknown"
+}
+
 export const makeCodexConnector = (
   config: CliConnectorConfig,
   executor: ProcessExecutorShape,
@@ -268,7 +283,7 @@ export const makeCodexConnector = (
     buildInteractiveArgv: (_context) => ["codex", ...extraArgs],
     complete,
     completeStream,
-    versionProbe: { executor, binary: "codex", cwd }
+    versionProbe: { executor, binary: "codex", cwd, authProbe: codexAuthProbe }
   })
 
   const executeStructuredWithUsage = <A, E, RD, RE>(

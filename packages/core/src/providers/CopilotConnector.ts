@@ -52,6 +52,9 @@ export const makeCopilotConnector = (
       Stream.fromEffect(complete(prompt)).pipe(
         Stream.map((text) => LlmChunk.make({ delta: text }))
       ),
+    // No auth probe: `gh auth status` validates every stored token against
+    // the GitHub API (and `gh auth token` would print the secret), so there
+    // is no offline login check to run; the login stays Unknown.
     versionProbe: { executor, binary: "gh", versionArgs: ["copilot", "--version"], cwd: "." }
   })
 }

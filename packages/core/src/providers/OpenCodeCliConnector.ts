@@ -145,6 +145,8 @@ export const makeOpenCodeCliConnector = (
     buildInteractiveArgv: (_context) => ["opencode"],
     complete,
     completeStream,
+    // No auth probe: `opencode auth list` lists stored credentials by
+    // provider, not whether the provider this seat runs has any; Unknown.
     versionProbe: { executor, binary: "opencode", cwd }
   })
 }

@@ -112,6 +112,7 @@ export const makeGrokCliConnector = (
     buildInteractiveArgv: (_context) => ["grok", ...extraArgs],
     complete,
     completeStream,
+    // No auth probe: grok offers `login` but no status subcommand; Unknown.
     versionProbe: { executor, binary: "grok", cwd }
   })
 }

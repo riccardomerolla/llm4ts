@@ -109,7 +109,9 @@ export const ConnectorHealthOut = Schema.Struct({
   id: Schema.String,
   availability: Availability,
   authStatus: AuthStatus,
-  probe: Schema.Literals(["version", "unknown"]),
+  // "auth": the CLI's own login check answered; "version": only `--version`
+  // ran, which proves no live login; "unknown": nothing more can be said.
+  probe: Schema.Literals(["version", "auth", "unknown"]),
   latencyMs: Schema.optionalKey(Schema.Int)
 })
 export type ConnectorHealthOut = typeof ConnectorHealthOut.Type

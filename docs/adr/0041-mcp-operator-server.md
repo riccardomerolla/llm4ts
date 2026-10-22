@@ -103,8 +103,9 @@ about them. The design is
    carries `summary` next to the structured fields, never instead of them.
    Always listed:
    - `preflight`: connectors with availability, `authStatus` and its
-     provenance `probe` (`version` means only `<cli> --version` ran and
-     proves no live session; never a bare valid), roster executors with
+     provenance `probe` (`auth` means the CLI's own login check answered;
+     `version` means only `<cli> --version` ran and proves no live session,
+     so `authStatus` is unknown, never a bare valid), roster executors with
      `disabled` and their health URL probed, the Node and llm4ts versions.
      It answers from the doctor's report, now collected apart from its
      text renderer.
@@ -228,7 +229,9 @@ about them. The design is
 - Steering a running story (retry, skip, add a story, approve a mid-run
   proposal) needs a control inbox the scheduler polls. It is the next
   project, and its tools register on this server.
-- `preflight` reports a version probe as `probe: "version"`. A real
-  per-seat session probe is still owed.
+- `preflight` reports a version probe as `probe: "version"` and a CLI's own
+  login check (`claude auth status`, `codex login status`, `pi auth check`,
+  `cursor-agent status`) as `probe: "auth"`; gemini, copilot, opencode and
+  grok offer no offline check and stay on the version probe.
 - Divergence from llm4zio v4.2.0, which has no operator server and no
   signal handling; recorded in `docs/parity.md` as additive.

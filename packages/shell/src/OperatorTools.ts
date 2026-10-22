@@ -133,7 +133,7 @@ const repoParam = Schema.optional(Schema.String)
 
 export const preflight = Tool.make("preflight", {
   description:
-    "Is this machine ready to run? Connector health (a probe of 'version' only ran `<cli> --version` and does not prove a live session), roster executors with their health URL probed, Node and llm4ts versions.",
+    "Is this machine ready to run? Connector health (probe 'auth' is the CLI's own login check; 'version' only ran `<cli> --version` and does not prove a live session), roster executors with their health URL probed, Node and llm4ts versions.",
   parameters: Schema.Struct({ repo: repoParam }),
   success: PreflightResult,
   failure: Schema.Union([UnknownRepo])
