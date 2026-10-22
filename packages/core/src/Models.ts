@@ -294,6 +294,19 @@ export const IsolationEnforcement = Schema.Literals(["enforced", "partial", "ign
 export type IsolationEnforcement = typeof IsolationEnforcement.Type
 
 /**
+ * How a CLI connector keeps the harness out of the paths a seat is denied
+ * (`CliConnectorConfig.deniedPaths`; by default the run's own state under
+ * `.llm4ts/`):
+ * - "enforced": the harness documents a deny rule the model cannot lift,
+ *   applied to its file tools and its shell alike.
+ * - "partial": the file tools are denied; the shell can still reach the path.
+ * - "ignored": the harness has no per-path rule; nothing reaches argv and
+ *   only the contract text in the prompt keeps the model out.
+ */
+export const PathDenyEnforcement = Schema.Literals(["enforced", "partial", "ignored"])
+export type PathDenyEnforcement = typeof PathDenyEnforcement.Type
+
+/**
  * How a connector produces the per-label probabilities behind `scoreLabels`:
  * - "logprobs": read off the backend's token log-probabilities in one
  *   forward pass (a real distribution, still uncalibrated).
@@ -345,5 +358,8 @@ export class ConnectorCapabilities extends Schema.Class<ConnectorCapabilities>(
   ),
   isolatedHeadless: IsolationEnforcement.pipe(
     Schema.withConstructorDefault(Effect.succeed<IsolationEnforcement>("ignored"))
+  ),
+  pathDeny: PathDenyEnforcement.pipe(
+    Schema.withConstructorDefault(Effect.succeed<PathDenyEnforcement>("ignored"))
   )
 }) {}

@@ -92,7 +92,15 @@ export class CliConnectorConfig extends Schema.TaggedClass<CliConnectorConfig>()
      * servers, settings, extensions and instruction files (ADR 0029). How
      * completely a connector honours it is `capabilities.isolatedHeadless`.
      */
-    isolated: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false)))
+    isolated: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+    /**
+     * Globs, relative to the working directory, the harness must neither
+     * read, modify nor delete (`.llm4ts/**` by default: the run's own
+     * state). How a connector honours them is `capabilities.pathDeny`;
+     * absent, the runner supplies its default, and an empty list denies
+     * nothing.
+     */
+    deniedPaths: Schema.optionalKey(Schema.Array(Schema.String))
   }
 ) {}
 

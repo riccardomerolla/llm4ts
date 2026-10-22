@@ -46,6 +46,31 @@ import {
  */
 export const claudeReadOnlyTools = "Read,Grep,Glob,Skill"
 
+/** A glob's directory, for the shell rule: `.llm4ts/**` names `.llm4ts`. */
+const deniedDirectory = (glob: string): string => glob.replace(/\/\*\*$/u, "")
+
+/**
+ * The inline settings that keep the harness out of `deniedPaths`: a
+ * `permissions.deny` rule per path for the file tools (`Read` covers Glob
+ * and Grep and also blocks Edit and Write on the same path; `Edit` covers
+ * every built-in tool that edits files) and one for the shell, matched on
+ * the command text (`*` can go anywhere in a Bash rule). Deny rules hold
+ * in every permission mode, `bypassPermissions` included, and `./` anchors
+ * at the current directory. Undefined when nothing is denied.
+ */
+export const claudeDenySettingsJson = (deniedPaths: ReadonlyArray<string>): string | undefined =>
+  deniedPaths.length === 0
+    ? undefined
+    : JSON.stringify({
+        permissions: {
+          deny: deniedPaths.flatMap((glob) => [
+            `Read(./${glob})`,
+            `Edit(./${glob})`,
+            `Bash(*${deniedDirectory(glob)}*)`
+          ])
+        }
+      })
+
 export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => {
   const effectiveFlags = config.readOnly
     ? {
@@ -53,6 +78,12 @@ export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<st
         ...config.flags
       }
     : config.flags
+  // An explicit `flags.settings` wins: `--settings` is taken once, and a
+  // file the operator points at is theirs to put the deny rules in.
+  const denySettings =
+    effectiveFlags.settings === undefined
+      ? claudeDenySettingsJson(config.deniedPaths ?? [])
+      : undefined
   return [
     ...optionalModelArgs(config.model),
     // `--effort` is Claude Code's own vocabulary: low, medium, high, max.
@@ -61,6 +92,7 @@ export const claudeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<st
     // auto memory and CLAUDE.md discovery: the documented headless mode for
     // a repository the run does not trust (ADR 0029).
     ...(config.isolated ? ["--bare"] : []),
+    ...(denySettings === undefined ? [] : ["--settings", denySettings]),
     ...sortedFlagArgs(effectiveFlags)
   ]
 }
@@ -291,7 +323,10 @@ export const makeClaudeCliConnector = (
       resumableSessions: true,
       readOnlyEnforcement: "enforced",
       effort: "mapped",
-      isolatedHeadless: "enforced"
+      isolatedHeadless: "enforced",
+      // `permissions.deny` rules (`claudeDenySettingsJson`) are documented
+      // to hold in every mode, for the file tools and the shell alike.
+      pathDeny: "enforced"
     }),
     buildArgv: (prompt, _context) => ["claude", "--print", ...extraArgs, prompt],
     buildInteractiveArgv: (_context) => ["claude", ...extraArgs],

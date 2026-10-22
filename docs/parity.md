@@ -634,3 +634,18 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   2026-10-06): `runQueue` spreads items over worktree shards
   (`LLM4TS_PORT_SHARDS`); `parseDiagnostics` reads javac and Maven error
   lines. llm4ts-only. Additive.
+- Run state kept out of the repository and of the coder (ADR 0027
+  amendment, 2026-10-22): the first write under any `.llm4ts/` leaves a
+  `.gitignore` there (`*`, kept as found when one exists), `commitAll`
+  never stages the directory (previously only the trace and the cost
+  ledger were taken back out; plans and archived runs were committed), and
+  `commitPaths` force-adds what it is named (a forked pack, a port ledger).
+  The autonomy contract names `.llm4ts/` as off limits in the `full` and
+  `minimal` profiles, every CLI seat is configured with
+  `deniedPaths: [".llm4ts/**"]` (a `permissions.deny` settings block on
+  Claude Code, an admin-tier policy rule on Gemini CLI; Codex and pi have
+  no per-path rule and publish `CapabilityUnenforceable`), and
+  `ConnectorCapabilities.pathDeny` grades it. llm4zio commits its plan
+  files and has no run-state rule. A repository that wants its own flows or
+  forked packs under `.llm4ts/` committed keeps its own ignore file with
+  the exceptions (`*` then `!flows/`), or commits them with `git add -f`.

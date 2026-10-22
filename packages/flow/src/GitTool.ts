@@ -6,6 +6,7 @@ import { MergeConflict, ProcessError, type FlowError } from "./FlowError.ts"
 import { Began, Timed, type FlowEventsShape } from "./FlowEvents.ts"
 import { timeEffect } from "./Timing.ts"
 import { guarded } from "./CapabilityGuard.ts"
+import { RunStateDirectory } from "./RunState.ts"
 
 export class BranchCreated extends Schema.TaggedClass<BranchCreated>()("Created", {}) {}
 export class BranchAlreadyExists extends Schema.TaggedClass<BranchAlreadyExists>()(
@@ -149,15 +150,14 @@ const problem = (result: ProcessResult): string => {
 }
 
 /**
- * The runner's own bookkeeping under `workDir/.llm4ts/`: the run trace and
- * the cost ledger. `commitAll` never stages them — they grow while the run
- * commits and belong to the machine, not the repository — while the rest of
- * `.llm4ts/` (plans, forked packs) is committed as before.
+ * The run's own state under `workDir/.llm4ts/`: traces, the cost ledger,
+ * plans, transcripts, epics. `commitAll` never stages it — it grows while
+ * the run commits and belongs to the machine, not the repository (a
+ * committed trace was read by every reviewer at real cost). `commitPaths`
+ * stages exactly what it is given, so a flow that keeps something there on
+ * purpose (a forked pack, a port ledger) names it.
  */
-export const runnerBookkeeping: ReadonlyArray<string> = [
-  ".llm4ts/trace-*.jsonl",
-  ".llm4ts/costs.jsonl"
-]
+export const runStatePaths: ReadonlyArray<string> = [RunStateDirectory]
 
 export const makeGitTool = (
   process: ProcessExecutorShape,
@@ -277,12 +277,14 @@ export const makeGitTool = (
   const checkout = (name: string): Effect.Effect<void, FlowError> =>
     write("git checkout", runOrFail(["checkout", name]).pipe(Effect.asVoid))
 
-  // Stage everything, then take the runner's bookkeeping back out of the
-  // index: `reset -- <glob>` leaves an ignored or unmatched glob alone and
-  // keeps a previously committed trace at its HEAD version, whereas an
-  // `:(exclude)` pathspec makes `add` refuse the ignored files outright.
+  // Stage everything, then take the run state back out of the index:
+  // `reset -- <path>` leaves an ignored or missing path alone and keeps a
+  // previously committed plan or trace at its HEAD version (so neither its
+  // change nor its deletion is staged), whereas an `:(exclude)` pathspec
+  // makes `add` refuse the ignored files outright. The `.gitignore` the
+  // runner leaves there (`RunState`) already keeps new files out of `add`.
   const addAll = runOrFail(["add", "-A"]).pipe(
-    Effect.andThen(runOrFail(["reset", "-q", "--", ...runnerBookkeeping])),
+    Effect.andThen(runOrFail(["reset", "-q", "--", ...runStatePaths])),
     Effect.asVoid
   )
 
@@ -294,9 +296,15 @@ export const makeGitTool = (
       }
       // "nothing to commit, working tree clean" when the tree is clean;
       // "nothing added to commit but untracked files present" when the only
-      // changes are files this commit was not asked to stage.
+      // changes are files this commit was not asked to stage; "no changes
+      // added to commit" when the only changes are to tracked files it was
+      // not asked to stage (a plan under the run state, revised by the run).
       const detail = problem(result)
-      if (detail.includes("nothing to commit") || detail.includes("nothing added to commit")) {
+      if (
+        detail.includes("nothing to commit") ||
+        detail.includes("nothing added to commit") ||
+        detail.includes("no changes added to commit")
+      ) {
         return new NothingToCommit()
       }
       return yield* ProcessError.make({
@@ -311,13 +319,15 @@ export const makeGitTool = (
   // `add -A -- <paths>` stages additions, modifications, AND deletions of
   // exactly those paths; a plain `add` would refuse a deleted file. `--only`
   // on commit would also work but ignores paths that were never tracked.
+  // `-f`: a path named here is wanted even where an ignore file (the run
+  // state's own, a forked pack under it) would otherwise refuse it.
   const commitPathsEffect = (
     message: string,
     paths: ReadonlyArray<string>
   ): Effect.Effect<CommitResult, FlowError> =>
     paths.length === 0
       ? Effect.succeed(new NothingToCommit())
-      : runOrFail(["add", "-A", "--", ...paths]).pipe(Effect.andThen(commitStaged(message)))
+      : runOrFail(["add", "-A", "-f", "--", ...paths]).pipe(Effect.andThen(commitStaged(message)))
 
   return {
     init: write(
