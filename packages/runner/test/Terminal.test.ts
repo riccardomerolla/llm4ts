@@ -40,6 +40,7 @@ import {
   rendersEvent,
   terminalLine,
   terminalSafe,
+  shouldReraise,
   terminalSupportsColor,
   type TerminalSurface
 } from "@llm4ts/runner/Terminal"
@@ -533,4 +534,11 @@ describe("terminal rendering", () => {
       })
     )
   )
+})
+
+describe("terminal signal handler", () => {
+  it("re-raises only when no other listener remains", () => {
+    assert.isTrue(shouldReraise(0))
+    assert.isFalse(shouldReraise(1))
+  })
 })

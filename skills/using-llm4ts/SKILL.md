@@ -49,6 +49,26 @@ Key flags:
 Don't pre-create a branch: the flow creates its own epic branch and commits
 each reviewed task on it.
 
+## With the MCP server
+
+When an llm4ts MCP server is configured (`llm4ts mcp`, ADR 0041), use its
+tools instead of `npx -y @llm4ts/shell run …`:
+
+- `preflight` before starting anything: connectors, roster health, versions.
+  A connector with `probe: "version"` only answered `--version`; it does not
+  prove a live login.
+- `start_run` with `flow`, `task` and a `requestId`; it returns the `runId`
+  at once. Repeating the call with the same `requestId` returns the same run.
+  It exists only when the server was started with `--allow-run`.
+- `run_wait` in a loop, passing back the `seq` it returned, to follow the run
+  until `exited` is true; `run_status` for the current state.
+- `diagnose` on a failed run (with `story` for an epic run) before proposing
+  a rerun.
+- `costs` for what a run cost; never take a figure from a run's prose.
+
+Don't fall back to a shell when a tool is absent or answers `NotAllowed`;
+tell the user which server flag it needs.
+
 ## Modernization flows and kits
 
 The `modernize-*` flows (survey, extract, seed, implement, verify, review)

@@ -1,46 +1,9 @@
-import { spawn, spawnSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { spawnSync } from "node:child_process"
 import { constants } from "node:os"
-import { dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
 import * as Effect from "effect/Effect"
-import * as Schema from "effect/Schema"
+import { FlowLaunchError, needsResolveFallback, nodeFlowProcess } from "./FlowProcess.ts"
 
-export class FlowLaunchError extends Schema.TaggedError<FlowLaunchError>()("FlowLaunch", {
-  message: Schema.String
-}) {}
-
-/**
- * True when the flow script cannot resolve `@llm4ts/runner` from its own
- * location — a global flow, a built-in copy, or a bare repository. Project
- * flows inside a repository that installs `@llm4ts/*` resolve their own pin
- * and need no help (the project-wins policy of ADR 0006). Implemented as the
- * same `node_modules` directory walk ESM resolution performs, so the check
- * stays honest under test runners that patch the module system.
- */
-export const needsResolveFallback = (flowPath: string): boolean => {
-  let directory = dirname(resolve(flowPath))
-  while (true) {
-    if (existsSync(join(directory, "node_modules", "@llm4ts", "runner", "package.json"))) {
-      return false
-    }
-    const parent = dirname(directory)
-    if (parent === directory) {
-      return true
-    }
-    directory = parent
-  }
-}
-
-// In the published package the hook is the compiled sibling; when running
-// from src (tests), it is the TypeScript source, which the child can load
-// because it always runs with type stripping enabled.
-const resolveFallbackUrl = (() => {
-  const compiled = new URL("./ResolveFallback.js", import.meta.url)
-  return existsSync(fileURLToPath(compiled))
-    ? compiled.href
-    : new URL("./ResolveFallback.ts", import.meta.url).href
-})()
+export { FlowLaunchError, needsResolveFallback }
 
 export interface LaunchFlowOptions {
   readonly flowPath: string
@@ -76,40 +39,31 @@ const restoreTerminal = (stdio: "inherit" | "ignore"): void => {
  * the child's exit code (`128 + signal` when terminated by a signal).
  */
 export const launchFlow = (options: LaunchFlowOptions): Effect.Effect<number, FlowLaunchError> =>
-  Effect.callback<number, FlowLaunchError>((resume) => {
+  Effect.gen(function* () {
     const environment = { ...(options.environment ?? process.env) }
     if (options.coder !== undefined) {
       environment.LLM4TS_CODER = options.coder
     }
-    const nodeArgs = ["--experimental-strip-types"]
-    if (needsResolveFallback(options.flowPath)) {
-      nodeArgs.push("--import", resolveFallbackUrl)
-    }
-    const child = spawn(process.execPath, [...nodeArgs, options.flowPath, ...options.taskArgs], {
-      stdio: options.stdio ?? "inherit",
-      env: environment,
-      ...(options.cwd === undefined ? {} : { cwd: options.cwd })
-    })
+    const stdio = options.stdio ?? "inherit"
     const ignoreSigint = (): void => {}
     process.on("SIGINT", ignoreSigint)
     const restoreSigint = (): void => {
       process.removeListener("SIGINT", ignoreSigint)
     }
-    child.on("error", (error) => {
-      restoreSigint()
-      resume(Effect.fail(new FlowLaunchError({ message: error.message })))
-    })
-    child.on("exit", (code, signal) => {
-      restoreSigint()
-      restoreTerminal(options.stdio ?? "inherit")
-      if (signal !== null) {
-        resume(Effect.succeed(128 + (constants.signals[signal] ?? 15)))
-      } else {
-        resume(Effect.succeed(code ?? 1))
+    return yield* Effect.gen(function* () {
+      const handle = yield* nodeFlowProcess.start({
+        flowPath: options.flowPath,
+        args: options.taskArgs,
+        environment,
+        stdio,
+        ...(options.cwd === undefined ? {} : { cwd: options.cwd })
+      })
+      const exit = yield* handle.exited.pipe(Effect.onInterrupt(() => handle.signal("SIGINT")))
+      restoreTerminal(stdio)
+      if (exit.signal !== undefined) {
+        const number = Object.entries(constants.signals).find(([name]) => name === exit.signal)
+        return 128 + (number?.[1] ?? 15)
       }
-    })
-    return Effect.sync(() => {
-      restoreSigint()
-      child.kill("SIGINT")
-    })
+      return exit.code ?? 1
+    }).pipe(Effect.ensuring(Effect.sync(restoreSigint)))
   })

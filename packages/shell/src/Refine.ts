@@ -15,7 +15,10 @@ import {
   scenarioTitles
 } from "@llm4ts/flow/Decisions"
 import { Domains, parseDomains, renderDomains } from "@llm4ts/flow/Domains"
-import { ApprovedMarker, DraftApprovalMarker } from "@llm4ts/flow/Approval"
+import { approveMarkdown } from "@llm4ts/flow/Approval"
+
+// Kept on the published `@llm4ts/shell/Refine` subpath.
+export { approveMarkdown }
 
 /**
  * The interactive front of `modernize-refine` (ADR 0015). The FILE is the
@@ -80,12 +83,6 @@ export const saveDomains = (modDir: string, domains: Domains) =>
   Effect.flatMap(FileSystem, (fs) =>
     fs.writeFileString(`${modDir}/domains.md`, renderDomains(domains))
   )
-
-/** `- [ ] Approved` → `- [x] Approved` in a markdown document; unchanged when already approved. */
-export const approveMarkdown = (markdown: string): string =>
-  markdown.includes(ApprovedMarker)
-    ? markdown
-    : markdown.replace(DraftApprovalMarker, ApprovedMarker)
 
 /** The decision signature: LLM4TS_APPROVER, else the OS user. */
 export const signer = (environment: Readonly<Record<string, string | undefined>>): string => {

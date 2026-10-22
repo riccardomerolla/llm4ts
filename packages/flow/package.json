@@ -38,6 +38,7 @@
     "./Domains": "./dist/Domains.js",
     "./EpicBrief": "./dist/EpicBrief.js",
     "./EpicRuns": "./dist/EpicRuns.js",
+    "./OperatorSchemas": "./dist/OperatorSchemas.js",
     "./Equiv": "./dist/Equiv.js",
     "./EquivReport": "./dist/EquivReport.js",
     "./EstimatedUsage": "./dist/EstimatedUsage.js",
