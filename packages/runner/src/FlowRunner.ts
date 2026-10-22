@@ -1207,34 +1207,47 @@ export const runNode = <A, E, R>(
 const mainErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message.length > 0 ? error.message : String(error)
 
+export type InterruptSignal = "SIGINT" | "SIGTERM"
+
 export interface SignalSource {
-  readonly once: (signal: "SIGINT", handler: () => void) => void
-  readonly off: (signal: "SIGINT", handler: () => void) => void
+  readonly once: (signal: InterruptSignal, handler: () => void) => void
+  readonly off: (signal: InterruptSignal, handler: () => void) => void
   readonly exit: (code: number) => void
 }
 
+const signalExitCode: Record<InterruptSignal, number> = { SIGINT: 130, SIGTERM: 143 }
+
 /**
- * First SIGINT interrupts the fiber (finalizers run, the trace ends
- * `interrupted`); a second one exits 130 at once. The handler re-arms itself
- * after the first signal.
+ * First signal (SIGINT by default) interrupts the fiber (finalizers run, the
+ * trace ends `interrupted`); a second one exits at once, 130 for SIGINT and
+ * 143 for SIGTERM. The handler re-arms itself after the first signal. Returns
+ * a disposer that removes whichever handler is armed.
  */
-export const interruptOnSignal = <A, E>(fiber: Fiber.Fiber<A, E>, signals: SignalSource): void => {
+export const interruptOnSignal = <A, E>(
+  fiber: Fiber.Fiber<A, E>,
+  signals: SignalSource,
+  signal: InterruptSignal = "SIGINT"
+): (() => void) => {
   const first = (): void => {
-    signals.once("SIGINT", second)
+    signals.once(signal, second)
     Effect.runFork(Fiber.interrupt(fiber))
   }
   const second = (): void => {
-    signals.exit(130)
+    signals.exit(signalExitCode[signal])
   }
-  signals.once("SIGINT", first)
+  const dispose = (): void => {
+    signals.off(signal, first)
+    signals.off(signal, second)
+  }
+  signals.once(signal, first)
   // After an interrupt the handler stays: a second Ctrl-C must still kill a
   // run whose finalizers hang. Otherwise it is removed when the fiber ends.
   fiber.addObserver((exit) => {
     if (!(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))) {
-      signals.off("SIGINT", first)
-      signals.off("SIGINT", second)
+      dispose()
     }
   })
+  return dispose
 }
 
 const processSignals: SignalSource = {

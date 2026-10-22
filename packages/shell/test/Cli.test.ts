@@ -18,7 +18,6 @@ import {
   runEnvironmentFrom,
   runShellCommand,
   geminiBridgeOptionsFrom,
-  nodeListFiles,
   watchOptionsFrom
 } from "@llm4ts/shell/Cli"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
@@ -315,20 +314,6 @@ describe("the mcp command", () => {
       assert.match(error.message, /LLM4TS_MCP_TOKEN or --token-file/)
     })
   )
-
-  it("lists regular files under a directory recursively, never directories", () => {
-    const dir = mkdtempSync(join(tmpdir(), "llm4ts-shell-mcp-"))
-    try {
-      mkdirSync(join(dir, "runs", "op-1"), { recursive: true })
-      mkdirSync(join(dir, "empty"))
-      writeFileSync(join(dir, "index.json"), "{}")
-      writeFileSync(join(dir, "runs", "op-1", "log.txt"), "")
-      assert.deepStrictEqual(nodeListFiles(dir), ["index.json", join("runs", "op-1", "log.txt")])
-      assert.deepStrictEqual(nodeListFiles(join(dir, "missing")), [])
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
 
   it.effect("the mcp command is registered", () =>
     Effect.gen(function* () {

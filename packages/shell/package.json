@@ -26,6 +26,7 @@
     "./Menu": "./dist/Menu.js",
     "./OperatorActTools": "./dist/OperatorActTools.js",
     "./OperatorConfig": "./dist/OperatorConfig.js",
+    "./OperatorNode": "./dist/OperatorNode.js",
     "./OperatorRuns": "./dist/OperatorRuns.js",
     "./OperatorServer": "./dist/OperatorServer.js",
     "./OperatorTools": "./dist/OperatorTools.js",

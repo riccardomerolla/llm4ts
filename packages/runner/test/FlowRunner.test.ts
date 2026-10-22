@@ -1378,10 +1378,10 @@ describe("interruptOnSignal", () => {
       handlers,
       exitCalls,
       source: {
-        once: (signal: "SIGINT", handler: () => void) => {
+        once: (signal: "SIGINT" | "SIGTERM", handler: () => void) => {
           handlers.set(signal, handler)
         },
-        off: (signal: "SIGINT", handler: () => void) => {
+        off: (signal: "SIGINT" | "SIGTERM", handler: () => void) => {
           if (handlers.get(signal) === handler) handlers.delete(signal)
         },
         exit: (code: number) => {
@@ -1457,6 +1457,35 @@ describe("interruptOnSignal", () => {
         fake.handlers.get("SIGINT")?.()
         yield* Fiber.await(fiber)
         assert.deepStrictEqual(fake.exitCalls, [130])
+      })
+    )
+  )
+
+  it.effect("SIGTERM interrupts the same way and its second one exits 143", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fiber } = yield* start
+        const fake = fakeSignals()
+        interruptOnSignal(fiber, fake.source, "SIGTERM")
+        assert.isUndefined(fake.handlers.get("SIGINT"))
+        fake.handlers.get("SIGTERM")?.()
+        const exit = yield* Fiber.await(fiber)
+        assert.isTrue(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
+        fake.handlers.get("SIGTERM")?.()
+        assert.deepStrictEqual(fake.exitCalls, [143])
+      })
+    )
+  )
+
+  it.effect("the disposer removes the armed handler", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fiber } = yield* start
+        const fake = fakeSignals()
+        const dispose = interruptOnSignal(fiber, fake.source)
+        dispose()
+        assert.isUndefined(fake.handlers.get("SIGINT"))
+        yield* Fiber.interrupt(fiber)
       })
     )
   )
