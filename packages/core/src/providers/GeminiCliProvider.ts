@@ -760,9 +760,13 @@ export const makeGeminiCliProvider = (
   executor: GeminiCliExecutorShape,
   executionContext: GeminiCliExecutionContext = GeminiCliExecutionContext.make({})
 ): CliConnectorShape => {
+  // `gemini --version` proves the install, not the login: the CLI has no auth
+  // status subcommand, and its account file records the last login rather than
+  // whether that token still works, so the login stays Unknown. `llm4ts doctor`
+  // reports the environment routes (API key, Vertex, project) separately.
   const healthy = HealthStatus.make({
     availability: "Healthy",
-    authStatus: "Valid"
+    authStatus: "Unknown"
   })
   const unhealthy = HealthStatus.make({
     availability: "Unhealthy",

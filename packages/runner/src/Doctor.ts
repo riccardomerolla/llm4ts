@@ -22,11 +22,21 @@ const credentialKeys = [
   "GOOGLE_API_KEY"
 ] as const
 
+// The auth column is what the connector's own login check answered. A CLI
+// that is installed but offers no cheap check says so: a version answer is
+// not a login, and "valid" here once hid an expired Claude session until the
+// first turn failed. Nothing is said about the login of a CLI that is absent.
+const authColumn = (status: HealthStatus): string => {
+  if (status.authStatus !== "Unknown") {
+    return `  auth: ${status.authStatus.toLowerCase()}`
+  }
+  return status.availability === "Healthy" ? "  auth: unknown (no probe)" : ""
+}
+
 const statusLine = (id: string, status: HealthStatus): string => {
   const mark =
     status.availability === "Healthy" ? "✔" : status.availability === "Unknown" ? "?" : "✖"
-  const auth = status.authStatus === "Unknown" ? "" : `  auth: ${status.authStatus.toLowerCase()}`
-  return `  ${mark} ${id.padEnd(14)} ${status.availability.toLowerCase()}${auth}`
+  return `  ${mark} ${id.padEnd(14)} ${status.availability.toLowerCase()}${authColumn(status)}`
 }
 
 const isSet = (value: string | undefined): value is string =>

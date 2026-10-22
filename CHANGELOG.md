@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.46.0
+
+`llm4ts doctor` reports a CLI seat's login from the CLI's own check.
+
+- **A version probe is no longer a login.** On 2026-10-21 doctor called
+  `claude` healthy with `auth: valid` while its OAuth session had expired;
+  the flow died five seconds later with "OAuth session expired and could not
+  be refreshed". A CLI connector's health check now runs the CLI's own
+  offline login check after `--version` and reports `authStatus` from what
+  it answers: `claude auth status --json`, `codex login status`,
+  `pi auth check --model <model> --no-refresh --json` (when the seat has a
+  model) and `cursor-agent status --format json`. None of them refreshes a
+  token or bills a request. A stale Claude session shows as `auth: invalid`.
+- **`auth: unknown (no probe)`** is what doctor prints for a CLI that is
+  installed but offers no cheap login check (gemini, gh copilot, opencode,
+  grok, antigravity), instead of `valid`. Nothing is printed about the
+  login of a CLI that is not installed.
+- **`CliVersionProbe.authProbe`** (`@llm4ts/core/Connector`): a connector
+  declares its login check as the subcommand's arguments and how its output
+  maps to an `AuthStatus`; `claudeAuthProbe`, `codexAuthProbe`,
+  `piAuthProbe`, `cursorAuthProbe` are exported beside their connectors.
+
 ## 2.45.0
 
 epic-stories takes its gates and worktree setup from the selected pack.

@@ -6,9 +6,11 @@ import { ConnectorCapabilities, ConnectorIds, HealthStatus, LlmChunk } from "../
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { failClassifiedCliError, optionalModelArgs, sortedFlagArgs } from "./CliSupport.ts"
 
+// `agy --version` proves the install, not the login: the CLI offers no offline
+// login check, so the auth status stays Unknown rather than claiming a session.
 const healthy = HealthStatus.make({
   availability: "Healthy",
-  authStatus: "Valid"
+  authStatus: "Unknown"
 })
 
 const unhealthy = HealthStatus.make({

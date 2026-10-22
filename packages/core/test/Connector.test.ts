@@ -12,7 +12,8 @@ import {
   makeApiConnector,
   makeCliConnector,
   timedHealthCheck,
-  type ApiConnectorPrimitives
+  type ApiConnectorPrimitives,
+  type CliAuthProbe
 } from "@llm4ts/core/Connector"
 import type { LlmError } from "@llm4ts/core/Errors"
 import type { StructuredResult } from "@llm4ts/core/LlmService"
@@ -171,7 +172,7 @@ describe("makeCliConnector", () => {
       Stream.make(LlmChunk.make({ delta: `echo:${prompt}`, finishReason: "stop" }))
   }
 
-  it.effect("derives Healthy/Valid from a successful version probe", () =>
+  it.effect("derives Healthy from a version probe but never Valid: a version is not a login", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeProcessExecutor({
         responses: new Map([
@@ -186,13 +187,128 @@ describe("makeCliConnector", () => {
         versionProbe: { executor: fake.executor, binary: "fake-cli" }
       })
       const health = yield* connector.healthCheck
-      const available = yield* connector.isAvailable
+      // Read before isAvailable, which runs the health check once more.
       const recorded = yield* fake.recorded
+      const available = yield* connector.isAvailable
 
       assert.strictEqual(health.availability, "Healthy")
-      assert.strictEqual(health.authStatus, "Valid")
+      assert.strictEqual(health.authStatus, "Unknown")
       assert.isTrue(available)
-      assert.deepStrictEqual(recorded[0]?.argv, ["fake-cli", "--version"])
+      assert.deepStrictEqual(
+        recorded.map((invocation) => invocation.argv),
+        [["fake-cli", "--version"]]
+      )
+    })
+  )
+
+  const loggedOutIsInvalid: CliAuthProbe = {
+    args: ["auth", "status"],
+    interpret: (result) =>
+      result.stdout.join("\n").includes("logged out")
+        ? "Invalid"
+        : result.exitCode === 0
+          ? "Valid"
+          : "Unknown"
+  }
+
+  it.effect(
+    "asks the auth probe after the version probe and reports a logged-out CLI as Invalid",
+    () =>
+      Effect.gen(function* () {
+        const fake = yield* makeFakeProcessExecutor({
+          responses: new Map([
+            [
+              processCommandKey(["fake-cli", "--version"]),
+              ProcessResult.make({ stdout: ["1.0.0"], exitCode: 0 })
+            ],
+            [
+              processCommandKey(["fake-cli", "auth", "status"]),
+              ProcessResult.make({ stdout: ["logged out"], exitCode: 1 })
+            ]
+          ])
+        })
+        const connector = makeCliConnector({
+          ...cliPrimitives,
+          versionProbe: {
+            executor: fake.executor,
+            binary: "fake-cli",
+            cwd: "/repo",
+            authProbe: loggedOutIsInvalid
+          }
+        })
+        const health = yield* connector.healthCheck
+        const recorded = yield* fake.recorded
+
+        assert.strictEqual(health.availability, "Healthy")
+        assert.strictEqual(health.authStatus, "Invalid")
+        assert.isTrue(yield* connector.isAvailable)
+        assert.deepStrictEqual(
+          recorded.map((invocation) => invocation.argv),
+          [
+            ["fake-cli", "--version"],
+            ["fake-cli", "auth", "status"]
+          ]
+        )
+        assert.strictEqual(recorded[1]?.cwd, "/repo")
+      })
+  )
+
+  it.effect("reports Valid only when the auth probe says so", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["fake-cli", "--version"]),
+            ProcessResult.make({ stdout: ["1.0.0"], exitCode: 0 })
+          ],
+          [
+            processCommandKey(["fake-cli", "auth", "status"]),
+            ProcessResult.make({ stdout: ["logged in as someone"], exitCode: 0 })
+          ]
+        ])
+      })
+      const connector = makeCliConnector({
+        ...cliPrimitives,
+        versionProbe: { executor: fake.executor, binary: "fake-cli", authProbe: loggedOutIsInvalid }
+      })
+      const health = yield* connector.healthCheck
+      assert.strictEqual(health.availability, "Healthy")
+      assert.strictEqual(health.authStatus, "Valid")
+    })
+  )
+
+  it.effect("reports Unknown when the auth probe itself cannot run", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["fake-cli", "--version"]),
+            ProcessResult.make({ stdout: ["1.0.0"], exitCode: 0 })
+          ]
+        ])
+      })
+      const connector = makeCliConnector({
+        ...cliPrimitives,
+        versionProbe: { executor: fake.executor, binary: "fake-cli", authProbe: loggedOutIsInvalid }
+      })
+      const health = yield* connector.healthCheck
+      assert.strictEqual(health.availability, "Healthy")
+      assert.strictEqual(health.authStatus, "Unknown")
+    })
+  )
+
+  it.effect("does not ask about auth when the CLI is not installed", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor()
+      const connector = makeCliConnector({
+        ...cliPrimitives,
+        versionProbe: { executor: fake.executor, binary: "fake-cli", authProbe: loggedOutIsInvalid }
+      })
+      const health = yield* connector.healthCheck
+      const recorded = yield* fake.recorded
+      assert.strictEqual(health.availability, "Unhealthy")
+      assert.strictEqual(health.authStatus, "Unknown")
+      assert.strictEqual(recorded.length, 1)
     })
   )
 

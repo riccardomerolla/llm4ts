@@ -634,3 +634,11 @@ profile`, transcripts on by default and compacted on land. llm4zio's
   2026-10-06): `runQueue` spreads items over worktree shards
   (`LLM4TS_PORT_SHARDS`); `parseDiagnostics` reads javac and Maven error
   lines. llm4ts-only. Additive.
+- CLI auth probes (2026-10-22): a CLI connector's health check asks the
+  CLI's own offline login check after `--version` — `claude auth status
+--json`, `codex login status`, `pi auth check --model … --no-refresh`,
+  `cursor-agent status --format json` — and reports `authStatus` from its
+  answer; a CLI with no such check (gemini, gh copilot, opencode, grok,
+  antigravity) reports `Unknown`, which `llm4ts doctor` renders as
+  `auth: unknown (no probe)`. llm4zio sets `Valid` from the version probe
+  alone, which called an expired Claude session healthy. Stricter.
