@@ -16,6 +16,97 @@ export type GateClass = typeof GateClass.Type
 export const FailureOrigin = Schema.Literals(["new", "base", "flaky"])
 export type FailureOrigin = typeof FailureOrigin.Type
 
+/**
+ * Why a test gate's exit code proves nothing: the runner collected or ran
+ * zero tests, or test files failed to load (an import that no longer
+ * resolves, a suite that errors before its first test). Either makes the
+ * gate red whatever the runner's exit code was.
+ */
+export const GateReason = Schema.Literals(["zero-tests", "load-failure"])
+export type GateReason = typeof GateReason.Type
+
+// One suite that errored before its tests ran, per runner: Vitest's
+// "Failed Suites", Jest's "Test suite failed to run", pytest's collection
+// errors, JUnit's class initialisation error under Surefire.
+const loadFailureMarkers: ReadonlyArray<RegExp> = [
+  /Failed Suites\s+\d+/u,
+  /Test suite failed to run/u,
+  /\berrors? during collection\b/u,
+  /ExceptionInInitializerError|initializationError/u
+]
+const vitestNoTests = /\bTests\s+no tests\b/u
+const vitestFilesFailed = /\bTest Files\s+\d+ failed\b/u
+// Nothing collected: Vitest, Jest, pytest, Surefire, Gradle.
+const zeroTestsMarkers: ReadonlyArray<RegExp> = [
+  /No test files found/u,
+  vitestNoTests,
+  /No tests found, exiting with code/u,
+  /\bTests:\s+0 total\b/u,
+  /\bno tests ran\b/u,
+  /\bcollected 0 items\b/u,
+  /No tests to run\./u,
+  /No tests found for given includes/u
+]
+const cargoRunning = /\brunning (\d+) tests?\b/gu
+const junitRun = /\bTests run:\s*(\d+)/gu
+const mochaPassing = /^\s*0 passing\b/mu
+const mochaFailing = /^\s*\d+ failing\b/mu
+
+const everyCountZero = (pattern: RegExp, output: string): boolean => {
+  let seen = false
+  pattern.lastIndex = 0
+  for (let match = pattern.exec(output); match !== null; match = pattern.exec(output)) {
+    seen = true
+    if (Number.parseInt(match[1] ?? "0", 10) > 0) {
+      return false
+    }
+  }
+  return seen
+}
+
+/**
+ * The reason a test runner's output cannot stand for a green gate, when
+ * it has one: `load-failure` when any suite errored before its tests ran
+ * (it wins, since a load failure also leaves tests unrun), `zero-tests`
+ * when the runner collected nothing (Vitest, Jest, pytest, cargo test,
+ * mocha, JUnit via Maven or Gradle). `undefined` means tests ran.
+ */
+export const testGateReasonOf = (output: string): GateReason | undefined => {
+  if (loadFailureMarkers.some((pattern) => pattern.test(output))) {
+    return "load-failure"
+  }
+  if (vitestNoTests.test(output) && vitestFilesFailed.test(output)) {
+    return "load-failure"
+  }
+  if (zeroTestsMarkers.some((pattern) => pattern.test(output))) {
+    return "zero-tests"
+  }
+  if (everyCountZero(cargoRunning, output) || everyCountZero(junitRun, output)) {
+    return "zero-tests"
+  }
+  if (mochaPassing.test(output) && !mochaFailing.test(output)) {
+    return "zero-tests"
+  }
+  return undefined
+}
+
+/** The reason as the fix prompt and the findings read it. */
+export const describeGateReason = (reason: GateReason): string =>
+  reason === "zero-tests"
+    ? "test gate ran zero tests (zero-tests): the runner collected no test, so its exit code proves nothing"
+    : "test files failed to load (load-failure): a suite errored before its tests ran, so the gate is red whatever its exit code"
+
+/**
+ * The reason as a failing line, so a baseline records it and triage
+ * compares it like any other line: a target whose base already ran zero
+ * tests inherits that, a change that breaks loading is charged with it.
+ */
+export const gateReasonLine = (reason: GateReason): string => `gate reason: ${reason}`
+
+/** The first gate reason a result carries, if any. */
+export const gateReasonOf = (result: ReviewResult): GateReason | undefined =>
+  result.issues.find((issue) => isGateIssue(issue) && issue.gateReason !== undefined)?.gateReason
+
 export class GateBaseline extends Schema.Class<GateBaseline>("GateBaseline")({
   baseCommit: Schema.String,
   appDir: Schema.String,
@@ -87,17 +178,22 @@ const legacyGateIssuePrefix = "lint failed: "
 export const isGateIssue = (issue: ReviewIssue): boolean =>
   issue.title.startsWith(gateIssuePrefix) || issue.title.startsWith(legacyGateIssuePrefix)
 
+/** A gate issue's comparable lines: its reason first, then its normalized output. */
+const failingLinesOfIssue = (
+  issue: ReviewIssue,
+  roots: ReadonlyArray<string>
+): ReadonlyArray<string> => [
+  ...(issue.gateReason === undefined ? [] : [gateReasonLine(issue.gateReason)]),
+  ...normalizeGateOutput(issue.description, roots)
+]
+
 /** Every gate issue's normalized failing lines, in order, each once. */
 export const failingLinesOf = (
   result: ReviewResult,
   roots: ReadonlyArray<string>
 ): ReadonlyArray<string> =>
   Array.from(
-    new Set(
-      result.issues
-        .filter(isGateIssue)
-        .flatMap((issue) => normalizeGateOutput(issue.description, roots))
-    )
+    new Set(result.issues.filter(isGateIssue).flatMap((issue) => failingLinesOfIssue(issue, roots)))
   )
 
 export interface GateTriage {
@@ -134,18 +230,28 @@ export const triageGates = (
       issues.push(issue)
       continue
     }
-    const lines = normalizeGateOutput(issue.description, roots)
+    const lines = failingLinesOfIssue(issue, roots)
     const fresh = lines.filter((line) => !known.has(line))
     inherited.push(...lines.filter((line) => known.has(line)))
     if (lines.length > 0 && fresh.length === 0) {
       continue
     }
     newLines.push(...fresh)
+    // A fresh reason keeps its sentence, so the fix prompt says what the
+    // runner's output meant, not only which lines were new.
+    const reasonLine = issue.gateReason === undefined ? undefined : gateReasonLine(issue.gateReason)
+    const freshOutput = fresh.filter((line) => line !== reasonLine)
+    const description =
+      issue.gateReason !== undefined && fresh.includes(reasonLine ?? "")
+        ? [describeGateReason(issue.gateReason), ...freshOutput].join("\n")
+        : fresh.length > 0
+          ? fresh.join("\n")
+          : issue.description
     issues.push(
       ReviewIssue.make({
         ...issue,
         origin: "new",
-        description: fresh.length > 0 ? fresh.join("\n") : issue.description
+        description
       })
     )
   }

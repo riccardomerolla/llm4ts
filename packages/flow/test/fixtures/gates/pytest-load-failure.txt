@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.1, pytest-8.3.4, pluggy-1.5.0
+rootdir: /wt/a
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+____________________ ERROR collecting tests/test_config.py _____________________
+ImportError while importing test module '/wt/a/tests/test_config.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+tests/test_config.py:1: in <module>
+    from app.legacy import loader
+E   ModuleNotFoundError: No module named 'app.legacy'
+=========================== short test summary info ============================
+ERROR tests/test_config.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.12s ===============================

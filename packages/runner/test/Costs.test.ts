@@ -1,9 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import { TokenUsage } from "@llm4ts/core/Models"
-import { TokensUsed } from "@llm4ts/flow/FlowEvents"
-import { TraceLine } from "@llm4ts/flow/FlowRecorder"
-import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import { appendCostRecord, makeCostRecord } from "@llm4ts/flow/CostLedger"
+import { makeCostTracker } from "@llm4ts/flow/CostTracker"
+import { PersistenceError } from "@llm4ts/flow/FlowError"
+import { StageStarted, TokensUsed, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
+import { TraceLine, makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
+import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import {
   isTraceFileName,
   makeCostsProgram,
@@ -112,5 +116,92 @@ describe("makeCostsProgram", () => {
       assert.strictEqual(result.traces, 0)
       assert.match(renderCostsResult(result), /no usage recorded/)
     })
+  )
+})
+
+describe("a short trace and its ledger line", () => {
+  /** A store whose appends to `path` fail after `allowed` of them: the recorder degrades mid-run. */
+  const failingAfter = (
+    store: PlainFileStoreShape,
+    path: string,
+    allowed: number
+  ): Effect.Effect<PlainFileStoreShape> =>
+    Effect.map(Ref.make(0), (count) => ({
+      ...store,
+      append: (target, contents) =>
+        target !== path
+          ? store.append(target, contents)
+          : Ref.updateAndGet(count, (n) => n + 1).pipe(
+              Effect.flatMap((n) =>
+                n > allowed
+                  ? Effect.fail(PersistenceError.make({ message: "disk full" }))
+                  : store.append(target, contents)
+              )
+            )
+    }))
+
+  it.effect("llm4ts costs reports what the run's own summary and ledger line say", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const tracePath = "/a/.llm4ts/trace-9.jsonl"
+        const memory = yield* makeMemoryPlainFileStore()
+        const files = yield* failingAfter(memory.store, tracePath, 2)
+        const hub = yield* makeFlowEventHub()
+        const tracker = yield* makeCostTracker()
+        yield* tracker.consume(hub)
+        const recorder = yield* makeFlowRecorder(files, tracePath, "run-9")
+        yield* recorder.consume(hub)
+
+        yield* hub.publish(StageStarted.make({ stage: "implement" }))
+        yield* hub.publish(
+          TokensUsed.make({
+            agent: "coder",
+            model: "claude-sonnet-4",
+            usage: TokenUsage.make({ prompt: 900, completion: 100, total: 1_000, costUsd: 0.5 })
+          })
+        )
+        yield* hub.publish(
+          TokensUsed.make({
+            agent: "coder",
+            model: "claude-sonnet-4",
+            usage: TokenUsage.make({ prompt: 2_900, completion: 100, total: 3_000, costUsd: 1.5 })
+          })
+        )
+        yield* hub.publish(
+          TokensUsed.make({
+            agent: "reviewer",
+            model: "gpt-5.5",
+            usage: TokenUsage.make({ prompt: 1_900, completion: 100, total: 2_000 })
+          })
+        )
+        assert.isTrue(yield* tracker.awaitDrained(hub))
+        assert.isTrue(yield* recorder.awaitDrained(hub))
+        yield* recorder.end("completed")
+        assert.strictEqual((yield* recorder.shortfall)?.lines, 3)
+
+        const record = makeCostRecord({
+          runId: "run-9",
+          at: "2026-09-18T09:00:00.000Z",
+          repo: "/a",
+          prompt: "upgrade",
+          cells: yield* tracker.cells
+        })
+        yield* appendCostRecord(files, "/a/.llm4ts/costs.jsonl", record)
+
+        const result = yield* makeCostsProgram(
+          { repos: ["/a"] },
+          { files, listTraces: () => [tracePath] }
+        )
+        const report = result.report
+        assert.deepStrictEqual(result.ledgerRuns, ["run-9"])
+        // The trace kept one call; the ledger line knows all three.
+        assert.strictEqual(report.measured.requests, 1)
+        assert.strictEqual(report.measured.total, 6_000)
+        assert.strictEqual(report.measured.prompt, record.totalPrompt)
+        assert.strictEqual(report.measured.completion, record.totalCompletion)
+        assert.closeTo(report.measured.costUsd ?? 0, record.totalCostUsd ?? -1, 1e-9)
+        assert.match(renderCostsResult(result), /1 run completed from the cost ledger .*run-9/)
+      })
+    )
   )
 })

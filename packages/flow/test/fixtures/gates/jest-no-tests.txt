@@ -1,0 +1,8 @@
+No tests found, exiting with code 1
+Run with `--passWithNoTests` to exit with code 0
+In /wt/a
+  3 files checked.
+  testMatch: **/__tests__/**/*.[jt]s?(x), **/?(*.)+(spec|test).[jt]s?(x) - 0 matches
+  testPathIgnorePatterns: /node_modules/ - 3 matches
+  testRegex:  - 0 matches
+Pattern:  - 0 matches

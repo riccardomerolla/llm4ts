@@ -1,0 +1,28 @@
+
+ RUN  v4.1.10 /wt/a
+
+ ❯ test/config.test.ts (0 test)
+ ❯ test/other.test.ts (0 test)
+
+ Test Files  2 failed (2)
+      Tests  no tests
+   Start at  08:23:41
+   Duration  133ms (transform 0ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/config.test.ts [ test/config.test.ts ]
+ FAIL  test/other.test.ts [ test/other.test.ts ]
+Error: "./internal/doesNotExist" is not exported under the conditions ["node", "development", "import"] from package /wt/a/node_modules/effect (see exports field in /wt/a/node_modules/effect/package.json)
+  Plugin: builtin:vite-resolve
+ ❯ EnvironmentPluginContainer.resolveId node_modules/vite/dist/node/chunks/node.js:30117:19
+ ❯ TransformPluginContext.resolve node_modules/vite/dist/node/chunks/node.js:30346:13
+ ❯ normalizeUrl node_modules/vite/dist/node/chunks/node.js:27430:22
+ ❯ node_modules/vite/dist/node/chunks/node.js:27506:30
+ ❯ TransformPluginContext.transform node_modules/vite/dist/node/chunks/node.js:27474:4
+ ❯ EnvironmentPluginContainer.transform node_modules/vite/dist/node/chunks/node.js:30201:14
+ ❯ loadAndTransform node_modules/vite/dist/node/chunks/node.js:20124:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+

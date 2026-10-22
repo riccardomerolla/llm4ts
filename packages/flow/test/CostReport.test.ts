@@ -2,11 +2,13 @@ import { assert, describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Schema from "effect/Schema"
 import { TokenUsage } from "@llm4ts/core/Models"
+import { CostCell, makeCostRecord } from "@llm4ts/flow/CostLedger"
 import {
   CostReport,
   UsageProjection,
   UsageSample,
   buildCostReport,
+  reconcileWithLedger,
   renderCostReport,
   usageSamplesFromTrace
 } from "@llm4ts/flow/CostReport"
@@ -297,5 +299,78 @@ describe("buildCostReport", () => {
     const encoded = Schema.encodeSync(Schema.fromJsonString(CostReport))(report)
     const decoded = Schema.decodeSync(Schema.fromJsonString(CostReport))(encoded)
     assert.deepStrictEqual(decoded, report)
+  })
+})
+
+describe("reconcileWithLedger", () => {
+  const cell = (agent: string, model: string, total: number, costUsd: number): CostCell =>
+    CostCell.make({
+      stage: "implement",
+      agent,
+      model,
+      prompt: total - 1,
+      completion: 1,
+      total,
+      costUsd
+    })
+  const record = makeCostRecord({
+    runId: "run-1",
+    at: "2026-09-18T09:00:00.000Z",
+    repo: "/a",
+    prompt: "upgrade",
+    cells: [cell("coder", "claude-sonnet-4", 4_000, 0.75), cell("reviewer", "gpt-5.5", 2_000, 0.25)]
+  })
+
+  it("tops a short trace up from its ledger line, per agent and model, at the run's start", () => {
+    const traced = [
+      sample(at("2026-09-18T09:10:00Z"), "run-1", 1_000, { costUsd: 0.5 }),
+      sample(at("2026-09-19T10:00:00Z"), "run-2", 500, { costUsd: 0.1 })
+    ]
+    const { samples, filledRuns } = reconcileWithLedger(traced, [record])
+    assert.deepStrictEqual(filledRuns, ["run-1"])
+    const filled = samples.filter((entry) => entry.source === "ledger")
+    assert.deepStrictEqual(
+      filled.map((entry) => [
+        entry.runId,
+        entry.agent,
+        entry.model,
+        entry.total,
+        entry.costUsd,
+        entry.at
+      ]),
+      [
+        ["run-1", "coder", "claude-sonnet-4", 3_000, 0.25, at("2026-09-18T09:00:00Z")],
+        ["run-1", "reviewer", "gpt-5.5", 2_000, 0.25, at("2026-09-18T09:00:00Z")]
+      ]
+    )
+    const report = buildCostReport(samples.filter((entry) => entry.runId === "run-1"))
+    assert.closeTo(report.measured.costUsd ?? 0, record.totalCostUsd ?? -1, 1e-9)
+    assert.strictEqual(report.measured.total, 6_000)
+    // Only the trace's own call counts as a request; the remainder is the ledger's.
+    assert.strictEqual(report.measured.requests, 1)
+    assert.strictEqual(samples.filter((entry) => entry.runId === "run-2").length, 1)
+  })
+
+  it("a trace that matches its ledger line adds nothing", () => {
+    const traced = [
+      sample(at("2026-09-18T09:10:00Z"), "run-1", 4_000, { costUsd: 0.75 }),
+      sample(at("2026-09-18T09:20:00Z"), "run-1", 2_000, {
+        costUsd: 0.25,
+        model: "gpt-5.5",
+        agent: "reviewer"
+      })
+    ]
+    const { samples, filledRuns } = reconcileWithLedger(traced, [record])
+    assert.deepStrictEqual(filledRuns, [])
+    assert.strictEqual(samples.length, 2)
+  })
+
+  it("a run with no trace at all is taken wholly from its line", () => {
+    const { samples, filledRuns } = reconcileWithLedger([], [record])
+    assert.deepStrictEqual(filledRuns, ["run-1"])
+    const report = buildCostReport(samples)
+    assert.strictEqual(report.runs, 1)
+    assert.strictEqual(report.measured.requests, 0)
+    assert.closeTo(report.measured.costUsd ?? 0, record.totalCostUsd ?? -1, 1e-9)
   })
 })

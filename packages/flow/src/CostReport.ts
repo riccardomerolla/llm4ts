@@ -1,7 +1,9 @@
 import * as DateTime from "effect/DateTime"
+import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type { TokenUsage } from "@llm4ts/core/Models"
+import type { CostRecord } from "./CostLedger.ts"
 import { isEstimatedModel } from "./EstimatedUsage.ts"
 import { TokensUsed, cloneName } from "./FlowEvents.ts"
 import type { TraceLine } from "./FlowRecorder.ts"
@@ -16,9 +18,21 @@ import { estimateCostUsd, PricesAsOf } from "./PriceList.ts"
  * backend's own token counts) and estimated usage (`EstimatedUsage`'s
  * character-count fallback, labelled `estimated:<model>`) are kept in separate
  * columns so a budget never mistakes one for the other.
+ *
+ * The trace is the source for timing, the cost ledger (`CostLedger`) for the
+ * run's total: both come from the same `TokensUsed` events, but the trace is
+ * a file in the target's working tree that a coder's shell, a `git clean`
+ * or a recorder that lost its disk can shorten, while the ledger line is
+ * written once from the run's own cost tracker, the same numbers the run
+ * printed. `reconcileWithLedger` tops a short trace up from its ledger line,
+ * so `llm4ts costs` and the run's summary agree.
  */
 
 export const UnknownModel = "(unknown)"
+
+/** Where a sample's numbers came from: a trace line, or the run's ledger line filling a short trace. */
+export const UsageSource = Schema.Literals(["trace", "ledger"])
+export type UsageSource = typeof UsageSource.Type
 
 export class UsageSample extends Schema.Class<UsageSample>("UsageSample")({
   /** Epoch milliseconds of the token report. */
@@ -34,7 +48,11 @@ export class UsageSample extends Schema.Class<UsageSample>("UsageSample")({
   estimated: Schema.Boolean,
   /** The lane's executor and clone, when the usage came from a roster lane (ADR 0033). */
   executor: Schema.optionalKey(Schema.String),
-  clone: Schema.optionalKey(Schema.Int)
+  clone: Schema.optionalKey(Schema.Int),
+  source: UsageSource.pipe(
+    Schema.withConstructorDefault(Effect.succeed("trace" as const)),
+    Schema.withDecodingDefaultKey(Effect.succeed("trace" as const))
+  )
 }) {}
 
 export class UsageTotals extends Schema.Class<UsageTotals>("UsageTotals")({
@@ -173,13 +191,145 @@ const totalsOf = (samples: ReadonlyArray<UsageSample>): UsageTotals => {
   const cached = sumOptional(samples.map((sample) => sample.cached))
   const costUsd = sumOptional(samples.map((sample) => sample.costUsd))
   return UsageTotals.make({
-    requests: samples.length,
+    // A ledger sample is a remainder, not a call the trace saw.
+    requests: samples.filter((sample) => sample.source === "trace").length,
     prompt: samples.reduce((sum, sample) => sum + sample.prompt, 0),
     completion: samples.reduce((sum, sample) => sum + sample.completion, 0),
     total: samples.reduce((sum, sample) => sum + sample.total, 0),
     ...(cached === undefined ? {} : { cached }),
     ...(costUsd === undefined ? {} : { costUsd })
   })
+}
+
+interface UsageSums {
+  prompt: number
+  completion: number
+  total: number
+  cached: number | undefined
+  costUsd: number | undefined
+}
+
+const emptySums = (): UsageSums => ({
+  prompt: 0,
+  completion: 0,
+  total: 0,
+  cached: undefined,
+  costUsd: undefined
+})
+
+const addSums = (into: UsageSums, usage: UsageSums): UsageSums => ({
+  prompt: into.prompt + usage.prompt,
+  completion: into.completion + usage.completion,
+  total: into.total + usage.total,
+  cached: sumOptional([into.cached, usage.cached]),
+  costUsd: sumOptional([into.costUsd, usage.costUsd])
+})
+
+const positive = (value: number): number => (value > 0 ? value : 0)
+
+/** What `b` has beyond `a`, per field, never below zero. */
+const remainderOf = (ledger: UsageSums, trace: UsageSums): UsageSums => ({
+  prompt: positive(ledger.prompt - trace.prompt),
+  completion: positive(ledger.completion - trace.completion),
+  total: positive(ledger.total - trace.total),
+  cached: ledger.cached === undefined ? undefined : positive(ledger.cached - (trace.cached ?? 0)),
+  costUsd:
+    ledger.costUsd === undefined ? undefined : positive(ledger.costUsd - (trace.costUsd ?? 0))
+})
+
+const hasRemainder = (sums: UsageSums): boolean =>
+  sums.prompt > 0 ||
+  sums.completion > 0 ||
+  sums.total > 0 ||
+  (sums.cached ?? 0) > 0 ||
+  (sums.costUsd ?? 0) > 1e-9
+
+interface UsageRow {
+  readonly agent: string
+  readonly model: string
+  readonly prompt: number
+  readonly completion: number
+  readonly total: number
+  readonly cached?: number
+  readonly costUsd?: number
+}
+
+/** A run's sums per agent and model, from its trace samples or its ledger cells. */
+const sumsByAgentModel = (
+  rows: ReadonlyArray<UsageRow>
+): ReadonlyMap<
+  string,
+  { readonly agent: string; readonly model: string; readonly sums: UsageSums }
+> => {
+  const groups = new Map<string, { agent: string; model: string; sums: UsageSums }>()
+  for (const row of rows) {
+    const key = JSON.stringify([row.agent, row.model])
+    const group = groups.get(key) ?? { agent: row.agent, model: row.model, sums: emptySums() }
+    groups.set(key, {
+      ...group,
+      sums: addSums(group.sums, {
+        prompt: row.prompt,
+        completion: row.completion,
+        total: row.total,
+        cached: row.cached,
+        costUsd: row.costUsd
+      })
+    })
+  }
+  return groups
+}
+
+export interface LedgerReconciliation {
+  readonly samples: ReadonlyArray<UsageSample>
+  /** Runs whose ledger line carried usage the trace did not: filled, in ledger order. */
+  readonly filledRuns: ReadonlyArray<string>
+}
+
+/**
+ * Tops the trace's samples up from the ledger: for every ledger record, what
+ * its cells hold beyond the trace's samples of that run, per agent and
+ * model, becomes one `ledger` sample at the run's start (the only time the
+ * ledger knows). A run with no trace at all is taken wholly from its line;
+ * a run whose trace matches its line adds nothing. The result's total
+ * therefore equals the ledger's, which is what the run itself printed.
+ */
+export const reconcileWithLedger = (
+  samples: ReadonlyArray<UsageSample>,
+  records: ReadonlyArray<CostRecord>
+): LedgerReconciliation => {
+  const filled: Array<UsageSample> = []
+  const filledRuns: Array<string> = []
+  for (const record of records) {
+    const traced = sumsByAgentModel(samples.filter((sample) => sample.runId === record.runId))
+    const ledgered = sumsByAgentModel(record.cells)
+    let filledThisRun = false
+    for (const [key, { agent, model, sums }] of ledgered) {
+      const remainder = remainderOf(sums, traced.get(key)?.sums ?? emptySums())
+      if (!hasRemainder(remainder)) {
+        continue
+      }
+      filledThisRun = true
+      filled.push(
+        UsageSample.make({
+          at: Date.parse(record.at),
+          runId: record.runId,
+          agent,
+          model,
+          prompt: remainder.prompt,
+          completion: remainder.completion,
+          total: remainder.total,
+          ...(remainder.cached === undefined ? {} : { cached: remainder.cached }),
+          ...(remainder.costUsd === undefined ? {} : { costUsd: remainder.costUsd }),
+          estimated: isEstimatedModel(model),
+          source: "ledger"
+        })
+      )
+    }
+    if (filledThisRun) {
+      filledRuns.push(record.runId)
+    }
+  }
+  return { samples: [...samples, ...filled], filledRuns }
 }
 
 const distinctRuns = (samples: ReadonlyArray<UsageSample>): number =>

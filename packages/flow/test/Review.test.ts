@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -621,6 +622,70 @@ describe("structured-output robustness", () => {
 
       assert.strictEqual(error._tag, "Llm")
       assert.strictEqual(yield* Ref.get(calls), 2)
+    })
+  )
+})
+
+describe("lintCommand test gate reasons", () => {
+  const fixture = (name: string): string =>
+    readFileSync(new URL(`./fixtures/gates/${name}`, import.meta.url), "utf8")
+  const exitsZeroWith = (output: string) =>
+    makeProcessExecutor({
+      run: () => Effect.succeed(ProcessResult.make({ stdout: output.split("\n"), exitCode: 0 })),
+      runStreaming: () => Stream.empty
+    })
+
+  it.effect("a green exit over test files that failed to load is red with a typed reason", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const result = yield* lintCommand(
+        exitsZeroWith(fixture("vitest-load-failure.txt")),
+        events,
+        ["pnpm", "test"],
+        "/wt/a"
+      )
+      assert.isFalse(result.isClean)
+      const issue = result.issues[0]
+      assert.strictEqual(issue?.gateReason, "load-failure")
+      assert.strictEqual(issue?.gateClass, "red")
+      assert.strictEqual(issue?.title, "gate failed: pnpm test")
+      assert.include(issue?.description ?? "", "test files failed to load (load-failure)")
+      assert.include(issue?.description ?? "", "FAIL  test/config.test.ts")
+      assert.strictEqual(result.passed, 0)
+      const timed = (yield* events.recorded).find((event) => event._tag === "Timed")
+      assert.deepStrictEqual(timed?._tag === "Timed" ? [timed.exitCode, timed.failed] : undefined, [
+        0,
+        true
+      ])
+    })
+  )
+
+  it.effect("a green exit that ran zero tests is red with `zero-tests`", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const result = yield* lintCommand(
+        exitsZeroWith(fixture("surefire-no-tests.txt")),
+        events,
+        ["mvn", "-B", "test"],
+        "/wt/a"
+      )
+      assert.strictEqual(result.issues[0]?.gateReason, "zero-tests")
+      assert.include(result.issues[0]?.description ?? "", "No tests to run.")
+      assert.strictEqual(result.passed, 0)
+    })
+  )
+
+  it.effect("a green exit whose tests ran stays green with its count", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      const result = yield* lintCommand(
+        exitsZeroWith(fixture("vitest-green.txt")),
+        events,
+        ["pnpm", "test"],
+        "/wt/a"
+      )
+      assert.isTrue(result.isClean)
+      assert.strictEqual(result.passed, 1)
     })
   )
 })

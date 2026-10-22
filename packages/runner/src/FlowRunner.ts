@@ -1110,6 +1110,22 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
         ),
         Effect.andThen(tree === undefined ? Effect.void : tree.close),
         Effect.andThen(appendLedger),
+        // A trace that lost lines says so here, once; the ledger line above
+        // is complete, and `llm4ts costs` reads it for this run's remainder.
+        Effect.andThen(
+          recorder === undefined
+            ? Effect.void
+            : Effect.flatMap(recorder.shortfall, (shortfall) =>
+                shortfall === undefined
+                  ? Effect.void
+                  : surface.log(
+                      palette.fail(
+                        `trace short: ${shortfall.lines} line${shortfall.lines === 1 ? "" : "s"} not recorded after "${shortfall.reason}" — ` +
+                          "the cost ledger line is complete, and llm4ts costs reads it for this run"
+                      )
+                    )
+              )
+        ),
         Effect.andThen(surface.setStatus(undefined)),
         Effect.andThen(tracker.summary),
         Effect.flatMap((summary) => surface.log(`\n${summary}`))

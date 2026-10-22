@@ -1,0 +1,27 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] -----------------------------< fx:notests >-----------------------------
+[INFO] Building notests 1.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ notests ---
+[INFO] skip non existing resourceDirectory /wt/a/src/main/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ notests ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ notests ---
+[INFO] skip non existing resourceDirectory /wt/a/src/test/resources
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ notests ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.3:test (default-test) @ notests ---
+[INFO] No tests to run.
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.281 s
+[INFO] Finished at: 2026-10-22T08:26:03+02:00
+[INFO] ------------------------------------------------------------------------

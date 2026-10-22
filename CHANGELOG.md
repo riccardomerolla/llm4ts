@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+Two things a run could say that were not true: a green test gate that ran
+no test, and a cost total `llm4ts costs` disagreed with.
+
+- **A test gate that ran zero tests, or whose test files failed to load, is
+  red whatever the runner exited with.** `lintCommand` reads the runner's
+  output after every gate (`GateTriage.testGateReasonOf`): Vitest's
+  `No test files found` and `Tests  no tests`, Jest's `No tests found` and
+  `Test suite failed to run`, pytest's `no tests ran` and collection errors,
+  cargo's `running 0 tests`, mocha's `0 passing`, Surefire's `No tests to
+run.` and `Tests run: 0`, and a JUnit class that fails to initialise. The
+  issue carries a typed `gateReason` (`zero-tests` or `load-failure`) and
+  opens with what it means, so the fix prompt, the story's findings and the
+  review see the reason, not only the output; the gate's `Timed` event says
+  `failed`. The reason is also a failing line of the baseline, so a target
+  whose base already ran no tests inherits that (ADR 0027) while a change
+  that breaks loading is charged with it. Recorded Vitest 4 and Surefire 3.5
+  output sits under `packages/flow/test/fixtures/gates/`. On 2026-10-22 an
+  `implement` run finished green while all its test files failed on import
+  (an `@effect/vitest` beta importing a module effect 4.0.0 no longer has);
+  that run had also run no gate at all, which is a separate matter.
+- **`llm4ts costs` reports what each run's own summary and ledger line say.**
+  The trace is a file in the target's working tree, and a run's trace can
+  lose lines there (the run that printed $2.95 had a trace starting at line
+  132, the coder's shell having seen the file; `llm4ts costs` then said
+  $1.02). The report now reads each repository's `.llm4ts/costs.jsonl` and
+  tops every run's trace samples up from its ledger line per agent and
+  model (`CostReport.reconcileWithLedger`), the remainder stamped at the
+  run's start with `source: "ledger"`; a run with no trace at all is taken
+  wholly from its line. The text output names the runs completed this way;
+  `--json` lists them as `ledgerRuns`. `requests` counts trace samples only.
+- **A trace that lost lines says so.** `FlowRecorder.shortfall` counts every
+  line from the first failed write on, with the error, and the runner prints
+  `trace short: N lines not recorded …` beside the cost summary instead of
+  leaving a quietly short trace.
+
 ## 2.45.0
 
 epic-stories takes its gates and worktree setup from the selected pack.
