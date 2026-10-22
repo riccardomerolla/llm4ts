@@ -19,7 +19,14 @@ import {
   type FlowError
 } from "./FlowError.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
-import { GateBaseline, gateIssuePrefix, isGateIssue, triageGates } from "./GateTriage.ts"
+import {
+  GateBaseline,
+  describeGateReason,
+  gateIssuePrefix,
+  isGateIssue,
+  testGateReasonOf,
+  triageGates
+} from "./GateTriage.ts"
 import {
   type OracleRules,
   checkOracle,
@@ -75,6 +82,8 @@ export class ReviewIssue extends Schema.Class<ReviewIssue>("ReviewIssue")({
   origin: Schema.optionalKey(Schema.Literals(["new", "base", "flaky"])),
   /** How a gate ended: a red exit, killed at the timeout, or a signal exit. */
   gateClass: Schema.optionalKey(Schema.Literals(["red", "hang", "crash"])),
+  /** Why a test gate's output could not stand for green: no tests ran, or test files failed to load. */
+  gateReason: Schema.optionalKey(Schema.Literals(["zero-tests", "load-failure"])),
   /** Where the gate's full output was written, when the caller asked for a log. */
   logPath: Schema.optionalKey(Schema.String)
 }) {}
@@ -538,7 +547,11 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
       )
     )
   )
-  const failed = result === undefined || result.exitCode !== 0
+  const output = result === undefined ? "" : [...result.stdout, ...result.stderr].join("\n")
+  // A runner that collected nothing, or whose files failed to load, is red
+  // whatever it exited with: a green exit over zero tests proves nothing.
+  const reason = result === undefined ? undefined : testGateReasonOf(output)
+  const failed = result === undefined || result.exitCode !== 0 || reason !== undefined
   yield* events.publish(
     Timed.make({
       kind: "gate",
@@ -550,16 +563,15 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
   )
   let logPath: string | undefined
   if (options.log !== undefined) {
-    const output =
-      result === undefined ? "" : [...result.stdout, ...result.stderr].join("\n").trim()
-    yield* options.log.files.writeAtomic(options.log.path, output)
+    yield* options.log.files.writeAtomic(options.log.path, output.trim())
     logPath = options.log.path
   }
+  // No summary line to count and a reason not to trust the run: zero passed.
   const passed =
     result === undefined
       ? undefined
-      : passedCountIn([...result.stdout, ...result.stderr].join("\n"))
-  if (result !== undefined && result.exitCode === 0) {
+      : (passedCountIn(output) ?? (reason === undefined ? undefined : 0))
+  if (!failed) {
     return ReviewResult.make({
       issues: [],
       summary: "lint passed",
@@ -568,16 +580,18 @@ export const lintCommand = Effect.fn("@llm4ts/flow/Review.lintCommand")(function
   }
   const seconds =
     options.timeout === undefined ? 0 : Math.round(Duration.toSeconds(options.timeout))
+  const problem =
+    result === undefined
+      ? `gate killed: no exit after ${seconds} seconds (LLM4TS_GATE_TIMEOUT)`
+      : processProblem(result.stdout, result.stderr, result.exitCode)
   return ReviewResult.make({
     issues: [
       ReviewIssue.make({
         severity: "Critical",
         title: `${gateIssuePrefix}${label}`,
-        description:
-          result === undefined
-            ? `gate killed: no exit after ${seconds} seconds (LLM4TS_GATE_TIMEOUT)`
-            : processProblem(result.stdout, result.stderr, result.exitCode),
+        description: reason === undefined ? problem : `${describeGateReason(reason)}\n\n${problem}`,
         gateClass: result === undefined ? "hang" : gateClassOf(result.exitCode),
+        ...(reason === undefined ? {} : { gateReason: reason }),
         ...(logPath === undefined ? {} : { logPath })
       })
     ],

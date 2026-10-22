@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
@@ -10,12 +11,16 @@ import {
   baselinesPath,
   compactGateArtifacts,
   compactGateLog,
+  describeGateReason,
   failingLinesOf,
   gateLogName,
+  gateReasonLine,
+  gateReasonOf,
   gatesIn,
   normalizeGateOutput,
   readBaseline,
   storyGateLogDir,
+  testGateReasonOf,
   triageGates,
   writeBaseline
 } from "@llm4ts/flow/Gates"
@@ -37,6 +42,10 @@ const tscRed = [
   "/Users/x/wt/a/src/app.ts(7,3): error TS2322: Type 'string' is not assignable to type 'number'.",
   "Found 1 error in src/app.ts:7"
 ].join("\n")
+
+/** Recorded runner output (see fixtures/gates/README.md). */
+const fixture = (name: string): string =>
+  readFileSync(new URL(`./fixtures/gates/${name}`, import.meta.url), "utf8")
 
 const gateIssue = (command: string, output: string): ReviewIssue =>
   ReviewIssue.make({
@@ -338,4 +347,109 @@ describe("compactGateLog and compactGateArtifacts", () => {
       assert.strictEqual(files[`${stateDir}/stories/a.findings.md`], "untouched")
     })
   )
+})
+
+describe("testGateReasonOf", () => {
+  it("reads a load failure from recorded Vitest and Surefire output", () => {
+    assert.strictEqual(testGateReasonOf(fixture("vitest-load-failure.txt")), "load-failure")
+    assert.strictEqual(testGateReasonOf(fixture("surefire-load-failure.txt")), "load-failure")
+  })
+
+  it("reads zero tests from recorded output, whatever the runner exited with", () => {
+    assert.strictEqual(testGateReasonOf(fixture("vitest-no-test-files.txt")), "zero-tests")
+    assert.strictEqual(testGateReasonOf(fixture("vitest-no-test-files-pass.txt")), "zero-tests")
+    assert.strictEqual(testGateReasonOf(fixture("surefire-no-tests.txt")), "zero-tests")
+  })
+
+  it("knows Jest's and pytest's shapes too", () => {
+    assert.strictEqual(testGateReasonOf(fixture("jest-load-failure.txt")), "load-failure")
+    assert.strictEqual(testGateReasonOf(fixture("jest-no-tests.txt")), "zero-tests")
+    assert.strictEqual(testGateReasonOf(fixture("pytest-load-failure.txt")), "load-failure")
+    assert.strictEqual(testGateReasonOf(fixture("pytest-no-tests.txt")), "zero-tests")
+    assert.strictEqual(
+      testGateReasonOf("running 0 tests\n\ntest result: ok. 0 passed"),
+      "zero-tests"
+    )
+    assert.strictEqual(
+      testGateReasonOf("Tests run: 0, Failures: 0, Errors: 0, Skipped: 0"),
+      "zero-tests"
+    )
+    assert.strictEqual(testGateReasonOf("\n  0 passing (1ms)\n"), "zero-tests")
+  })
+
+  it("a run whose tests ran has no reason, red or green", () => {
+    assert.isUndefined(testGateReasonOf(fixture("vitest-green.txt")))
+    assert.isUndefined(testGateReasonOf(vitestRed))
+    assert.isUndefined(testGateReasonOf(tscRed))
+    assert.isUndefined(testGateReasonOf("test result: ok. 11 passed; 0 failed; 0 ignored"))
+    // cargo's doc-tests print their own `running 0 tests` beside the unit tests.
+    assert.isUndefined(testGateReasonOf("running 12 tests\n...\nrunning 0 tests\n"))
+    assert.isUndefined(testGateReasonOf("Tests run: 5, Failures: 0\nTests run: 0, Failures: 0"))
+    assert.isUndefined(testGateReasonOf("\n  0 passing (2s)\n  3 failing\n"))
+    assert.isUndefined(testGateReasonOf("Tests:       1 failed, 11 passed, 12 total"))
+    assert.isUndefined(testGateReasonOf(""))
+  })
+})
+
+describe("triage of gate reasons", () => {
+  const roots = ["/wt/a"]
+  const zeroTests = ReviewResult.make({
+    issues: [
+      ReviewIssue.make({
+        severity: "Critical",
+        title: "gate failed: mvn -q test",
+        description: `${describeGateReason("zero-tests")}\n\n${fixture("surefire-no-tests.txt")}`,
+        gateClass: "red",
+        gateReason: "zero-tests"
+      })
+    ],
+    summary: "gate failed"
+  })
+
+  it("a baseline records the reason as a failing line", () => {
+    assert.deepStrictEqual(failingLinesOf(zeroTests, roots), [gateReasonLine("zero-tests")])
+    assert.strictEqual(gateReasonOf(zeroTests), "zero-tests")
+  })
+
+  it("a reason the base already had is inherited, not charged", () => {
+    const baseline = GateBaseline.make({
+      baseCommit: "abc",
+      appDir: ".",
+      commands: ["mvn -q test"],
+      failingLines: [gateReasonLine("zero-tests")],
+      recordedAt: 1
+    })
+    const triage = triageGates(zeroTests, baseline, roots)
+    assert.isTrue(triage.blocking.isClean)
+    assert.deepStrictEqual(triage.inherited, [gateReasonLine("zero-tests")])
+  })
+
+  it("a fresh reason blocks, its sentence first, and the reason stays typed", () => {
+    const baseline = GateBaseline.make({
+      baseCommit: "abc",
+      appDir: ".",
+      commands: ["pnpm test"],
+      failingLines: [],
+      recordedAt: 1
+    })
+    const loadFailure = ReviewResult.make({
+      issues: [
+        ReviewIssue.make({
+          severity: "Critical",
+          title: "gate failed: pnpm test",
+          description: `${describeGateReason("load-failure")}\n\n${fixture("vitest-load-failure.txt")}`,
+          gateClass: "red",
+          gateReason: "load-failure"
+        })
+      ],
+      summary: "gate failed"
+    })
+    const triage = triageGates(loadFailure, baseline, roots)
+    const issue = triage.blocking.issues[0]
+    assert.strictEqual(issue?.origin, "new")
+    assert.strictEqual(issue?.gateReason, "load-failure")
+    assert.isTrue(issue?.description.startsWith(describeGateReason("load-failure")))
+    assert.include(issue?.description ?? "", "FAIL test/config.test.ts [ test/config.test.ts ]")
+    assert.include(triage.newLines, gateReasonLine("load-failure"))
+  })
 })

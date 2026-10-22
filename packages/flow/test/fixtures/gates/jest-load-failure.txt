@@ -1,0 +1,17 @@
+ FAIL  test/config.test.ts
+  ● Test suite failed to run
+
+    Cannot find module 'effect/internal/doesNotExist' from 'test/config.test.ts'
+
+      1 | import { it, assert } from "@effect/vitest"
+    > 2 | import { something } from "effect/internal/doesNotExist"
+        | ^
+      3 |
+
+      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/resolver.js:427:11)
+
+Test Suites: 1 failed, 1 total
+Tests:       0 total
+Snapshots:   0 total
+Time:        0.512 s
+Ran all test suites.

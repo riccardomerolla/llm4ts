@@ -24,9 +24,18 @@ export class TraceLine extends Schema.Class<TraceLine>("TraceLine")({
 export const RunOutcome = Schema.Literals(["completed", "failed", "interrupted"])
 export type RunOutcome = typeof RunOutcome.Type
 
+/** Lines the recorder could not write: the trace is short by this much, from the first failure on. */
+export interface TraceShortfall {
+  readonly lines: number
+  /** The first write failure, as the file store described it. */
+  readonly reason: string
+}
+
 export interface FlowRecorderShape extends StreamRecorder {
   readonly runId: string
   readonly tracePath: string
+  /** What the trace is missing, once a write failed; `undefined` while every line landed. */
+  readonly shortfall: Effect.Effect<TraceShortfall | undefined>
   readonly record: (event: FlowEvent) => Effect.Effect<void>
   readonly consume: (hub: FlowEventHub) => Effect.Effect<void, never, Scope.Scope>
   /** Appends the `RunEnded` line: a reader knows the run is over, not stalled. */
@@ -53,12 +62,18 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
   const sequence = yield* Ref.make(0)
   const consumed = yield* Ref.make(0)
   const lock = yield* Semaphore.make(1)
-  const degraded = yield* Ref.make(false)
+  // Set by the first failed write and never cleared: a disk that refused one
+  // line is not asked again, but every line it then loses is counted, so
+  // the run can say how short its trace is (`llm4ts costs` reads the
+  // ledger for the rest).
+  const degraded = yield* Ref.make<TraceShortfall | undefined>(undefined)
 
   const append = (kind: string, fields: Readonly<Record<string, JsonValue>>): Effect.Effect<void> =>
     lock.withPermit(
       Effect.gen(function* () {
-        if (yield* Ref.get(degraded)) {
+        const shortfall = yield* Ref.get(degraded)
+        if (shortfall !== undefined) {
+          yield* Ref.set(degraded, { ...shortfall, lines: shortfall.lines + 1 })
           return
         }
         const seq = yield* Ref.getAndUpdate(sequence, (current) => current + 1)
@@ -73,7 +88,7 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
         })
         yield* files
           .append(tracePath, `${encode(line)}\n`)
-          .pipe(Effect.catch(() => Ref.set(degraded, true)))
+          .pipe(Effect.catch((error) => Ref.set(degraded, { lines: 1, reason: error.message })))
       })
     )
 
@@ -83,6 +98,7 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
   const recorder: FlowRecorderShape = {
     runId,
     tracePath,
+    shortfall: Ref.get(degraded),
     record,
     rawLine: (provider, model, line) =>
       append("RawLine", {

@@ -4,7 +4,11 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { Board, BoardVersion } from "@llm4ts/flow/BoardSync"
 import { loadCostLedger } from "@llm4ts/flow/CostLedger"
-import { buildCostReport, usageSamplesFromTrace } from "@llm4ts/flow/CostReport"
+import {
+  buildCostReport,
+  reconcileWithLedger,
+  usageSamplesFromTrace
+} from "@llm4ts/flow/CostReport"
 import { describeFlowError, type FlowError } from "@llm4ts/flow/FlowError"
 import { FlowEvent } from "@llm4ts/flow/FlowEvents"
 import { RunOutcome, type TraceLine } from "@llm4ts/flow/FlowRecorder"
@@ -369,6 +373,18 @@ export const runDiagnosisOf = (
 
 const ledgerTolerance = 0.005
 
+const costOf = (report: {
+  readonly measured: { readonly costUsd?: number }
+  readonly estimated: { readonly costUsd?: number }
+}): number => (report.measured.costUsd ?? 0) + (report.estimated.costUsd ?? 0)
+
+/**
+ * One run's costs: its trace folded and topped up from its `costs.jsonl`
+ * line (`CostReport.reconcileWithLedger`), so `total` is what the run itself
+ * printed even when the trace lost lines; `fromLedger` is how much of it the
+ * ledger supplied. `differs` is left for a trace that says more than the
+ * ledger, which no line can fill.
+ */
 export const costsOfRun = (
   files: PlainFileStoreShape,
   tracePath: string,
@@ -377,16 +393,21 @@ export const costsOfRun = (
 ): Effect.Effect<CostsOut, TraceUnreadable> =>
   Effect.gen(function* () {
     const lines = yield* readLines(files, tracePath)
-    const report = buildCostReport(usageSamplesFromTrace(lines))
-    const total = (report.measured.costUsd ?? 0) + (report.estimated.costUsd ?? 0)
+    const traced = usageSamplesFromTrace(lines)
     const records = yield* loadCostLedger(files, ledgerPath).pipe(
       Effect.mapError(unreadable(ledgerPath))
     )
-    const ledger = records.find((record) => record.runId === runId)?.totalCostUsd
+    const record = records.find((candidate) => candidate.runId === runId)
+    const reconciled = record === undefined ? traced : reconcileWithLedger(traced, [record]).samples
+    const report = buildCostReport(reconciled)
+    const total = costOf(report)
+    const fromLedger = total - costOf(buildCostReport(traced))
+    const ledger = record?.totalCostUsd
     return CostsOut.make({
       report,
       total,
       ...(ledger === undefined ? {} : { ledger }),
+      ...(fromLedger > ledgerTolerance ? { fromLedger } : {}),
       differs: ledger !== undefined && Math.abs(total - ledger) > ledgerTolerance
     })
   })

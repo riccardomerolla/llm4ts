@@ -137,9 +137,11 @@ about them. The design is
      diagnosis carries gate log tails. Both shapes
      are bounded by `chars` (default 12000). Plain runs are covered because
      the motivating session ran `implement`, which has tasks and no stories.
-   - `costs`: for one run, the trace fold as `total` with the `costs.jsonl`
-     ledger figure beside it as `ledger` and a `differs` flag; without a run
-     id, the repository's costs over every trace, as `llm4ts costs` reports.
+   - `costs`: for one run, the trace fold topped up from its `costs.jsonl`
+     line as `total`, the ledger figure beside it as `ledger`, `fromLedger`
+     when the trace was short, and a `differs` flag for a trace that says
+     more than the ledger; without a run id, the repository's costs over
+     every trace and ledger line, as `llm4ts costs` reports.
    - `profile` (where a run's time went) and `retro_list` (an epic's retros
      with their approval and applied state).
 

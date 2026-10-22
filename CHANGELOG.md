@@ -63,7 +63,6 @@ A chat agent can run llm4ts through MCP instead of a shell (ADR 0041).
   `@llm4ts/shell/FlowProcess`, `OperatorActTools`, `OperatorConfig`,
   `OperatorNode`, `OperatorRuns`, `OperatorServer`, `OperatorTools`,
   `RunSupervisor`, `ShellErrors`.
-
 - **`.llm4ts/` is never committed by a flow.** The first write under
   `<repo>/.llm4ts/` leaves a `.gitignore` there containing `*` (an ignore
   file already present is kept as it is), so traces, plans, transcripts
@@ -96,17 +95,6 @@ A chat agent can run llm4ts through MCP instead of a shell (ADR 0041).
   because its trial ports are written under `.llm4ts/port/trial/` by the
   coder. A roster seat or a connector config that sets `deniedPaths`
   itself keeps it.
-
-Known, not fixed here:
-
-- `llm4ts doctor` reports a CLI healthy when its login has expired; the
-  probe checks the binary, not the session.
-- `llm4ts costs` and a run's own summary can disagree.
-- A run can call itself green while every test file fails on load; a gate
-  that counts zero tests as a pass lets that through.
-- Steering a running story (retry, skip, add a story, approve mid-run)
-  needs a control inbox the scheduler polls. It is the next project, and
-  its tools will register on this server.
 - **A version probe is no longer a login.** On 2026-10-21 doctor called
   `claude` healthy with `auth: valid` while its OAuth session had expired;
   the flow died five seconds later with "OAuth session expired and could not
@@ -127,6 +115,46 @@ Known, not fixed here:
   `collectDoctorReport` and the MCP `preflight` tool report such a seat
   with `probe: "auth"`; `probe: "version"` still means only `--version`
   ran, and its `authStatus` is then `Unknown`, never `Valid`.
+- **A test gate that ran zero tests, or whose test files failed to load, is
+  red whatever the runner exited with.** `lintCommand` reads the runner's
+  output after every gate (`GateTriage.testGateReasonOf`): Vitest's
+  `No test files found` and `Tests  no tests`, Jest's `No tests found` and
+  `Test suite failed to run`, pytest's `no tests ran` and collection errors,
+  cargo's `running 0 tests`, mocha's `0 passing`, Surefire's `No tests to
+run.` and `Tests run: 0`, and a JUnit class that fails to initialise. The
+  issue carries a typed `gateReason` (`zero-tests` or `load-failure`) and
+  opens with what it means, so the fix prompt, the story's findings and the
+  review see the reason, not only the output; the gate's `Timed` event says
+  `failed`. The reason is also a failing line of the baseline, so a target
+  whose base already ran no tests inherits that (ADR 0027) while a change
+  that breaks loading is charged with it. Recorded Vitest 4 and Surefire 3.5
+  output sits under `packages/flow/test/fixtures/gates/`. On 2026-10-22 an
+  `implement` run finished green while all its test files failed on import
+  (an `@effect/vitest` beta importing a module effect 4.0.0 no longer has);
+  that run had also run no gate at all, which is a separate matter.
+- **`llm4ts costs` reports what each run's own summary and ledger line say.**
+  The trace is a file in the target's working tree, and a run's trace can
+  lose lines there (the run that printed $2.95 had a trace starting at line
+  132, the coder's shell having seen the file; `llm4ts costs` then said
+  $1.02). The report now reads each repository's `.llm4ts/costs.jsonl` and
+  tops every run's trace samples up from its ledger line per agent and
+  model (`CostReport.reconcileWithLedger`), the remainder stamped at the
+  run's start with `source: "ledger"`; a run with no trace at all is taken
+  wholly from its line. The text output names the runs completed this way;
+  `--json` lists them as `ledgerRuns`. `requests` counts trace samples only.
+  The MCP `costs` tool does the same for one run: `total` is the reconciled
+  figure, `fromLedger` what the ledger line supplied, and `differs` is left
+  for a trace that says more than its line.
+- **A trace that lost lines says so.** `FlowRecorder.shortfall` counts every
+  line from the first failed write on, with the error, and the runner prints
+  `trace short: N lines not recorded …` beside the cost summary instead of
+  leaving a quietly short trace.
+
+Known, not fixed here:
+
+- Steering a running story (retry, skip, add a story, approve mid-run)
+  needs a control inbox the scheduler polls. It is the next project, and
+  its tools will register on this server.
 
 ## 2.45.0
 

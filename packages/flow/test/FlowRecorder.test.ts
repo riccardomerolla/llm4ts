@@ -92,10 +92,14 @@ describe("FlowRecorder", () => {
         hashSha256: (_path) => Effect.succeed("")
       }
       const recorder = yield* makeFlowRecorder(failing, "trace.jsonl", "run-3")
+      assert.isUndefined(yield* recorder.shortfall)
       yield* recorder.record(Info.make({ message: "first" }))
       yield* recorder.record(Info.make({ message: "second" }))
+      yield* recorder.end("completed")
 
       assert.strictEqual(yield* Ref.get(attempts), 1)
+      // Every line from the first failure on is counted, so the run can say how short the trace is.
+      assert.deepStrictEqual(yield* recorder.shortfall, { lines: 3, reason: "disk unavailable" })
     })
   )
 })

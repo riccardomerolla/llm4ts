@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import { TokenUsage } from "@llm4ts/core/Models"
-import { CostRecord } from "@llm4ts/flow/CostLedger"
+import { CostCell, CostRecord } from "@llm4ts/flow/CostLedger"
 import {
   Aborted,
   Info,
@@ -156,37 +156,64 @@ describe("RunReaders", () => {
     })
   )
 
-  it.effect("costsOfRun flags a ledger that disagrees", () =>
-    Effect.gen(function* () {
-      const used = TokensUsed.make({
-        agent: "coder",
-        model: "m",
-        usage: TokenUsage.make({ prompt: 10, completion: 5, total: 15, costUsd: 1.5 })
+  it.effect(
+    "costsOfRun tops a short trace up from its ledger line, and flags a trace that says more",
+    () =>
+      Effect.gen(function* () {
+        const used = TokensUsed.make({
+          agent: "coder",
+          model: "m",
+          usage: TokenUsage.make({ prompt: 10, completion: 5, total: 15, costUsd: 1.5 })
+        })
+        const recordOf = (runId: string, costUsd: number): CostRecord =>
+          CostRecord.make({
+            schemaVersion: 1,
+            runId,
+            at: "2026-10-22T00:00:00Z",
+            repo: "/repo",
+            promptHead: "",
+            promptHash: "h",
+            pricesAsOf: "2026-01-01",
+            cells: [
+              CostCell.make({
+                stage: "implement",
+                agent: "coder",
+                model: "m",
+                prompt: 10,
+                completion: 5,
+                total: 15,
+                costUsd
+              })
+            ],
+            totalPrompt: 10,
+            totalCompletion: 5,
+            totalCostUsd: costUsd
+          })
+        const files = yield* storeOf({
+          "/t/trace.jsonl": encode([event(1, used)]),
+          "/t/costs.jsonl":
+            [recordOf("run-1", 2), recordOf("run-2", 1)]
+              .map((record) => JSON.stringify(record))
+              .join("\n") + "\n"
+        })
+        // The trace holds $1.50 of a $2 run: the ledger line supplies the rest.
+        const costs = yield* costsOfRun(files, "/t/trace.jsonl", "/t/costs.jsonl", "run-1")
+        assert.strictEqual(costs.total, 2)
+        assert.strictEqual(costs.ledger, 2)
+        assert.closeTo(costs.fromLedger ?? 0, 0.5, 1e-9)
+        assert.isFalse(costs.differs)
+        // A trace that says more than its ledger line cannot be filled: it differs.
+        const trace = yield* storeOf({
+          "/t/trace.jsonl": encode([event(1, used)]),
+          "/t/costs.jsonl": JSON.stringify(recordOf("run-1", 1)) + "\n"
+        })
+        const more = yield* costsOfRun(trace, "/t/trace.jsonl", "/t/costs.jsonl", "run-1")
+        assert.strictEqual(more.total, 1.5)
+        assert.isUndefined(more.fromLedger)
+        assert.isTrue(more.differs)
+        const none = yield* costsOfRun(files, "/t/trace.jsonl", "/t/costs.jsonl", "other")
+        assert.isUndefined(none.ledger)
+        assert.isFalse(none.differs)
       })
-      const record = CostRecord.make({
-        schemaVersion: 1,
-        runId: "run-1",
-        at: "2026-10-22T00:00:00Z",
-        repo: "/repo",
-        promptHead: "",
-        promptHash: "h",
-        pricesAsOf: "2026-01-01",
-        cells: [],
-        totalPrompt: 10,
-        totalCompletion: 5,
-        totalCostUsd: 2
-      })
-      const files = yield* storeOf({
-        "/t/trace.jsonl": encode([event(1, used)]),
-        "/t/costs.jsonl": JSON.stringify(record) + "\n"
-      })
-      const costs = yield* costsOfRun(files, "/t/trace.jsonl", "/t/costs.jsonl", "run-1")
-      assert.strictEqual(costs.total, 1.5)
-      assert.strictEqual(costs.ledger, 2)
-      assert.isTrue(costs.differs)
-      const none = yield* costsOfRun(files, "/t/trace.jsonl", "/t/costs.jsonl", "other")
-      assert.isUndefined(none.ledger)
-      assert.isFalse(none.differs)
-    })
   )
 })
