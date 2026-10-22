@@ -1,5 +1,78 @@
 # Changelog
 
+## 2.46.0
+
+A chat agent can run llm4ts through MCP instead of a shell (ADR 0041).
+
+- **`llm4ts mcp`** serves llm4ts to an MCP client (Grok Bot, Claude Code,
+  Cursor). With no transport flag, or `--stdio`, it speaks MCP on stdin and
+  stdout. `--http` serves `/mcp` on `127.0.0.1:4321` (`--host`, `--port`)
+  and refuses to start without a bearer token from `LLM4TS_MCP_TOKEN` or
+  `--token-file`; a request without the exact `Authorization: Bearer`
+  header gets a bare `401`. The token is never logged, and the request log
+  holds the method, the tool, the duration and the status, never the
+  arguments. Repositories come from `--repo` (repeatable) or
+  `~/.config/llm4ts/mcp.json`, and the client names them by id, never by
+  path.
+- **Read tools, always listed:** `preflight`, `list_flows`, `list_epics`,
+  `list_runs`, `run_status`, `run_wait`, `run_events`, `run_log`,
+  `story_detail`, `diagnose`, `transcript_tail`, `costs`, `profile`,
+  `retro_list`. `run_wait` long-polls the trace and returns the next
+  meaningful events, or nothing after `timeoutSeconds` (default 120, at
+  most 300). `run_status` and `run_wait` carry a one-line `summary` from
+  `summarizeTree` (`@llm4ts/runner/RunSummary`). `diagnose` covers an epic
+  story (the retro digest for that story) and a plain run (the failing
+  stage or task). `costs` gives the trace total, the ledger's figure beside
+  it, and `differs` when they disagree.
+- **Act tools, only when allowed:** `start_run`, `stop_run` and
+  `retro_start` with `--allow-run`; `approve` (kind `retro`) with
+  `--allow-approve`. A tool not allowed is absent from `tools/list`. Every
+  client value is checked before it reaches the flow's argv or environment:
+  `pack`, `epic`, `coder`, executors and `land` are names, `task` may not
+  start with `-` or `@`, and `flags` refuses `--repo`, `-C`,
+  `--prompt-file`, the typed knob flags, `--allow-mutating`, `--yes`,
+  `--env` and `--target`.
+- **A run supervisor.** The server starts each flow as a child process
+  with its stdout and stderr in files, and passes `LLM4TS_RUN_ID` and
+  `LLM4TS_TRACE_PATH`, which every flow now honours. Its registry and logs
+  live in `${XDG_STATE_HOME:-~/.local/state}/llm4ts/mcp/<repoId>/`, outside
+  the checkout. One flow that writes the checkout runs per repository
+  (`--parallel-runs` raises it; `epic-retro` is exempt), and `start_run`
+  with a repeated `requestId` returns the run it already started.
+  `stop_run`, and stopping the server, send SIGINT, then SIGTERM after 30 s.
+  A run whose process died while no server watched it is marked `lost`.
+- **Ctrl-C ends a flow cleanly.** The first SIGINT now interrupts the flow:
+  finalizers run and the trace ends with `RunEnded{interrupted}`. A second
+  SIGINT exits at once with 130, as Ctrl-C did before.
+- **The doctor's `probe`.** `collectDoctorReport`
+  (`@llm4ts/runner/Doctor`) returns the doctor's findings as data, and each
+  connector says how far its health was checked: `probe: "version"` means
+  only `<cli> --version` ran and proves no live login. `llm4ts doctor`
+  prints what it printed before.
+- **A Grok Bot operator template.** `docs/grok-bot/operator.md` holds the
+  bot's rules, two routines, the install steps for the server behind an
+  ssh forward, and the local stdio variant. The `using-llm4ts` skill now
+  prefers the server's tools when one is configured.
+- New subpath exports: `@llm4ts/flow/OperatorSchemas`;
+  `@llm4ts/runner/RunReaders`, `RunSummary`, `StoryReaders`;
+  `@llm4ts/shell/FlowProcess`, `OperatorActTools`, `OperatorConfig`,
+  `OperatorNode`, `OperatorRuns`, `OperatorServer`, `OperatorTools`,
+  `RunSupervisor`, `ShellErrors`.
+
+Known, not fixed here:
+
+- `llm4ts doctor` reports a CLI healthy when its login has expired; the
+  probe checks the binary, not the session.
+- A coder can delete `.llm4ts/` and the trace of an earlier run with it.
+- Flows can commit run artefacts (plans, traces), which reviewers then read
+  at real cost. `.llm4ts/` should carry its own `.gitignore`.
+- `llm4ts costs` and a run's own summary can disagree.
+- A run can call itself green while every test file fails on load; a gate
+  that counts zero tests as a pass lets that through.
+- Steering a running story (retry, skip, add a story, approve mid-run)
+  needs a control inbox the scheduler polls. It is the next project, and
+  its tools will register on this server.
+
 ## 2.45.0
 
 epic-stories takes its gates and worktree setup from the selected pack.

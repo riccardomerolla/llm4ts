@@ -1016,11 +1016,13 @@ const mcpCommand = Command.make(
     ),
     allowApprove: Flag.Boolean("allow-approve").pipe(
       Flag.withDefault(false),
-      Flag.withDescription("Offer the tools that approve a plan or a retro")
+      Flag.withDescription("Offer the approve tool, which ticks a retro report's approval marker")
     ),
     parallelRuns: Flag.Int("parallel-runs").pipe(
       Flag.optional,
-      Flag.withDescription("Flows that may run at once across all repositories (default 1)")
+      Flag.withDescription(
+        "Flows that write a checkout and may run at once per repository (default 1)"
+      )
     )
   },
   (flags) =>
