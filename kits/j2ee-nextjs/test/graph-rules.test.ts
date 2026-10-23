@@ -216,3 +216,90 @@ describe("j2ee-nextjs-spa on a classic web.xml (jsp-file servlets, forms posting
     })
   )
 })
+
+describe("j2ee-nextjs-spa on nested JSPs calling REST resources and server-side Java", () => {
+  it.effect(
+    "static and dynamic includes, ajax → REST resource, useBean, scriptlet and EL bean refs all link",
+    () =>
+      Effect.gen(function* () {
+        const kits = yield* makeNodeWorkspace(kitsRoot)
+        const pack = yield* loadPack(kits, "j2ee-nextjs/packs/j2ee-nextjs-spa")
+        const estate = yield* makeMemoryWorkspace()
+        yield* estate.write(
+          "web/pages/fattura.jsp",
+          [
+            '<%@ include file="/pages/header.jspf" %>',
+            '<jsp:include page="dettaglio.jsp"/>',
+            '<jsp:useBean id="svc" class="com.bank.svc.InvoiceService" scope="request"/>',
+            "<% Totals.compute(svc); %>",
+            "<p>${invoiceBean.total}</p>",
+            "<script>",
+            "  $.ajax({ url: '/bank/rest/invoices/' + id, type: 'GET' });",
+            '  $.getJSON("rest/reports/monthly");',
+            "</script>",
+            ""
+          ].join("\n")
+        )
+        yield* estate.write("web/pages/header.jspf", "<h1>Banca</h1>\n")
+        yield* estate.write("web/pages/dettaglio.jsp", "<p>detail</p>\n")
+        yield* estate.write(
+          "src/com/bank/rest/InvoiceResource.java",
+          [
+            "package com.bank.rest;",
+            '@Path("/invoices")',
+            "@Produces(MediaType.APPLICATION_JSON)",
+            "public class InvoiceResource {",
+            '  @GET @Path("/{id}") public Invoice get(@PathParam("id") long id) { return null; }',
+            "}",
+            ""
+          ].join("\n")
+        )
+        yield* estate.write(
+          "src/com/bank/rest/ReportResource.java",
+          [
+            "package com.bank.rest;",
+            "@RestController",
+            '@RequestMapping("/reports")',
+            "public class ReportResource {}",
+            ""
+          ].join("\n")
+        )
+        yield* estate.write(
+          "src/com/bank/svc/InvoiceService.java",
+          "package com.bank.svc;\npublic class InvoiceService {}\n"
+        )
+        yield* estate.write(
+          "src/com/bank/svc/Totals.java",
+          "package com.bank.svc;\npublic class Totals {}\n"
+        )
+        yield* estate.write(
+          "src/com/bank/web/InvoiceBean.java",
+          "package com.bank.web;\n@Named\n@RequestScoped\npublic class InvoiceBean {}\n"
+        )
+        const { graph } = yield* buildCodeGraph(estate, {
+          sources: pack.sources ?? ".*",
+          coverage: pack.coverage,
+          rules: pack.graph
+        })
+        const projected = projectToFiles(graph)
+        assert.deepStrictEqual(
+          projected.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`).sort(),
+          [
+            "fattura->InvoiceBean:jsp-el-bean",
+            "fattura->InvoiceResource:jsp-ajax-rest",
+            "fattura->InvoiceService:jsp-usebean",
+            "fattura->ReportResource:jsp-ajax-rest",
+            "fattura->Totals:jsp-static-call",
+            "fattura->dettaglio:jsp-include",
+            "fattura->header:jsp-static-include"
+          ]
+        )
+        assert.isFalse(
+          graph.unresolved.some(
+            (item) => item.reason === "join-from" || item.reason === "isolated"
+          ),
+          graph.unresolved.map((item) => `${item.reason}:${item.node}`).join(", ")
+        )
+      })
+  )
+})

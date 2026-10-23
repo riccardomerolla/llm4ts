@@ -6,6 +6,7 @@ import {
   edgeRuleOfSurvey,
   emptyGraphRules,
   matchUrl,
+  matchUrlPath,
   normalizeUrl,
   type EdgeRule,
   type GraphRules,
@@ -768,7 +769,12 @@ const joinEdges = (
         )
         continue
       }
-      const request = rule.match === "url" ? normalizeUrl(raw) : raw.trim()
+      const request =
+        rule.match === "url" || rule.match === "url-path"
+          ? normalizeUrl(raw)
+          : rule.match === "exact-ci"
+            ? raw.trim().toLowerCase()
+            : raw.trim()
       const inScope = targets.filter((target) =>
         rule.scope === "file"
           ? target.path === source.path
@@ -784,9 +790,15 @@ const joinEdges = (
         const how: JoinMatch | undefined =
           rule.match === "url"
             ? matchUrl(request, value)
-            : value.trim() === request
-              ? "exact"
-              : undefined
+            : rule.match === "url-path"
+              ? matchUrlPath(request, value)
+              : rule.match === "exact-ci"
+                ? value.trim().toLowerCase() === request
+                  ? "exact"
+                  : undefined
+                : value.trim() === request
+                  ? "exact"
+                  : undefined
         return how === undefined ? [] : [{ target, how, value }]
       })
       // Servlet-spec order: exact beats the longest prefix beats an extension.
@@ -830,9 +842,9 @@ const joinEdges = (
   // A join source is a hole only when NO rule of its kind matched it and
   // nothing else links from it — a form whose action an Edge rule resolved
   // to a page, or a mapping wired by the other servlet-wiring section, is not.
-  const joinedFrom = new Set(edges.map((edge) => `${edge.kind}\u0000${edge.from}`))
-  for (const [key, miss] of missed) {
-    if (joinedFrom.has(key) || linked.has(nodeId(miss.source))) {
+  const joinedFrom = new Set(edges.map((edge) => edge.from))
+  for (const miss of missed.values()) {
+    if (joinedFrom.has(nodeId(miss.source)) || linked.has(nodeId(miss.source))) {
       continue
     }
     unresolved.push(

@@ -2,7 +2,7 @@
 
 source: jsp
 scaffold: ../../scaffolds/nextjs-spa
-sources: .*\.(jsp|js|java|xml)$
+sources: .*\.(jsp|jspf|js|java|xml)$
 spec-schema: pagespec
 programs: .*\.jsp
 specs-dir: docs/modernization/specs
@@ -45,6 +45,11 @@ unit: url:\s*['"]([^'"]+)['"]
 files: .*\.jsp$
 unit: <jsp:include page="([^"]+)"
 
+## Survey: jsp-static-include
+
+files: .*\.jspf?$
+unit: <%@\s*include\s+file="([^"]+)"
+
 ## Survey: servlet-class
 
 files: .*web\.xml$
@@ -74,6 +79,39 @@ files: .*web\.xml$
 pattern: <servlet>(?:(?!</servlet>)[\s\S])*?<servlet-name>(?<name>[^<]+)</servlet-name>(?:(?!</servlet>)[\s\S])*?<servlet-class>(?:[a-z0-9_]+\.)*(?<class>[A-Za-z0-9_]+)</servlet-class>
 descriptor: yes
 anchor: class
+
+## Node: rest-resource
+
+files: .*\.java$
+pattern: @(?:Path|RequestMapping)\(\s*(?:value\s*=\s*)?"(?<url>[^"]+)"\s*\)(?:\s*@\w+(?:\([^)]*\))?)*\s*public\s+(?:abstract\s+)?class\s+(?<name>\w+)
+
+## Node: java-bean
+
+files: .*\.java$
+pattern: @(?:Named|ManagedBean|Stateless|Stateful|Singleton|Component|Service|Controller)\b(?:\([^)]*\))?(?:\s*@\w+(?:\([^)]*\))?)*\s*public\s+class\s+(?<name>\w+)
+
+## Node: el-bean-ref
+
+files: .*\.jspf?$
+pattern: \$\{(?<name>[a-z]\w*)\.
+
+## Edge: jsp-usebean
+
+files: .*\.jspf?$
+pattern: <jsp:useBean\b[^>]*\bclass="(?:[\w]+\.)*(?<to>\w+)"
+unknown: drop
+
+## Edge: jsp-static-call
+
+files: .*\.jspf?$
+pattern: \b(?<to>[A-Z][A-Za-z0-9]+)\.[a-z]\w*\(
+unknown: drop
+
+## Edge: jsp-new
+
+files: .*\.jspf?$
+pattern: \bnew\s+(?<to>[A-Z]\w*)\s*\(
+unknown: drop
 
 ## Node: servlet-jsp
 
@@ -126,6 +164,18 @@ from: form.url
 to: servlet-mapping.url
 match: url
 
+## Join: jsp-ajax-rest
+
+from: ajax-call.url
+to: rest-resource.url
+match: url-path
+
+## Join: jsp-el-bean
+
+from: el-bean-ref.name
+to: java-bean.name
+match: exact-ci
+
 ## Join: servlet-wiring
 
 from: servlet-mapping.name
@@ -140,5 +190,5 @@ scope: file
 
 ## Consolidate
 
-- cluster: jsp-form-action, jsp-ajax-target, jsp-form-to-page, jsp-ajax-to-page
-- context: jsp-include
+- cluster: jsp-form-action, jsp-ajax-target, jsp-form-to-page, jsp-ajax-to-page, jsp-ajax-rest
+- context: jsp-include, jsp-static-include

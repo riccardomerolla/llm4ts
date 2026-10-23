@@ -95,11 +95,27 @@ const packs = [
     specsDir: "docs/modernization/specs",
     featuresDir: "docs/modernization/features",
     coverage: ["servlet-url", "jsp-form", "jsp-ajax"],
-    survey: ["jsp-include", "servlet-class"],
+    survey: ["jsp-include", "jsp-static-include", "servlet-class"],
     graph: {
-      nodes: ["ajax-call", "form", "servlet-mapping", "servlet-decl", "servlet-jsp"],
+      nodes: [
+        "ajax-call",
+        "form",
+        "servlet-mapping",
+        "servlet-decl",
+        "rest-resource",
+        "java-bean",
+        "el-bean-ref",
+        "servlet-jsp"
+      ],
       edges: ["jsp-form-to-page", "jsp-ajax-to-page"],
-      joins: ["jsp-ajax-target", "jsp-form-action", "servlet-wiring", "servlet-wiring"],
+      joins: [
+        "jsp-ajax-target",
+        "jsp-form-action",
+        "jsp-ajax-rest",
+        "jsp-el-bean",
+        "servlet-wiring",
+        "servlet-wiring"
+      ],
       probes: []
     },
     replay: false

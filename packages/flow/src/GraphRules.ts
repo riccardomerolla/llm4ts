@@ -39,7 +39,15 @@ export class EdgeRule extends Schema.Class<EdgeRule>("EdgeRule")({
   unknown: Schema.optionalKey(Schema.Literals(["keep", "drop"]))
 }) {}
 
-export const JoinMatchMode = Schema.Literals(["exact", "url"])
+/**
+ * `exact`: trimmed string equality. `exact-ci`: the same ignoring case (an EL
+ * `${invoiceBean}` against a class `InvoiceBean`). `url`: servlet-spec
+ * matching of a request against a `url-pattern`. `url-path`: the target's
+ * path segments occur contiguously inside the request's, `{param}` matching
+ * any one segment — a JAX-RS `@Path("/invoices")` under a context root and
+ * an application path, called as `/bank/rest/invoices/42`.
+ */
+export const JoinMatchMode = Schema.Literals(["exact", "exact-ci", "url", "url-path"])
 export type JoinMatchMode = typeof JoinMatchMode.Type
 export const JoinScope = Schema.Literals(["estate", "app", "file"])
 export type JoinScope = typeof JoinScope.Type
@@ -212,7 +220,15 @@ export const parseGraphRules = (
         if (from === undefined || to === undefined) {
           return yield* fail(`'${heading}' needs 'from: <kind>.<attr>' and 'to: <kind>.<attr>'`)
         }
-        const match: JoinMatchMode = fields.match === "url" ? "url" : "exact"
+        const modes: ReadonlyArray<JoinMatchMode> = ["exact", "exact-ci", "url", "url-path"]
+        const match = modes.find((mode) => mode === (fields.match ?? "exact"))
+        if (match === undefined) {
+          return yield* fail(
+            `'${heading}' match: must be one of ${modes.join(", ")}, got '${fields.match}'`
+          )
+        }
+        // A servlet url-pattern is per web app; a REST resource class usually
+        // lives outside the app directory, so url-path defaults to the estate.
         const scope: JoinScope =
           fields.scope === "file" || fields.scope === "app" || fields.scope === "estate"
             ? fields.scope
@@ -305,6 +321,35 @@ export const matchUrl = (request: string, pattern: string): JoinMatch | undefine
   if (target.endsWith("/*")) {
     const prefix = target.slice(0, -2)
     return request === prefix || request.startsWith(`${prefix}/`) ? "prefix" : undefined
+  }
+  return undefined
+}
+
+const segmentsOf = (url: string): ReadonlyArray<string> =>
+  url.split("/").filter((s) => s.length > 0)
+
+/**
+ * `url-path` matching: the pattern's segments occur contiguously, in order,
+ * somewhere in the request's; `{param}` matches any single segment. A pattern
+ * with no literal segment never matches.
+ */
+export const matchUrlPath = (request: string, pattern: string): JoinMatch | undefined => {
+  const want = segmentsOf(normalizeUrl(pattern))
+  const have = segmentsOf(request)
+  if (
+    want.length === 0 ||
+    want.every((segment) => /^\{.*\}$/.test(segment)) ||
+    want.length > have.length
+  ) {
+    return undefined
+  }
+  for (let start = 0; start + want.length <= have.length; start += 1) {
+    const hit = want.every(
+      (segment, index) => /^\{.*\}$/.test(segment) || segment === have[start + index]
+    )
+    if (hit) {
+      return "prefix"
+    }
   }
   return undefined
 }
