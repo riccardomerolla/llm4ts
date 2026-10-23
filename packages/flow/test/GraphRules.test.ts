@@ -4,6 +4,7 @@ import {
   edgeKindsOf,
   graphRulesHash,
   matchUrl,
+  matchUrlPath,
   normalizeUrl,
   parseGraphRules
 } from "@llm4ts/flow/GraphRules"
@@ -130,4 +131,38 @@ describe("graph rules", () => {
     assert.strictEqual(matchUrl("/salvaFattura.do", "*.do"), "extension")
     assert.strictEqual(matchUrl("/other", "/api/*"), undefined)
   })
+})
+
+describe("url-path and exact-ci joins", () => {
+  it("url-path finds the resource's segments inside a request under a context root", () => {
+    assert.strictEqual(matchUrlPath("/bank/rest/invoices/42", "/invoices"), "prefix")
+    assert.strictEqual(matchUrlPath("/bank/rest/invoices/42", "/invoices/{id}"), "prefix")
+    assert.strictEqual(matchUrlPath("/bank/rest/invoices/42", "/reports"), undefined)
+    assert.strictEqual(matchUrlPath("/bank/rest/invoices", "/{anything}"), undefined)
+    assert.strictEqual(matchUrlPath("/a", "/a/b"), undefined)
+  })
+
+  it.effect(
+    "parses the new modes, rejects an unknown one, and defaults url-path to the estate scope",
+    () =>
+      Effect.gen(function* () {
+        const rules = yield* parseGraphRules(
+          sections(
+            "## Node: a\nfiles: .*\npattern: (?<name>x)\n\n## Join: j\nfrom: a.url\nto: a.url\nmatch: url-path\n\n## Join: k\nfrom: a.name\nto: a.name\nmatch: exact-ci\n"
+          ),
+          []
+        )
+        assert.deepStrictEqual(
+          rules.joins.map((rule) => `${rule.match}/${rule.scope}`),
+          ["url-path/estate", "exact-ci/estate"]
+        )
+        const bad = yield* parseGraphRules(
+          sections(
+            "## Node: a\nfiles: .*\npattern: (?<name>x)\n\n## Join: j\nfrom: a.url\nto: a.url\nmatch: fuzzy\n"
+          ),
+          []
+        ).pipe(Effect.flip)
+        assert.include(bad.message, "fuzzy")
+      })
+  )
 })

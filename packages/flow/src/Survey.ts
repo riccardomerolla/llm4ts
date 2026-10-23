@@ -6,6 +6,7 @@ import {
   edgeRuleOfSurvey,
   emptyGraphRules,
   matchUrl,
+  matchUrlPath,
   normalizeUrl,
   type EdgeRule,
   type GraphRules,
@@ -641,8 +642,11 @@ const scanEdges = (
               .filter((node) => nodeLineStart(node) >= startLine && nodeLineStart(node) <= endLine)
               .map(nodeId)
           )
-        } else if (target.found || rule.toKind === "file") {
+        } else if (target.found || (rule.toKind === "file" && rule.unknown !== "drop")) {
           targets.push(target.id)
+        }
+        if (!target.found && rule.unknown === "drop") {
+          continue
         }
         if (!target.found) {
           unresolved.push(
@@ -732,7 +736,9 @@ const joinEdges = (
   nodes: ReadonlyArray<SurveyNode>,
   fills: ReadonlyArray<Fill>,
   rules: ReadonlyArray<JoinRule>,
-  roots: ReadonlyArray<string>
+  roots: ReadonlyArray<string>,
+  /** Ids that already have an outgoing captured edge: a source an Edge rule resolved is no join hole. */
+  linked: ReadonlySet<string>
 ): {
   readonly edges: ReadonlyArray<SurveyEdge>
   readonly unresolved: ReadonlyArray<Unresolved>
@@ -741,6 +747,11 @@ const joinEdges = (
   const edges: Array<SurveyEdge> = []
   const unresolved: Array<Unresolved> = []
   const seen = new Set<string>()
+  /** `kind\0source` of every source that had the attr but no match under some rule of that kind. */
+  const missed = new Map<
+    string,
+    { readonly rule: JoinRule; readonly source: SurveyNode; readonly raw: string }
+  >()
   for (const rule of rules) {
     const sources = nodes.filter((node) => nodeKind(node) === rule.fromKind)
     const targets = nodes.filter((node) => nodeKind(node) === rule.toKind)
@@ -758,7 +769,12 @@ const joinEdges = (
         )
         continue
       }
-      const request = rule.match === "url" ? normalizeUrl(raw) : raw.trim()
+      const request =
+        rule.match === "url" || rule.match === "url-path"
+          ? normalizeUrl(raw)
+          : rule.match === "exact-ci"
+            ? raw.trim().toLowerCase()
+            : raw.trim()
       const inScope = targets.filter((target) =>
         rule.scope === "file"
           ? target.path === source.path
@@ -774,9 +790,15 @@ const joinEdges = (
         const how: JoinMatch | undefined =
           rule.match === "url"
             ? matchUrl(request, value)
-            : value.trim() === request
-              ? "exact"
-              : undefined
+            : rule.match === "url-path"
+              ? matchUrlPath(request, value)
+              : rule.match === "exact-ci"
+                ? value.trim().toLowerCase() === request
+                  ? "exact"
+                  : undefined
+                : value.trim() === request
+                  ? "exact"
+                  : undefined
         return how === undefined ? [] : [{ target, how, value }]
       })
       // Servlet-spec order: exact beats the longest prefix beats an extension.
@@ -785,16 +807,10 @@ const joinEdges = (
           joinRank[left.how] - joinRank[right.how] || right.value.length - left.value.length
       )[0]
       if (best === undefined) {
-        unresolved.push(
-          Unresolved.make({
-            reason: "join-from",
-            rule: rule.kind,
-            node: nodeId(source),
-            reference: raw,
-            file: source.path,
-            line: nodeLineStart(source)
-          })
-        )
+        const key = `${rule.kind}\u0000${nodeId(source)}`
+        if (!missed.has(key)) {
+          missed.set(key, { rule, source, raw })
+        }
         continue
       }
       const inferred =
@@ -822,6 +838,25 @@ const joinEdges = (
         )
       }
     }
+  }
+  // A join source is a hole only when NO rule of its kind matched it and
+  // nothing else links from it — a form whose action an Edge rule resolved
+  // to a page, or a mapping wired by the other servlet-wiring section, is not.
+  const joinedFrom = new Set(edges.map((edge) => edge.from))
+  for (const miss of missed.values()) {
+    if (joinedFrom.has(nodeId(miss.source)) || linked.has(nodeId(miss.source))) {
+      continue
+    }
+    unresolved.push(
+      Unresolved.make({
+        reason: "join-from",
+        rule: miss.rule.kind,
+        node: nodeId(miss.source),
+        reference: miss.raw,
+        file: miss.source.path,
+        line: nodeLineStart(miss.source)
+      })
+    )
   }
   // A join target nothing reaches, reported once per node whatever the kind:
   // a mapping hit by a form but by no ajax call is wired, not a hole.
@@ -863,16 +898,31 @@ export const applyFillsAndJoins = (
 ): SurveyGraph => {
   const nodes = withFills(graph.nodes, fills)
   const kept = graph.edges.filter((edge) => !(edge.mechanism ?? "").startsWith("join:"))
-  const joined = joinEdges(nodes, fills, rules.joins, appRoots(paths))
+  const joined = joinEdges(
+    nodes,
+    fills,
+    rules.joins,
+    appRoots(paths),
+    new Set(kept.map((edge) => edge.from))
+  )
   const edges = [...kept, ...joined.edges]
   const projected = projectToFiles(SurveyGraph.make({ nodes, edges, unresolved: [], fills }))
   // A file that only holds wiring records (web.xml) is a descriptor file, not
-  // a unit nothing references: it never counts as isolated.
+  // a unit nothing references: it never counts as isolated. Nor does a file no
+  // rule scans: a DTO under `sources:` with no Java rule is unscanned, not dead.
+  // A file that owns sub-file nodes is structured, not dead: its holes are
+  // reported per node (an ajax call nothing maps), never as `isolated` too.
   const wiringFiles = new Set(nodes.filter(isDescriptor).map((node) => node.path))
+  const structured = new Set(
+    nodes.filter((node) => nodeKind(node) !== "file").map((node) => node.path)
+  )
+  const scanned = [...rules.nodes, ...rules.edges].map((rule) => new RegExp(rule.files))
   const isolated = projected.nodes
     .filter(
       (node) =>
         !wiringFiles.has(node.path) &&
+        !structured.has(node.path) &&
+        scanned.some((pattern) => pattern.test(node.path)) &&
         projected.incoming(node.name).length === 0 &&
         projected.outgoing(node.name).length === 0
     )
