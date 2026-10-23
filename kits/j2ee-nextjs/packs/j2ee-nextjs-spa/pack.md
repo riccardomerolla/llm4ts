@@ -2,7 +2,7 @@
 
 source: jsp
 scaffold: ../../scaffolds/nextjs-spa
-sources: .*\.(jsp|java|xml)
+sources: .*\.(jsp|js|java|xml)$
 spec-schema: pagespec
 programs: .*\.jsp
 specs-dir: docs/modernization/specs
@@ -27,53 +27,92 @@ setup: pnpm install --offline
 
 ## Coverage: servlet-url
 
-files: .*web\.xml
+files: .*web\.xml$
 unit: <url-pattern>([^<]+)</url-pattern>
 
 ## Coverage: jsp-form
 
-files: .*\.jsp
+files: .*\.jsp$
 unit: action="([^"]+)"
 
 ## Coverage: jsp-ajax
 
-files: .*\.jsp
+files: .*\.jsp$
 unit: url:\s*['"]([^'"]+)['"]
 
 ## Survey: jsp-include
 
-files: .*\.jsp
+files: .*\.jsp$
 unit: <jsp:include page="([^"]+)"
 
 ## Survey: servlet-class
 
-files: .*web\.xml
+files: .*web\.xml$
 unit: <servlet-class>[a-z.]*\.([A-Za-z0-9]+)</servlet-class>
 
 ## Node: ajax-call
 
-files: .*\.(jsp|js)
+files: .*\.(jsp|js)$
 pattern: (?:["']?url["']?\s*:\s*|\$\.(?:get|post|getJSON)\(\s*)['"](?<name>[^'"]+)['"]
 attrs: url=name
 
 ## Node: form
 
-files: .*\.jsp
+files: .*\.jsp$
 pattern: <(?:[a-z]+:)?[Ff][Oo][Rr][Mm]\b[^>]*\b[Aa][Cc][Tt][Ii][Oo][Nn]=["'](?<name>[^"']+)["']
 attrs: url=name
 
 ## Node: servlet-mapping
 
-files: .*web\.xml
+files: .*web\.xml$
 pattern: <servlet-mapping>\s*<servlet-name>(?<name>[^<]+)</servlet-name>\s*<url-pattern>(?<url>[^<]+)</url-pattern>
 descriptor: yes
 
 ## Node: servlet-decl
 
-files: .*web\.xml
+files: .*web\.xml$
 pattern: <servlet>(?:(?!</servlet>)[\s\S])*?<servlet-name>(?<name>[^<]+)</servlet-name>(?:(?!</servlet>)[\s\S])*?<servlet-class>(?:[a-z0-9_]+\.)*(?<class>[A-Za-z0-9_]+)</servlet-class>
 descriptor: yes
 anchor: class
+
+## Node: servlet-jsp
+
+files: .*web\.xml$
+pattern: <servlet>(?:(?!</servlet>)[\s\S])*?<servlet-name>(?<name>[^<]+)</servlet-name>(?:(?!</servlet>)[\s\S])*?<jsp-file>(?<page>[^<]+)</jsp-file>
+descriptor: yes
+anchor: page
+
+## Edge: jsp-form-to-page
+
+files: .*\.jsp$
+pattern: <(?:[a-z]+:)?[Ff][Oo][Rr][Mm]\b[^>]*\b[Aa][Cc][Tt][Ii][Oo][Nn]=["'](?<to>[^"'?]+\.jsp)
+from: form
+unknown: drop
+
+## Edge: jsp-ajax-to-page
+
+files: .*\.(jsp|js)$
+pattern: (?:["']?url["']?\s*:\s*|\$\.(?:get|post|getJSON)\(\s*)['"](?<to>[^'"?]+\.jsp)
+from: ajax-call
+unknown: drop
+
+## Edge: java-import
+
+files: .*\.java$
+pattern: ^import\s+(?:static\s+)?[\w.]*\.(?<to>[A-Z]\w*)\s*;
+unknown: drop
+
+## Edge: java-new
+
+files: .*\.java$
+pattern: \bnew\s+(?<to>[A-Z]\w*)\s*[<(]
+unknown: drop
+
+## Edge: java-static-call
+
+files: .*\.java$
+pattern: \b(?<to>[A-Z]\w+)\.[a-z]\w*\(
+unknown: drop
 
 ## Join: jsp-ajax-target
 
@@ -93,7 +132,13 @@ from: servlet-mapping.name
 to: servlet-decl.name
 scope: file
 
+## Join: servlet-wiring
+
+from: servlet-mapping.name
+to: servlet-jsp.name
+scope: file
+
 ## Consolidate
 
-- cluster: jsp-form-action, jsp-ajax-target
+- cluster: jsp-form-action, jsp-ajax-target, jsp-form-to-page, jsp-ajax-to-page
 - context: jsp-include

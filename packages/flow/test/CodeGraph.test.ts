@@ -22,7 +22,12 @@ import {
 } from "@llm4ts/flow/Survey"
 import { CoverageRule } from "@llm4ts/flow/SpecChecks"
 import { makeMemoryWorkspace } from "@llm4ts/flow/Workspace"
-import { loadLegacyMiniPack, writeLegacyMini } from "./support/legacyMini.ts"
+import {
+  legacyMiniPackManifest,
+  loadLegacyMiniPack,
+  writeLegacyMini
+} from "./support/legacyMini.ts"
+import { loadPack } from "@llm4ts/flow/Pack"
 
 const fileNode = (name: string, path = `src/${name}.jsp`): SurveyNode =>
   SurveyNode.make({ path, name, lines: 10, units: 1 })
@@ -466,4 +471,96 @@ describe("projection on descriptor cycles", () => {
       ["p->T:k"]
     )
   })
+})
+
+describe("edge rules over a class-based language", () => {
+  it.effect("`unknown: drop` keeps JDK targets out of the graph and the unresolved list", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "src/a/LoginServlet.java",
+        [
+          "package a;",
+          "import java.util.ArrayList;",
+          "import a.svc.InvoiceService;",
+          "public class LoginServlet {",
+          "  void go() { new ArrayList<String>(); new InvoiceService().save(); EsbClient.call(); }",
+          "}",
+          ""
+        ].join("\n")
+      )
+      yield* workspace.write(
+        "src/a/svc/InvoiceService.java",
+        "package a.svc;\npublic class InvoiceService {}\n"
+      )
+      yield* workspace.write("src/a/EsbClient.java", "package a;\npublic class EsbClient {}\n")
+      yield* workspace.write(
+        "pack/pack.md",
+        [
+          "# Pack: java",
+          "",
+          "source: jsp",
+          "sources: .*\\.java",
+          "",
+          "## Edge: java-import",
+          "files: .*\\.java",
+          "pattern: ^import\\s+(?:static\\s+)?[\\w.]*\\.(?<to>[A-Z]\\w*)\\s*;",
+          "unknown: drop",
+          "",
+          "## Edge: java-new",
+          "files: .*\\.java",
+          "pattern: \\bnew\\s+(?<to>[A-Z]\\w*)\\s*[<(]",
+          "unknown: drop",
+          "",
+          "## Edge: java-static-call",
+          "files: .*\\.java",
+          "pattern: \\b(?<to>[A-Z]\\w+)\\.[a-z]\\w*\\(",
+          "unknown: drop",
+          ""
+        ].join("\n")
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      const { graph } = yield* buildCodeGraph(workspace, {
+        sources: pack.sources ?? ".*",
+        coverage: pack.coverage,
+        rules: pack.graph
+      })
+      assert.deepStrictEqual(
+        graph.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`).sort(),
+        [
+          "LoginServlet->EsbClient:java-static-call",
+          "LoginServlet->InvoiceService:java-import",
+          "LoginServlet->InvoiceService:java-new"
+        ]
+      )
+      assert.isFalse(graph.unresolved.some((item) => item.reason === "edge-target"))
+    })
+  )
+
+  it.effect("a file no rule scans is never reported as isolated", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* writeLegacyMini(workspace)
+      yield* workspace.write("src/com/legacy/Dto.properties", "a=b\n")
+      yield* workspace.write(
+        "pack/pack.md",
+        legacyMiniPackManifest.replace(
+          "sources: .*\\.(jsp|js|java|xml|cbl)",
+          "sources: .*\\.(jsp|js|java|xml|cbl|properties)"
+        )
+      )
+      const pack = yield* loadPack(workspace, "pack")
+      const { graph } = yield* buildCodeGraph(workspace, {
+        sources: pack.sources ?? ".*",
+        coverage: pack.coverage,
+        rules: pack.graph
+      })
+      const isolated = graph.unresolved
+        .filter((item) => item.reason === "isolated")
+        .map((item) => item.node)
+      assert.notInclude(isolated, "Dto")
+      // Java files ARE scanned (esb-call node rule, invokes-esb edge rule), so a dead servlet still counts.
+      assert.include(isolated, "OrphanServlet")
+    })
+  )
 })

@@ -39,7 +39,12 @@ as `key: value` lines until the first `## ` section.
 - `## Edge: <kind>`: `files:`, `pattern:` with a `(?<to>…)` group and an
   optional `(?<thru>…)` range, `from:` the enclosing node kind (default
   `file`), `to:` the target node kind (default `file`, resolved same-file
-  first).
+  first), `unknown: keep | drop` for a `file` target no unit owns (`keep`,
+  the default, records an edge to the literal and an `edge-target` hole;
+  `drop` ignores it — Java imports of `java.util.*` are not holes).
+- A file counts as `isolated` only when some Node or Edge rule's `files:`
+  matches it and nothing links to or from it; a file under `sources:` that
+  no rule scans is unscanned, not dead.
 - `## Join: <kind>`: `from: <kind>.<attr>`, `to: <kind>.<attr>`, `match:
 exact | url` (servlet-spec order: exact, `/*` prefix, `*.ext`), `scope:
 estate | app | file` (`url` defaults to `app`, the directory containing

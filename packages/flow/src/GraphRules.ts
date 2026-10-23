@@ -29,7 +29,14 @@ export class EdgeRule extends Schema.Class<EdgeRule>("EdgeRule")({
   fromKind: Schema.String,
   toKind: Schema.String,
   /** A folded `## Survey:` rule: the target is the first positional group (or the whole match), as before ADR 0030. */
-  positional: Schema.optionalKey(Schema.Boolean)
+  positional: Schema.optionalKey(Schema.Boolean),
+  /**
+   * What a `to: file` capture no unit owns becomes: `keep` (default) an edge
+   * to the literal plus an `edge-target` hole, as Survey rules always did;
+   * `drop` nothing at all — for class-based languages whose imports mostly
+   * name the platform (`java.util.ArrayList`), not the estate.
+   */
+  unknown: Schema.optionalKey(Schema.Literals(["keep", "drop"]))
 }) {}
 
 export const JoinMatchMode = Schema.Literals(["exact", "url"])
@@ -179,13 +186,23 @@ export const parseGraphRules = (
         if (!fields.pattern.includes("(?<to>")) {
           return yield* fail(`'${heading}' pattern needs a (?<to>…) group`)
         }
+        if (
+          fields.unknown !== undefined &&
+          fields.unknown !== "keep" &&
+          fields.unknown !== "drop"
+        ) {
+          return yield* fail(
+            `'${heading}' unknown: must be 'keep' or 'drop', got '${fields.unknown}'`
+          )
+        }
         edges.push(
           EdgeRule.make({
             kind,
             files: fields.files,
             pattern: fields.pattern,
             fromKind: fields.from ?? "file",
-            toKind: fields.to ?? "file"
+            toKind: fields.to ?? "file",
+            ...(fields.unknown === "drop" ? { unknown: "drop" as const } : {})
           })
         )
       } else if (heading.startsWith("## Join: ")) {

@@ -104,3 +104,115 @@ describe("j2ee-nextjs-spa graph rules on representative markup", () => {
     })
   )
 })
+
+describe("j2ee-nextjs-spa Java and script coverage", () => {
+  it.effect(
+    "Java classes link by import, instantiation and static call; .js files are sources",
+    () =>
+      Effect.gen(function* () {
+        const kits = yield* makeNodeWorkspace(kitsRoot)
+        const pack = yield* loadPack(kits, "j2ee-nextjs/packs/j2ee-nextjs-spa")
+        const estate = yield* makeMemoryWorkspace()
+        yield* estate.write(
+          "src/com/bank/web/LoginServlet.java",
+          [
+            "package com.bank.web;",
+            "import java.util.ArrayList;",
+            "import com.bank.svc.InvoiceService;",
+            "public class LoginServlet extends HttpServlet {",
+            '  void doPost() { new InvoiceService().save(new ArrayList<String>()); EsbGateway.call("Op"); }',
+            "}",
+            ""
+          ].join("\n")
+        )
+        yield* estate.write(
+          "src/com/bank/svc/InvoiceService.java",
+          "package com.bank.svc;\npublic class InvoiceService {}\n"
+        )
+        yield* estate.write(
+          "src/com/bank/esb/EsbGateway.java",
+          "package com.bank.esb;\npublic class EsbGateway {}\n"
+        )
+        yield* estate.write(
+          "src/com/bank/dto/Dto.java",
+          "package com.bank.dto;\npublic class Dto {}\n"
+        )
+        yield* estate.write("web/js/app.js", "$.ajax({ url: '/api/x' });\n")
+        const { graph } = yield* buildCodeGraph(estate, {
+          sources: pack.sources ?? ".*",
+          coverage: pack.coverage,
+          rules: pack.graph
+        })
+        assert.deepStrictEqual(
+          graph.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`).sort(),
+          [
+            "LoginServlet->EsbGateway:java-static-call",
+            "LoginServlet->InvoiceService:java-import",
+            "LoginServlet->InvoiceService:java-new"
+          ]
+        )
+        assert.isTrue(
+          graph.nodes.some((node) => node.kind === "ajax-call" && node.path === "web/js/app.js")
+        )
+        // The JDK is never a hole, and a DTO nothing references is a real isolated finding.
+        assert.isFalse(graph.unresolved.some((item) => item.reason === "edge-target"))
+        assert.deepStrictEqual(
+          graph.unresolved.filter((item) => item.reason === "isolated").map((item) => item.node),
+          ["Dto"]
+        )
+      })
+  )
+})
+
+describe("j2ee-nextjs-spa on a classic web.xml (jsp-file servlets, forms posting to pages)", () => {
+  it.effect("URL → jsp-file servlets and direct .jsp actions both reach the page", () =>
+    Effect.gen(function* () {
+      const kits = yield* makeNodeWorkspace(kitsRoot)
+      const pack = yield* loadPack(kits, "j2ee-nextjs/packs/j2ee-nextjs-spa")
+      const estate = yield* makeMemoryWorkspace()
+      yield* estate.write(
+        "web/WEB-INF/web.xml",
+        [
+          "<web-app>",
+          "  <servlet>",
+          "    <servlet-name>salva</servlet-name>",
+          "    <jsp-file>/pages/salvaFattura.jsp</jsp-file>",
+          "  </servlet>",
+          "  <servlet-mapping><servlet-name>salva</servlet-name><url-pattern>/salva</url-pattern></servlet-mapping>",
+          "</web-app>",
+          ""
+        ].join("\n")
+      )
+      yield* estate.write(
+        "web/pages/fattura.jsp",
+        [
+          '<form action="/salva" method="post"></form>',
+          "<form action='dettaglio.jsp'></form>",
+          "<script>$.ajax({ url: 'stampa.jsp?id=1' });</script>",
+          ""
+        ].join("\n")
+      )
+      yield* estate.write("web/pages/salvaFattura.jsp", "<p>saved</p>\n")
+      yield* estate.write("web/pages/dettaglio.jsp", "<p>detail</p>\n")
+      yield* estate.write("web/pages/stampa.jsp", "<p>print</p>\n")
+      const { graph } = yield* buildCodeGraph(estate, {
+        sources: pack.sources ?? ".*",
+        coverage: pack.coverage,
+        rules: pack.graph
+      })
+      const projected = projectToFiles(graph)
+      assert.deepStrictEqual(
+        projected.edges.map((edge) => `${edge.from}->${edge.to}:${edge.kind}`).sort(),
+        [
+          "fattura->dettaglio:jsp-form-to-page",
+          "fattura->salvaFattura:jsp-form-action",
+          "fattura->stampa:jsp-ajax-to-page"
+        ]
+      )
+      assert.isFalse(
+        graph.unresolved.some((item) => item.reason === "join-from"),
+        graph.unresolved.map((item) => `${item.reason}:${item.node}`).join(", ")
+      )
+    })
+  )
+})

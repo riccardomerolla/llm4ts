@@ -38,7 +38,9 @@ part:
   named groups become attrs; `descriptor: yes` for wiring records such as a
   `web.xml` mapping; `anchor: <attr>` when the node stands for another unit),
   `## Edge: <kind>` (`pattern:` with `(?<to>…)`, optional `(?<thru>…)`,
-  `from:`/`to:` node kinds, default `file`) and `## Join: <kind>` (`from:
+  `from:`/`to:` node kinds, default `file`; `unknown: drop` for rules whose
+  captures mostly name the platform, such as Java imports) and
+  `## Join: <kind>` (`from:
 <kind>.<attr>`, `to: <kind>.<attr>`, `match: exact | url`, `scope: estate
 | app | file`) describe sub-file nodes and the links a single regex cannot
   see, such as an ajax URL to the servlet `web.xml` maps it to (ADR 0030).

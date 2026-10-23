@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.47.2
+
+- **`isolated` means scanned and unlinked.** A file under `sources:` that no
+  Node or Edge rule looks at is no longer reported as an unresolved
+  `isolated` unit; on a J2EE estate that was every Java class, 613 of 615.
+- **`## Edge:` rules take `unknown: drop`.** A `file` target no unit owns is
+  then ignored instead of becoming a literal edge plus an `edge-target` hole,
+  which is what Java imports of the JDK need.
+- **`j2ee-nextjs-spa` links Java classes** by import, instantiation and
+  static call (`java-import`, `java-new`, `java-static-call`), so servlet →
+  service → ESB wrapper paths exist, and its `sources:` now includes `.js`
+  files so ajax calls in scripts become nodes. Its `sources:` and `files:`
+  regexes are anchored with `$`, so `.json` (including the survey's own
+  `graph.json`) never counts as a source.
+- **Classic `web.xml` and forms that post to pages.** A `<servlet>` with a
+  `<jsp-file>` is a `servlet-jsp` node anchored to that page, wired by
+  `servlet-wiring` like a class servlet; a form action or ajax `url` naming a
+  `.jsp` the estate owns links page to page (`jsp-form-to-page`,
+  `jsp-ajax-to-page`). A join source counts as `join-from` only when no
+  rule of its kind matched it and nothing else links from it.
+
 ## 2.47.1
 
 - **`llm4ts graph` finds the shipped packs again.** The verb handed the

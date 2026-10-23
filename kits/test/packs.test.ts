@@ -97,9 +97,9 @@ const packs = [
     coverage: ["servlet-url", "jsp-form", "jsp-ajax"],
     survey: ["jsp-include", "servlet-class"],
     graph: {
-      nodes: ["ajax-call", "form", "servlet-mapping", "servlet-decl"],
-      edges: [],
-      joins: ["jsp-ajax-target", "jsp-form-action", "servlet-wiring"],
+      nodes: ["ajax-call", "form", "servlet-mapping", "servlet-decl", "servlet-jsp"],
+      edges: ["jsp-form-to-page", "jsp-ajax-to-page"],
+      joins: ["jsp-ajax-target", "jsp-form-action", "servlet-wiring", "servlet-wiring"],
       probes: []
     },
     replay: false
