@@ -41,7 +41,8 @@ part:
   `from:`/`to:` node kinds, default `file`; `unknown: drop` for rules whose
   captures mostly name the platform, such as Java imports) and
   `## Join: <kind>` (`from:
-<kind>.<attr>`, `to: <kind>.<attr>`, `match: exact | url`, `scope: estate
+<kind>.<attr>`, `to: <kind>.<attr>`, `match: exact | exact-ci | url |
+  url-path`, `scope: estate
 | app | file`) describe sub-file nodes and the links a single regex cannot
   see, such as an ajax URL to the servlet `web.xml` maps it to (ADR 0030).
 - `## Probe: <name>` (`from:`, `to:` node references) names a flow that must

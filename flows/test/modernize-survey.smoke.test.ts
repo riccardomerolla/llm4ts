@@ -446,7 +446,7 @@ describe("modernize-survey over a J2EE estate (model stubbed)", { timeout: smoke
       assert.isDefined(triage)
       assert.include(`${result.stdout}${result.stderr}`, "nothing unresolved")
       for (const prompt of [triage ?? ""]) {
-        assert.include(prompt, "jsp-include, servlet-class")
+        assert.include(prompt, "jsp-include, jsp-static-include, servlet-class")
         assert.include(prompt, "web.xml")
         assert.notMatch(prompt, /COBOL|JCL|COPY|EXEC PGM/)
       }

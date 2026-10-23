@@ -45,10 +45,7 @@ as `key: value` lines until the first `## ` section.
 - A file counts as `isolated` only when some Node or Edge rule's `files:`
   matches it and nothing links to or from it; a file under `sources:` that
   no rule scans is unscanned, not dead.
-- `## Join: <kind>`: `from: <kind>.<attr>`, `to: <kind>.<attr>`, `match:
-exact | url` (servlet-spec order: exact, `/*` prefix, `*.ext`), `scope:
-estate | app | file` (`url` defaults to `app`, the directory containing
-  `WEB-INF`).
+- `## Join: <kind>`: `from: <kind>.<attr>`, `to: <kind>.<attr>`, `match: exact | exact-ci | url | url-path` (`url` is servlet-spec order: exact, `/*` prefix, `*.ext`; `url-path` finds the target's segments contiguously inside the request's, `{param}` matching any one segment, for REST resources called under a context root; `exact-ci` ignores case, for EL bean names against class names), `scope: estate | app | file` (`url` defaults to `app`, the directory containing `WEB-INF`; the rest to `estate`).
 - `## Probe: <name>`: `from:` and `to:` node references (an id, `<kind>:<name>`
   or a file unit) that pack-check requires to be connected.
 - `## Graph`: `- worklist-max: 200` and `- batch-size: 20` bound the survey's

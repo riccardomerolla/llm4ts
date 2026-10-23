@@ -18,8 +18,16 @@
   `<jsp-file>` is a `servlet-jsp` node anchored to that page, wired by
   `servlet-wiring` like a class servlet; a form action or ajax `url` naming a
   `.jsp` the estate owns links page to page (`jsp-form-to-page`,
-  `jsp-ajax-to-page`). A join source counts as `join-from` only when no
-  rule of its kind matched it and nothing else links from it.
+  `jsp-ajax-to-page`). A join source counts as `join-from` only when
+  nothing at all links from it.
+- **Nested JSPs calling REST and server-side Java.** `jsp-static-include`
+  (`<%@ include file=…>`, `.jspf` is a source), `rest-resource` nodes from
+  class-level JAX-RS `@Path` or Spring `@RequestMapping` joined by the new
+  `match: url-path` (segments inside the request, `{param}` wildcards, so
+  `/bank/rest/invoices/42` reaches `@Path("/invoices")`), `jsp-usebean`,
+  `jsp-static-call` and `jsp-new` from scriptlets, and `${bean.x}` EL
+  references joined to `@Named`/`@Stateless`/`@Component` classes by the
+  new `match: exact-ci`.
 
 ## 2.47.1
 
