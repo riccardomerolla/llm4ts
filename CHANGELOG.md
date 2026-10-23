@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.47.1
+
+- **`llm4ts graph` finds the shipped packs again.** The verb handed the
+  shell's flow tiers to the pack lookup, so `--pack j2ee-nextjs-spa` (and any
+  kit pack by name) failed with `pack … not found`; it now resolves packs
+  through the kit tiers (PR #58).
+
 ## 2.47.0
 
 A lighter epic flow that reaches an MVP sooner, test-first (ADR 0042).
