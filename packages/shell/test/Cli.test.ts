@@ -8,9 +8,11 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import type { FileSystem } from "effect/FileSystem"
 import * as Option from "effect/Option"
+import { nodeGraphDependencies } from "@llm4ts/runner/Graph"
 import {
   costsOptionsFrom,
   graphCommandFrom,
+  shellTierPaths,
   profileOptionsFrom,
   renderFlowList,
   renderKitList,
@@ -523,6 +525,25 @@ describe("geminiBridgeOptionsFrom (ADR 0037)", () => {
         geminiBridgeOptionsFrom({ ...none, port: Option.some(0) }, {})
       )
       assert.include(port.message, "--port")
+    })
+  )
+})
+
+describe("llm4ts graph resolves packs through the shell's KIT tiers", () => {
+  it.effect("a pack under the project kit tier is found with the tiers the shell hands over", () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(join(tmpdir(), "llm4ts-graph-tiers-"))
+      try {
+        const packDir = join(root, ".llm4ts", "kits", "web", "packs", "j2ee-nextjs-spa")
+        mkdirSync(packDir, { recursive: true })
+        writeFileSync(join(packDir, "pack.md"), "# Pack: j2ee-nextjs-spa\n\nsource: jsp\n")
+        // Exactly what the `graph` verb passes: the shell's tier paths object.
+        const deps = nodeGraphDependencies(process.env, shellTierPaths({ cwd: root }))
+        const pack = yield* deps.openPack(root, "j2ee-nextjs-spa")
+        assert.strictEqual(pack.name, "j2ee-nextjs-spa")
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
     })
   )
 })
