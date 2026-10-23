@@ -227,10 +227,16 @@ export const makeGraphProgram = Effect.fn("@llm4ts/runner/Graph.make")(function*
   }
 })
 
-/** Node-backed dependencies: the disk, a legacy-sized workspace, packs from the kit tiers. */
+/**
+ * Node-backed dependencies: the disk, a legacy-sized workspace, and packs from
+ * the KIT tiers. The second argument is the shell's whole tier object (flows
+ * and kits): reading `.kits` here, rather than taking kit tiers directly, is
+ * what stops the flow tiers from being passed by mistake — their `builtin` is
+ * the flows directory, under which no kit is ever found.
+ */
 export const nodeGraphDependencies = (
   environment: Readonly<Record<string, string | undefined>>,
-  kits: KitTierPaths
+  tiers: { readonly kits?: KitTierPaths }
 ): GraphDependencies => ({
   files: nodePlainFileStore,
   workspace: (root) =>
@@ -240,9 +246,6 @@ export const nodeGraphDependencies = (
       environment: { ...environment, ...(pack === undefined ? {} : { LLM4TS_PACK: pack }) },
       launchDir: repo,
       flowDir: repo,
-      kits:
-        kits.builtin === undefined
-          ? kitTierPaths({ cwd: repo, homeDir: homedir(), environment })
-          : kits
+      kits: tiers.kits ?? kitTierPaths({ cwd: repo, homeDir: homedir(), environment })
     }).pipe(Effect.map((opened) => opened.pack))
 })
