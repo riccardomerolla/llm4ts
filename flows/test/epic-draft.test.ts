@@ -291,3 +291,89 @@ describe("epic-draft flags and policy", () => {
     assert.isDefined(options.afterUnit)
   })
 })
+
+describe("epic-draft review fixes", () => {
+  const roundPlan = [
+    "```json storyplan",
+    JSON.stringify({
+      epicId: "e",
+      epic: "Accounts.",
+      stories: [{ id: "a-tests", title: "Tests for a", description: "d", owned: ["src/a"] }]
+    }),
+    "```"
+  ].join("\n")
+
+  it.effect("--harden with an open round resumes it instead of replanning", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic("/e/plan.md", "plan")
+      yield* memory.store.writeAtomic(debtPath("/e"), "## a\n- [ ] test: shows the balance")
+      yield* memory.store.writeAtomic("/e/rounds/1/plan.md", roundPlan)
+      // Round 1 has a plan and no merged story: runAction must see empty feedback.
+      assert.strictEqual(yield* hardenFeedback("/e", "", memory.store), "")
+    })
+  )
+
+  it.effect("the debt keeps the test gate's failing lines, not its whole output", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      const noisy = ReviewResult.make({
+        issues: [
+          ReviewIssue.make({
+            severity: "Critical",
+            title: "gate failed: pnpm test",
+            description: [
+              " ✓ src/b.test.ts > lists cards 3ms",
+              " ✓ src/c.test.ts > renders 2ms",
+              " FAIL src/a.test.ts > shows the balance",
+              "AssertionError: expected 0 to be 10"
+            ].join("\n")
+          })
+        ],
+        summary: "gates"
+      })
+      const { unit } = yield* unitWith(memory.store, () => Effect.succeed(noisy))
+      yield* draftAfterUnit(false)(unit, report)
+      const debt = (yield* memory.files)[debtPath("/e")] ?? ""
+      assert.include(debt, "FAIL src/a.test.ts > shows the balance")
+      assert.notInclude(debt, "lists cards")
+    })
+  )
+
+  it.effect("a rerun after hardening does not owe the paid tests again", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic(
+        paidPath("/e"),
+        "# Debt — e\n\n## a\n\n- [ ] test: shows the balance\n"
+      )
+      const { unit, infos } = yield* unitWith(memory.store, undefined)
+      yield* draftAfterUnit(true)(unit, report)
+      assert.isUndefined((yield* memory.files)[debtPath("/e")])
+      assert.deepStrictEqual(yield* infos, [])
+    })
+  )
+
+  it.effect("a settled round names the debt it did not plan", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic("/e/plan.md", "plan")
+      yield* memory.store.writeAtomic(debtPath("/e"), "## a\n- [ ] test: shows the balance")
+      yield* memory.store.writeAtomic("/e/rounds/1/plan.md", "round")
+      yield* memory.store.writeAtomic(
+        "/e/rounds/1/not-planned.md",
+        "- **naming** — a deliberate choice\n- **csv** — out of scope"
+      )
+      const { unit, infos } = yield* unitWith(memory.store, undefined)
+      const done = EpicReport.make({
+        ...report,
+        stories: report.stories.filter((story) => story.status === "done")
+      })
+      yield* hardenAfterUnit({ ...unit, stateDir: "/e/rounds/1" }, done)
+      assert.include(
+        yield* infos,
+        "harden: 2 debt items were not planned (/e/rounds/1/not-planned.md); pass them to --harden as text if they still matter"
+      )
+    })
+  )
+})

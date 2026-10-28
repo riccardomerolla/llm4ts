@@ -6,12 +6,15 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import type { FlowError, FlowLlmError, PersistenceError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
+import { failingLinesOf } from "@llm4ts/flow/GateTriage"
+import { countNotPlanned } from "@llm4ts/flow/RefineRound"
 import { correctnessReviewer } from "@llm4ts/flow/Review"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { deferredPath, type EpicReport } from "@llm4ts/flow/Stories"
+import { deferredPath, EpicReport } from "@llm4ts/flow/Stories"
 import { StoryPlan } from "@llm4ts/flow/StoryPlan"
 import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import {
+  loadRounds,
   rubricStoryJudge,
   storyPlanInstructions,
   storyPlanJsonSchema,
@@ -120,7 +123,13 @@ export const draftAfterUnit =
   (withTests: boolean) =>
   (unit: EpicUnitContext, report: EpicReport): Effect.Effect<void, FlowError> =>
     Effect.gen(function* () {
-      const stories = merged(unit.plan, report)
+      // A story whose debt a hardening round already paid owes nothing again.
+      const paid = new Set(
+        ((yield* unit.files.read(paidPath(unit.stateDir))) ?? "")
+          .split("\n")
+          .flatMap((line) => (line.startsWith("## ") ? [line.slice(3).trim()] : []))
+      )
+      const stories = merged(unit.plan, report).filter((story) => !paid.has(story.id))
       const findings: Array<string> = []
       for (const story of stories) {
         const text = yield* unit.files.read(deferredPath(unit.stateDir, story.id))
@@ -130,15 +139,17 @@ export const draftAfterUnit =
         withTests || unit.testGate === undefined
           ? undefined
           : yield* unit.testGate(unit.workDir, unit.events)
+      // The failing lines alone: a test run's whole output would crowd the planner's prompt.
+      const failing =
+        gate === undefined || gate.issues.length === 0
+          ? []
+          : failingLinesOf(gate, [unit.workDir]).map((line) => `- ${line}`)
       const testFailures =
         gate === undefined || gate.issues.length === 0
           ? undefined
-          : gate.issues
-              .map(
-                (issue) =>
-                  `- ${issue.title}${issue.description.length === 0 ? "" : `: ${issue.description}`}`
-              )
-              .join("\n")
+          : (failing.length > 0 ? failing : gate.issues.map((issue) => `- ${issue.title}`)).join(
+              "\n"
+            )
       const owed = stories.reduce((sum, story) => sum + story.acceptance.length, 0)
       if (owed === 0 && findings.length === 0 && testFailures === undefined) {
         return
@@ -148,7 +159,10 @@ export const draftAfterUnit =
         path,
         renderDebt(
           unit.plan,
-          report,
+          EpicReport.make({
+            ...report,
+            stories: report.stories.filter((outcome) => !paid.has(outcome.id))
+          }),
           findings.length === 0 ? undefined : findings.join("\n"),
           testFailures
         )
@@ -191,8 +205,17 @@ export const hardenFeedback = (
   text: string,
   files: PlainFileStoreShape
 ): Effect.Effect<string, PersistenceError> =>
-  Effect.map(openDebt(files, epicStateDir), (open) =>
-    open.length === 0
+  Effect.gen(function* () {
+    // An open round finishes before another is planned: with text, runAction would refuse it.
+    const rounds = yield* loadRounds(files, epicStateDir).pipe(
+      Effect.catch(() => Effect.succeed([]))
+    )
+    const last = rounds.at(-1)
+    if (last?.plan !== undefined && last.merged < last.plan.stories.length) {
+      return text
+    }
+    const open = yield* openDebt(files, epicStateDir)
+    return open.length === 0
       ? text
       : [
           "Pay this epic's draft debt: write the tests owed as deterministic tests in the house",
@@ -201,7 +224,7 @@ export const hardenFeedback = (
           "",
           ...open.flatMap((debt) => [debt.text, ""])
         ].join("\n")
-  )
+  })
 
 /** After a hardening round that settled (nothing failed or waiting), its debt is paid. */
 export const hardenAfterUnit = (
@@ -216,6 +239,16 @@ export const hardenAfterUnit = (
       const paid = (yield* unit.files.read(paidPath(debt.dir))) ?? ""
       yield* unit.files.writeAtomic(paidPath(debt.dir), `${paid}${debt.text}\n`)
       yield* unit.files.writeAtomic(debtPath(debt.dir), "")
+    }
+    // What the round's planner left out is listed, never carried (ADR 0031 decision 6).
+    const notPlannedPath = join(unit.stateDir, "not-planned.md")
+    const left = countNotPlanned((yield* unit.files.read(notPlannedPath)) ?? "")
+    if (left > 0) {
+      yield* unit.events.publish(
+        Info.make({
+          message: `harden: ${counted(left, "debt item was", "debt items were")} not planned (${notPlannedPath}); pass them to --harden as text if they still matter`
+        })
+      )
     }
   })
 
