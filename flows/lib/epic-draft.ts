@@ -6,17 +6,39 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import type { FlowError, FlowLlmError, PersistenceError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
+import { correctnessReviewer } from "@llm4ts/flow/Review"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { deferredPath, type EpicReport } from "@llm4ts/flow/Stories"
 import { StoryPlan } from "@llm4ts/flow/StoryPlan"
 import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import {
+  rubricStoryJudge,
   storyPlanInstructions,
   storyPlanJsonSchema,
   unitStateDirs,
+  withoutTestGate,
+  type EpicStoriesOptions,
   type EpicUnitContext,
   type PlanInputs
 } from "./epic-stories.ts"
+
+// ---- Flags ------------------------------------------------------------------
+
+export interface DraftFlags {
+  /** `--harden`: plan the epic's open debt (and the text given) as a round under the full bar. */
+  readonly harden: boolean
+  /** `--with-tests`: keep the test gate while drafting. */
+  readonly withTests: boolean
+  /** Everything else, for epic-stories' own flags (`--harden` becomes `--refine`). */
+  readonly argv: ReadonlyArray<string>
+}
+
+export const parseDraftFlags = (argv: ReadonlyArray<string>): DraftFlags => {
+  const harden = argv.includes("--harden")
+  const withTests = argv.includes("--with-tests")
+  const rest = argv.filter((arg) => arg !== "--harden" && arg !== "--with-tests")
+  return { harden, withTests, argv: harden ? ["--refine", ...rest] : rest }
+}
 
 // ---- The draft plan ---------------------------------------------------------
 
@@ -196,3 +218,27 @@ export const hardenAfterUnit = (
       yield* unit.files.writeAtomic(debtPath(debt.dir), "")
     }
   })
+
+// ---- The policy -------------------------------------------------------------
+
+/**
+ * The epic-stories spine with epic-draft's policy (ADR 0043). A draft defers
+ * tests and validation; `--harden` runs epic-stories' own bar over the debt.
+ */
+export const epicDraftOptions = (flags: DraftFlags): EpicStoriesOptions =>
+  flags.harden
+    ? {
+        storyJudge: rubricStoryJudge,
+        refineFeedback: hardenFeedback,
+        afterUnit: hardenAfterUnit
+      }
+    : {
+        generatePlan: generateDraftPlan,
+        stories: () => ({
+          reviewers: [correctnessReviewer],
+          maxRounds: 1,
+          deferNonBlocking: true
+        }),
+        ...(flags.withTests ? {} : { selectGates: withoutTestGate }),
+        afterUnit: draftAfterUnit(flags.withTests)
+      }

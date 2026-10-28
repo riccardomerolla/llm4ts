@@ -3,20 +3,22 @@ import * as Effect from "effect/Effect"
 import { FlowAborted } from "@llm4ts/flow/FlowError"
 import { Info, makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
+import { correctnessReviewer, ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 import { deferredPath, EpicReport, StoryOutcome } from "@llm4ts/flow/Stories"
 import { Story, StoryPlan } from "@llm4ts/flow/StoryPlan"
 import {
   debtPath,
   draftAfterUnit,
   draftPlanInstructions,
+  epicDraftOptions,
   generateDraftPlan,
   hardenAfterUnit,
   hardenFeedback,
   paidPath,
+  parseDraftFlags,
   renderDebt
 } from "../lib/epic-draft.ts"
-import type { EpicUnitContext } from "../lib/epic-stories.ts"
+import { rubricStoryJudge, type EpicUnitContext } from "../lib/epic-stories.ts"
 import { scripted } from "./support.ts"
 
 describe("epic-draft plan", () => {
@@ -244,4 +246,48 @@ describe("epic-draft --harden", () => {
       assert.strictEqual(yield* hardenFeedback("/e", "", memory.store), "")
     })
   )
+})
+
+describe("epic-draft flags and policy", () => {
+  it("--harden becomes --refine; --with-tests is the flow's own", () => {
+    assert.deepStrictEqual(parseDraftFlags(["--harden", "--with-tests", "--epic", "e"]), {
+      harden: true,
+      withTests: true,
+      argv: ["--refine", "--epic", "e"]
+    })
+    assert.deepStrictEqual(parseDraftFlags(["text"]).argv, ["text"])
+  })
+
+  it.effect("a draft run: one lens, one round, findings deferred, no judge, test gate off", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      const { unit } = yield* unitWith(memory.store, undefined)
+      const options = epicDraftOptions(parseDraftFlags([]))
+      assert.isUndefined(options.storyJudge)
+      assert.isUndefined(options.beforeLand)
+      assert.isDefined(options.afterUnit)
+      assert.deepStrictEqual(options.selectGates?.([["pnpm", "test"]]).commands, [])
+      const policy = options.stories?.(unit)
+      assert.deepStrictEqual(
+        policy?.reviewers?.map((reviewer) => reviewer.name),
+        [correctnessReviewer.name]
+      )
+      assert.strictEqual(policy?.maxRounds, 1)
+      assert.isTrue(policy?.deferNonBlocking)
+    })
+  )
+
+  it("--with-tests keeps the test gate", () => {
+    assert.isUndefined(epicDraftOptions(parseDraftFlags(["--with-tests"])).selectGates)
+  })
+
+  it("--harden runs epic-stories' full bar", () => {
+    const options = epicDraftOptions(parseDraftFlags(["--harden"]))
+    assert.strictEqual(options.storyJudge, rubricStoryJudge)
+    assert.isUndefined(options.stories)
+    assert.isUndefined(options.selectGates)
+    assert.isUndefined(options.generatePlan)
+    assert.isDefined(options.refineFeedback)
+    assert.isDefined(options.afterUnit)
+  })
 })
