@@ -4,14 +4,16 @@
 // debt.md, and `--harden` plans that debt as a round under the full bar.
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import type { FlowError, FlowLlmError } from "@llm4ts/flow/FlowError"
+import type { FlowError, FlowLlmError, PersistenceError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
+import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { deferredPath, type EpicReport } from "@llm4ts/flow/Stories"
 import { StoryPlan } from "@llm4ts/flow/StoryPlan"
 import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import {
   storyPlanInstructions,
   storyPlanJsonSchema,
+  unitStateDirs,
   type EpicUnitContext,
   type PlanInputs
 } from "./epic-stories.ts"
@@ -139,3 +141,58 @@ export const draftAfterUnit =
         })
       )
     })
+
+// ---- Hardening --------------------------------------------------------------
+
+/** The open debt lists of an epic, by state folder; empty ones are paid. */
+const openDebt = (
+  files: PlainFileStoreShape,
+  epicStateDir: string
+): Effect.Effect<
+  ReadonlyArray<{ readonly dir: string; readonly text: string }>,
+  PersistenceError
+> =>
+  Effect.gen(function* () {
+    const open: Array<{ readonly dir: string; readonly text: string }> = []
+    for (const dir of yield* unitStateDirs(files, epicStateDir)) {
+      const text = (yield* files.read(debtPath(dir)))?.trim() ?? ""
+      if (text.length > 0) {
+        open.push({ dir, text })
+      }
+    }
+    return open
+  })
+
+/** `--harden`: the text given, then every open debt list, as the round to plan. */
+export const hardenFeedback = (
+  epicStateDir: string,
+  text: string,
+  files: PlainFileStoreShape
+): Effect.Effect<string, PersistenceError> =>
+  Effect.map(openDebt(files, epicStateDir), (open) =>
+    open.length === 0
+      ? text
+      : [
+          "Pay this epic's draft debt: write the tests owed as deterministic tests in the house",
+          "style, make the test gate green, and close the findings that still apply.",
+          ...(text.length === 0 ? [] : ["", text]),
+          "",
+          ...open.flatMap((debt) => [debt.text, ""])
+        ].join("\n")
+  )
+
+/** After a hardening round that settled (nothing failed or waiting), its debt is paid. */
+export const hardenAfterUnit = (
+  unit: EpicUnitContext,
+  report: EpicReport
+): Effect.Effect<void, FlowError> =>
+  Effect.gen(function* () {
+    if (report.count("failed") > 0 || report.count("waiting") > 0) {
+      return
+    }
+    for (const debt of yield* openDebt(unit.files, unit.epicStateDir)) {
+      const paid = (yield* unit.files.read(paidPath(debt.dir))) ?? ""
+      yield* unit.files.writeAtomic(paidPath(debt.dir), `${paid}${debt.text}\n`)
+      yield* unit.files.writeAtomic(debtPath(debt.dir), "")
+    }
+  })

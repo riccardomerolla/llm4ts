@@ -11,6 +11,9 @@ import {
   draftAfterUnit,
   draftPlanInstructions,
   generateDraftPlan,
+  hardenAfterUnit,
+  hardenFeedback,
+  paidPath,
   renderDebt
 } from "../lib/epic-draft.ts"
 import type { EpicUnitContext } from "../lib/epic-stories.ts"
@@ -188,6 +191,57 @@ describe("epic-draft debt", () => {
       yield* draftAfterUnit(false)(unit, nothingMerged)
       assert.isUndefined((yield* memory.files)[debtPath("/e")])
       assert.deepStrictEqual(yield* infos, [])
+    })
+  )
+})
+
+describe("epic-draft --harden", () => {
+  it.effect("plans every open debt list, with the text first", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic("/e/plan.md", "plan")
+      yield* memory.store.writeAtomic(debtPath("/e"), "## a\n- [ ] test: shows the balance")
+      yield* memory.store.writeAtomic("/e/rounds/1/plan.md", "round")
+      yield* memory.store.writeAtomic(debtPath("/e/rounds/1"), "## c\n- [ ] test: lists cards")
+      const feedback = yield* hardenFeedback("/e", "focus on a", memory.store)
+      assert.include(feedback, "Pay this epic's draft debt")
+      assert.isBelow(feedback.indexOf("focus on a"), feedback.indexOf("shows the balance"))
+      assert.include(feedback, "lists cards")
+    })
+  )
+
+  it.effect("refuses when there is no debt and no text", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic("/e/plan.md", "plan")
+      yield* memory.store.writeAtomic(debtPath("/e"), "")
+      // epic-stories' runAction answers empty feedback with a usage error.
+      assert.strictEqual(yield* hardenFeedback("/e", "", memory.store), "")
+      assert.strictEqual(yield* hardenFeedback("/e", "free text", memory.store), "free text")
+    })
+  )
+
+  it.effect("moves consumed debt to debt.paid.md once the round settles", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic("/e/plan.md", "plan")
+      yield* memory.store.writeAtomic(debtPath("/e"), "## a\n- [ ] test: shows the balance")
+      yield* memory.store.writeAtomic("/e/rounds/1/plan.md", "round")
+      const { unit } = yield* unitWith(memory.store, undefined)
+      const round = { ...unit, stateDir: "/e/rounds/1" }
+
+      yield* hardenAfterUnit(round, report)
+      assert.include((yield* memory.files)[debtPath("/e")] ?? "", "shows the balance")
+
+      const settled = EpicReport.make({
+        ...report,
+        stories: report.stories.filter((story) => story.status === "done")
+      })
+      yield* hardenAfterUnit(round, settled)
+      const files = yield* memory.files
+      assert.strictEqual(files[debtPath("/e")], "")
+      assert.include(files[paidPath("/e")] ?? "", "shows the balance")
+      assert.strictEqual(yield* hardenFeedback("/e", "", memory.store), "")
     })
   )
 })
