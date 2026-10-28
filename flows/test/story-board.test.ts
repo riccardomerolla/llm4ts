@@ -76,12 +76,12 @@ const judgeWith = (answers: Record<string, Answer>, failures: Record<string, str
   })
 
 describe("the story board ruleset", () => {
-  it.effect("is valid, with three imports, two exports and six rules", () =>
+  it.effect("is valid, with three imports, two exports and seven rules", () =>
     Effect.gen(function* () {
       const board = yield* makeStoryBoard()
       assert.deepStrictEqual(board.imports, ["story.brief", "story.diff", "story.houseRules"])
       assert.deepStrictEqual(board.exports, ["story.mergeable", "story.issues"])
-      assert.strictEqual(board.rules.length, 6)
+      assert.strictEqual(board.rules.length, 7)
       assert.deepStrictEqual(board.warnings, [])
       assert.include(board.describe(), "bar:")
     })
@@ -123,6 +123,25 @@ describe("the story board ruleset", () => {
       assert.include(state, "Money type")
       assert.include(state, "+ code")
       assert.include(state, "kit components only")
+    })
+  )
+
+  it.effect("a story with deferred tests merges with tests at 0; the state says why", () =>
+    Effect.gen(function* () {
+      const { fake, judge, seats } = yield* judgeWith({ ...allTop, tests: level("tests", 0) })
+      const deferred = Story.make({ ...story, testsDeferred: "runs only on an ACE server" })
+      const verdict = yield* judge(deferred, "+ code", seats)
+      assert.isTrue(verdict.isClean)
+      const requests = yield* fake.recorded
+      assert.include(
+        String(requests[0]?.state),
+        "Tests deferred by the plan: runs only on an ACE server"
+      )
+      const held = yield* judge(story, "+ code", seats)
+      assert.deepStrictEqual(
+        held.issues.map((i) => i.title),
+        ["judge[conto]: tests scored 0.0"]
+      )
     })
   )
 

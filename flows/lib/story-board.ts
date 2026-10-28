@@ -29,10 +29,21 @@ import {
 import { cap } from "@llm4ts/flow/Context"
 import { FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
 import { JudgmentObserved, publishJudgmentObserved } from "@llm4ts/flow/FlowEvents"
-import { certaintyOf, decide, judgmentOf, type JudgmentPolicy } from "@llm4ts/flow/Judgment"
+import {
+  certaintyOf,
+  Decision,
+  decide,
+  judgmentOf,
+  type JudgmentPolicy
+} from "@llm4ts/flow/Judgment"
 import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 import { dependenciesOf, type Story, type StoryPlan } from "@llm4ts/flow/StoryPlan"
-import { storyDimensions, type StoryJudge, type StoryJudgeContext } from "./epic-stories.ts"
+import {
+  storyDimensions,
+  testsDeferredLines,
+  type StoryJudge,
+  type StoryJudgeContext
+} from "./epic-stories.ts"
 
 export class StoryBrief extends Schema.Class<StoryBrief>("StoryBrief")({
   id: Schema.String,
@@ -44,7 +55,8 @@ export class StoryBrief extends Schema.Class<StoryBrief>("StoryBrief")({
   sharedReadOnly: Schema.Array(Schema.String),
   dependencies: Schema.Array(
     Schema.Struct({ id: Schema.String, provides: Schema.Array(Schema.String) })
-  )
+  ),
+  testsDeferred: Schema.optionalKey(Schema.String)
 }) {}
 
 export const storyBriefOf = (story: Story, plan?: StoryPlan): StoryBrief =>
@@ -62,7 +74,8 @@ export const storyBriefOf = (story: Story, plan?: StoryPlan): StoryBrief =>
         : dependenciesOf(plan, story.id).flatMap((id) => {
             const dependency = plan.story(id)
             return dependency === undefined ? [] : [{ id, provides: dependency.provides }]
-          })
+          }),
+    ...(story.testsDeferred === undefined ? {} : { testsDeferred: story.testsDeferred })
   })
 
 // ---- Facts ------------------------------------------------------------------
@@ -72,6 +85,7 @@ export const storyDiff = makeKey("story.diff", Schema.String)
 export const houseRules = makeKey("story.houseRules", Schema.String)
 export const mergeable = makeKey("story.mergeable", Schema.Boolean)
 export const issues = makeKey("story.issues", Schema.Array(ReviewIssue))
+const decisions = makeKey("story.decisions", Schema.Array(Decision))
 
 /** One judged answer and one decision per story dimension, keyed by the dimension's name. */
 const judged = (name: string) => answerKey(`judge.${name}`)
@@ -111,6 +125,7 @@ export const stateOf = (brief: StoryBrief, diff: string, rules: string): string 
     `Provides: ${brief.provides.join(", ") || "(none)"}`,
     `Owned paths: ${brief.owned.join(", ")}`,
     `Shared read-only: ${brief.sharedReadOnly.join(", ") || "(none)"}`,
+    ...testsDeferredLines(brief.testsDeferred),
     ...(brief.dependencies.length === 0
       ? []
       : [
@@ -157,7 +172,7 @@ export const makeStoryBoard = (
         return answer?.type === "score" ? [d.answer.of(answer)] : []
       })
   })
-  const decisions = dimensions.map((d) =>
+  const deciders = dimensions.map((d) =>
     decideRule({
       name: `decide-${d.dimension.name}`,
       answer: d.answer,
@@ -165,27 +180,33 @@ export const makeStoryBoard = (
       ...(policy === undefined ? {} : { policy })
     })
   )
+  // The four decisions as one fact, so the bar can also read the brief.
+  const joined = derive({
+    name: "decisions",
+    condition: all(provides.decision, scope.decision, houseStyle.decision, tests.decision),
+    produces: [decisions],
+    derive: (verdicts) => [decisions.of(verdicts)]
+  })
   const bar = derive({
     name: "bar",
     condition: all(
+      storyBrief,
       provides.answer,
       scope.answer,
       houseStyle.answer,
       tests.answer,
-      provides.decision,
-      scope.decision,
-      houseStyle.decision,
-      tests.decision
+      decisions
     ),
     produces: [mergeable, issues],
-    derive: ([a1, a2, a3, a4, v1, v2, v3, v4]) => {
+    derive: ([brief, a1, a2, a3, a4, verdicts]) => {
       const found: Array<ReviewIssue> = []
       const answers = [a1, a2, a3, a4]
-      const verdicts = [v1, v2, v3, v4]
       dimensions.forEach((d, index) => {
         const answer = answers[index]
         const verdict = verdicts[index]
         if (answer === undefined || verdict === undefined || answer.type !== "score") return
+        // The plan deferred this story's tests (it runs only in a live runtime).
+        if (d === tests && brief.testsDeferred !== undefined) return
         if (answer.score < passingScore) {
           found.push(
             ReviewIssue.make({
@@ -211,7 +232,7 @@ export const makeStoryBoard = (
     name: "story-board",
     imports: [storyBrief, storyDiff, houseRules],
     exports: [mergeable, issues],
-    rules: [storyJudge, ...decisions, bar]
+    rules: [storyJudge, ...deciders, joined, bar]
   })
 }
 

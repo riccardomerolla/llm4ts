@@ -1066,7 +1066,8 @@ export const storyJsonSchema = {
     readFirst: { type: "array", items: { type: "string" } },
     acceptance: { type: "array", items: { type: "string" } },
     provides: { type: "array", items: { type: "string" } },
-    testsChange: { type: "boolean" }
+    testsChange: { type: "boolean" },
+    testsDeferred: { type: "string" }
   },
   required: [
     "id",
@@ -1119,6 +1120,10 @@ export const storyPlanInstructions = (
     "- `testsChange`: true only for a story whose job includes deleting, skipping or rewriting",
     "  existing tests (a migration of a test suite, a removed feature). Every other story leaves",
     "  it out: the gates fail a story that deletes a test file or adds a skip marker.",
+    "- `testsDeferred`: only for a story whose code runs nowhere but a live runtime the repository",
+    "  cannot host in a test (IBM ACE message flows and ESQL, a mainframe transaction): one",
+    "  sentence naming that runtime. The judge then does not ask it for tests. Never set it because",
+    "  tests are hard to write; every other story leaves it out and owns its test files.",
     "- `owned` sets are pairwise DISJOINT: no path prefix appears under two stories.",
     "- Shared surfaces (the kit, the theme, house rules) are never edited by a feature story. A new",
     "  shared component is its own story, and every story using it depends on it.",
@@ -1447,13 +1452,20 @@ export const storyDimensions: ReadonlyArray<Dimension> = [
 export const judgeSeverity = (name: string, score: number): "Critical" | "Warning" =>
   name === "provides" || score <= 0 ? "Critical" : "Warning"
 
+/** The dimensions a story is held to: all of them, less `tests` when the plan deferred them. */
+export const judgedDimensionsOf = (story: Story): ReadonlyArray<string> =>
+  storyDimensions
+    .map((dimension) => dimension.name)
+    .filter((name) => story.testsDeferred === undefined || name !== "tests")
+
 const subBar = (scored: EvalResult, story: Story): ReviewResult =>
   ReviewResult.make({
     issues: scored.scores
       .filter(
         (score) =>
+          judgedDimensionsOf(story).includes(score.name) &&
           score.score <
-          (storyDimensions.find((dimension) => dimension.name === score.name)?.maxScore ?? 2)
+            (storyDimensions.find((dimension) => dimension.name === score.name)?.maxScore ?? 2)
       )
       .map((score) =>
         ReviewIssue.make({
@@ -1464,6 +1476,15 @@ const subBar = (scored: EvalResult, story: Story): ReviewResult =>
       ),
     summary: `judge:${story.id}`
   })
+
+/** What a judge is told about a story the plan exempted from tests; nothing otherwise. */
+export const testsDeferredLines = (reason: string | undefined): ReadonlyArray<string> =>
+  reason === undefined
+    ? []
+    : [
+        `Tests deferred by the plan: ${reason}`,
+        "No test file is expected; do not mark any dimension down for its absence."
+      ]
 
 /**
  * What the story judge reads beside the diff: the story, and what every
@@ -1500,6 +1521,7 @@ export const storyJudgeQuery = (
     `Provides: ${story.provides.join(", ") || "(none)"}`,
     `Owned paths: ${story.owned.join(", ")}`,
     `Shared read-only: ${story.sharedReadOnly.join(", ") || "(none)"}`,
+    ...testsDeferredLines(story.testsDeferred),
     ...(dependencies.length === 0
       ? []
       : [

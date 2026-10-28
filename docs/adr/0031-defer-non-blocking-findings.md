@@ -68,6 +68,25 @@ lighter review. It is opt-in, and runs without it behave as before.
   resumed run found.
 - No `llm4zio` parity impact: the epic flows are llm4ts-only.
 
+## Amendment (2026-10-28): a story may defer its tests
+
+Some stories have no deterministic test to write: an IBM ACE message flow
+and its ESQL, or a mainframe transaction, run only inside a live runtime the
+repository cannot host. Holding them to `tests` sent the coder into round
+after round of building mock interpreters. A story's plan entry may now carry
+`testsDeferred: "<the runtime it needs>"`:
+
+- The judge still scores `tests`, and the score is kept in the verdict, but it
+  is never a finding, Critical or Warning, with or without deferral. The
+  story-board ruleset skips it the same way.
+- The judge reads the reason beside the story and is told not to mark any
+  dimension down for the missing tests.
+- It enters `storyHash` only when set. The planner may set it only for such
+  a runtime, never because tests are hard to write; `epic-mvp` plans never
+  set it, since every MVP story is test-first.
+
+The oracle guard and the gates are unchanged.
+
 ## Not decided here
 
 - Making deferral the default.

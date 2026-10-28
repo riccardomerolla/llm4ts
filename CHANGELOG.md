@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.48.0
+
+- **A story may defer its tests (ADR 0031 amendment).** A plan entry may set
+  `testsDeferred` to the live runtime its code needs (IBM ACE flows and ESQL,
+  a mainframe). The story judge and the story-board ruleset keep the `tests`
+  score but never raise it as a finding, and the judge is told why. The
+  planner is told when it may set it; `epic-mvp` never does.
+- **Packs loaded from `.` keep their prompts and reviewer lenses.** A pattern
+  such as `./prompts/*.md` matched nothing in `discover`, because walked paths
+  never start with `./`; a leading `./` is now stripped from the pattern.
+- **A wildcard owned path is its directory.** A trailing `/*` or `/**` on a
+  story path prefix (as in `module/**`) is dropped, so files under it no
+  longer fail the perimeter check.
+
 ## 2.47.2
 
 - **`isolated` means scanned and unlinked.** A file under `sources:` that no

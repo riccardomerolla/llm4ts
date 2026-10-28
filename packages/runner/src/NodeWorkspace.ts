@@ -192,7 +192,9 @@ export const makeNodeWorkspace = Effect.fn("@llm4ts/runner/NodeWorkspace.make")(
   ): Effect.Effect<ReadonlyArray<string>, WorkspaceError> =>
     Effect.tryPromise({
       try: async () => {
-        const normalizedPattern = pattern.replaceAll("\\", "/")
+        // Walked paths are root-relative with no leading "./"; a pack loaded from
+        // dir "." asks for "./prompts/*.md" and must still match them.
+        const normalizedPattern = pattern.replaceAll("\\", "/").replace(/^(\.\/)+/, "")
         const matcher = normalizedPattern === "**/*" ? /.*/ : globRegex(normalizedPattern)
         const excluded = new Set(limits.excludeDirs ?? [])
         const results: Array<string> = []

@@ -59,6 +59,13 @@ describe("StoryPlan", () => {
     assert.isFalse(pathWithin("src/kit.ts", "src/kit"))
   })
 
+  it("pathWithin reads a trailing wildcard as the directory it ends", () => {
+    assert.isTrue(pathWithin("module/pom.xml", "module/**"))
+    assert.isTrue(pathWithin("src/test/java/AppTest.java", "src/test/**/"))
+    assert.isTrue(pathWithin("module/pom.xml", "./module/*"))
+    assert.isFalse(pathWithin("module-other/pom.xml", "module/**"))
+  })
+
   it("a valid plan has no violations and yields dependency-ordered waves", () => {
     assert.deepStrictEqual(storyPlanViolations(demoPlan), [])
     assert.deepStrictEqual(topologicalWaves(demoPlan), [
@@ -183,6 +190,15 @@ describe("testsChange (ADR 0027)", () => {
     assert.isFalse(plain.testsChange)
     assert.strictEqual(storyHash(Story.make({ ...plain, testsChange: false })), storyHash(plain))
     assert.notStrictEqual(storyHash(Story.make({ ...plain, testsChange: true })), storyHash(plain))
+  })
+
+  it("testsDeferred is absent by default and enters the hash only when set", () => {
+    const plain = story("esb-flow", ["esb/flows"])
+    assert.isUndefined(plain.testsDeferred)
+    assert.notStrictEqual(
+      storyHash(Story.make({ ...plain, testsDeferred: "runs only on an ACE server" })),
+      storyHash(plain)
+    )
   })
 })
 

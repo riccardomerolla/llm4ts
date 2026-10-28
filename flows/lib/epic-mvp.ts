@@ -133,6 +133,7 @@ export const mvpPlanInstructions = (
     "  `acceptance` outcome, and none depends on a parked one.",
     "- Prefer fewer, thinner stories: the thinnest end-to-end path that works.",
     "- Items an approved brief marks deferred or dropped are parked, never planned.",
+    "- Leave `testsDeferred` out: every MVP story is written test-first.",
     'Add `"later":[…]` to each story and `"parked":[…]` beside `"stories"` in the JSON.'
   ].join("\n")
 

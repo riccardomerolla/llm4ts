@@ -756,6 +756,38 @@ describe("epic-stories flags and seats", () => {
         )
       })
   )
+
+  it.effect("a story with deferred tests clears with no tests, the score still kept", () =>
+    Effect.gen(function* () {
+      const story = Story.make({
+        id: "esb-flow",
+        title: "ESB flow",
+        description: "An ACE subflow and its ESQL.",
+        owned: ["esb/flows"],
+        testsDeferred: "the subflow runs only on an ACE integration server"
+      })
+      const untested = structured({
+        scores: [
+          { name: "provides", score: 2, reasoning: "" },
+          { name: "scope", score: 2, reasoning: "" },
+          { name: "house-style", score: 2, reasoning: "" },
+          { name: "tests", score: 0, reasoning: "no tests" }
+        ]
+      })
+      const deferred = yield* judgeStory(untested, story, "diff", 1000)
+      assert.isTrue(deferred.isClean)
+      assert.deepStrictEqual(
+        deferred.dimensions.find((dimension) => dimension.id === "tests")?.score,
+        0
+      )
+      const { testsDeferred: _, ...rest } = story
+      const held = yield* judgeStory(untested, Story.make(rest), "diff", 1000)
+      assert.deepStrictEqual(
+        held.issues.map((issue) => [issue.severity, issue.title]),
+        [["Critical", "judge[esb-flow]: tests scored 0"]]
+      )
+    })
+  )
 })
 
 describe("epic-stories worktrees, outages and blocked claims", () => {
@@ -1375,6 +1407,21 @@ describe("storyJudgeQuery with acceptance criteria", () => {
     const query = storyJudgeQuery(specified)
     assert.include(query, "Done when (the story's acceptance criteria")
     assert.include(query, "1. GET /a answers 200")
+    assert.notInclude(query, "Tests deferred")
+  })
+
+  it("tells the judge why a story's tests are deferred", () => {
+    const deferred = Story.make({
+      id: "a",
+      title: "A",
+      description: "Do a.",
+      owned: ["src/a"],
+      testsDeferred: "runs only on an ACE server"
+    })
+    assert.include(
+      storyJudgeQuery(deferred),
+      "Tests deferred by the plan: runs only on an ACE server"
+    )
   })
 })
 

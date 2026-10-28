@@ -91,6 +91,10 @@ describe("symlink-aware bounded workspace", () => {
         })
         assert.deepStrictEqual(excluded, ["src/main/webapp/login.jsp"])
 
+        assert.deepStrictEqual(yield* workspace.discover("./src/main/webapp/*.jsp"), [
+          "src/main/webapp/login.jsp"
+        ])
+
         const overflow = yield* Effect.flip(workspace.discover())
         assert.strictEqual(overflow._tag, "WorkspaceLimit")
 

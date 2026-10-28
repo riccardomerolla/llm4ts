@@ -59,7 +59,14 @@ export class Story extends Schema.Class<Story>("Story")({
   testsChange: Schema.Boolean.pipe(
     Schema.withConstructorDefault(Effect.succeed(false)),
     Schema.withDecodingDefaultKey(Effect.succeed(false))
-  )
+  ),
+  /**
+   * Why this story ships no deterministic tests: its code only runs inside a
+   * live runtime the repository cannot host (an IBM ACE integration server,
+   * a mainframe). Set, the story judge's `tests` score is recorded but never
+   * a finding. Absent outside such stories.
+   */
+  testsDeferred: Schema.optionalKey(Schema.String)
 }) {}
 
 export class StoryPlan extends Schema.Class<StoryPlan>("StoryPlan")({
@@ -79,6 +86,8 @@ export const normalizePath = (path: string): string =>
     .trim()
     .replace(/\\/g, "/")
     .replace(/^(\.\/)+/, "")
+    // Planners write "module/**" for a directory; prefixes are already recursive.
+    .replace(/\/\*+\/?$/, "")
     .replace(/\/+$/, "")
 
 /** Whether `path` is `prefix` itself or lies under it. */
@@ -383,7 +392,8 @@ export const storyHash = (story: Story): string =>
         : { readFirst: [...story.readFirst].map(normalizePath) }),
       ...(story.acceptance.length === 0 ? {} : { acceptance: [...story.acceptance] }),
       ...(story.later === undefined || story.later.length === 0 ? {} : { later: [...story.later] }),
-      ...(story.testsChange ? { testsChange: true } : {})
+      ...(story.testsChange ? { testsChange: true } : {}),
+      ...(story.testsDeferred === undefined ? {} : { testsDeferred: story.testsDeferred })
     })
   )
 
