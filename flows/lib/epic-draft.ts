@@ -2,11 +2,19 @@
 // deferred, not dropped. A draft run plans and builds without tests, under
 // one review lens and the build gates; what it deferred is written to
 // debt.md, and `--harden` plans that debt as a round under the full bar.
+import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import type { FlowLlmError } from "@llm4ts/flow/FlowError"
+import type { FlowError, FlowLlmError } from "@llm4ts/flow/FlowError"
+import { Info } from "@llm4ts/flow/FlowEvents"
+import { deferredPath, type EpicReport } from "@llm4ts/flow/Stories"
 import { StoryPlan } from "@llm4ts/flow/StoryPlan"
 import { structuredAndPublish } from "@llm4ts/flow/Usage"
-import { storyPlanInstructions, storyPlanJsonSchema, type PlanInputs } from "./epic-stories.ts"
+import {
+  storyPlanInstructions,
+  storyPlanJsonSchema,
+  type EpicUnitContext,
+  type PlanInputs
+} from "./epic-stories.ts"
 
 // ---- The draft plan ---------------------------------------------------------
 
@@ -40,3 +48,94 @@ export const generateDraftPlan = (inputs: PlanInputs): Effect.Effect<StoryPlan, 
     // The id and the epic text are ours, whatever the model echoed back.
     Effect.map((plan) => StoryPlan.make({ ...plan, epicId: inputs.epicId, epic: inputs.epic }))
   )
+
+// ---- The debt ---------------------------------------------------------------
+
+/** What a draft unit deferred: the tests owed, the findings, the skipped test gate. */
+export const debtPath = (stateDir: string): string => join(stateDir, "debt.md")
+
+/** Debt a settled hardening round consumed. */
+export const paidPath = (stateDir: string): string => join(stateDir, "debt.paid.md")
+
+const merged = (plan: StoryPlan, report: EpicReport) =>
+  plan.stories.filter((story) =>
+    report.stories.some((outcome) => outcome.id === story.id && outcome.status === "done")
+  )
+
+export const renderDebt = (
+  plan: StoryPlan,
+  report: EpicReport,
+  deferred: string | undefined,
+  testFailures: string | undefined
+): string =>
+  [
+    `# Debt — ${plan.epicId}`,
+    "",
+    ...merged(plan, report).flatMap((story) => [
+      `## ${story.id}`,
+      "",
+      ...story.acceptance.map((outcome) => `- [ ] test: ${outcome}`),
+      ""
+    ]),
+    ...(deferred === undefined ? [] : ["## Deferred findings", "", deferred, ""]),
+    ...(testFailures === undefined
+      ? []
+      : ["## Test gate on the epic checkout (skipped while drafting)", "", testFailures, ""])
+  ].join("\n")
+
+const counted = (count: number, one: string, many: string): string =>
+  `${count} ${count === 1 ? one : many}`
+
+/**
+ * After a draft unit: `debt.md` with the merged stories' owed tests, their
+ * deferred findings and, when the draft skipped it, one run of the test gate
+ * on the epic checkout — gates with a memory would otherwise call those
+ * failures inherited and never charge a hardening story with them.
+ */
+export const draftAfterUnit =
+  (withTests: boolean) =>
+  (unit: EpicUnitContext, report: EpicReport): Effect.Effect<void, FlowError> =>
+    Effect.gen(function* () {
+      const stories = merged(unit.plan, report)
+      const findings: Array<string> = []
+      for (const story of stories) {
+        const text = yield* unit.files.read(deferredPath(unit.stateDir, story.id))
+        findings.push(...(text ?? "").split("\n").filter((line) => line.startsWith("- [")))
+      }
+      const gate =
+        withTests || unit.testGate === undefined
+          ? undefined
+          : yield* unit.testGate(unit.workDir, unit.events)
+      const testFailures =
+        gate === undefined || gate.issues.length === 0
+          ? undefined
+          : gate.issues
+              .map(
+                (issue) =>
+                  `- ${issue.title}${issue.description.length === 0 ? "" : `: ${issue.description}`}`
+              )
+              .join("\n")
+      const owed = stories.reduce((sum, story) => sum + story.acceptance.length, 0)
+      if (owed === 0 && findings.length === 0 && testFailures === undefined) {
+        return
+      }
+      const path = debtPath(unit.stateDir)
+      yield* unit.files.writeAtomic(
+        path,
+        renderDebt(
+          unit.plan,
+          report,
+          findings.length === 0 ? undefined : findings.join("\n"),
+          testFailures
+        )
+      )
+      yield* unit.events.publish(
+        Info.make({
+          message: `debt: ${counted(owed, "test owed", "tests owed")}, ${
+            findings.length === 0
+              ? "no deferred findings"
+              : counted(findings.length, "deferred finding", "deferred findings")
+          }${testFailures === undefined ? "" : ", test gate red"} — run epic-draft --harden (${path})`
+        })
+      )
+    })
