@@ -1883,6 +1883,23 @@ export const testGateCommand = (
     command.some((part, index) => index > 0 && /(?:^|[^a-z])(?:test|vitest|jest)/iu.test(part))
   )
 
+/** The gates less the test command (ADR 0043): a draft defers its tests, not its build. */
+export const withoutTestGate = (commands: ReadonlyArray<ReadonlyArray<string>>): SelectedGates => {
+  const test = testGateCommand(commands)
+  return test === undefined
+    ? { commands, note: "test gate: none recognised, every gate kept" }
+    : {
+        commands: commands.filter((command) => command !== test),
+        note: `test gate deferred: ${test.join(" ")}`
+      }
+}
+
+/** What a policy's `selectGates` keeps, and the line the run prints about it. */
+export interface SelectedGates {
+  readonly commands: ReadonlyArray<ReadonlyArray<string>>
+  readonly note?: string
+}
+
 /**
  * How gate output reaches the coder: a capped tail, and the log's path. The
  * epic-stories coders are CLI harnesses that can open a file; an API coder
@@ -2107,9 +2124,28 @@ export interface PlanInputs {
   readonly stateDir: string
 }
 
+/** A unit's state folders, the epic's and then each planned round's (ADR 0021). */
+export const unitStateDirs = (
+  files: PlainFileStoreShape,
+  epicStateDir: string
+): Effect.Effect<ReadonlyArray<string>, PersistenceError> =>
+  Effect.gen(function* () {
+    const dirs = [epicStateDir]
+    for (let round = 1; ; round += 1) {
+      const dir = join(epicStateDir, "rounds", String(round))
+      if ((yield* files.read(join(dir, "plan.md"))) === undefined) {
+        return dirs
+      }
+      dirs.push(dir)
+    }
+  })
+
 /** The executor options a flow built on this spine may set (ADR 0042). */
 export type StoriesPolicy = Partial<
-  Pick<StoriesOptions, "redPhase" | "planTasks" | "reviewers" | "maxRounds" | "taskConcurrency">
+  Pick<
+    StoriesOptions,
+    "redPhase" | "planTasks" | "reviewers" | "maxRounds" | "taskConcurrency" | "deferNonBlocking"
+  >
 >
 
 export interface EpicStoriesOptions {
@@ -2117,6 +2153,8 @@ export interface EpicStoriesOptions {
   readonly argv?: ReadonlyArray<string>
   /** The story judge; absent, stories merge on their gates alone (epic-mvp). */
   readonly storyJudge?: (context: StoryJudgeContext) => StoryJudge
+  /** Narrows the run's resolved gates (ADR 0043); absent, every gate runs. */
+  readonly selectGates?: (commands: ReadonlyArray<ReadonlyArray<string>>) => SelectedGates
   /** Checks the environment before any seat is resolved. */
   readonly preflight?: (
     environment: Readonly<Record<string, string | undefined>>
@@ -2515,8 +2553,17 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             scripts: yield* appScripts(files, join(input.workDir, appDir)),
             pack
           })
-          const commands = resolvedGates.commands
-          yield* events.publish(Info.make({ message: gateListMessage(resolvedGates) }))
+          const selected =
+            options.selectGates === undefined
+              ? undefined
+              : options.selectGates(resolvedGates.commands)
+          const commands = selected?.commands ?? resolvedGates.commands
+          yield* events.publish(
+            Info.make({ message: gateListMessage({ ...resolvedGates, commands }) })
+          )
+          if (selected?.note !== undefined) {
+            yield* events.publish(Info.make({ message: selected.note }))
+          }
           // The Node the gates would run on is the one on PATH, not the one
           // the application pins; a mismatch is a red first story that says
           // nothing about Node. Ask now, and name both.
@@ -2617,14 +2664,18 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             appDir,
             gatesIn(nodeProcessExecutor, events, commands, gateRunOptions(process.env))
           )
-          const testCommand = testGateCommand(commands)
-          const testGate =
-            testCommand === undefined
+          const testGateOf = (from: ReadonlyArray<ReadonlyArray<string>>) => {
+            const testCommand = testGateCommand(from)
+            return testCommand === undefined
               ? undefined
               : inAppDir(
                   appDir,
                   gatesIn(nodeProcessExecutor, events, [testCommand], gateRunOptions(process.env))
                 )
+          }
+          const testGate = testGateOf(commands)
+          // A policy that deferred the test gate still gets it, to run once on its own terms.
+          const unitTestGate = testGateOf(resolvedGates.commands)
           const unitContext = (work: {
             readonly plan: StoryPlan
             readonly stateDir: string
@@ -2636,7 +2687,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             appDir,
             files,
             events,
-            testGate
+            testGate: unitTestGate
           })
           const setupCommand = worktreeSetupCommand(process.env, pack)
           const healthUrl = serverHealthUrl(localServer, process.env)

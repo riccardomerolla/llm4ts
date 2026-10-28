@@ -48,6 +48,7 @@ import { nodeProcessExecutor, ScriptUsage } from "@llm4ts/runner"
 import {
   storyJsonSchema,
   storyPlanInstructions,
+  unitStateDirs,
   type EpicStoriesOptions,
   type EpicUnitContext,
   type PlanInputs
@@ -568,29 +569,13 @@ const Verdict = Schema.fromJsonString(MvpVerdict)
 const encodeVerdict = Schema.encodeSync(Verdict)
 const decodeVerdict = Schema.decodeUnknownOption(Verdict)
 
-/** The state folders whose verdicts the landing reads: the epic's and each round's. */
-const verdictDirs = (
-  files: PlainFileStoreShape,
-  epicStateDir: string
-): Effect.Effect<ReadonlyArray<string>, PersistenceError> =>
-  Effect.gen(function* () {
-    const dirs = [epicStateDir]
-    for (let round = 1; ; round += 1) {
-      const dir = join(epicStateDir, "rounds", String(round))
-      if ((yield* files.read(join(dir, "plan.md"))) === undefined) {
-        return dirs
-      }
-      dirs.push(dir)
-    }
-  })
-
 /** `--land` only once the MVP is reached, in the epic and in every round. */
 export const mvpBeforeLand = (
   epicStateDir: string,
   files: PlainFileStoreShape
 ): Effect.Effect<void, FlowError> =>
   Effect.gen(function* () {
-    for (const dir of yield* verdictDirs(files, epicStateDir)) {
+    for (const dir of yield* unitStateDirs(files, epicStateDir)) {
       const text = yield* files.read(verdictPath(dir))
       const verdict = text === undefined ? undefined : decodeVerdict(text)
       if (verdict === undefined || Option.isNone(verdict)) {
@@ -617,7 +602,7 @@ export const mvpIterateFeedback = (
 ): Effect.Effect<string, PersistenceError> =>
   Effect.gen(function* () {
     const parked: Array<string> = []
-    for (const dir of yield* verdictDirs(files, epicStateDir)) {
+    for (const dir of yield* unitStateDirs(files, epicStateDir)) {
       const list = yield* files.read(parkedPath(dir))
       if (list !== undefined) {
         parked.push(list)

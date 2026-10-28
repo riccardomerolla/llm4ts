@@ -68,6 +68,8 @@ import {
   stallOptions,
   gatesIn,
   testGateCommand,
+  unitStateDirs,
+  withoutTestGate,
   judgeStory,
   localCoderServer,
   orientationFor,
@@ -1488,4 +1490,35 @@ describe("review and stall knobs (ADR 0027)", () => {
     assert.strictEqual(timed.repeats, 7)
     assert.isDefined(timed.silence)
   })
+})
+
+describe("draft seams (ADR 0043)", () => {
+  it("withoutTestGate drops the test command and says which", () => {
+    const picked = withoutTestGate([
+      ["pnpm", "typecheck"],
+      ["pnpm", "test"],
+      ["pnpm", "build"]
+    ])
+    assert.deepStrictEqual(picked.commands, [
+      ["pnpm", "typecheck"],
+      ["pnpm", "build"]
+    ])
+    assert.strictEqual(picked.note, "test gate deferred: pnpm test")
+  })
+
+  it("keeps every gate when no test command is found", () => {
+    const picked = withoutTestGate([["mvn", "verify"]])
+    assert.deepStrictEqual(picked.commands, [["mvn", "verify"]])
+    assert.strictEqual(picked.note, "test gate: none recognised, every gate kept")
+  })
+
+  it.effect("unitStateDirs lists the epic folder, then each round that has a plan", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      yield* memory.store.writeAtomic("/e/plan.md", "plan")
+      yield* memory.store.writeAtomic("/e/rounds/1/plan.md", "round")
+      yield* memory.store.writeAtomic("/e/rounds/3/plan.md", "gap")
+      assert.deepStrictEqual(yield* unitStateDirs(memory.store, "/e"), ["/e", "/e/rounds/1"])
+    })
+  )
 })
