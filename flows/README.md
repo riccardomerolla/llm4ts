@@ -433,7 +433,8 @@ llm4ts run epic-draft --repo ~/work/portal -- --land     # land, hardened or not
 - **Hardening.** `--harden` plans the open debt (and any text given) as a
   refine round under epic-stories' full bar: every review lens, the rubric
   story judge and every gate. When that round settles, its debt moves to
-  `debt.paid.md`.
+  `debt.paid.md`. Finish an open hardening round with `--harden`, not a plain
+  rerun, which would run it at the draft bar.
 - **Which epic flow.** `epic-stories` for the full bar on every story,
   `epic-mvp` to reach an MVP test-first, `epic-draft` for code first and
   tests in the next iteration.
