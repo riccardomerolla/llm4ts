@@ -379,6 +379,11 @@ Info, each as a `ReviewFindingDemoted` event.
 | `LLM4TS_TEST_REPORT` | The JUnit XML report the test gate writes, relative to the app directory; an outcome is green when every test tagged `[story#n]` passed |
 | `LLM4TS_TEST_ONE`    | A command run once per outcome, `{tag}` or `{tagRegex}` replaced by its tag (`pnpm vitest run -t {tagRegex}`); green when it exits 0    |
 
+`epic-draft` (ADR 0043) takes two flags of its own: `--with-tests` keeps the
+test gate while drafting (it is off by default; typecheck, lint and build
+always run), and `--harden` plans the epic's open `debt.md` lists as a refine
+round under epic-stories' full bar.
+
 `epic-stories --defer-findings` (or `LLM4TS_DEFER_FINDINGS=1`) makes review
 lighter (ADR 0031). A task's review settles once only non-Critical findings
 are left (a red gate still loops). The judge clears a story whose findings

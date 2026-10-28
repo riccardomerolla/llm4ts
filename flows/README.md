@@ -13,6 +13,7 @@ one-line description. These scripts double as the built-in flows of the
 | `epic-design.ts`            | Legacy extract pack + target repo → an approved epic brief for `epic-stories`                                                       | reasoner CLI                      |
 | `epic-stories.ts`           | Epic → story DAG → parallel coders in worktrees → epic branch                                                                       | reasoner CLI + pi + Git           |
 | `epic-mvp.ts`               | Epic → MVP cut → red tests first → coders make them green; the rest parked for `--iterate`                                          | reasoner CLI + pi + Git           |
+| `epic-draft.ts`             | Epic → stories without tests → one lens and the build gates; what was deferred is debt `--harden` pays                              | reasoner CLI + pi + Git           |
 | `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                      | reasoner CLI                      |
 | `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                                 | selected CLI + GitHub             |
 | `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                              | selected CLI + Maven              |
@@ -407,6 +408,35 @@ llm4ts run epic-mvp --repo ~/work/portal -- --iterate   # plan what was parked
 - **When to pick it.** Use epic-mvp for greenfield or additive work, where
   a test can say what done means. Use epic-stories for refactors,
   cross-cutting changes, and work that needs judgment on house style.
+
+### Working code first: `epic-draft`
+
+`epic-draft` (ADR 0043) runs on the `epic-stories` engine and defers tests
+and validation instead of dropping them: draft fast, then `--harden`. A
+draft that lands unhardened ships untested code.
+
+```bash
+llm4ts run epic-draft --repo ~/work/portal -- "Add the current account and wire transfers"
+llm4ts run epic-draft --repo ~/work/portal -- --harden   # write the tests owed, close findings
+llm4ts run epic-draft --repo ~/work/portal -- --land     # land, hardened or not
+```
+
+- **The draft.** The planner writes stories with no test files; each still
+  lists its `acceptance` outcomes, the tests owed. Each task gets one
+  correctness lens for one round, non-blocking findings are deferred, and
+  there is no story judge. Typecheck, lint and build still run on every
+  task and merge; the test gate is off unless `--with-tests`. The oracle
+  guard still stops a draft from deleting or skipping existing tests.
+- **The debt.** After the run, `debt.md` beside the plan lists each merged
+  story's tests owed and its deferred findings. When the draft skipped the
+  test gate, it runs once on the epic checkout and its failures go in too.
+- **Hardening.** `--harden` plans the open debt (and any text given) as a
+  refine round under epic-stories' full bar: every review lens, the rubric
+  story judge and every gate. When that round settles, its debt moves to
+  `debt.paid.md`.
+- **Which epic flow.** `epic-stories` for the full bar on every story,
+  `epic-mvp` to reach an MVP test-first, `epic-draft` for code first and
+  tests in the next iteration.
 
 ### The story judge as a ruleset (fork)
 

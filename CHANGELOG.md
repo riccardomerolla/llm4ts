@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **`epic-draft`: working code first, tests later (ADR 0043).** A third
+  flow on the epic-stories engine. Stories are planned without tests, each
+  task gets one correctness lens for one round, findings are deferred, there
+  is no story judge, and the test gate is off (`--with-tests` keeps it);
+  typecheck, lint and build still run. `debt.md` lists the tests owed, the
+  deferred findings and the test gate's failures on the epic checkout, and
+  `--harden` plans that debt as a round under epic-stories' full bar.
+- **Two seams on the epic spine.** A policy may set `deferNonBlocking`
+  without the automatic follow-up round, and `selectGates` narrows the
+  resolved gates (`withoutTestGate`). `unitStateDirs` lists an epic's state
+  folders for any policy.
+
 ## 2.48.0
 
 - **A story may defer its tests (ADR 0031 amendment).** A plan entry may set

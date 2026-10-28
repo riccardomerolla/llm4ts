@@ -1,6 +1,6 @@
 # ADR 0043: epic-draft — Defer Tests and Validation, Then Harden
 
-Status: Proposed · Date: 2026-10-28 · Extends ADR 0013, ADR 0021, ADR 0031, ADR 0042
+Status: Accepted · Date: 2026-10-28 · Extends ADR 0013, ADR 0021, ADR 0031, ADR 0042
 
 ## Context
 
