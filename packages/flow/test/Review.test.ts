@@ -1643,3 +1643,26 @@ describe("reviewAndFixLoop recheck mode (ADR 0044)", () => {
     })
   )
 })
+
+describe("review diff size (ADR 0044)", () => {
+  it.effect("ReviewFindings carry the reviewed diff's line count", () =>
+    Effect.gen(function* () {
+      const events = yield* makeCollectingFlowEvents
+      yield* reviewAndFixLoop({
+        reviewers: [lens()],
+        reviewerService: reviewerService(
+          yield* Ref.make<ReadonlyArray<unknown>>([]),
+          yield* Ref.make(0)
+        ),
+        coder: yield* makeChat(coderService(yield* Ref.make(0))),
+        taskTitle: "task",
+        currentDiff: Effect.succeed("line one\nline two\nline three"),
+        events
+      })
+      const sizes = (yield* events.recorded).flatMap((event) =>
+        event._tag === "ReviewFindings" ? [event.diffLines] : []
+      )
+      assert.deepStrictEqual(sizes, [3])
+    })
+  )
+})

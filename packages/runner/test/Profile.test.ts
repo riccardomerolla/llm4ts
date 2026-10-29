@@ -8,6 +8,7 @@ import { TokenUsage } from "@llm4ts/core/Models"
 import {
   EvidenceChecked,
   Info,
+  ReviewFindings,
   StageCompleted,
   StageStarted,
   StoryJudged,
@@ -455,5 +456,32 @@ describe("evidence per story (ADR 0027)", () => {
         finding.text.includes("list: the coder claimed 1 verification command that never ran")
       )
     )
+  })
+})
+
+describe("story review diff size (ADR 0044)", () => {
+  const reviewed: ReadonlyArray<TreeInput> = [
+    at(0, StageStarted.make({ stage: "story s1", lane: "s1" })),
+    at(
+      10,
+      ReviewFindings.make({ round: 1, settled: false, issues: [], lane: "s1", diffLines: 40 })
+    ),
+    at(
+      20,
+      ReviewFindings.make({ round: 2, settled: true, issues: [], lane: "s1", diffLines: 120 })
+    ),
+    at(30, StageCompleted.make({ stage: "story s1", lane: "s1" }))
+  ]
+
+  it("profile reports the largest review diff per story", () => {
+    const [s1] = profileOf(reviewed).stories
+    assert.strictEqual(s1?.reviewDiffLines, 120)
+    assert.include(renderProfile(profileOf(reviewed)), "review diff 120 lines")
+  })
+
+  it("a trace without review diff sizes reports none", () => {
+    const [home] = profileOf(measured).stories
+    assert.isUndefined(home?.reviewDiffLines)
+    assert.notInclude(renderProfile(profileOf(measured)), "review diff")
   })
 })

@@ -1157,10 +1157,12 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
         result.isClean ||
         round >= maxRounds ||
         (settle === "blocking" && !(yield* Ref.get(gateRed)) && !result.issues.some(isBlocking))
+      const reviewed = !(yield* Ref.get(gateRed)) && diffNow.length > 0
       yield* options.events.publish(
         ReviewFindings.make({
           round,
           settled,
+          ...(reviewed ? { diffLines: diffNow.split("\n").length } : {}),
           issues: result.issues.map((issue) =>
             ReviewFinding.make({
               severity: issue.severity,

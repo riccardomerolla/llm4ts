@@ -134,7 +134,9 @@ export class ReviewFindings extends Schema.TaggedClass<ReviewFindings>()("Review
   settled: Schema.Boolean,
   issues: Schema.Array(ReviewFinding),
   lane: Schema.optionalKey(Schema.String),
-  executor: Schema.optionalKey(Schema.String)
+  executor: Schema.optionalKey(Schema.String),
+  /** Lines of the diff the reviewers read, on a round where they ran (ADR 0044). */
+  diffLines: Schema.optionalKey(Schema.Int)
 }) {}
 
 /**

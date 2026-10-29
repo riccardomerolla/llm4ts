@@ -101,7 +101,9 @@ export const StoryProfile = Schema.Struct({
   /** Commands the coder's Findings claimed to have run that no tool call carried (ADR 0027). */
   unverifiedClaims: Schema.Int,
   /** Tasks whose Findings said `confidence: low`. */
-  lowConfidenceTasks: Schema.Int
+  lowConfidenceTasks: Schema.Int,
+  /** The largest diff its reviewers read in one round, in lines (ADR 0044). */
+  reviewDiffLines: Schema.optionalKey(Schema.Int)
 })
 export type StoryProfile = typeof StoryProfile.Type
 
@@ -187,6 +189,7 @@ interface Lane {
   exploreBeforeEdit: number
   unverifiedClaims: number
   lowConfidenceTasks: number
+  reviewDiffLines: number | undefined
 }
 
 interface Lease {
@@ -364,7 +367,8 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
             firstEdit: undefined,
             exploreBeforeEdit: 0,
             unverifiedClaims: 0,
-            lowConfidenceTasks: 0
+            lowConfidenceTasks: 0,
+            reviewDiffLines: undefined
           })
           continue
         }
@@ -430,6 +434,11 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
       case "Info":
         if (lane !== undefined && event.message.startsWith(`story ${lane.id}: already merged`)) {
           lane.skipped = true
+        }
+        break
+      case "ReviewFindings":
+        if (lane !== undefined && event.diffLines !== undefined) {
+          lane.reviewDiffLines = Math.max(lane.reviewDiffLines ?? 0, event.diffLines)
         }
         break
       case "EvidenceChecked":
@@ -654,6 +663,7 @@ const storyProfile = (
     exploreBeforeEdit: lane.exploreBeforeEdit,
     unverifiedClaims: lane.unverifiedClaims,
     lowConfidenceTasks: lane.lowConfidenceTasks,
+    ...(lane.reviewDiffLines === undefined ? {} : { reviewDiffLines: lane.reviewDiffLines }),
     id: lane.id,
     ...(lane.executor === undefined ? {} : { executor: lane.executor }),
     status: lane.status,
@@ -926,6 +936,17 @@ export const renderProfile = (report: ProfileReport): string => {
               story.firstEditMs === undefined ? "" : `${story.exploreBeforeEdit} explore`,
               story.firstEditMs === undefined ? "never" : duration(story.firstEditMs)
             ])
+          )
+        ]),
+    ...(report.stories.every((story) => story.reviewDiffLines === undefined)
+      ? []
+      : [
+          "",
+          "Largest review diff per story",
+          ...report.stories.flatMap((story) =>
+            story.reviewDiffLines === undefined
+              ? []
+              : [`  ${story.id}: review diff ${story.reviewDiffLines} lines`]
           )
         ]),
     ...(report.skipped.length === 0
