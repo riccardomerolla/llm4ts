@@ -85,7 +85,9 @@ export class ReviewIssue extends Schema.Class<ReviewIssue>("ReviewIssue")({
   /** Why a test gate's output could not stand for green: no tests ran, or test files failed to load. */
   gateReason: Schema.optionalKey(Schema.Literals(["zero-tests", "load-failure"])),
   /** Where the gate's full output was written, when the caller asked for a log. */
-  logPath: Schema.optionalKey(Schema.String)
+  logPath: Schema.optionalKey(Schema.String),
+  /** The reviewer that raised it (ADR 0044): a lens name, or "judge"; absent for gate findings. */
+  lens: Schema.optionalKey(Schema.String)
 }) {}
 
 export class ReviewResult extends Schema.Class<ReviewResult>("ReviewResult")({
@@ -459,6 +461,17 @@ export const applyTriage = Effect.fn("@llm4ts/flow/Review.applyTriage")(function
   }
   return triaged.blocking
 })
+
+/** Names `lens` as the source of every finding in `result` that names none yet (ADR 0044). */
+export const tagLens = (lens: string, result: ReviewResult): ReviewResult =>
+  result.issues.every((issue) => issue.lens !== undefined)
+    ? result
+    : ReviewResult.make({
+        ...result,
+        issues: result.issues.map((issue) =>
+          issue.lens === undefined ? ReviewIssue.make({ ...issue, lens }) : issue
+        )
+      })
 
 export const mergeReviewResults = (results: ReadonlyArray<ReviewResult>): ReviewResult => {
   const counts = results.flatMap((result) => (result.passed === undefined ? [] : [result.passed]))
@@ -974,7 +987,7 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
         Effect.flatMap(review(lens), (result) =>
           Effect.map(demoteUnplaced(lens, result, files, options.events), (placed) => ({
             lens,
-            result: placed
+            result: tagLens(lens.name, placed)
           }))
         )
       const parallelism = options.parallelism ?? 0

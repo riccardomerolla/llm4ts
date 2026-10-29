@@ -27,7 +27,8 @@ import {
   mergeVotes,
   minimalReviewers,
   reviewAndFixLoop,
-  reviewRulesPreamble
+  reviewRulesPreamble,
+  tagLens
 } from "@llm4ts/flow/Review"
 import { GateBaseline } from "@llm4ts/flow/Gates"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
@@ -121,7 +122,7 @@ describe("reviewAndFixLoop", () => {
             maxRounds: 1,
             prescreen: { judgment }
           })
-          assert.deepStrictEqual(result.issues, dirty.issues)
+          assert.deepStrictEqual(result.issues, tagLens("correctness", dirty).issues)
           assert.strictEqual(yield* Ref.get(calls), 1)
           assert.isFalse(
             (yield* events.recorded).some((event) => event._tag === "JudgmentObserved")
@@ -1316,6 +1317,59 @@ describe("review rounds say what runs", () => {
           .map((lens) => lens.name)
           .join(", ")})`
       ])
+    })
+  )
+})
+
+describe("lens attribution (ADR 0044)", () => {
+  it("tagLens names the lens on untagged issues only", () => {
+    const result = ReviewResult.make({
+      issues: [
+        ReviewIssue.make({ severity: "Warning", title: "a" }),
+        ReviewIssue.make({ severity: "Warning", title: "b", lens: "judge" })
+      ]
+    })
+    assert.deepStrictEqual(
+      tagLens("correctness", result).issues.map((issue) => issue.lens),
+      ["correctness", "judge"]
+    )
+  })
+
+  it.effect("a ReviewIssue without lens still decodes", () =>
+    Effect.gen(function* () {
+      const issue = yield* Schema.decodeUnknownEffect(ReviewIssue)({
+        severity: "Info",
+        title: "x"
+      })
+      assert.isUndefined(issue.lens)
+    })
+  )
+
+  it.effect("reviewAndFixLoop tags each lens's findings with its name", () =>
+    Effect.gen(function* () {
+      const finding = (title: string) => ({
+        issues: [{ severity: "Warning", title }],
+        summary: ""
+      })
+      const values = yield* Ref.make<ReadonlyArray<unknown>>([finding("one"), finding("two")])
+      const coder = yield* makeChat(coderService(yield* Ref.make(0)))
+      const result = yield* reviewAndFixLoop({
+        reviewers: [lens(), lens(undefined, "security")],
+        reviewerService: reviewerService(values, yield* Ref.make(0)),
+        coder,
+        taskTitle: "task",
+        currentDiff: Effect.succeed("diff"),
+        events: yield* makeCollectingFlowEvents,
+        parallelism: 1,
+        maxRounds: 1
+      })
+      assert.deepStrictEqual(
+        result.issues.map((issue) => [issue.title, issue.lens]),
+        [
+          ["one", "correctness"],
+          ["two", "security"]
+        ]
+      )
     })
   )
 })
