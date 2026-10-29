@@ -89,7 +89,6 @@ import {
   defaultOracleRules,
   parseUnifiedDiff
 } from "./OracleGuard.ts"
-import { isGateIssue } from "./GateTriage.ts"
 import { ReviewMemory } from "./Recheck.ts"
 import { cachedValue, fingerprintOf } from "./ReviewCache.ts"
 import { withContract, type ContractProfile } from "./AutonomyContract.ts"
@@ -2149,6 +2148,29 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         ]
         const judge = options.judge
         const latest = yield* Ref.make<ReviewResult | undefined>(undefined)
+        const lastStanding = yield* Ref.make<ReviewResult | undefined>(undefined)
+        // The fix turn is a fresh chat: it gets the story and where each finding points.
+        const storyFixPrompt = (prompt: string, standing: ReviewResult | undefined): string => {
+          const located = (standing?.issues ?? []).flatMap((issue) =>
+            issue.file === undefined
+              ? []
+              : [
+                  `- ${issue.title} (${issue.lens ?? "gates"}): ${issue.file}${
+                    issue.line === undefined ? "" : `:${issue.line}`
+                  }`
+                ]
+          )
+          return [
+            `Story ${story.id}: ${story.title}`,
+            story.description,
+            ...(story.acceptance.length === 0
+              ? []
+              : ["Done when:", ...story.acceptance.map((line) => `- ${line}`)]),
+            "",
+            prompt,
+            ...(located.length === 0 ? [] : ["", "Where the findings point:", ...located])
+          ].join("\n")
+        }
         const judgeRuns = yield* Ref.make(0)
         const lastRound = yield* Ref.make(0)
         // A judge that scores `provides` at 0 is owed a piece no fix turn writes.
@@ -2172,19 +2194,25 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             Effect.gen(function* () {
               const verdict = yield* Ref.get(latest)
               if (missingPiece(verdict)) {
+                // Used once: a later round's fix answers that round, not this verdict.
+                yield* Ref.set(latest, undefined)
                 yield* addRevision(verdict, false)
                 yield* guarded(implementTasks, implementTasks)
                 yield* catchUp(story, git)
                 yield* repairPerimeter
                 return ""
               }
-              const reply = yield* coderTurn(prompt)
+              // A BLOCKED_ON from the fix turn stops the story like a task's would.
+              yield* guarded(
+                coderTurn(storyFixPrompt(prompt, yield* Ref.get(lastStanding))),
+                Effect.void
+              )
               yield* git.commitAll(`${story.id}: story review fixes`)
-              return reply
+              return ""
             }),
           onRound: (round, standing, settled) =>
             Effect.andThen(
-              Ref.set(lastRound, round),
+              Effect.andThen(Ref.set(lastRound, round), Ref.set(lastStanding, standing)),
               appendFindings(
                 story,
                 `story review round ${round} — ${
@@ -2229,7 +2257,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         })
         const rounds = yield* Ref.get(lastRound)
         const left = result.issues
-        const gateLeft = left.filter(isGateIssue)
+        // Lenses and the judge always name themselves: a finding with no
+        // lens is a gate's (target gates, oracle, perimeter, frozen tests).
+        const gateLeft = left.filter((issue) => issue.lens === undefined)
         if (gateLeft.length > 0) {
           return yield* failed(
             story,

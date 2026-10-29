@@ -31,7 +31,7 @@ import {
   tagLens
 } from "@llm4ts/flow/Review"
 import { GateBaseline } from "@llm4ts/flow/Gates"
-import type { ReviewMemory } from "@llm4ts/flow/Recheck"
+import { ReviewMemory } from "@llm4ts/flow/Recheck"
 import { diffChunks, remember } from "@llm4ts/flow/Recheck"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import * as Fiber from "effect/Fiber"
@@ -1613,14 +1613,76 @@ describe("reviewAndFixLoop recheck mode (ADR 0044)", () => {
       const seen = yield* Ref.get(prompts)
       assert.strictEqual(seen.length, 1)
       assert.include(seen[0] ?? "", "re-check")
+      // The saved round's fix had not landed: it is applied (and recorded) first.
       assert.deepStrictEqual(
-        (yield* Ref.get(saved)).map((memory) => memory.round),
-        [2]
+        (yield* Ref.get(saved)).map((memory) => [memory.round, memory.fixed === true]),
+        [
+          [1, true],
+          [2, false]
+        ]
       )
       const rounds = (yield* events.recorded).flatMap((event) =>
         event._tag === "ReviewFindings" ? [event.round] : []
       )
       assert.deepStrictEqual(rounds, [2])
+    })
+  )
+
+  it.effect("a resume whose fix never landed applies it before reviewing", () =>
+    Effect.gen(function* () {
+      for (const fixed of [false, true]) {
+        const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+        const asks = yield* Ref.make(0)
+        const asksAtReview = yield* Ref.make<ReadonlyArray<number>>([])
+        const saved = yield* Ref.make<ReadonlyArray<ReviewMemory>>([])
+        const remembered = remember(
+          undefined,
+          1,
+          diffChunks(section("x.ts", "one")),
+          [
+            {
+              name: "a",
+              result: tagLens(
+                "a",
+                ReviewResult.make({
+                  issues: [ReviewIssue.make({ severity: "Warning", title: "bug" })]
+                })
+              )
+            }
+          ],
+          ["x.ts"]
+        )
+        const before = fixed ? ReviewMemory.make({ ...remembered, fixed: true }) : remembered
+        const seat = lensService({}, prompts)
+        const watched: LlmServiceShape = {
+          ...seat,
+          executeStructuredWithUsage: (prompt, schema, jsonSchema) =>
+            Effect.andThen(
+              Effect.flatMap(Ref.get(asks), (count) =>
+                Ref.update(asksAtReview, (all) => [...all, count])
+              ),
+              seat.executeStructuredWithUsage(prompt, schema, jsonSchema)
+            )
+        }
+        yield* reviewAndFixLoop({
+          reviewers: [tagged("a")],
+          reviewerService: watched,
+          coder: yield* makeChat(coderService(asks)),
+          taskTitle: "story s1",
+          currentDiff: diffs(asks, [section("x.ts", "one"), section("x.ts", "two")]),
+          events: yield* makeCollectingFlowEvents,
+          recheck: {
+            memory: {
+              load: Effect.succeed(before),
+              save: (memory) => Ref.update(saved, (all) => [...all, memory])
+            }
+          }
+        })
+        assert.deepStrictEqual(yield* Ref.get(asksAtReview), [fixed ? 0 : 1])
+        if (!fixed) {
+          assert.isTrue((yield* Ref.get(saved)).some((memory) => memory.fixed === true))
+        }
+      }
     })
   )
 

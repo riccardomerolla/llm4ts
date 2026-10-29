@@ -2896,6 +2896,119 @@ describe("Stories executor: story-level review (ADR 0044)", () => {
     })
   )
 
+  it.effect("a last round red on the oracle fails the story instead of carrying it", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const { harness, context, options } = yield* storyRun(
+        lensSeat({ a: [finding("bug")] }, prompts, true),
+        { reviewRounds: 2 }
+      )
+      const gated: StoriesOptions = {
+        ...options,
+        gates: (workDir) =>
+          Effect.map(Ref.get(harness.log), (log) =>
+            workDir.endsWith("/a") && log.some((line) => line.endsWith("a: story review fixes"))
+              ? red("oracle: a test was deleted")
+              : clean
+          )
+      }
+      const report = yield* implementStoriesFlow(context, gated)
+      assert.strictEqual(report.stories[0]?.status, "failed")
+      assert.include(report.stories[0]?.reason ?? "", "oracle: a test was deleted")
+    })
+  )
+
+  it.effect("a red gate after a revision gets a fix turn, not a second revision", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const verdicts = yield* Ref.make(0)
+      const missing = StoryVerdict.make({
+        issues: [ReviewIssue.make({ severity: "Critical", title: "route /a is missing" })],
+        summary: "judge:a",
+        dimensions: [{ id: "provides", score: 0, max: 2 }]
+      })
+      const { harness, context, options } = yield* storyRun(lensSeat({}, prompts), {
+        judge: () =>
+          Effect.map(
+            Ref.getAndUpdate(verdicts, (n) => n + 1),
+            (n) => (n === 0 ? missing : clean)
+          )
+      })
+      const gated: StoriesOptions = {
+        ...options,
+        gates: (workDir) =>
+          Effect.map(Ref.get(harness.log), (log) => {
+            // Red once the revision has caught up with a moved epic, until a fix lands.
+            const revised = log.findIndex((line) =>
+              line.endsWith("a: Revision 1: close the judge's findings")
+            )
+            const after = revised < 0 ? [] : log.slice(revised + 1)
+            const moved = after.some((line) => line.startsWith(`catch-up:${workDir}:`))
+            const fixed = after.some((line) => line.endsWith("a: story review fixes"))
+            return workDir.endsWith("/a") && moved && !fixed
+              ? red("gate failed: tsc after the epic moved")
+              : clean
+          })
+      }
+      const report = yield* implementStoriesFlow(context, gated)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const log = yield* Ref.get(harness.log)
+      assert.isFalse(log.some((line) => line.includes("Revision 2")))
+      assert.isTrue(log.some((line) => line.endsWith("a: story review fixes")))
+    })
+  )
+
+  it.effect("the fix turn gets the story brief and where each finding points", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const asked: Array<string> = []
+      const turns = yield* Ref.make(0)
+      const located = {
+        issues: [{ severity: "Critical", title: "bug", file: "x.ts", line: 3 }],
+        summary: ""
+      }
+      const { context, options } = yield* storyRun(lensSeat({ a: [located] }, prompts), {})
+      const coderSeat = scriptedCoder(turns, (_turn, prompt) => {
+        asked.push(prompt)
+        return "done"
+      })
+      const scripted: StoriesOptions = {
+        ...options,
+        contextFor: (workDir, contextOptions) =>
+          Effect.map(options.contextFor(workDir, contextOptions), (seats) => ({
+            ...seats,
+            context: { ...seats.context, coder: coderSeat }
+          }))
+      }
+      yield* implementStoriesFlow(context, scripted)
+      assert.isTrue(
+        asked.some((prompt) => prompt.includes("x.ts:3") && prompt.includes("Implement a."))
+      )
+    })
+  )
+
+  it.effect("BLOCKED_ON from the fix turn stops the story", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const turns = yield* Ref.make(0)
+      const { context, options } = yield* storyRun(lensSeat({ a: [finding("bug")] }, prompts), {})
+      const coderSeat = scriptedCoder(turns, (_turn, prompt) =>
+        prompt.includes("bug") ? "BLOCKED_ON: the accounts contract" : "done"
+      )
+      const scripted: StoriesOptions = {
+        ...options,
+        contextFor: (workDir, contextOptions) =>
+          Effect.map(options.contextFor(workDir, contextOptions), (seats) => ({
+            ...seats,
+            context: { ...seats.context, coder: coderSeat }
+          }))
+      }
+      const report = yield* implementStoriesFlow(context, scripted)
+      assert.strictEqual(report.stories[0]?.status, "failed")
+      assert.include(report.stories[0]?.reason ?? "", "the accounts contract")
+    })
+  )
+
   it.effect("a finished story's review state is removed, failed or merged", () =>
     Effect.gen(function* () {
       for (const judge of [() => Effect.succeed(red("never")), () => Effect.succeed(clean)]) {

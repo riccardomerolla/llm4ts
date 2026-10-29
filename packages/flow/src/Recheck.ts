@@ -52,7 +52,9 @@ export class ReviewMemory extends Schema.Class<ReviewMemory>("ReviewMemory")({
   round: Schema.Int,
   /** `diffChunks` of the diff they reviewed. */
   chunks: Schema.Record(Schema.String, Schema.String),
-  reviewers: Schema.Array(ReviewerState)
+  reviewers: Schema.Array(ReviewerState),
+  /** The fix for this round's findings landed: a restart reviews the next round, not fixes first. */
+  fixed: Schema.optionalKey(Schema.Boolean)
 }) {}
 
 /** A reviewer the round may ask: a lens, or an extra review such as the story judge. */

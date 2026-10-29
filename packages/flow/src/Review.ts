@@ -34,7 +34,7 @@ import {
   parseUnifiedDiff,
   passedCountIn
 } from "./OracleGuard.ts"
-import type { ReviewMemory } from "./Recheck.ts"
+import { ReviewMemory } from "./Recheck.ts"
 import {
   type Candidate,
   diffChunks,
@@ -1179,11 +1179,27 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       if (settled) {
         return result
       }
-      const fix = fixPrompt(result, options.fix)
-      yield* options.fixWith === undefined ? options.coder.ask(fix) : options.fixWith(fix)
+      yield* applyFix(result)
       return yield* loop(round + 1, result)
     })
 
-  // A restart resumes after the last round its reviewers answered (ADR 0044).
+  /** Sends the findings to the fixer; in recheck mode, records that the fix landed (ADR 0044). */
+  const applyFix = (result: ReviewResult): Effect.Effect<void, FlowError> =>
+    Effect.gen(function* () {
+      const fix = fixPrompt(result, options.fix)
+      yield* options.fixWith === undefined ? options.coder.ask(fix) : options.fixWith(fix)
+      const remembered = yield* Ref.get(memory)
+      if (recheck?.memory !== undefined && remembered !== undefined) {
+        const fixed = ReviewMemory.make({ ...remembered, fixed: true })
+        yield* Ref.set(memory, fixed)
+        yield* recheck.memory.save(fixed)
+      }
+    })
+
+  // A restart resumes after the last round its reviewers answered (ADR 0044),
+  // first applying that round's fix when it never landed.
+  if (loaded !== undefined && loaded.fixed !== true && !standing(loaded).isClean) {
+    yield* applyFix(standing(loaded))
+  }
   return yield* loop(loaded === undefined ? 1 : Math.min(loaded.round + 1, maxRounds), undefined)
 })
