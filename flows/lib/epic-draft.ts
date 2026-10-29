@@ -269,7 +269,9 @@ export const epicDraftOptions = (flags: DraftFlags): EpicStoriesOptions =>
         generatePlan: generateDraftPlan,
         stories: () => ({
           reviewers: [correctnessReviewer],
+          // One round, whether the lens reviews each task or the story (ADR 0044).
           maxRounds: 1,
+          reviewRounds: 1,
           deferNonBlocking: true
         }),
         ...(flags.withTests ? {} : { selectGates: withoutTestGate }),

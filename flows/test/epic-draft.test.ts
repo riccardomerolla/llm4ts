@@ -273,6 +273,7 @@ describe("epic-draft flags and policy", () => {
         [correctnessReviewer.name]
       )
       assert.strictEqual(policy?.maxRounds, 1)
+      assert.strictEqual(policy?.reviewRounds, 1)
       assert.isTrue(policy?.deferNonBlocking)
     })
   )

@@ -80,7 +80,9 @@ import {
   storyContextChars,
   deferFindingsEnabled,
   deferredFeedback,
+  epicUsage,
   judgeRoundsOption,
+  reviewOptions,
   judgeSeverity,
   mergeRevisionsOption,
   taskConcurrencyOption,
@@ -285,6 +287,32 @@ describe("epic-stories flags and seats", () => {
       })
       assert.deepStrictEqual(judgeRoundsOption(undefined, { LLM4TS_JUDGE_ROUNDS: "x" }), {})
       assert.deepStrictEqual(judgeRoundsOption(undefined, {}), {})
+      // Story-level review (ADR 0044): the default, --review-at task goes back.
+      assert.isUndefined(flags.reviewAt)
+      assert.strictEqual((yield* parseEpicArgs(["--review-at", "task"])).reviewAt, "task")
+      assert.strictEqual((yield* parseEpicArgs(["--review-at=story"])).reviewAt, "story")
+      assert.strictEqual(
+        (yield* Effect.flip(parseEpicArgs(["--review-at", "nope"])))._tag,
+        "ScriptUsage"
+      )
+      assert.strictEqual((yield* parseEpicArgs(["--review-rounds", "4"])).reviewRounds, 4)
+      assert.strictEqual((yield* parseEpicArgs(["--judge-rounds", "4"])).reviewRounds, 4)
+      assert.strictEqual(
+        (yield* Effect.flip(parseEpicArgs(["--review-rounds", "0"])))._tag,
+        "ScriptUsage"
+      )
+      assert.deepStrictEqual(reviewOptions(undefined, undefined, {}), { reviewAt: "story" })
+      assert.deepStrictEqual(reviewOptions(undefined, 4, {}), {
+        reviewAt: "story",
+        reviewRounds: 4
+      })
+      assert.deepStrictEqual(reviewOptions("task", 4, {}), { reviewAt: "task", judgeRounds: 4 })
+      assert.deepStrictEqual(reviewOptions(undefined, undefined, { LLM4TS_JUDGE_ROUNDS: "2" }), {
+        reviewAt: "story",
+        reviewRounds: 2
+      })
+      assert.include(epicUsage, "--review-at <task|story>")
+      assert.include(epicUsage, "--review-rounds <n>")
       assert.isFalse(flags.deferFindings)
       assert.isUndefined(flags.mergeRevisions)
       assert.strictEqual((yield* parseEpicArgs(["--merge-revisions", "0"])).mergeRevisions, 0)

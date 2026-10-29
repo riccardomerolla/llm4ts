@@ -119,6 +119,10 @@ export interface EpicArgs {
   readonly concurrency: number | undefined
   /** `--judge-rounds <n>`: judge attempts per story, each but the last followed by a revision. */
   readonly judgeRounds: number | undefined
+  /** `--review-at <task|story>`: where the review lenses run (ADR 0044); absent, per story. */
+  readonly reviewAt: "task" | "story" | undefined
+  /** `--review-rounds <n>` (or `--judge-rounds`): rounds of the story review (ADR 0044). */
+  readonly reviewRounds: number | undefined
   /** `--defer-findings`: non-blocking findings wait for a follow-up round (ADR 0031). */
   readonly deferFindings: boolean
   /** `--merge-revisions <n>`: times a story red after merging goes back to fix it. */
@@ -154,8 +158,10 @@ export const epicUsage = [
   "                      A plain rerun finishes an open round; --plan-only stops after planning",
   "  --concurrency <n>   stories implemented at once (default 3)",
   "  --fail-fast         stop the epic at the first failed story",
-  "  --judge-rounds <n>  judge attempts per story (default 2 = one revision); a story the judge",
-  "                      has not cleared after n attempts fails. LLM4TS_JUDGE_ROUNDS sets it too",
+  "  --review-at <task|story> where the review lenses run (default story: once per story,",
+  "                      beside the judge; task: every task, as before 2.51)",
+  "  --review-rounds <n> rounds of the story review (default 3); in task mode, judge attempts",
+  "                      (default 2). --judge-rounds and LLM4TS_JUDGE_ROUNDS set it too",
   "  --task-concurrency <n> coders one story may hold at once (default 1: every task in order).",
   "                      Above 1, a task the plan says needs nothing still running, and whose",
   "                      Owns: paths overlap no running task's, goes to a free coder in its own",
@@ -189,6 +195,7 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
     let failFast = false
     let concurrency: number | undefined
     let judgeRounds: number | undefined
+    let reviewAt: "task" | "story" | undefined
     let deferFindings = false
     let mergeRevisions: number | undefined
     let taskConcurrency: number | undefined
@@ -270,17 +277,32 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
           })
         }
         mergeRevisions = parsed
-      } else if (argument === "--judge-rounds" || argument.startsWith("--judge-rounds=")) {
-        const raw = argument.includes("=")
-          ? argument.slice("--judge-rounds=".length)
-          : argv[index + 1]
+      } else if (argument === "--review-at" || argument.startsWith("--review-at=")) {
+        const raw = argument.includes("=") ? argument.slice("--review-at=".length) : argv[index + 1]
+        if (!argument.includes("=")) {
+          index += 1
+        }
+        if (raw !== "task" && raw !== "story") {
+          return yield* ScriptUsage.make({
+            message: `--review-at takes task or story\n${epicUsage}`
+          })
+        }
+        reviewAt = raw
+      } else if (
+        argument === "--judge-rounds" ||
+        argument.startsWith("--judge-rounds=") ||
+        argument === "--review-rounds" ||
+        argument.startsWith("--review-rounds=")
+      ) {
+        const name = argument.split("=")[0] ?? argument
+        const raw = argument.includes("=") ? argument.slice(name.length + 1) : argv[index + 1]
         if (!argument.includes("=")) {
           index += 1
         }
         const parsed = Number.parseInt(raw ?? "", 10)
         if (!Number.isInteger(parsed) || parsed < 1) {
           return yield* ScriptUsage.make({
-            message: `--judge-rounds requires a positive integer\n${epicUsage}`
+            message: `${name} requires a positive integer\n${epicUsage}`
           })
         }
         judgeRounds = parsed
@@ -293,6 +315,8 @@ export const parseEpicArgs = (argv: ReadonlyArray<string>): Effect.Effect<EpicAr
       failFast,
       concurrency,
       judgeRounds,
+      reviewAt,
+      reviewRounds: judgeRounds,
       deferFindings,
       mergeRevisions,
       taskConcurrency,
@@ -382,6 +406,30 @@ export const judgeRoundsOption = (
   }
   const raw = Number.parseInt(environment.LLM4TS_JUDGE_ROUNDS ?? "", 10)
   return Number.isInteger(raw) && raw > 0 ? { judgeRounds: raw } : {}
+}
+
+/**
+ * Where the lenses run and for how many rounds (ADR 0044): per story unless
+ * `--review-at task`. The rounds (`--review-rounds`, `--judge-rounds`, or
+ * `LLM4TS_JUDGE_ROUNDS`) bound the story review, or in task mode count judge
+ * attempts as before.
+ */
+export const reviewOptions = (
+  reviewAt: "task" | "story" | undefined,
+  rounds: number | undefined,
+  environment: Readonly<Record<string, string | undefined>>
+): {
+  readonly reviewAt: "task" | "story"
+  readonly reviewRounds?: number
+  readonly judgeRounds?: number
+} => {
+  const at = reviewAt ?? "story"
+  const { judgeRounds } = judgeRoundsOption(rounds, environment)
+  return judgeRounds === undefined
+    ? { reviewAt: at }
+    : at === "story"
+      ? { reviewAt: at, reviewRounds: judgeRounds }
+      : { reviewAt: at, judgeRounds }
 }
 
 // ---- Epics in a repository ---------------------------------------------------------
@@ -2145,7 +2193,13 @@ export const unitStateDirs = (
 export type StoriesPolicy = Partial<
   Pick<
     StoriesOptions,
-    "redPhase" | "planTasks" | "reviewers" | "maxRounds" | "taskConcurrency" | "deferNonBlocking"
+    | "redPhase"
+    | "planTasks"
+    | "reviewers"
+    | "maxRounds"
+    | "reviewRounds"
+    | "taskConcurrency"
+    | "deferNonBlocking"
   >
 >
 
@@ -2804,7 +2858,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                       ...(orientation === undefined ? [] : ["", orientation])
                     ].join("\n")
                   ),
-                ...judgeRoundsOption(flags.judgeRounds, process.env),
+                ...reviewOptions(flags.reviewAt, flags.reviewRounds, process.env),
                 ...mergeRevisionsOption(flags.mergeRevisions, process.env),
                 ...taskConcurrencyOption(flags.taskConcurrency, process.env),
                 concurrency,
