@@ -34,6 +34,16 @@ import {
   parseUnifiedDiff,
   passedCountIn
 } from "./OracleGuard.ts"
+import type { ReviewMemory } from "./Recheck.ts"
+import {
+  type Candidate,
+  diffChunks,
+  planRound,
+  recheckLead,
+  remember,
+  standing,
+  touchedFiles
+} from "./Recheck.ts"
 import { cachedReview, fingerprintOf } from "./ReviewCache.ts"
 import { withCallPurpose } from "./Timing.ts"
 import {
@@ -715,6 +725,32 @@ export interface ReviewAndFixOptions {
    * non-blocking. A red gate is always blocking.
    */
   readonly settle?: SettleRule
+  /**
+   * Incremental re-review (ADR 0044): each reviewer's findings are kept
+   * across rounds, a later round asks only the reviewers with findings (a
+   * re-check of them) or with files they have not seen, and the result is
+   * every finding still standing. Absent, every lens reviews every round.
+   */
+  readonly recheck?: RecheckOptions
+}
+
+/** A reviewer beside the lenses, such as the story judge (ADR 0044). */
+export interface ExtraReview {
+  readonly name: string
+  /** `prior`: its own standing findings when this run is a re-check; undefined for a full review. */
+  readonly review: (
+    diff: string,
+    prior: ReadonlyArray<ReviewIssue> | undefined
+  ) => Effect.Effect<ReviewResult, FlowError>
+}
+
+export interface RecheckOptions {
+  readonly extra?: ReadonlyArray<ExtraReview>
+  /** Where the reviewers' memory is kept, so a restart resumes at the next round. */
+  readonly memory?: {
+    readonly load: Effect.Effect<ReviewMemory | undefined, FlowError>
+    readonly save: (memory: ReviewMemory) => Effect.Effect<void, FlowError>
+  }
 }
 
 /** When a review round stops sending findings back to the coder (ADR 0031). */
@@ -825,9 +861,13 @@ export const reviewWith = (
   events: FlowEventsShape,
   lens: Reviewer,
   taskTitle: string,
-  diff: string
+  diff: string,
+  /** A re-check (ADR 0044): the files the fix touched and the lens's own earlier findings. */
+  recheck?: { readonly touched: ReadonlyArray<string>; readonly prior: ReadonlyArray<ReviewIssue> }
 ): Effect.Effect<ReviewResult, FlowLlmError> => {
-  const prompt = `${lensPrompt(lens)}\n\n${reviewPrompt(taskTitle, diff)}`
+  const lead =
+    recheck === undefined ? "" : `${recheckLead(taskTitle, recheck.touched, recheck.prior)}\n\n`
+  const prompt = `${lensPrompt(lens)}\n\n${lead}${reviewPrompt(taskTitle, diff)}`
   // Usage is published per attempt — a schema retry costs real tokens too.
   const attempt = (text: string): Effect.Effect<ReviewResult, LlmError> =>
     service.executeStructuredWithUsage(text, ReviewResult, reviewJsonSchema).pipe(
@@ -875,6 +915,104 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
   // A red gate is never settled early, whatever its findings' severities.
   const gateRed = yield* Ref.make(false)
 
+  const recheck = options.recheck
+  const loaded = recheck?.memory === undefined ? undefined : yield* recheck.memory.load
+  const memory = yield* Ref.make<ReviewMemory | undefined>(loaded)
+
+  /** One round of incremental re-review (ADR 0044): returns what still stands. */
+  const recheckRound = (
+    settings: RecheckOptions,
+    round: number,
+    diff: string,
+    files: ReadonlyArray<string>
+  ): Effect.Effect<ReviewResult, FlowError> =>
+    Effect.gen(function* () {
+      const before = yield* Ref.get(memory)
+      const chunks = diffChunks(diff)
+      const shown = files.length > 0 ? files : Object.keys(chunks)
+      const touched = before === undefined ? [] : touchedFiles(before.chunks, chunks)
+      const extras = settings.extra ?? []
+      const candidates: ReadonlyArray<Candidate> = [
+        ...options.reviewers.map((lens) => ({
+          name: lens.name,
+          matches: (changed: ReadonlyArray<string>) => lens.matches(changed)
+        })),
+        ...extras.map((extra) => ({ name: extra.name, matches: () => true, onlyWhenDirty: true }))
+      ]
+      const plan = planRound(candidates, before, shown, touched)
+      const priorOf = (name: string): ReadonlyArray<ReviewIssue> =>
+        before?.reviewers.find((entry) => entry.name === name)?.findings ?? []
+      const asked = [...plan.full, ...plan.recheck]
+      if (asked.length > 0) {
+        yield* options.events.publish(
+          Info.make({
+            message: `review round ${round} of "${options.taskTitle}": ${asked
+              .map((name) => (plan.recheck.includes(name) ? `${name} (re-check)` : name))
+              .join(", ")}`
+          })
+        )
+      }
+      const cache = options.cache
+      const ask = (
+        name: string
+      ): Effect.Effect<{ readonly name: string; readonly result: ReviewResult }, FlowError> => {
+        const again = plan.recheck.includes(name)
+        const prior = priorOf(name)
+        const lens = options.reviewers.find((candidate) => candidate.name === name)
+        const extra = extras.find((candidate) => candidate.name === name)
+        const lensAnswer = (lens: Reviewer): Effect.Effect<ReviewResult, FlowError> => {
+          const call = withCallPurpose(
+            `${name} lens${again ? " · re-check" : ""}`,
+            reviewWith(
+              options.reviewerService,
+              options.events,
+              lens,
+              options.taskTitle,
+              diff,
+              again ? { touched, prior } : undefined
+            )
+          )
+          const answered =
+            cache === undefined
+              ? call
+              : cachedReview(
+                  cache.files,
+                  join(cache.dir, `${fileSlug(name)}.json`),
+                  fingerprintOf([
+                    name,
+                    lensPrompt(lens),
+                    "0",
+                    options.taskTitle,
+                    diff,
+                    ...(again ? ["recheck", ...prior.map((issue) => issue.title)] : [])
+                  ]),
+                  call
+                )
+          return Effect.flatMap(answered, (result) =>
+            demoteUnplaced(lens, result, files, options.events)
+          )
+        }
+        const answer: Effect.Effect<ReviewResult, FlowError> =
+          lens !== undefined
+            ? lensAnswer(lens)
+            : extra !== undefined
+              ? extra.review(diff, again ? prior : undefined)
+              : Effect.succeed(ReviewResult.make({ issues: [] }))
+        return Effect.map(answer, (result) => ({ name, result: tagLens(name, result) }))
+      }
+      const parallelism = options.parallelism ?? 0
+      const ran =
+        parallelism > 0
+          ? yield* Effect.forEach(asked, ask, { concurrency: parallelism })
+          : yield* Effect.forEach(asked, ask, { concurrency: "unbounded" })
+      const next = remember(before, round, chunks, ran, shown)
+      yield* Ref.set(memory, next)
+      if (settings.memory !== undefined) {
+        yield* settings.memory.save(next)
+      }
+      return standing(next)
+    })
+
   const reviewOnce = (
     round: number,
     previous: ReviewResult | undefined
@@ -893,6 +1031,9 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       }
       const diff = yield* options.currentDiff
       const files = yield* changedFiles
+      if (recheck !== undefined) {
+        return yield* recheckRound(recheck, round, diff, files)
+      }
       const selected = yield* selector.select(options.reviewers, files, round, previous)
       const screened =
         options.prescreen === undefined
@@ -1041,5 +1182,6 @@ export const reviewAndFixLoop = Effect.fn("@llm4ts/flow/Review.reviewAndFixLoop"
       return yield* loop(round + 1, result)
     })
 
-  return yield* loop(1, undefined)
+  // A restart resumes after the last round its reviewers answered (ADR 0044).
+  return yield* loop(loaded === undefined ? 1 : Math.min(loaded.round + 1, maxRounds), undefined)
 })

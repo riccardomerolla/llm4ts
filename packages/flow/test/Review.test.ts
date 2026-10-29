@@ -31,6 +31,8 @@ import {
   tagLens
 } from "@llm4ts/flow/Review"
 import { GateBaseline } from "@llm4ts/flow/Gates"
+import type { ReviewMemory } from "@llm4ts/flow/Recheck"
+import { diffChunks, remember } from "@llm4ts/flow/Recheck"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import * as Fiber from "effect/Fiber"
 import { TestClock } from "effect/testing"
@@ -1370,6 +1372,274 @@ describe("lens attribution (ADR 0044)", () => {
           ["two", "security"]
         ]
       )
+    })
+  )
+})
+
+describe("reviewAndFixLoop recheck mode (ADR 0044)", () => {
+  const section = (path: string, line: string): string =>
+    [
+      `diff --git a/${path} b/${path}`,
+      `--- a/${path}`,
+      `+++ b/${path}`,
+      "@@ -1,1 +1,1 @@",
+      `+${line}`
+    ].join("\n")
+
+  const tagged = (name: string, files?: string): Reviewer =>
+    Reviewer.make({
+      name,
+      systemPrompt: `LENS:${name}`,
+      ...(files === undefined ? {} : { files })
+    })
+
+  const answer = (...titles: ReadonlyArray<string>) => ({
+    issues: titles.map((title) => ({ severity: "Warning", title })),
+    summary: ""
+  })
+
+  /** Answers each lens from its own queue (clean when empty) and records every prompt. */
+  const lensService = (
+    answers: Readonly<Record<string, ReadonlyArray<unknown>>>,
+    prompts: Ref.Ref<ReadonlyArray<string>>
+  ): LlmServiceShape => {
+    const queues = new Map(Object.entries(answers).map(([name, list]) => [name, [...list]]))
+    const next = <A, E, RD, RE>(prompt: string, schema: Schema.ConstraintCodec<A, E, RD, RE>) =>
+      Ref.update(prompts, (all) => [...all, prompt]).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            const name = /LENS:(\w+)/u.exec(prompt)?.[1] ?? ""
+            return queues.get(name)?.shift() ?? { issues: [], summary: "clean" }
+          })
+        ),
+        Effect.flatMap((value) => Schema.decodeUnknownEffect(schema)(value).pipe(Effect.orDie))
+      )
+    return {
+      ...reviewerService(Ref.makeUnsafe<ReadonlyArray<unknown>>([]), Ref.makeUnsafe(0)),
+      executeStructured: (prompt, schema, _jsonSchema) => next(prompt, schema),
+      executeStructuredWithUsage: (prompt, schema, _jsonSchema) =>
+        next(prompt, schema).pipe(Effect.map((value) => [value, undefined, undefined] as const))
+    }
+  }
+
+  /** The diff before any fix, then after each fix the coder applies. */
+  const diffs = (asks: Ref.Ref<number>, versions: ReadonlyArray<string>) =>
+    Effect.map(Ref.get(asks), (count) => versions[Math.min(count, versions.length - 1)] ?? "")
+
+  it.effect(
+    "round 2 reruns only the lens with findings, with its earlier findings in the prompt",
+    () =>
+      Effect.gen(function* () {
+        const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+        const asks = yield* Ref.make(0)
+        const result = yield* reviewAndFixLoop({
+          reviewers: [tagged("a"), tagged("b")],
+          reviewerService: lensService({ a: [answer("bug")] }, prompts),
+          coder: yield* makeChat(coderService(asks)),
+          taskTitle: "story s1",
+          currentDiff: diffs(asks, [section("x.ts", "one"), section("x.ts", "two")]),
+          events: yield* makeCollectingFlowEvents,
+          parallelism: 1,
+          recheck: {}
+        })
+        assert.isTrue(result.isClean)
+        const seen = yield* Ref.get(prompts)
+        assert.strictEqual(seen.length, 3)
+        const last = seen[2] ?? ""
+        assert.include(last, "LENS:a")
+        assert.include(last, "re-check")
+        assert.include(last, "bug")
+      })
+  )
+
+  it.effect("a clean lens reruns when the fix touches a file it never saw", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const asks = yield* Ref.make(0)
+      yield* reviewAndFixLoop({
+        reviewers: [tagged("a"), tagged("b", "\\.test\\.ts$")],
+        reviewerService: lensService({ a: [answer("bug")] }, prompts),
+        coder: yield* makeChat(coderService(asks)),
+        taskTitle: "story s1",
+        currentDiff: diffs(asks, [
+          [section("x.ts", "one"), section("y.test.ts", "t")].join("\n"),
+          [section("x.ts", "two"), section("y.test.ts", "t"), section("z.test.ts", "n")].join("\n")
+        ]),
+        events: yield* makeCollectingFlowEvents,
+        parallelism: 1,
+        recheck: {}
+      })
+      const round2 = (yield* Ref.get(prompts)).slice(2)
+      assert.strictEqual(round2.length, 2)
+      assert.isTrue(
+        round2.some((prompt) => prompt.includes("LENS:a") && prompt.includes("re-check"))
+      )
+      assert.isTrue(
+        round2.some((prompt) => prompt.includes("LENS:b") && !prompt.includes("re-check"))
+      )
+    })
+  )
+
+  it.effect("the result is the standing findings across rounds", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const asks = yield* Ref.make(0)
+      const result = yield* reviewAndFixLoop({
+        reviewers: [tagged("a"), tagged("b")],
+        reviewerService: lensService(
+          { a: [answer("bug"), answer()], b: [answer("slow"), answer("slow")] },
+          prompts
+        ),
+        coder: yield* makeChat(coderService(asks)),
+        taskTitle: "story s1",
+        currentDiff: diffs(asks, [section("x.ts", "one"), section("x.ts", "two")]),
+        events: yield* makeCollectingFlowEvents,
+        parallelism: 1,
+        maxRounds: 2,
+        recheck: {}
+      })
+      assert.deepStrictEqual(
+        result.issues.map((issue) => [issue.title, issue.lens]),
+        [["slow", "b"]]
+      )
+    })
+  )
+
+  it.effect("an extra review runs beside the lenses and gets its prior on re-check", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const asks = yield* Ref.make(0)
+      const priors = yield* Ref.make<ReadonlyArray<ReadonlyArray<string> | undefined>>([])
+      const verdicts = [
+        ReviewResult.make({
+          issues: [ReviewIssue.make({ severity: "Critical", title: "missing" })]
+        }),
+        ReviewResult.make({ issues: [] })
+      ]
+      const result = yield* reviewAndFixLoop({
+        reviewers: [tagged("a")],
+        reviewerService: lensService({}, prompts),
+        coder: yield* makeChat(coderService(asks)),
+        taskTitle: "story s1",
+        currentDiff: diffs(asks, [section("x.ts", "one"), section("x.ts", "two")]),
+        events: yield* makeCollectingFlowEvents,
+        recheck: {
+          extra: [
+            {
+              name: "judge",
+              review: (_diff, prior) =>
+                Ref.modify(priors, (all) => [
+                  verdicts[all.length] ?? ReviewResult.make({ issues: [] }),
+                  [...all, prior?.map((issue) => issue.title)]
+                ])
+            }
+          ]
+        }
+      })
+      assert.isTrue(result.isClean)
+      assert.deepStrictEqual(yield* Ref.get(priors), [undefined, ["missing"]])
+      // The clean lens is not asked again.
+      assert.strictEqual((yield* Ref.get(prompts)).length, 1)
+    })
+  )
+
+  it.effect("a red gate round runs no reviewer and a lens that never ran reviews in full", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const asks = yield* Ref.make(0)
+      const gates = yield* Ref.make<ReadonlyArray<ReviewResult>>([
+        ReviewResult.make({
+          issues: [ReviewIssue.make({ severity: "Critical", title: "gate failed: tsc" })]
+        })
+      ])
+      const result = yield* reviewAndFixLoop({
+        reviewers: [tagged("a")],
+        reviewerService: lensService({}, prompts),
+        coder: yield* makeChat(coderService(asks)),
+        taskTitle: "story s1",
+        currentDiff: diffs(asks, [section("x.ts", "one"), section("x.ts", "two")]),
+        events: yield* makeCollectingFlowEvents,
+        lint: Ref.modify(gates, (queue) => [
+          queue[0] ?? ReviewResult.make({ issues: [] }),
+          queue.slice(1)
+        ]),
+        recheck: {}
+      })
+      assert.isTrue(result.isClean)
+      const seen = yield* Ref.get(prompts)
+      assert.strictEqual(seen.length, 1)
+      assert.notInclude(seen[0] ?? "", "re-check")
+    })
+  )
+
+  it.effect("resumes from saved memory at the next round", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const saved = yield* Ref.make<ReadonlyArray<ReviewMemory>>([])
+      const events = yield* makeCollectingFlowEvents
+      const before = remember(
+        undefined,
+        1,
+        diffChunks(section("x.ts", "one")),
+        [
+          {
+            name: "a",
+            result: tagLens(
+              "a",
+              ReviewResult.make({
+                issues: [ReviewIssue.make({ severity: "Warning", title: "bug" })]
+              })
+            )
+          },
+          { name: "b", result: ReviewResult.make({ issues: [] }) }
+        ],
+        ["x.ts"]
+      )
+      const result = yield* reviewAndFixLoop({
+        reviewers: [tagged("a"), tagged("b")],
+        reviewerService: lensService({}, prompts),
+        coder: yield* makeChat(coderService(yield* Ref.make(0))),
+        taskTitle: "story s1",
+        currentDiff: Effect.succeed(section("x.ts", "two")),
+        events,
+        recheck: {
+          memory: {
+            load: Effect.succeed(before),
+            save: (memory) => Ref.update(saved, (all) => [...all, memory])
+          }
+        }
+      })
+      assert.isTrue(result.isClean)
+      const seen = yield* Ref.get(prompts)
+      assert.strictEqual(seen.length, 1)
+      assert.include(seen[0] ?? "", "re-check")
+      assert.deepStrictEqual(
+        (yield* Ref.get(saved)).map((memory) => memory.round),
+        [2]
+      )
+      const rounds = (yield* events.recorded).flatMap((event) =>
+        event._tag === "ReviewFindings" ? [event.round] : []
+      )
+      assert.deepStrictEqual(rounds, [2])
+    })
+  )
+
+  it.effect("without recheck every lens runs every round, as before", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const asks = yield* Ref.make(0)
+      yield* reviewAndFixLoop({
+        reviewers: [tagged("a"), tagged("b")],
+        reviewerService: lensService({ a: [answer("bug")] }, prompts),
+        coder: yield* makeChat(coderService(asks)),
+        taskTitle: "task",
+        currentDiff: diffs(asks, [section("x.ts", "one"), section("x.ts", "two")]),
+        events: yield* makeCollectingFlowEvents,
+        parallelism: 1
+      })
+      const seen = yield* Ref.get(prompts)
+      assert.strictEqual(seen.length, 4)
+      assert.isFalse(seen.some((prompt) => prompt.includes("re-check")))
     })
   )
 })
