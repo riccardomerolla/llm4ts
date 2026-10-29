@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { PersistenceError, type FlowError } from "./FlowError.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
-import { ReviewResult } from "./Review.ts"
+import { ReviewResult } from "./ReviewModel.ts"
 
 /** A stable key over parts, length-prefixed so a split never collides with another. */
 export const fingerprintOf = (parts: ReadonlyArray<string>): string => {
