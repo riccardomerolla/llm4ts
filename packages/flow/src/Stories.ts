@@ -119,8 +119,18 @@ const join = (root: string, path: string): string =>
 
 /** A flow context rooted in a story's worktree, plus that story's own usage totals. */
 /** A story judge's review with the rubric's scores; a plain `ReviewResult` has none. */
+/** A dimension below the bar the story was not held to, with the judge's reasoning (ADR 0045). */
+export const ExcusedDimension = Schema.Struct({
+  id: Schema.String,
+  score: Schema.Number,
+  max: Schema.Number,
+  reasoning: Schema.String
+})
+export type ExcusedDimension = typeof ExcusedDimension.Type
+
 export class StoryVerdict extends ReviewResult.extend<StoryVerdict>("StoryVerdict")({
-  dimensions: Schema.Array(JudgedDimension)
+  dimensions: Schema.Array(JudgedDimension),
+  excused: Schema.optionalKey(Schema.Array(ExcusedDimension))
 }) {}
 
 /** What a judge answers: a scored verdict, or a plain review result. */
@@ -821,6 +831,12 @@ export interface StoriesOptions {
    */
   readonly deferNonBlocking?: boolean
   /**
+   * Names the bar the judge holds stories to when it is not the default
+   * (`defer-tests`, ADR 0045). It enters the judge's cache fingerprint, so a
+   * verdict judged under one bar is never reused under another.
+   */
+  readonly judgeBar?: string
+  /**
    * Second opinion on a BLOCKED_ON claim the plan cannot settle (a path no
    * story owns, or a parallel story's). `real: false` sends the coder back
    * once with the reason. Omit to accept every such claim.
@@ -871,6 +887,27 @@ export const deferredPath = (stateDir: string, storyId: string): string =>
 /** Where a story review keeps its reviewers' memory between rounds and runs (ADR 0044). */
 export const reviewStatePath = (stateDir: string, storyId: string): string =>
   join(stateDir, `stories/${storyId}.review-state.json`)
+
+/** Where a story's last judge verdict is kept, beside a fingerprint of what it judged. */
+export const judgeVerdictPath = (stateDir: string, storyId: string): string =>
+  join(stateDir, `stories/${storyId}.judge.json`)
+
+/** A story's last judge verdict, when it was a scored one (ADR 0045: what the debt reads). */
+export const lastStoryVerdict = (
+  files: PlainFileStoreShape,
+  stateDir: string,
+  storyId: string
+): Effect.Effect<StoryVerdict | undefined> =>
+  files.read(judgeVerdictPath(stateDir, storyId)).pipe(
+    Effect.flatMap((text) =>
+      text === undefined
+        ? Effect.succeed(undefined)
+        : Schema.decodeUnknownEffect(
+            Schema.fromJsonString(Schema.Struct({ result: StoryVerdict }))
+          )(text).pipe(Effect.map((entry) => entry.result))
+    ),
+    Effect.catch(() => Effect.succeed(undefined))
+  )
 
 /** A deferred finding as one Markdown bullet, prefixed with where it was found. */
 export const deferredLine = (source: string, issue: ReviewIssue): string => {
@@ -974,8 +1011,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const statePath = (story: Story): string => join(options.stateDir, `stories/${story.id}.json`)
   const planPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.plan.md`)
   /** The judge's last verdict beside a fingerprint of what it judged. */
-  const judgePath = (story: Story): string =>
-    join(options.stateDir, `stories/${story.id}.judge.json`)
+  const judgePath = (story: Story): string => judgeVerdictPath(options.stateDir, story.id)
   /** One file per review lens, beside a fingerprint of the task and diff. */
   const reviewCacheDir = (story: Story): string =>
     join(options.stateDir, `stories/${story.id}.review`)
@@ -2073,7 +2109,9 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
                       story.id,
                       story.title,
                       story.description,
-                      story.provides.join("\n")
+                      story.provides.join("\n"),
+                      // Absent for the default bar: verdicts stored before 2.52 stay valid.
+                      ...(options.judgeBar === undefined ? [] : [options.judgeBar])
                     ]),
                     withTimedRole(
                       "judge",

@@ -1076,6 +1076,25 @@ describe("Stories executor", () => {
       })
   )
 
+  it.effect("a verdict judged under another bar is never reused (ADR 0045)", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const verdicts = yield* Ref.make(0)
+      const options = yield* makeOptions(harness, single, context, {
+        judge: () => Ref.update(verdicts, (n) => n + 1).pipe(Effect.as(red("tests scored 0")))
+      })
+      yield* implementStoriesFlow(context, options)
+      assert.strictEqual(yield* Ref.get(verdicts), 2)
+      // Rerun under --defer-tests: round 1 must ask the judge again.
+      const deferring = { ...options, judgeBar: "defer-tests", judge: () => Effect.succeed(clean) }
+      const second = yield* implementStoriesFlow(context, deferring)
+      assert.strictEqual(second.stories[0]?.status, "done")
+      // Cleared at round 1: the stored red verdict did not answer for the new bar.
+      assert.include(second.stories[0]?.judge ?? "", "round 1")
+    })
+  )
+
   it.effect("times every merge and its wait for the merge lock on the story's lane", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness()

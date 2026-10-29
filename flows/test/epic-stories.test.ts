@@ -820,6 +820,60 @@ describe("epic-stories flags and seats", () => {
   )
 })
 
+describe("--defer-tests judge bar (ADR 0045)", () => {
+  const story = Story.make({
+    id: "conto",
+    title: "Current account",
+    description: "Balance.",
+    owned: ["src/conto"],
+    acceptance: ["shows the balance"]
+  })
+  const untested = () =>
+    structured({
+      scores: [
+        { name: "provides", score: 2, reasoning: "" },
+        { name: "scope", score: 2, reasoning: "" },
+        { name: "house-style", score: 1, reasoning: "names drift" },
+        { name: "tests", score: 0, reasoning: "no test covers the balance" }
+      ]
+    })
+
+  it.effect("tests at 0 is excused, not a finding, its reasoning kept", () =>
+    Effect.gen(function* () {
+      const verdict = yield* judgeStory(untested(), story, "diff", 1000, undefined, "diff", {
+        deferTests: true
+      })
+      assert.deepStrictEqual(
+        verdict.issues.map((issue) => issue.title),
+        ["judge[conto]: house-style scored 1"]
+      )
+      assert.deepStrictEqual(verdict.excused, [
+        { id: "tests", score: 0, max: 2, reasoning: "no test covers the balance" }
+      ])
+      assert.strictEqual(verdict.dimensions.find((dimension) => dimension.id === "tests")?.score, 0)
+    })
+  )
+
+  it.effect("without the bar, tests at 0 still fails and nothing is excused", () =>
+    Effect.gen(function* () {
+      const verdict = yield* judgeStory(untested(), story, "diff", 1000)
+      assert.include(
+        verdict.issues.map((issue) => `${issue.severity} ${issue.title}`),
+        "Critical judge[conto]: tests scored 0"
+      )
+      assert.isUndefined(verdict.excused)
+    })
+  )
+
+  it("tells the judge tests may wait, without saying none are expected", () => {
+    const query = storyJudgeQuery(story, undefined, "diff", { deferTests: true })
+    assert.include(query, "Tests may be deferred to a later round")
+    assert.include(query, "do not mark any other dimension down")
+    assert.notInclude(query, "No test file is expected")
+    assert.notInclude(storyJudgeQuery(story), "Tests may be deferred")
+  })
+})
+
 describe("epic-stories worktrees, outages and blocked claims", () => {
   it("puts worktrees beside the repository and finds a local engine's health URL", () => {
     assert.strictEqual(

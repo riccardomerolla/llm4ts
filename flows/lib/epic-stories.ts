@@ -1501,20 +1501,32 @@ export const storyDimensions: ReadonlyArray<Dimension> = [
 export const judgeSeverity = (name: string, score: number): "Critical" | "Warning" =>
   name === "provides" || score <= 0 ? "Critical" : "Warning"
 
-/** The dimensions a story is held to: all of them, less `tests` when the plan deferred them. */
-export const judgedDimensionsOf = (story: Story): ReadonlyArray<string> =>
+/** What a run holds its stories to beyond the plan: `--defer-tests` excuses `tests` (ADR 0045). */
+export interface JudgeBar {
+  readonly deferTests?: boolean
+}
+
+/**
+ * The dimensions a story is held to: all of them, less `tests` when the plan
+ * deferred them or the run's bar does.
+ */
+export const judgedDimensionsOf = (story: Story, bar: JudgeBar = {}): ReadonlyArray<string> =>
   storyDimensions
     .map((dimension) => dimension.name)
-    .filter((name) => story.testsDeferred === undefined || name !== "tests")
+    .filter(
+      (name) => name !== "tests" || (story.testsDeferred === undefined && bar.deferTests !== true)
+    )
 
-const subBar = (scored: EvalResult, story: Story): ReviewResult =>
+const maxScoreOf = (name: string): number =>
+  storyDimensions.find((dimension) => dimension.name === name)?.maxScore ?? 2
+
+const subBar = (scored: EvalResult, story: Story, bar: JudgeBar): ReviewResult =>
   ReviewResult.make({
     issues: scored.scores
       .filter(
         (score) =>
-          judgedDimensionsOf(story).includes(score.name) &&
-          score.score <
-            (storyDimensions.find((dimension) => dimension.name === score.name)?.maxScore ?? 2)
+          judgedDimensionsOf(story, bar).includes(score.name) &&
+          score.score < maxScoreOf(score.name)
       )
       .map((score) =>
         ReviewIssue.make({
@@ -1535,6 +1547,12 @@ export const testsDeferredLines = (reason: string | undefined): ReadonlyArray<st
         "No test file is expected; do not mark any dimension down for its absence."
       ]
 
+/** What a judge is told under `--defer-tests` (ADR 0045): score tests, hold nothing else to them. */
+export const deferTestsLines: ReadonlyArray<string> = [
+  "Tests may be deferred to a later round: score `tests` on what the diff shows,",
+  "but do not mark any other dimension down because tests are missing."
+]
+
 /**
  * What the story judge reads beside the diff: the story, and what every
  * story it depends on provides. Without the dependencies the judge cannot
@@ -1545,7 +1563,8 @@ export const testsDeferredLines = (reason: string | undefined): ReadonlyArray<st
 export const storyJudgeQuery = (
   story: Story,
   plan?: StoryPlan,
-  subject: "diff" | "code" = "diff"
+  subject: "diff" | "code" = "diff",
+  bar: JudgeBar = {}
 ): string => {
   const dependencies =
     plan === undefined
@@ -1571,6 +1590,7 @@ export const storyJudgeQuery = (
     `Owned paths: ${story.owned.join(", ")}`,
     `Shared read-only: ${story.sharedReadOnly.join(", ") || "(none)"}`,
     ...testsDeferredLines(story.testsDeferred),
+    ...(story.testsDeferred === undefined && bar.deferTests === true ? deferTestsLines : []),
     ...(dependencies.length === 0
       ? []
       : [
@@ -1603,27 +1623,42 @@ export const judgeStory = (
   diff: string,
   budget: number,
   plan?: StoryPlan,
-  subject: "diff" | "code" = "diff"
+  subject: "diff" | "code" = "diff",
+  bar: JudgeBar = {}
 ): Effect.Effect<StoryVerdict, FlowError> =>
   judge(reasoning, storyDimensions)
     .evaluate(
       Sample.make({
-        query: storyJudgeQuery(story, plan, subject),
+        query: storyJudgeQuery(story, plan, subject, bar),
         response: cap(diff, budget).text
       })
     )
     .pipe(
       Effect.mapError(FlowLlmError.from),
-      Effect.map((scored) =>
-        StoryVerdict.make({
-          ...subBar(scored, story),
+      Effect.map((scored) => {
+        // Below the bar but not held to it: kept, with why, for the debt (ADR 0045).
+        const excused = scored.scores
+          .filter(
+            (score) =>
+              !judgedDimensionsOf(story, bar).includes(score.name) &&
+              score.score < maxScoreOf(score.name)
+          )
+          .map((score) => ({
+            id: score.name,
+            score: score.score,
+            max: maxScoreOf(score.name),
+            reasoning: score.reasoning
+          }))
+        return StoryVerdict.make({
+          ...subBar(scored, story, bar),
           dimensions: scored.scores.map((score) => ({
             id: score.name,
             score: score.score,
-            max: storyDimensions.find((dimension) => dimension.name === score.name)?.maxScore ?? 2
-          }))
+            max: maxScoreOf(score.name)
+          })),
+          ...(excused.length === 0 ? {} : { excused })
         })
-      )
+      })
     )
 
 // ---- App directory ----------------------------------------------------------------
@@ -2142,6 +2177,20 @@ export const rubricStoryJudge =
       subject
     )
 
+/** The rubric judge under `--defer-tests` (ADR 0045): `tests` is scored, never a finding. */
+export const deferringTestsJudge =
+  (context: StoryJudgeContext): StoryJudge =>
+  (story, diff, seats, subject) =>
+    judgeStory(
+      seats.context.roster?.forRole("judge") ?? seats.context.judge ?? seats.context.reasoning,
+      story,
+      diff,
+      context.budget,
+      context.plan,
+      subject,
+      { deferTests: true }
+    )
+
 /** What a policy sees of one unit the executor runs: the epic's plan or one refine round. */
 export interface EpicUnitContext {
   readonly plan: StoryPlan
@@ -2200,6 +2249,7 @@ export type StoriesPolicy = Partial<
     | "reviewRounds"
     | "taskConcurrency"
     | "deferNonBlocking"
+    | "judgeBar"
   >
 >
 
