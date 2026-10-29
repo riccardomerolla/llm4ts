@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.49.0
 
 - **`epic-draft`: working code first, tests later (ADR 0043).** A third
   flow on the epic-stories engine. Stories are planned without tests, each
