@@ -206,7 +206,7 @@ describe("epic-draft --harden", () => {
       yield* memory.store.writeAtomic("/e/rounds/1/plan.md", "round")
       yield* memory.store.writeAtomic(debtPath("/e/rounds/1"), "## c\n- [ ] test: lists cards")
       const feedback = yield* hardenFeedback("/e", "focus on a", memory.store)
-      assert.include(feedback, "Pay this epic's draft debt")
+      assert.include(feedback, "Pay this epic's debt")
       assert.isBelow(feedback.indexOf("focus on a"), feedback.indexOf("shows the balance"))
       assert.include(feedback, "lists cards")
     })

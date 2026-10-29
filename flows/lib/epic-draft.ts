@@ -2,23 +2,18 @@
 // deferred, not dropped. A draft run plans and builds without tests, under
 // one review lens and the build gates; what it deferred is written to
 // debt.md, and `--harden` plans that debt as a round under the full bar.
-import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import type { FlowError, FlowLlmError, PersistenceError } from "@llm4ts/flow/FlowError"
+import type { FlowError, FlowLlmError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { failingLinesOf } from "@llm4ts/flow/GateTriage"
-import { countNotPlanned } from "@llm4ts/flow/RefineRound"
 import { correctnessReviewer } from "@llm4ts/flow/Review"
-import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { deferredPath, EpicReport } from "@llm4ts/flow/Stories"
 import { StoryPlan } from "@llm4ts/flow/StoryPlan"
 import { structuredAndPublish } from "@llm4ts/flow/Usage"
+import { counted, debtPath, hardenOptions, paidPath } from "./debt.ts"
 import {
-  loadRounds,
-  rubricStoryJudge,
   storyPlanInstructions,
   storyPlanJsonSchema,
-  unitStateDirs,
   withoutTestGate,
   type EpicStoriesOptions,
   type EpicUnitContext,
@@ -78,11 +73,8 @@ export const generateDraftPlan = (inputs: PlanInputs): Effect.Effect<StoryPlan, 
 
 // ---- The debt ---------------------------------------------------------------
 
-/** What a draft unit deferred: the tests owed, the findings, the skipped test gate. */
-export const debtPath = (stateDir: string): string => join(stateDir, "debt.md")
-
-/** Debt a settled hardening round consumed. */
-export const paidPath = (stateDir: string): string => join(stateDir, "debt.paid.md")
+// The debt files and `--harden` live in debt.ts, shared with epic-stories (ADR 0045).
+export { debtPath, hardenAfterUnit, hardenFeedback, paidPath } from "./debt.ts"
 
 const merged = (plan: StoryPlan, report: EpicReport) =>
   plan.stories.filter((story) =>
@@ -109,9 +101,6 @@ export const renderDebt = (
       ? []
       : ["## Test gate on the epic checkout (skipped while drafting)", "", testFailures, ""])
   ].join("\n")
-
-const counted = (count: number, one: string, many: string): string =>
-  `${count} ${count === 1 ? one : many}`
 
 /**
  * After a draft unit: `debt.md` with the merged stories' owed tests, their
@@ -178,80 +167,6 @@ export const draftAfterUnit =
       )
     })
 
-// ---- Hardening --------------------------------------------------------------
-
-/** The open debt lists of an epic, by state folder; empty ones are paid. */
-const openDebt = (
-  files: PlainFileStoreShape,
-  epicStateDir: string
-): Effect.Effect<
-  ReadonlyArray<{ readonly dir: string; readonly text: string }>,
-  PersistenceError
-> =>
-  Effect.gen(function* () {
-    const open: Array<{ readonly dir: string; readonly text: string }> = []
-    for (const dir of yield* unitStateDirs(files, epicStateDir)) {
-      const text = (yield* files.read(debtPath(dir)))?.trim() ?? ""
-      if (text.length > 0) {
-        open.push({ dir, text })
-      }
-    }
-    return open
-  })
-
-/** `--harden`: the text given, then every open debt list, as the round to plan. */
-export const hardenFeedback = (
-  epicStateDir: string,
-  text: string,
-  files: PlainFileStoreShape
-): Effect.Effect<string, PersistenceError> =>
-  Effect.gen(function* () {
-    // An open round finishes before another is planned: with text, runAction would refuse it.
-    const rounds = yield* loadRounds(files, epicStateDir).pipe(
-      Effect.catch(() => Effect.succeed([]))
-    )
-    const last = rounds.at(-1)
-    if (last?.plan !== undefined && last.merged < last.plan.stories.length) {
-      return text
-    }
-    const open = yield* openDebt(files, epicStateDir)
-    return open.length === 0
-      ? text
-      : [
-          "Pay this epic's draft debt: write the tests owed as deterministic tests in the house",
-          "style, make the test gate green, and close the findings that still apply.",
-          ...(text.length === 0 ? [] : ["", text]),
-          "",
-          ...open.flatMap((debt) => [debt.text, ""])
-        ].join("\n")
-  })
-
-/** After a hardening round that settled (nothing failed or waiting), its debt is paid. */
-export const hardenAfterUnit = (
-  unit: EpicUnitContext,
-  report: EpicReport
-): Effect.Effect<void, FlowError> =>
-  Effect.gen(function* () {
-    if (report.count("failed") > 0 || report.count("waiting") > 0) {
-      return
-    }
-    for (const debt of yield* openDebt(unit.files, unit.epicStateDir)) {
-      const paid = (yield* unit.files.read(paidPath(debt.dir))) ?? ""
-      yield* unit.files.writeAtomic(paidPath(debt.dir), `${paid}${debt.text}\n`)
-      yield* unit.files.writeAtomic(debtPath(debt.dir), "")
-    }
-    // What the round's planner left out is listed, never carried (ADR 0031 decision 6).
-    const notPlannedPath = join(unit.stateDir, "not-planned.md")
-    const left = countNotPlanned((yield* unit.files.read(notPlannedPath)) ?? "")
-    if (left > 0) {
-      yield* unit.events.publish(
-        Info.make({
-          message: `harden: ${counted(left, "debt item was", "debt items were")} not planned (${notPlannedPath}); pass them to --harden as text if they still matter`
-        })
-      )
-    }
-  })
-
 // ---- The policy -------------------------------------------------------------
 
 /**
@@ -260,11 +175,7 @@ export const hardenAfterUnit = (
  */
 export const epicDraftOptions = (flags: DraftFlags): EpicStoriesOptions =>
   flags.harden
-    ? {
-        storyJudge: rubricStoryJudge,
-        refineFeedback: hardenFeedback,
-        afterUnit: hardenAfterUnit
-      }
+    ? hardenOptions
     : {
         generatePlan: generateDraftPlan,
         stories: () => ({
