@@ -16,6 +16,7 @@ import { withKindSpan, type SpanOptions } from "./Spans.ts"
 import { FlowAborted, describeFlowError, type FlowError } from "./FlowError.ts"
 import { taskGraph, type Plan, type Task, type TaskNode } from "./Plan.ts"
 import type { PlanStoreShape } from "./Persistence.ts"
+import { pathWithin } from "./StoryPlan.ts"
 
 const errorMessage = describeFlowError
 
@@ -111,6 +112,22 @@ export const implementTaskLoop = Effect.fn("@llm4ts/flow/PlanExecution.implement
  * conflicting task runs after the others, on the merged state.
  */
 export type AsideOutcome = "merged" | "declined" | "conflict"
+
+/**
+ * Whether a task may run aside while `running` tasks are in flight (ADR 0034
+ * amendment): only when it and each of them declare `Owns:` and no path of
+ * one lies within a path of another. An undeclared footprint could be any
+ * file, so it waits its turn.
+ */
+export const mayRunBeside = (node: TaskNode, running: ReadonlyArray<TaskNode>): boolean =>
+  node.owns.length > 0 &&
+  running.every(
+    (other) =>
+      other.owns.length > 0 &&
+      !other.owns.some((theirs) =>
+        node.owns.some((ours) => pathWithin(ours, theirs) || pathWithin(theirs, ours))
+      )
+  )
 
 export interface AsideRequest {
   readonly node: TaskNode
@@ -234,6 +251,10 @@ export const implementTaskGraph = Effect.fn("@llm4ts/flow/PlanExecution.implemen
           break
         }
         if (running.has(node.index) || homeOnly.has(node.index)) {
+          continue
+        }
+        const beside = graph.filter((other) => running.has(other.index))
+        if (!mayRunBeside(node, beside)) {
           continue
         }
         running.set(node.index, "aside")

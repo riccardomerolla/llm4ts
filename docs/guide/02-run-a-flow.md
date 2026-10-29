@@ -164,9 +164,10 @@ time [model 0% · tools 0% · gates 100% · wait 0%]
 tokens [48.0k]  cost [~$0.44]  run [live]
 ```
 
-A story whose task plan says two tasks need nothing from each other runs
-the second beside the first on another coder that is free (`--task-concurrency`,
-default 2, `1` runs every task in order): it shows as a `└ task coder
+With `--task-concurrency 2` or more (the default, `1`, runs every task in
+order), a story whose task plan says two tasks need nothing from each other,
+and whose `Owns:` paths do not overlap, runs the second beside the first on
+another coder that is free: it shows as a `└ task coder
 claude#2 · 3/5 …` line under its story and as `[▶] … ← claude#2` in the
 checklist, works in its own worktree, and merges into the story branch
 when its gates pass.

@@ -230,8 +230,8 @@ describe("implementTaskGraph (ADR 0034)", () => {
       epicId: "S01",
       tasks: [
         Task.make({ title: "a", description: "" }),
-        Task.make({ title: "b", description: "Depends on: 1" }),
-        Task.make({ title: "c", description: "Depends on: 1" }),
+        Task.make({ title: "b", description: "Depends on: 1\nOwns: src/b" }),
+        Task.make({ title: "c", description: "Depends on: 1\nOwns: src/c" }),
         Task.make({ title: "d", description: "Depends on: 2, 3" })
       ]
     })
@@ -314,9 +314,9 @@ describe("implementTaskGraph (ADR 0034)", () => {
         epicId: "S01",
         tasks: [
           Task.make({ title: "a", description: "" }),
-          Task.make({ title: "b", description: "Depends on: 1" }),
-          Task.make({ title: "c", description: "Depends on: 1" }),
-          Task.make({ title: "e", description: "Depends on: 2" })
+          Task.make({ title: "b", description: "Depends on: 1\nOwns: src/b" }),
+          Task.make({ title: "c", description: "Depends on: 1\nOwns: src/c" }),
+          Task.make({ title: "e", description: "Depends on: 2\nOwns: src/e" })
         ]
       })
       const { result, home, aside } = yield* run(plan, (title) =>
@@ -340,6 +340,39 @@ describe("implementTaskGraph (ADR 0034)", () => {
       })
       const { home, aside } = yield* run(chain, () => "merged")
       assert.deepStrictEqual(home, ["a", "b"])
+      assert.deepStrictEqual(aside, [])
+    })
+  )
+
+  it.effect("never runs two tasks side by side whose Owns: overlap", () =>
+    Effect.gen(function* () {
+      const shared = Plan.make({
+        epicId: "S01",
+        tasks: [
+          Task.make({ title: "a", description: "" }),
+          Task.make({ title: "b", description: "Depends on: 1\nOwns: esql/Common.esql" }),
+          Task.make({ title: "c", description: "Depends on: 1\nOwns: esql/" })
+        ]
+      })
+      const { result, home, aside } = yield* run(shared, () => "merged")
+      assert.isTrue(result.tasks.every((task) => task.completed))
+      assert.deepStrictEqual(home, ["a", "b", "c"])
+      assert.deepStrictEqual(aside, [])
+    })
+  )
+
+  it.effect("never sets aside a task that declares no Owns:", () =>
+    Effect.gen(function* () {
+      const unknown = Plan.make({
+        epicId: "S01",
+        tasks: [
+          Task.make({ title: "a", description: "" }),
+          Task.make({ title: "b", description: "Depends on: 1\nOwns: src/b" }),
+          Task.make({ title: "c", description: "Depends on: 1" })
+        ]
+      })
+      const { home, aside } = yield* run(unknown, () => "merged")
+      assert.deepStrictEqual(home, ["a", "b", "c"])
       assert.deepStrictEqual(aside, [])
     })
   )

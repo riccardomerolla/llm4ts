@@ -2257,7 +2257,10 @@ describe("Stories executor with tasks aside (ADR 0034)", () => {
       epicId: story.id,
       tasks: [
         Task.make({ title: "route", description: "Add the route." }),
-        Task.make({ title: "cookie", description: "Wire the cookie. Depends on: 1" }),
+        Task.make({
+          title: "cookie",
+          description: `Wire the cookie. Depends on: 1. Owns: ${story.owned[0] ?? ""}/cookie.ts`
+        }),
         Task.make({
           title: "docs",
           description: `Write the docs. Depends on: 1. Owns: ${story.owned[0] ?? ""}/docs.md`
@@ -2374,8 +2377,15 @@ describe("Stories executor with tasks aside: conflicts and red merges (ADR 0034)
       epicId: story.id,
       tasks: [
         Task.make({ title: "route", description: "Add the route." }),
-        Task.make({ title: "cookie", description: "Wire the cookie. Depends on: 1" }),
-        Task.make({ title: "docs", description: "Write the docs. Depends on: 1" })
+        Task.make({
+          title: "cookie",
+          description: `Wire the cookie. Depends on: 1. Owns: ${story.owned[0] ?? ""}/cookie.ts`
+        }),
+        Task.make({
+          title: "docs",
+          // The fake coder changes index.ts wherever it runs.
+          description: `Write the docs. Depends on: 1. Owns: ${story.owned[0] ?? ""}/index.ts`
+        })
       ]
     })
 
@@ -2388,6 +2398,7 @@ describe("Stories executor with tasks aside: conflicts and red merges (ADR 0034)
     Effect.gen(function* () {
       const base = yield* makeOptions(harness, single, context, {
         planTasks: (_seats, item) => Effect.succeed(fanTasks(item)),
+        taskConcurrency: 2,
         ...overrides
       })
       const options: StoriesOptions = {
@@ -2428,6 +2439,28 @@ describe("Stories executor with tasks aside: conflicts and red merges (ADR 0034)
       memories.set(options, memoryFilesOf(base))
       return options
     })
+
+  it.effect("by default every task runs in the story worktree (ADR 0034 amendment)", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const context = yield* makeContext(harness)
+      const base = yield* makeOptions(harness, single, context, {
+        planTasks: (_seats, item) => Effect.succeed(fanTasks(item))
+      })
+      const report = yield* implementStoriesFlow(context, base)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const log = yield* Ref.get(harness.log)
+      assert.isFalse(log.some((line) => line.includes(".task-")))
+      assert.deepStrictEqual(
+        log.filter((line) => line.startsWith("commit:/repo/.llm4ts/worktrees/a:")).slice(0, 3),
+        [
+          "commit:/repo/.llm4ts/worktrees/a:a: route",
+          "commit:/repo/.llm4ts/worktrees/a:a: cookie",
+          "commit:/repo/.llm4ts/worktrees/a:a: docs"
+        ]
+      )
+    })
+  )
 
   it.effect("a task whose merge back conflicts runs at home after the others", () =>
     Effect.gen(function* () {

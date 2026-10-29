@@ -792,8 +792,9 @@ export interface StoriesOptions {
   /**
    * Coders one story may hold at once, its own included (ADR 0034): a
    * ready task whose plan says it may runs beside the held coder, in its
-   * own worktree, on a coder that is free now. Default 2; 1 runs every task
-   * in order on the story's coder.
+   * own worktree, on a coder that is free now, when its `Owns:` paths are
+   * declared and overlap no running task's. Default 1: every task in order on
+   * the story's coder.
    */
   readonly taskConcurrency?: number
   /** Stop the epic at the first failed story instead of skipping its dependents. */
@@ -950,7 +951,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const concurrency = Math.max(1, options.concurrency ?? 3)
   const judgeRounds = Math.max(1, options.judgeRounds ?? 2)
   const mergeRevisions = Math.max(0, options.mergeRevisions ?? 1)
-  const taskConcurrency = Math.max(1, options.taskConcurrency ?? 2)
+  // Parallel tasks are opt-in (ADR 0034 amendment): one coder per story unless asked.
+  const taskConcurrency = Math.max(1, options.taskConcurrency ?? 1)
   const deferring = options.deferNonBlocking === true
   const statePath = (story: Story): string => join(options.stateDir, `stories/${story.id}.json`)
   const planPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.plan.md`)

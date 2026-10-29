@@ -1439,8 +1439,8 @@ describe("implementPlanFlow with tasks aside (ADR 0034)", () => {
         epicId: "S01",
         tasks: [
           Task.make({ title: "a", description: "do a" }),
-          Task.make({ title: "b", description: "do b. Depends on: 1" }),
-          Task.make({ title: "c", description: "do c. Depends on: 1" })
+          Task.make({ title: "b", description: "do b. Depends on: 1. Owns: src/b" }),
+          Task.make({ title: "c", description: "do c. Depends on: 1. Owns: src/c" })
         ]
       })
       const base = {

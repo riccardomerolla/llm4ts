@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.50.0
+
+- **Parallel tasks inside a story are opt-in (ADR 0034 amendment).**
+  `--task-concurrency` now defaults to 1, so every task runs in order in the
+  story worktree. A live run on an IBM ACE estate at the old default of 2
+  hit shared ESQL modules changed by two tasks at once (BIP2484E duplicate
+  declarations, conflicting merges that threw away work) and 429 quota
+  errors from two coders and ten review lenses at once.
+- **Side by side only on declared, disjoint files.** With
+  `--task-concurrency` above 1, a task runs beside another only when both
+  declare `Owns:` and no owned path overlaps; otherwise it waits its turn.
+
 ## 2.49.0
 
 - **`epic-draft`: working code first, tests later (ADR 0043).** A third

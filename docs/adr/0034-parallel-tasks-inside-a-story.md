@@ -84,3 +84,35 @@ its acceptance criteria allow and still has independent tasks.
 - After any task merged in, the story's gates run on the result before the
   judge (`story <id>: gates after parallel tasks`); red is a revision task
   for the story's coder, up to `mergeRevisions` times, then the story fails.
+
+## Amendment (2026-10-29): opt-in, and only on declared, disjoint files
+
+A live run on an IBM ACE estate (ESQL modules, subflows) at the default of
+2 showed the costs outweighing the gain:
+
+- Two tasks declared `Depends on: none` but both changed one shared ESQL
+  module. Each declared the same procedure, so the merged story failed to
+  deploy (BIP2484E, duplicate declaration), and the merge back conflicted,
+  discarding the aside coder's work.
+- Without a roster every ready task runs aside (implementation notes
+  above), and each task runs its own review lenses. Two coders and ten
+  lenses at once exhausted the provider's tokens-per-minute quota (429),
+  which stopped the aside task before it finished.
+- The same run at `--task-concurrency 1` had none of these failures.
+
+Two changes:
+
+1. **The default is 1.** `--task-concurrency` (and
+   `LLM4TS_TASK_CONCURRENCY`) now defaults to 1: every task runs in order in
+   the story worktree. Parallel tasks are opt-in, for an epic where a
+   profile (`llm4ts profile --against`) shows they pay.
+2. **Only declared, disjoint footprints run side by side.** A ready task
+   runs aside only when it declares `Owns:` and so does every task running
+   at that moment, and no owned path of one lies within an owned path of
+   another (`pathWithin`, the story perimeter's rule). Otherwise it waits
+   its turn. `Owns:` stays advisory for what a task may change; it is now
+   required for a task to run beside another.
+
+Consequences: an epic run with no flags behaves as before 2.42.0 inside a
+story. Plans that relied on `Depends on: none` alone, without `Owns:`, no
+longer run in parallel even when opted in.
