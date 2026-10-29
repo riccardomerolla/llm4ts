@@ -20,7 +20,7 @@ import type { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import type { LlmError } from "@llm4ts/core/Errors"
 import { BoardItem, eventedBoard, type BoardSyncShape } from "./BoardSync.ts"
 import { makeChat } from "./Chat.ts"
-import { implementPlanFlow, type TaskOverrides } from "./Flow.ts"
+import { flowReviewer, implementPlanFlow, type TaskOverrides } from "./Flow.ts"
 import {
   GateBaseline,
   baselineKey,
@@ -77,6 +77,8 @@ import {
   applyTriage,
   isBlocking,
   loadRepoReviewRules,
+  minimalReviewers,
+  reviewAndFixLoop,
   nonBlockingIssues,
   type FixPromptOptions,
   type GateTriageOptions
@@ -87,6 +89,8 @@ import {
   defaultOracleRules,
   parseUnifiedDiff
 } from "./OracleGuard.ts"
+import { isGateIssue } from "./GateTriage.ts"
+import { ReviewMemory } from "./Recheck.ts"
 import { cachedValue, fingerprintOf } from "./ReviewCache.ts"
 import { withContract, type ContractProfile } from "./AutonomyContract.ts"
 import { fabricatedStatusIssues, unverifiedClaims } from "./Evidence.ts"
@@ -753,6 +757,14 @@ export interface StoriesOptions {
    */
   readonly judgeRounds?: number
   /**
+   * Where the review lenses run (ADR 0044): each task (default), or once per
+   * story, beside the judge, with incremental re-checks and one fix turn per
+   * round.
+   */
+  readonly reviewAt?: "task" | "story"
+  /** Story mode: rounds of the merged story review. Default 3. Task mode ignores it. */
+  readonly reviewRounds?: number
+  /**
    * When the epic gates are red after a story merges (the merge is undone),
    * the story goes back to its worktree this many times: it catches up with
    * the epic, gets a revision task with the failures, and merges again.
@@ -857,6 +869,10 @@ const combined = (first: ReviewResult, second: ReviewResult): ReviewResult =>
 export const deferredPath = (stateDir: string, storyId: string): string =>
   join(stateDir, `stories/${storyId}.deferred.md`)
 
+/** Where a story review keeps its reviewers' memory between rounds and runs (ADR 0044). */
+export const reviewStatePath = (stateDir: string, storyId: string): string =>
+  join(stateDir, `stories/${storyId}.review-state.json`)
+
 /** A deferred finding as one Markdown bullet, prefixed with where it was found. */
 export const deferredLine = (source: string, issue: ReviewIssue): string => {
   const where =
@@ -954,6 +970,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   // Parallel tasks are opt-in (ADR 0034 amendment): one coder per story unless asked.
   const taskConcurrency = Math.max(1, options.taskConcurrency ?? 1)
   const deferring = options.deferNonBlocking === true
+  const reviewAtStory = options.reviewAt === "story"
+  const reviewRounds = Math.max(1, options.reviewRounds ?? 3)
   const statePath = (story: Story): string => join(options.stateDir, `stories/${story.id}.json`)
   const planPath = (story: Story): string => join(options.stateDir, `stories/${story.id}.plan.md`)
   /** The judge's last verdict beside a fingerprint of what it judged. */
@@ -1900,7 +1918,10 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       // A lens's answer is kept beside the task and diff it answered, so a
       // rerun over the same change asks nothing; every round is written to
       // the story's findings log for people to read.
-      reviewCache: { files, dir: reviewCacheDir(story) },
+      // Reviewing per story (ADR 0044), a task runs on its gates alone.
+      ...(reviewAtStory
+        ? { reviewers: [] }
+        : { reviewCache: { files, dir: reviewCacheDir(story) } }),
       onReview: (task, round, result, settled) =>
         Effect.gen(function* () {
           // A settled round's leftovers are deferred, not dropped: when the
@@ -1920,15 +1941,17 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       onTaskReply: (task, _reply, trailer, startedAt) => checkEvidence(task, trailer, startedAt),
       // The repository's own review rules ride along as one extra lens
       // (ADR 0027 decision 9), read from the epic checkout.
-      repoRules: loadRepoReviewRules(files, context.workDir),
+      ...(reviewAtStory ? {} : { repoRules: loadRepoReviewRules(files, context.workDir) }),
       ...(options.votes === undefined ? {} : { votes: options.votes }),
       ...(options.fixer === undefined ? {} : { fixer: options.fixer }),
       ...(options.stall === undefined ? {} : { stall: options.stall }),
-      ...(options.reviewers === undefined ? {} : { reviewers: options.reviewers }),
+      ...(options.reviewers === undefined || reviewAtStory ? {} : { reviewers: options.reviewers }),
       ...(options.maxRounds === undefined ? {} : { maxRounds: options.maxRounds }),
       ...(deferring ? { settle: "blocking" as const } : {})
     })
     if (mergeFailure !== undefined) {
+      // The tasks run again: what the story review remembered no longer holds.
+      yield* files.remove(reviewStatePath(options.stateDir, story.id))
       // The branch already caught up with the epic above: the gates in the
       // worktree now see the combination that was red after the merge.
       yield* appendRevision(
@@ -1986,11 +2009,17 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         verdict
       )
 
-    let judgeNote: string | undefined
-    let inPlace = false
-    if (options.judge !== undefined) {
-      const judge = options.judge
-      for (let round = 1; round <= judgeRounds; round += 1) {
+    /**
+     * One judge round over the story's branch: the verdict, published on the
+     * lane, logged in the findings and kept beside a fingerprint of what was
+     * judged. `empty` says the branch had no changes, so its owned code was
+     * judged instead.
+     */
+    const judgeOnce = (
+      judge: NonNullable<StoriesOptions["judge"]>,
+      round: number
+    ): Effect.Effect<{ readonly verdict: ReviewResult; readonly empty: boolean }, FlowError> =>
+      Effect.gen(function* () {
         const diff = yield* git.diffVsBase(epicBranch)
         // No changes is not a failure by itself: the story's code may already
         // be on the epic (an earlier story or run put it there). Judge that
@@ -2102,6 +2131,152 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             dimensions: verdict instanceof StoryVerdict ? verdict.dimensions : []
           })
         )
+        return { verdict, empty }
+      })
+
+    /**
+     * The story review (ADR 0044): every lens and the judge on the story's
+     * diff, one fix turn per round, re-checks after the first. Returns the
+     * judge's note; fails the story when the judge is still not cleared.
+     */
+    const reviewStory = (): Effect.Effect<string | undefined, FlowError> =>
+      Effect.gen(function* () {
+        const statePath = reviewStatePath(options.stateDir, story.id)
+        const repoRules = yield* loadRepoReviewRules(files, context.workDir)
+        const lenses = [
+          ...(options.reviewers ?? minimalReviewers),
+          ...(repoRules === undefined ? [] : [repoRules])
+        ]
+        const judge = options.judge
+        const latest = yield* Ref.make<ReviewResult | undefined>(undefined)
+        const judgeRuns = yield* Ref.make(0)
+        const lastRound = yield* Ref.make(0)
+        // A judge that scores `provides` at 0 is owed a piece no fix turn writes.
+        const missingPiece = (verdict: ReviewResult | undefined): verdict is StoryVerdict =>
+          verdict instanceof StoryVerdict &&
+          verdict.dimensions.some((d) => d.id === "provides" && d.score <= 0)
+        const result = yield* reviewAndFixLoop({
+          reviewers: lenses,
+          reviewerService: flowReviewer(storyContext),
+          coder: yield* makeChat(storyContext.coder, { system, events, agent: "coder" }),
+          taskTitle: `story ${story.id}: ${story.title}`,
+          currentDiff: git.diffVsBase(epicBranch),
+          events: storyContext.events,
+          lint: gates,
+          triage,
+          maxRounds: reviewRounds,
+          ...(deferring ? { settle: "blocking" as const } : {}),
+          ...(options.fix === undefined ? {} : { fix: options.fix }),
+          cache: { files, dir: reviewCacheDir(story) },
+          fixWith: (prompt) =>
+            Effect.gen(function* () {
+              const verdict = yield* Ref.get(latest)
+              if (missingPiece(verdict)) {
+                yield* addRevision(verdict, false)
+                yield* guarded(implementTasks, implementTasks)
+                yield* catchUp(story, git)
+                yield* repairPerimeter
+                return ""
+              }
+              const reply = yield* coderTurn(prompt)
+              yield* git.commitAll(`${story.id}: story review fixes`)
+              return reply
+            }),
+          onRound: (round, standing, settled) =>
+            Effect.andThen(
+              Ref.set(lastRound, round),
+              appendFindings(
+                story,
+                `story review round ${round} — ${
+                  standing.isClean ? "clean" : `${standing.issues.length} issue(s)`
+                }${settled ? "" : ", fixing"}`,
+                standing
+              )
+            ),
+          recheck: {
+            extra:
+              judge === undefined
+                ? []
+                : [
+                    {
+                      name: "judge",
+                      review: () =>
+                        Effect.gen(function* () {
+                          const round = yield* Ref.updateAndGet(judgeRuns, (n) => n + 1)
+                          const { verdict } = yield* judgeOnce(judge, round)
+                          yield* Ref.set(latest, verdict)
+                          return verdict
+                        })
+                    }
+                  ],
+            memory: {
+              load: Effect.map(files.read(statePath), (text) => {
+                if (text === undefined) return undefined
+                try {
+                  return Schema.decodeUnknownSync(ReviewMemory)(JSON.parse(text))
+                } catch {
+                  // An unreadable state starts the review over.
+                  return undefined
+                }
+              }),
+              save: (memory) =>
+                files.writeAtomic(
+                  statePath,
+                  JSON.stringify(Schema.encodeSync(ReviewMemory)(memory), null, 2)
+                )
+            }
+          }
+        })
+        const rounds = yield* Ref.get(lastRound)
+        const left = result.issues
+        const gateLeft = left.filter(isGateIssue)
+        if (gateLeft.length > 0) {
+          return yield* failed(
+            story,
+            `its gates are still red after ${rounds} story review round${rounds === 1 ? "" : "s"}:\n${issueLines(
+              ReviewResult.make({ issues: gateLeft })
+            )}`
+          )
+        }
+        const judgeLeft = left.filter(
+          (issue) => issue.lens === "judge" && (!deferring || isBlocking(issue))
+        )
+        if (judgeLeft.length > 0) {
+          return yield* failed(
+            story,
+            `judge not cleared after ${rounds} story review round${rounds === 1 ? "" : "s"}:\n${issueLines(
+              ReviewResult.make({ issues: judgeLeft })
+            )}`
+          )
+        }
+        const waiting = deferring ? left : []
+        for (const issue of waiting) {
+          deferred.push(deferredLine("story review", issue))
+        }
+        const carried = deferring ? [] : left.filter((issue) => issue.lens !== "judge")
+        if (carried.length > 0) {
+          yield* appendFindings(
+            story,
+            "carried: review rounds ran out",
+            ReviewResult.make({ issues: carried })
+          )
+        }
+        return judge === undefined
+          ? undefined
+          : `judge cleared (story review round ${rounds}${
+              waiting.length === 0 ? "" : `, ${waiting.length} finding(s) deferred`
+            })`
+      })
+
+    let judgeNote: string | undefined
+    let inPlace = false
+    const storyDiff = reviewAtStory ? yield* git.diffVsBase(epicBranch) : ""
+    if (reviewAtStory && storyDiff.trim().length > 0) {
+      judgeNote = yield* reviewStory()
+    } else if (options.judge !== undefined) {
+      const judge = options.judge
+      for (let round = 1; round <= judgeRounds; round += 1) {
+        const { verdict, empty } = yield* judgeOnce(judge, round)
         // Deferring, a verdict with nothing blocking clears: what it found
         // waits for the follow-up round instead of another revision.
         if (verdict.isClean || (deferring && !verdict.issues.some(isBlocking))) {
@@ -2218,6 +2393,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         ...(last === undefined ? {} : { executor: last })
       })
     )
+    yield* files.remove(reviewStatePath(options.stateDir, story.id))
     const inherited = inheritedByStory.get(story.id)
     return StoryOutcome.make({
       id: story.id,
@@ -2254,11 +2430,19 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   const attempt = (story: Story): Effect.Effect<Completion> =>
     annotated(
       story,
-      stage(laneOf(story), `story ${story.id}`, runStory(story), {
-        kind: "AGENT",
-        root: true,
-        attributes: storySpanAttributes(story)
-      })
+      stage(
+        laneOf(story),
+        `story ${story.id}`,
+        // A story that ends failed starts its review over next time (ADR 0044).
+        Effect.tapError(runStory(story), () =>
+          Effect.ignore(files.remove(reviewStatePath(options.stateDir, story.id)))
+        ),
+        {
+          kind: "AGENT",
+          root: true,
+          attributes: storySpanAttributes(story)
+        }
+      )
     ).pipe(
       Effect.map((outcome): Completion => ({ story, outcome })),
       Effect.catch((error) =>

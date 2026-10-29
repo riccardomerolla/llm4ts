@@ -18,6 +18,8 @@ import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { makeMemoryPlainFileStore, saveVersioned } from "@llm4ts/flow/Persistence"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
+import { Reviewer } from "@llm4ts/flow/Reviewer"
+import { ReviewMemory, diffChunks, remember } from "@llm4ts/flow/Recheck"
 import {
   BlockedVerdict,
   StoryState,
@@ -26,6 +28,7 @@ import {
   blockedOnIn,
   blockedRebuttal,
   deferredPath,
+  reviewStatePath,
   frozenTestsGate,
   implementStoriesFlow,
   redTestsPath,
@@ -2527,6 +2530,38 @@ describe("Stories executor with tasks aside: conflicts and red merges (ADR 0034)
       assert.include(planText, "combined red")
     })
   )
+
+  it.effect("story review: parallel tasks are reviewed once, after their gates together", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const seat: LlmServiceShape = {
+        ...cleanReviewer,
+        executeStructuredWithUsage: (prompt, schema, jsonSchema) =>
+          Effect.andThen(
+            Ref.update(prompts, (all) => [...all, prompt]),
+            cleanReviewer.executeStructuredWithUsage(prompt, schema, jsonSchema)
+          )
+      }
+      const harness = yield* makeHarness()
+      const base = yield* makeContext(harness)
+      const context: FlowContextShape = { ...base, reviewers: [seat] }
+      const options = yield* withAside(harness, context, {
+        reviewAt: "story",
+        reviewers: [
+          Reviewer.make({ name: "a", systemPrompt: "LENS:a" }),
+          Reviewer.make({ name: "b", systemPrompt: "LENS:b" })
+        ]
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const log = yield* Ref.get(harness.log)
+      assert.isTrue(log.some((line) => line.includes(".task-")))
+      assert.strictEqual(
+        (yield* Ref.get(prompts)).filter((prompt) => prompt.includes("LENS:")).length,
+        2
+      )
+    })
+  )
 })
 
 describe("Stories executor: test-first red phase (ADR 0042)", () => {
@@ -2594,6 +2629,279 @@ describe("Stories executor: test-first red phase (ADR 0042)", () => {
       const report = yield* implementStoriesFlow(context, options)
       assert.strictEqual(report.stories[0]?.status, "failed")
       assert.include(report.stories[0]?.reason ?? "", "frozen red test changed")
+    })
+  )
+})
+
+describe("Stories executor: story-level review (ADR 0044)", () => {
+  const lensOf = (name: string): Reviewer => Reviewer.make({ name, systemPrompt: `LENS:${name}` })
+
+  const finding = (...titles: ReadonlyArray<string>) => ({
+    issues: titles.map((title) => ({ severity: "Critical", title })),
+    summary: ""
+  })
+
+  /** A reviewer seat answering each lens from its own queue (clean when empty); it records every prompt. */
+  const lensSeat = (
+    answers: Readonly<Record<string, ReadonlyArray<unknown>>>,
+    prompts: Ref.Ref<ReadonlyArray<string>>,
+    repeatLast = false
+  ): LlmServiceShape => {
+    const queues = new Map(Object.entries(answers).map(([name, list]) => [name, [...list]]))
+    const next = <A, E, RD, RE>(prompt: string, schema: Schema.ConstraintCodec<A, E, RD, RE>) =>
+      Ref.update(prompts, (all) => [...all, prompt]).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            const name = /LENS:(\w+)/u.exec(prompt)?.[1] ?? ""
+            const queue = queues.get(name) ?? []
+            const value = repeatLast && queue.length === 1 ? queue[0] : queue.shift()
+            return value ?? { issues: [], summary: "clean" }
+          })
+        ),
+        Effect.flatMap((value) => Schema.decodeUnknownEffect(schema)(value).pipe(Effect.orDie))
+      )
+    return {
+      ...cleanReviewer,
+      executeStructured: (prompt, schema, _jsonSchema) => next(prompt, schema),
+      executeStructuredWithUsage: (prompt, schema, _jsonSchema) =>
+        next(prompt, schema).pipe(Effect.map((value) => [value, undefined, undefined] as const))
+    }
+  }
+
+  const threeTasks = (item: Story): Plan =>
+    Plan.make({
+      epicId: item.id,
+      tasks: [1, 2, 3].map((n) =>
+        Task.make({ title: `${item.id} task ${n}`, description: item.description })
+      )
+    })
+
+  const storyRun = (
+    seat: LlmServiceShape,
+    overrides: Partial<StoriesOptions>,
+    harnessOverrides: Parameters<typeof makeHarness>[0] = {}
+  ) =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness(harnessOverrides)
+      const base = yield* makeContext(harness)
+      const context: FlowContextShape = { ...base, reviewers: [seat] }
+      const options = yield* makeOptions(harness, single, context, {
+        reviewers: [lensOf("a"), lensOf("b")],
+        reviewAt: "story",
+        ...overrides
+      })
+      return { harness, context, options }
+    })
+
+  it.effect("tasks run no lens, the story is reviewed once", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const { context, options } = yield* storyRun(lensSeat({}, prompts), {
+        planTasks: (_seats, item) => Effect.succeed(threeTasks(item))
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const seen = yield* Ref.get(prompts)
+      assert.strictEqual(seen.length, 2)
+      assert.isTrue(seen.every((prompt) => prompt.includes("Story a")))
+    })
+  )
+
+  it.effect("task review stays the default", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const harness = yield* makeHarness()
+      const base = yield* makeContext(harness)
+      const context: FlowContextShape = { ...base, reviewers: [lensSeat({}, prompts)] }
+      const options = yield* makeOptions(harness, single, context, {
+        reviewers: [lensOf("a"), lensOf("b")],
+        planTasks: (_seats, item) => Effect.succeed(threeTasks(item))
+      })
+      yield* implementStoriesFlow(context, options)
+      assert.strictEqual((yield* Ref.get(prompts)).length, 6)
+    })
+  )
+
+  it.effect("one fix turn per round, then only the lens with findings re-checks", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const { harness, context, options } = yield* storyRun(
+        lensSeat({ a: [finding("bug")] }, prompts),
+        {}
+      )
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const seen = yield* Ref.get(prompts)
+      assert.strictEqual(seen.length, 3)
+      assert.include(seen[2] ?? "", "LENS:a")
+      assert.include(seen[2] ?? "", "re-check")
+      const fixes = (yield* Ref.get(harness.log)).filter((line) =>
+        line.endsWith("a: story review fixes")
+      )
+      assert.strictEqual(fixes.length, 1)
+    })
+  )
+
+  it.effect("the judge runs beside the lenses and its findings reach the same fix turn", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const asked: Array<string> = []
+      const turns = yield* Ref.make(0)
+      const verdicts = yield* Ref.make(0)
+      const { context, options } = yield* storyRun(lensSeat({ a: [finding("bug")] }, prompts), {
+        judge: () =>
+          Effect.map(
+            Ref.getAndUpdate(verdicts, (n) => n + 1),
+            (n) => (n === 0 ? red("missing test") : clean)
+          )
+      })
+      const coderSeat = scriptedCoder(turns, (_turn, prompt) => {
+        asked.push(prompt)
+        return "done"
+      })
+      const scripted: StoriesOptions = {
+        ...options,
+        contextFor: (workDir, contextOptions) =>
+          Effect.map(options.contextFor(workDir, contextOptions), (seats) => ({
+            ...seats,
+            context: { ...seats.context, coder: coderSeat }
+          }))
+      }
+      const report = yield* implementStoriesFlow(context, scripted)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      assert.include(report.stories[0]?.judge ?? "", "story review")
+      assert.strictEqual(yield* Ref.get(verdicts), 2)
+      assert.isTrue(
+        asked.some((prompt) => prompt.includes("bug") && prompt.includes("missing test"))
+      )
+    })
+  )
+
+  it.effect("provides at 0 becomes a revision task", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const verdicts = yield* Ref.make(0)
+      const missing = StoryVerdict.make({
+        issues: [ReviewIssue.make({ severity: "Critical", title: "route /a is missing" })],
+        summary: "judge:a",
+        dimensions: [{ id: "provides", score: 0, max: 2 }]
+      })
+      const { harness, context, options } = yield* storyRun(lensSeat({}, prompts), {
+        judge: () =>
+          Effect.map(
+            Ref.getAndUpdate(verdicts, (n) => n + 1),
+            (n) => (n === 0 ? missing : clean)
+          )
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const log = yield* Ref.get(harness.log)
+      assert.include(
+        log,
+        "commit:/repo/.llm4ts/worktrees/a:a: Revision 1: close the judge's findings"
+      )
+      assert.isFalse(log.some((line) => line.endsWith("a: story review fixes")))
+    })
+  )
+
+  it.effect("out of rounds, judge not cleared fails the story", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const { context, options } = yield* storyRun(lensSeat({}, prompts), {
+        reviewRounds: 2,
+        judge: () => Effect.succeed(red("never good enough"))
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "failed")
+      assert.include(
+        report.stories[0]?.reason ?? "",
+        "judge not cleared after 2 story review rounds"
+      )
+      assert.include(report.stories[0]?.reason ?? "", "never good enough")
+    })
+  )
+
+  it.effect(
+    "out of rounds with only lens findings, the story merges and the findings are carried",
+    () =>
+      Effect.gen(function* () {
+        const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+        const { context, options } = yield* storyRun(
+          lensSeat({ a: [finding("still slow")] }, prompts, true),
+          { reviewRounds: 2 }
+        )
+        const report = yield* implementStoriesFlow(context, options)
+        assert.strictEqual(report.stories[0]?.status, "done")
+        const findings = yield* options.files.read(
+          "/repo/.llm4ts/epics/single/stories/a.findings.md"
+        )
+        assert.include(findings ?? "", "carried")
+        assert.include(findings ?? "", "still slow")
+      })
+  )
+
+  it.effect("an empty diff is judged on its owned code, with no lens", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const { context, options } = yield* storyRun(
+        lensSeat({}, prompts),
+        {
+          judge: (_item, _text, _seats, subject) =>
+            Effect.succeed(subject === "code" ? clean : red("unexpected subject"))
+        },
+        { branchDiff: () => "" }
+      )
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      assert.strictEqual(report.stories[0]?.judge, "verified already in place (round 1)")
+      assert.strictEqual((yield* Ref.get(prompts)).length, 0)
+    })
+  )
+
+  it.effect("a saved review state resumes at the next round", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const { context, options } = yield* storyRun(lensSeat({}, prompts), {})
+      const diff = "diff --git a/file b/file\n+story work"
+      const saved = remember(
+        undefined,
+        1,
+        diffChunks(diff),
+        [
+          {
+            name: "a",
+            result: ReviewResult.make({
+              issues: [ReviewIssue.make({ severity: "Critical", title: "bug", lens: "a" })]
+            })
+          },
+          { name: "b", result: clean }
+        ],
+        ["file"]
+      )
+      yield* options.files.writeAtomic(
+        reviewStatePath(options.stateDir, "a"),
+        JSON.stringify(Schema.encodeSync(ReviewMemory)(saved))
+      )
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      const seen = yield* Ref.get(prompts)
+      assert.strictEqual(seen.length, 1)
+      assert.include(seen[0] ?? "", "LENS:a")
+      assert.include(seen[0] ?? "", "re-check")
+    })
+  )
+
+  it.effect("a finished story's review state is removed, failed or merged", () =>
+    Effect.gen(function* () {
+      for (const judge of [() => Effect.succeed(red("never")), () => Effect.succeed(clean)]) {
+        const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+        const { context, options } = yield* storyRun(lensSeat({}, prompts), {
+          reviewRounds: 1,
+          judge
+        })
+        yield* implementStoriesFlow(context, options)
+        assert.isUndefined(yield* options.files.read(reviewStatePath(options.stateDir, "a")))
+      }
     })
   )
 })
