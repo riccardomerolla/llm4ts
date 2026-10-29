@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.51.0
 
 - **Review per story, not per task (ADR 0044).** In `epic-stories`,
   `epic-mvp` and `epic-draft`, tasks run on their gates alone. When a
