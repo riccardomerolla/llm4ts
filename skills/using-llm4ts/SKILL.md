@@ -35,7 +35,10 @@ red tests first, green tests in place of review, and the rest parked for
 `--iterate`. It needs `LLM4TS_TEST_REPORT` (the JUnit report the tests
 write) or `LLM4TS_TEST_ONE`. `epic-draft` is the fastest: code first with
 one review lens and the build gates, the tests owed written to `debt.md`,
-and `--harden` to pay them under the full bar. Pick `epic-stories` for
+and `--harden` to pay them under the full bar. `epic-stories --defer-tests`
+keeps the full review but lets a story merge when the judge finds its tests
+missing; those tests go to `debt.md`, paid the same way with
+`epic-stories --harden`. Pick `epic-stories` for
 refactors, cross-cutting changes, or work that needs judgment on house style.
 
 `implement` is the default flow; run `npx -y @llm4ts/shell list` to see

@@ -5,6 +5,8 @@
 //   llm4ts run epic-stories --repo ~/demo/portal -- --land            # land the finished epic on main
 //   llm4ts run epic-stories --repo ~/demo/portal -- --list            # the repository's epics
 //   llm4ts run epic-stories --repo ~/demo/portal -- --epic <id>       # resume one, no text needed
+//   llm4ts run epic-stories --repo ~/demo/portal -- --defer-tests "…" # missing tests become debt
+//   llm4ts run epic-stories --repo ~/demo/portal -- --harden --epic <id> # plan that debt as a round
 //
 // The reasoning seat (LLM4TS_REASONER, default claude) splits the epic,
 // reviews every task and judges every story; the coder seat (LLM4TS_CODER,
@@ -21,7 +23,15 @@
 // Transcripts (what each seat was told and answered) are ON by default for
 // this flow — LLM4TS_TRANSCRIPT=off turns them off — and --land compacts them
 // (shape kept, content removed) rather than deleting them (ADR 0025).
+// With --defer-tests the judge's tests score is never a finding and what it
+// excused is written to debt.md; --harden plans that debt (ADR 0045).
+import * as Effect from "effect/Effect"
 import { runFlowMain } from "@llm4ts/runner"
-import { rubricStoryJudge, runEpicStories } from "./lib/epic-stories.ts"
+import { epicStoriesOptions, parseStoriesFlags } from "./lib/debt.ts"
+import { runEpicStories } from "./lib/epic-stories.ts"
 
-runFlowMain(runEpicStories({ storyJudge: rubricStoryJudge }))
+runFlowMain(
+  Effect.flatMap(parseStoriesFlags(process.argv.slice(2), process.env), (flags) =>
+    runEpicStories({ ...epicStoriesOptions(flags), argv: flags.argv })
+  )
+)

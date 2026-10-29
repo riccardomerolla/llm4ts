@@ -207,7 +207,8 @@ describe("the fork entry", () => {
     const here = dirname(fileURLToPath(import.meta.url))
     const original = readFileSync(join(here, "..", "epic-stories.ts"), "utf8")
     const fork = readFileSync(join(here, "..", "epic-stories-board.ts"), "utf8")
-    assert.include(original, "runEpicStories({ storyJudge: rubricStoryJudge })")
+    // epic-stories picks its judge from its flags (ADR 0045); the rubric judge by default.
+    assert.include(original, "runEpicStories({ ...epicStoriesOptions(flags), argv: flags.argv })")
     assert.match(fork, /runEpicStories\(\{\s*storyJudge: boardJudgeFactory/)
     assert.match(fork.split("\n")[0] ?? "", /^\/\/ .*fork of epic-stories/)
   })

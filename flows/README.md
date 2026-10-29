@@ -252,6 +252,13 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   Warning. The rest goes to `stories/<id>.deferred.md`. When every story is
   merged, the run plans those findings as one refine round and runs it.
   Findings deferred inside that round are only listed.
+- `--defer-tests` (or `LLM4TS_DEFER_TESTS=1`, ADR 0045) never fails a story
+  on the judge's `tests` score, even 0. The judge still scores `tests`, and
+  the coder is still asked for tests; a red test gate still fails the story.
+  After the run, `debt.md` lists each merged story whose tests the judge
+  excused: the score, its reasoning, and each acceptance outcome as a test
+  owed. Read it, then `--harden --epic <id>` plans that debt as a refine
+  round under the full bar, as `epic-draft --harden` does.
 - `LLM4TS_REASONER` (default `claude`, or `gemini`) splits, reviews every
   task and judges every story; `LLM4TS_CODER` (default `pi`) implements.
   `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi

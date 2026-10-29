@@ -47,6 +47,7 @@ whose judge finds tests missing, and plan those tests afterwards.
    Deferred findings are left out. With `--defer-findings` they already get
    their own follow-up round (ADR 0031); listing them here would plan them
    twice.
+
 5. **`epic-stories --harden` pays it.** It plans the open debt as a refine
    round under the full standard, the same as `epic-draft --harden`, and
    marks the debt paid once that round settles. The harden code moves to

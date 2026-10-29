@@ -400,6 +400,16 @@ are all Warnings: a partial `scope`, `house-style` or `tests`, while
 `stories/<id>.deferred.md`. Once every story of the epic is merged, those
 lists are planned and run as one refine round.
 
+`epic-stories --defer-tests` (or `LLM4TS_DEFER_TESTS=1`, ADR 0045) excuses
+the judge's `tests` score at any value, 0 included: it is kept in the
+verdict, never a finding. Nothing else changes: the coder is still asked
+for tests, the `test` lens still reviews, and a red test gate still fails.
+Each merged story whose tests were excused is written to `debt.md` with its
+acceptance outcomes as tests owed; `epic-stories --harden` plans the open
+debt as a refine round under the full bar and marks it paid once that round
+settles. The judge's bar is part of its cached verdict's key, so a story
+that failed on `tests 0` is judged afresh when rerun with `--defer-tests`.
+
 Votes multiply only the adversarial lens; the concern lenses run once. With a
 roster, consecutive votes take turns across executors (ADR 0019), so two
 votes usually come from two models.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.52.0
+
+- **`epic-stories --defer-tests` (ADR 0045).** The judge's `tests` score,
+  even 0, no longer fails a story; `LLM4TS_DEFER_TESTS=1` sets it too. The
+  score and the judge's reasoning stay in the verdict. After the run,
+  `debt.md` lists each merged story whose tests were excused, with its
+  acceptance outcomes as tests owed. The coder is still asked for tests and
+  a red test gate still fails.
+- **`epic-stories --harden`** plans the open debt as a refine round under
+  the full bar, as `epic-draft --harden` does; the two share
+  `flows/lib/debt.ts`.
+- **Library seams.** `StoriesOptions.judgeBar` enters the judge's cache key,
+  so a verdict judged under another bar is never reused; `StoryVerdict`
+  carries the `excused` dimensions; `judgeVerdictPath` and
+  `lastStoryVerdict` read a story's last verdict.
+
 ## 2.51.0
 
 - **Review per story, not per task (ADR 0044).** In `epic-stories`,
