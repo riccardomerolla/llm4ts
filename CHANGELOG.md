@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **Review per story, not per task (ADR 0044).** In `epic-stories`,
+  `epic-mvp` and `epic-draft`, tasks run on their gates alone. When a
+  story's tasks are in, every review lens and the story judge read the
+  story's diff side by side, and one fix turn takes all their findings.
+  Later rounds re-check only the reviewers that had findings, or a lens the
+  fix brought a new kind of file. A restart resumes the review at its next
+  round. `--review-at task` goes back to reviewing every task.
+- **`--review-rounds <n>`** (default 3) bounds the story review;
+  `--judge-rounds` and `LLM4TS_JUDGE_ROUNDS` set it too. Out of rounds, a
+  judge still not cleared fails the story, and open lens findings are
+  logged as `carried` while the story merges.
+- **Library seams.** `reviewAndFixLoop` takes an opt-in `recheck` (reviewer
+  memory, extra reviews such as the judge, the findings still standing);
+  findings name their `lens`; `implementStoriesFlow` takes `reviewAt` and
+  `reviewRounds`. Defaults are unchanged.
+- **`llm4ts profile`** shows the largest review diff per story.
+
 ## 2.50.0
 
 - **Parallel tasks inside a story are opt-in (ADR 0034 amendment).**

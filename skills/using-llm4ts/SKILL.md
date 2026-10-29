@@ -28,7 +28,8 @@ Requires Node.js 22+; no install needed:
 npx -y @llm4ts/shell run implement "<task description>"
 ```
 
-For an epic, `epic-stories` plans stories and reviews and judges each one.
+For an epic, `epic-stories` plans stories, runs each task on its gates, and
+reviews and judges each story once (`--review-at task` reviews every task).
 `epic-mvp` is the lighter path to an MVP for greenfield or additive work:
 red tests first, green tests in place of review, and the rest parked for
 `--iterate`. It needs `LLM4TS_TEST_REPORT` (the JUnit report the tests

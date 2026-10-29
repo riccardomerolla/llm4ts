@@ -2272,7 +2272,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
     let inPlace = false
     const storyDiff = reviewAtStory ? yield* git.diffVsBase(epicBranch) : ""
     if (reviewAtStory && storyDiff.trim().length > 0) {
-      judgeNote = yield* reviewStory()
+      judgeNote = yield* stage(laneOf(story), `story ${story.id}: review`, reviewStory())
     } else if (options.judge !== undefined) {
       const judge = options.judge
       for (let round = 1; round <= judgeRounds; round += 1) {

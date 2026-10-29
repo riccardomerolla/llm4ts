@@ -220,11 +220,23 @@ pnpm --filter @llm4ts/flows epic-stories -- \
 - `--concurrency <n>` (default 3) caps the stories implemented at once;
   `--fail-fast` stops at the first failed story instead of putting its
   dependents on hold (`waiting` on the board until it is fixed and rerun).
-- `--judge-rounds <n>` (or `LLM4TS_JUDGE_ROUNDS`; the flag wins; default 2)
-  sets the judge attempts per story. Each attempt the judge does not clear,
-  except the last, becomes a revision task the coder runs before the next
-  judgment; after `n` attempts the story fails with the judge's findings.
-  The default of 2 is one revision, so `--judge-rounds 4` allows three.
+- The review lenses run once per story, beside the judge (ADR 0044). Each
+  task runs on its gates alone. When the story's tasks are in, every lens
+  and the judge review the story's diff side by side, and one fix turn, a
+  fresh coder chat on the story's worktree, gets all their findings. From
+  the second round only the reviewers that had findings re-check them, or a
+  lens whose kind of file the fix newly touched. A judge that scores
+  `provides` at 0 gets a revision task instead of a fix turn. Out of rounds,
+  a judge still not cleared fails the story; lens findings still open are
+  logged as `carried` in `<id>.findings.md` and the story merges. The
+  reviewers' memory is in `stories/<id>.review-state.json`, so a restart
+  resumes at the next round. `--review-at task` goes back to a review on
+  every task.
+- `--review-rounds <n>` (or `--judge-rounds`, or `LLM4TS_JUDGE_ROUNDS`; the
+  flag wins; default 3) bounds the story review. With `--review-at task` it
+  keeps its old meaning: judge attempts per story (default 2), each but the
+  last followed by a revision task, then the story fails with the judge's
+  findings.
 - `--merge-revisions <n>` (or `LLM4TS_MERGE_REVISIONS`; default 1, ADR 0032):
   when the epic gates go red after a story merges, the merge is undone and
   the story goes back to its worktree. It catches up with the epic, so its

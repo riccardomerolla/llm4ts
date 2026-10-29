@@ -384,6 +384,14 @@ test gate while drafting (it is off by default; typecheck, lint and build
 always run), and `--harden` plans the epic's open `debt.md` lists as a refine
 round under epic-stories' full bar.
 
+The epic flows review each story once, not each task (ADR 0044): every lens
+and the judge read the story's diff side by side, one fix turn takes their
+findings, and later rounds re-check only what had findings. `--review-at
+task` reviews every task instead. `--review-rounds <n>` (default 3; also
+`--judge-rounds` or `LLM4TS_JUDGE_ROUNDS`) bounds the story review; in task
+mode it counts judge attempts (default 2). `llm4ts profile` shows the
+largest review diff per story.
+
 `epic-stories --defer-findings` (or `LLM4TS_DEFER_FINDINGS=1`) makes review
 lighter (ADR 0031). A task's review settles once only non-Critical findings
 are left (a red gate still loops). The judge clears a story whose findings

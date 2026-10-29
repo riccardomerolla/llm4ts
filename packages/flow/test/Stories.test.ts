@@ -2699,11 +2699,16 @@ describe("Stories executor: story-level review (ADR 0044)", () => {
       const { context, options } = yield* storyRun(lensSeat({}, prompts), {
         planTasks: (_seats, item) => Effect.succeed(threeTasks(item))
       })
-      const report = yield* implementStoriesFlow(context, options)
+      const events = yield* makeCollectingFlowEvents
+      const report = yield* implementStoriesFlow({ ...context, events }, options)
       assert.strictEqual(report.stories[0]?.status, "done")
       const seen = yield* Ref.get(prompts)
       assert.strictEqual(seen.length, 2)
       assert.isTrue(seen.every((prompt) => prompt.includes("Story a")))
+      const stages = (yield* events.recorded).flatMap((event) =>
+        event._tag === "StageStarted" ? [event.stage] : []
+      )
+      assert.include(stages, "story a: review")
     })
   )
 

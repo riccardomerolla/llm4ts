@@ -1,6 +1,6 @@
 # ADR 0044: Review Per Story, Not Per Task
 
-Status: Proposed · Date: 2026-10-29 · Amends ADR 0013, ADR 0031, ADR 0042,
+Status: Accepted · Date: 2026-10-29 · Amends ADR 0013, ADR 0031, ADR 0042,
 ADR 0043
 
 ## Context
