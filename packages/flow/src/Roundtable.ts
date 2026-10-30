@@ -50,7 +50,11 @@ export class Persona extends Schema.Class<Persona>("Persona")({
   caresAbout: Schema.String,
   pushesBackOn: Schema.String,
   neverDecidesAlone: Schema.String,
-  voice: Schema.String
+  voice: Schema.String,
+  /** The Scribe's section skeleton for `outline.md`; other cards have none. */
+  outlineTemplate: Schema.optionalKey(Schema.String),
+  /** The Scribe's section skeleton for `plan.md`. */
+  planTemplate: Schema.optionalKey(Schema.String)
 }) {}
 
 /** The order a card without one gets: after every bundled persona. */
@@ -61,7 +65,9 @@ const personaSections = {
   caresAbout: "Cares about",
   pushesBackOn: "Pushes back on",
   neverDecidesAlone: "Never decides alone",
-  voice: "Voice"
+  voice: "Voice",
+  outlineTemplate: "Outline template",
+  planTemplate: "Plan template"
 } as const
 type PersonaSection = keyof typeof personaSections
 const personaSectionKeys: ReadonlyArray<PersonaSection> = [
@@ -69,8 +75,12 @@ const personaSectionKeys: ReadonlyArray<PersonaSection> = [
   "caresAbout",
   "pushesBackOn",
   "neverDecidesAlone",
-  "voice"
+  "voice",
+  "outlineTemplate",
+  "planTemplate"
 ]
+/** Sections whose body is a markdown skeleton: a `## ` line inside them is content, not a section. */
+const templateSections: ReadonlyArray<PersonaSection> = ["outlineTemplate", "planTemplate"]
 
 const personaSectionOf = (title: string): PersonaSection | undefined =>
   personaSectionKeys.find((key) => personaSections[key].toLowerCase() === title.toLowerCase())
@@ -118,7 +128,9 @@ export const parsePersona = Effect.fn("@llm4ts/flow/Roundtable.parsePersona")(fu
     caresAbout: [],
     pushesBackOn: [],
     neverDecidesAlone: [],
-    voice: []
+    voice: [],
+    outlineTemplate: [],
+    planTemplate: []
   }
   let current: PersonaSection | "unknown" | "none" = "none"
   let fenced = false
@@ -129,12 +141,17 @@ export const parsePersona = Effect.fn("@llm4ts/flow/Roundtable.parsePersona")(fu
     if (!fenced && trimmed.startsWith("## ")) {
       const title = trimmed.slice(3).trim()
       const key = personaSectionOf(title)
-      if (key === undefined) {
-        violations.push(`line ${index + 1}: unknown section "${title}"`)
-        current = "unknown"
-      } else {
+      if (key !== undefined) {
         current = key
+        continue
       }
+      // A template is a skeleton of headings: its `## ` lines are its body.
+      if (current !== "unknown" && current !== "none" && templateSections.includes(current)) {
+        bodies[current].push(raw)
+        continue
+      }
+      violations.push(`line ${index + 1}: unknown section "${title}"`)
+      current = "unknown"
       continue
     }
     if (current !== "unknown" && current !== "none") bodies[current].push(raw)
@@ -151,7 +168,9 @@ export const parsePersona = Effect.fn("@llm4ts/flow/Roundtable.parsePersona")(fu
     caresAbout: text("caresAbout"),
     pushesBackOn: text("pushesBackOn"),
     neverDecidesAlone: text("neverDecidesAlone"),
-    voice: text("voice")
+    voice: text("voice"),
+    ...(bodies.outlineTemplate.length === 0 ? {} : { outlineTemplate: text("outlineTemplate") }),
+    ...(bodies.planTemplate.length === 0 ? {} : { planTemplate: text("planTemplate") })
   })
 })
 
@@ -162,7 +181,10 @@ export const renderPersona = (persona: Persona): string =>
     `order: ${persona.order}`,
     "---",
     "",
-    ...personaSectionKeys.flatMap((key) => sectionLines(personaSections[key], prose(persona[key])))
+    ...personaSectionKeys.flatMap((key) => {
+      const body = persona[key]
+      return body === undefined ? [] : sectionLines(personaSections[key], prose(body))
+    })
   ].join("\n")
 
 // ---- The meeting file ---------------------------------------------------------
@@ -909,7 +931,8 @@ const firstLine = (text: string): string => {
   return line.length > 80 ? `${line.slice(0, 77)}...` : line
 }
 
-const renderTurn = (turn: Turn): string => {
+/** One turn as the notes show it: `**PO** #4 objection to #2, blocking: …`. */
+export const renderTurn = (turn: Turn): string => {
   if (turn.kind === "pass") return `**${turn.speaker}** #${turn.id} passes.`
   const owner = turn.needsHuman ? " for the owner" : ""
   const assuming = turn.assumption === undefined ? "" : ` (assuming: ${turn.assumption})`
