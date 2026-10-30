@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/js",
-  "version": "2.52.0",
+  "version": "2.53.0",
   "description": "Promise and exception facade for llm4ts",
   "license": "MIT",
   "type": "module",
