@@ -363,6 +363,48 @@ export class ContractConflict extends Schema.TaggedError<ContractConflict>()("Co
   }
 }
 
+/** A persona card that does not parse: the file name is what the user asked for. */
+export class PersonaInvalid extends Schema.TaggedError<PersonaInvalid>()("PersonaInvalid", {
+  name: Schema.String,
+  violations: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    return `persona card ${this.name} invalid:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** A roundtable meeting file that does not parse. */
+export class MeetingInvalid extends Schema.TaggedError<MeetingInvalid>()("MeetingInvalid", {
+  path: Schema.optionalKey(Schema.String),
+  violations: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const where = this.path === undefined ? "" : ` in ${this.path}`
+    return `meeting invalid${where}:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** A roundtable turn record (`turns.jsonl`) with a line that does not decode. */
+export class TurnsInvalid extends Schema.TaggedError<TurnsInvalid>()("TurnsInvalid", {
+  path: Schema.optionalKey(Schema.String),
+  violations: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const where = this.path === undefined ? "" : ` in ${this.path}`
+    return `turn record invalid${where}:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** A roundtable proposed its agenda and stopped for the owner to edit it. */
+export class AgendaPending extends Schema.TaggedError<AgendaPending>()("AgendaPending", {
+  path: Schema.String,
+  items: Schema.Int
+}) {
+  get message(): string {
+    return `${this.items} agenda item(s) proposed in ${this.path} — edit them under '## Agenda' and rerun, or pass --no-pause`
+  }
+}
+
 export const FlowError = Schema.Union([
   PersistenceError,
   PlanParseError,
@@ -393,6 +435,10 @@ export const FlowError = Schema.Union([
   ExtractPackMissing,
   EpicBriefInvalid,
   EpicBriefNotApproved,
-  RefineRefused
+  RefineRefused,
+  PersonaInvalid,
+  MeetingInvalid,
+  TurnsInvalid,
+  AgendaPending
 ])
 export type FlowError = typeof FlowError.Type
