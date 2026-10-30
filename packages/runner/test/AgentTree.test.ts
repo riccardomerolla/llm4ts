@@ -11,6 +11,7 @@ import {
   ExecutorReleased,
   ExecutorResumed,
   Info,
+  RoundtableTurn,
   JudgmentObserved,
   StoryJudged,
   StageStarted,
@@ -888,5 +889,93 @@ describe("agent tree: tasks beside the story's coder (ADR 0034)", () => {
     ])
     assert.deepStrictEqual(home.lanes[0]?.taskCoders, [])
     assert.strictEqual(home.lanes[0]?.task?.index, 3)
+  })
+})
+
+describe("roundtable attendees (ADR 0046)", () => {
+  const spoke = (
+    turn: number,
+    lane: string,
+    kind: "proposal" | "agreement" | "objection",
+    summary: string,
+    extra: {
+      item?: number
+      round?: number
+      blocking?: boolean
+      answers?: ReadonlyArray<number>
+    } = {}
+  ) =>
+    RoundtableTurn.make({
+      lane,
+      meeting: "payments-hub",
+      item: extra.item ?? 1,
+      itemTitle: "Scope",
+      round: extra.round ?? 1,
+      turn,
+      kind,
+      blocking: extra.blocking ?? false,
+      answers: [...(extra.answers ?? [])],
+      summary
+    })
+
+  it("an attendee is a lane: its last turn and the item it is on, no executor", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "item 1: Scope" })),
+      at(0, StageStarted.make({ stage: "attendee PO", lane: "PO" })),
+      at(0, StageStarted.make({ stage: "attendee Cloud Architect", lane: "Cloud Architect" })),
+      at(3, spoke(1, "PO", "proposal", "Cards first.")),
+      at(
+        9,
+        spoke(2, "Cloud Architect", "objection", "Transfers are cheap.", {
+          blocking: true,
+          answers: [1]
+        })
+      ),
+      at(14, spoke(3, "PO", "agreement", "Fine, both.", { round: 2, answers: [2] }))
+    ])
+    assert.deepStrictEqual(
+      state.lanes.map((lane) => [lane.id, lane.kind, lane.status]),
+      [
+        ["PO", "attendee", "running"],
+        ["Cloud Architect", "attendee", "running"]
+      ]
+    )
+    assert.deepStrictEqual(state.lanes[0]?.turn, {
+      id: 3,
+      kind: "agreement",
+      summary: "Fine, both.",
+      blocking: false
+    })
+    assert.deepStrictEqual(state.lanes[0]?.stages, ["item 1 r2"])
+    assert.strictEqual(state.lastChanged, "PO")
+    const text = frame(state).join("\n")
+    assert.include(text, "▸ ◐ PO · #3 agreement: Fine, both. · item 1 r2")
+    assert.include(text, "◐ Cloud Architect · #2 objection (blocking)")
+    assert.notInclude(text, "no task plan yet")
+    assert.notInclude(text, "(leasing)")
+    assert.include(text, "┌─ PO ·")
+    assert.match(text, /PO\s+#1 proposal: Cards first\./u)
+    assert.match(text, /Cloud Architect\s+#2 objection \(blocking\) → #1: Transfers are cheap\./u)
+    assert.include(text, "item 1: Scope")
+  })
+
+  it("the chair and the owner have no lane: their turns go to the run log; a finished attendee is a chip", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "attendee PO", lane: "PO" })),
+      at(1, spoke(1, "PO", "proposal", "Cards first.")),
+      at(
+        2,
+        spoke(2, "Chair", "agreement", "Judged resolved by #1 (p=0.90).", {
+          round: 2,
+          answers: [1]
+        })
+      ),
+      at(3, StageCompleted.make({ stage: "attendee PO", lane: "PO" }))
+    ])
+    assert.strictEqual(state.lanes.length, 1)
+    assert.strictEqual(state.lanes[0]?.status, "done")
+    const text = frame(state).join("\n")
+    assert.match(text, /Chair\s+#2 agreement → #1: Judged resolved by #1/u)
+    assert.match(text, /PO\s+done/u)
   })
 })

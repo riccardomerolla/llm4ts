@@ -4,6 +4,7 @@ import * as Option from "effect/Option"
 import type { JsonSchema } from "@llm4ts/core/Models"
 import { makeOpenPointsCollector, OpenPoint } from "./Decisions.ts"
 import { MeetingInvalid, PersonaInvalid, TurnsInvalid } from "./FlowError.ts"
+import { RoundtableTurnKind } from "./FlowEvents.ts"
 
 /**
  * The roundtable (ADR 0046): a meeting run by code. Chosen personas speak in
@@ -413,15 +414,9 @@ export const ownerSpeaker = "Owner"
 /** The code that runs the meeting; it speaks only to record a judgment. */
 export const chairSpeaker = "Chair"
 
-export const TurnKind = Schema.Literals([
-  "position",
-  "question",
-  "objection",
-  "agreement",
-  "proposal",
-  "pass"
-])
-export type TurnKind = typeof TurnKind.Type
+/** The kinds of turn, shared with the `RoundtableTurn` event the dashboard reads. */
+export const TurnKind = RoundtableTurnKind
+export type TurnKind = RoundtableTurnKind
 
 /**
  * One contribution on one agenda item in one round. `answers` names the
