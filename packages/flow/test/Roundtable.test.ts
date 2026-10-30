@@ -116,6 +116,47 @@ describe("persona cards", () => {
     })
   )
 
+  it.effect(
+    "a Scribe card may carry the outline and plan templates, rendered only when present",
+    () =>
+      Effect.gen(function* () {
+        const card = [
+          "---",
+          "name: Scribe",
+          "order: 90",
+          "---",
+          "",
+          "## Mandate",
+          "",
+          "Writes it up.",
+          "",
+          "## Cares about",
+          "",
+          "## Pushes back on",
+          "",
+          "## Never decides alone",
+          "",
+          "## Voice",
+          "",
+          "## Outline template",
+          "",
+          "## Context",
+          "## Decision",
+          "",
+          "## Plan template",
+          "",
+          "## Phases",
+          ""
+        ].join("\n")
+        const persona = yield* parsePersona("Scribe", card)
+        assert.strictEqual(persona.outlineTemplate, "## Context\n## Decision")
+        assert.strictEqual(persona.planTemplate, "## Phases")
+        assert.strictEqual(renderPersona(persona), card)
+        const plain = yield* parsePersona("sre", sreCard)
+        assert.strictEqual(plain.outlineTemplate, undefined)
+      })
+  )
+
   it("the constructor is the type", () => {
     const persona = Persona.make({
       name: "PO",

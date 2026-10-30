@@ -15,6 +15,7 @@ one-line description. These scripts double as the built-in flows of the
 | `epic-mvp.ts`               | Epic → MVP cut → red tests first → coders make them green; the rest parked for `--iterate`                                          | reasoner CLI + pi + Git           |
 | `epic-draft.ts`             | Epic → stories without tests → one lens and the build gates; what was deferred is debt `--harden` pays                              | reasoner CLI + pi + Git           |
 | `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                      | reasoner CLI                      |
+| `roundtable.ts`             | A topic and a goal → personas discuss item by item, a Scribe writes the outline and the plan; you steer from the meeting file       | reasoner CLI                      |
 | `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                                 | selected CLI + GitHub             |
 | `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                              | selected CLI + Maven              |
 | `local.ts`                  | LM Studio reasoning followed by a local pi coding agent                                                                             | LM Studio + pi                    |
@@ -124,6 +125,53 @@ pnpm --filter @llm4ts/flows implement -- \
 Accepted values are `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`,
 `cursor`, and `opencode`. The inherited `LLM4ZIO_CODER` name is no longer read
 for migration.
+
+## Running a design meeting: `roundtable`
+
+`roundtable` is for what comes before an epic: "we need an architecture
+outline and a plan for solution XYZ, within our standards". Instead of one
+reasoner writing a document, a room of personas discusses the topic toward
+the goal, and a Scribe writes it up (ADR 0046).
+
+```sh
+llm4ts run roundtable --repo ~/work/portal "Architecture outline for the payments hub" \
+  -- --goal "An outline and a plan the committee can approve, within our standards" \
+     --agents "PO,PM,Sr SW Eng,Cloud Architect,DevOps,SRE" --context docs/standards
+```
+
+- **Code chairs the meeting.** The first attendee proposes three to seven
+  agenda items; the run stops for you to edit them in `meeting.md` unless
+  `--no-pause`. Then, item by item, every attendee is asked once per round
+  in persona order and may pass. A turn is prose with a typed header: a
+  position, a proposal, an objection (blocking or not), a question for the
+  room or for you, an agreement. An item settles after a complete round
+  with no open blocking objection and no open question; silence is consent.
+  A blocking objection is closed by its objector, or by the Judgment
+  service when the objector has spoken past a reply without closing it.
+  Three rounds per item (`--rounds`) and forty turns in all (`--max-turns`);
+  what is still open is written down, never forced.
+- **The file is the state.** `.llm4ts/meetings/<id>/meeting.md` holds the
+  status, the agenda, the questions parked for you under `## Answers` and
+  your `## Feedback`. `turns.jsonl` is the record, `discussion.md` the same
+  as meeting notes. Answer a question or write feedback and rerun: your
+  words become Owner turns, the item reopens for one more round, the drafts
+  are rewritten.
+- **Deliverables.** `outline.md` and `plan.md` by the Scribe, from the
+  templates in its card; `decisions.md` (ADR-shaped, one entry per proposal
+  that stood, with its dissent) and `open-questions.md` rendered by code.
+  Every attendee reviews the drafts once; the Scribe fixes what blocks.
+- **Personas are cards.** Six are bundled (PO, PM, Sr SW Eng, Cloud
+  Architect, DevOps, SRE) plus the Scribe. `-- --eject-personas` writes
+  them to `.llm4ts/personas/`; a card there with the same name wins. A card
+  is frontmatter (`name`, `order`) and the sections Mandate, Cares about,
+  Pushes back on, Never decides alone, Voice; the Scribe's also carries
+  Outline template and Plan template.
+- **Seats.** Every persona borrows one read-only, toolless reasoning seat:
+  `LLM4TS_REASONER` (default `claude`). Attendees read the topic, the goal,
+  the documents under `--context` (capped by `LLM4TS_CONTEXT_BUDGET`), the
+  decisions of earlier items and the turns of the current one. Nothing in
+  the repository's git is touched. `-- --list` shows the meetings and the
+  personas.
 
 ## Designing an epic from a legacy analysis
 

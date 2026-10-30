@@ -210,7 +210,9 @@ export const runFlow = (
   flow: string,
   repo: string,
   extraEnv: Readonly<Record<string, string>> = {},
-  task?: string
+  task?: string,
+  /** The flow's own flags, after the task, as `llm4ts run <flow> … -- <flags>` forwards them. */
+  extraArgs: ReadonlyArray<string> = []
 ): SpawnSyncReturns<string> =>
   spawnSync(
     process.execPath,
@@ -219,7 +221,8 @@ export const runFlow = (
       join(flowsRoot, `${flow}.ts`),
       "--repo",
       repo,
-      ...(task === undefined ? [] : [task])
+      ...(task === undefined ? [] : [task]),
+      ...extraArgs
     ],
     {
       // The launch directory is the fixture, so LLM4TS_PACK resolves there —

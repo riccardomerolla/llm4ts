@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.53.0
+
+- **`roundtable` (ADR 0046).** A meeting run by code: personas chosen by
+  card (PO, PM, Sr SW Eng, Cloud Architect, DevOps, SRE bundled, custom
+  cards under `.llm4ts/personas/`) discuss a topic toward a goal, agenda
+  item by agenda item, in typed turns (position, proposal, objection,
+  question, agreement, pass). An item settles after a complete round with
+  no open blocking objection; the objector closes their own objection, the
+  Judgment service breaks a stalemate. A Scribe writes `outline.md` and
+  `plan.md`; code renders `decisions.md` with the dissent and
+  `open-questions.md`. `meeting.md` is the state: answers and feedback
+  written there become Owner turns on the next run. `--eject-personas`,
+  `--list`, `--context`, `--rounds`, `--max-turns`, `--no-pause`.
+- **Library seams.** `@llm4ts/flow/Roundtable`: persona cards, the meeting
+  file, the turn record, the derived state and the chair's `nextAction`,
+  all pure. New errors `PersonaInvalid`, `MeetingInvalid`, `TurnsInvalid`,
+  `AgendaPending`.
+
 ## 2.52.0
 
 - **`epic-stories --defer-tests` (ADR 0045).** The judge's `tests` score,
