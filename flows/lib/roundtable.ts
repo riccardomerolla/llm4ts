@@ -61,6 +61,7 @@ import {
 } from "@llm4ts/flow/Roundtable"
 import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { ScriptUsage } from "@llm4ts/runner/FlowArgs"
+import { terminalSafe } from "@llm4ts/runner/Terminal"
 import { bundledPersonaCards, scribeName } from "./roundtable-personas.ts"
 
 // ---- Flags ----------------------------------------------------------------------
@@ -772,9 +773,17 @@ export const runRoundtable = Effect.fn("roundtable.run")(function* (
   }
 })
 
-/** The first line of a turn's body, cut short: what the dashboard shows on the lane. */
+/**
+ * The first line of a turn's body, cut short: what the dashboard shows on
+ * the lane. A model's reply is untrusted text on its way to a terminal:
+ * escape sequences and control characters are dropped, not painted.
+ */
 const firstLine = (text: string): string => {
-  const line = (text.split(/\r?\n/)[0] ?? "").replace(/\s+/g, " ").trim()
+  const line = terminalSafe(text.split(/\r?\n/)[0] ?? "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
   return line.length > 80 ? `${line.slice(0, 77)}...` : line
 }
 

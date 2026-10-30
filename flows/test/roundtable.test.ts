@@ -216,7 +216,8 @@ describe("a roundtable from agenda to done", () => {
       const room = yield* setup()
       yield* room.run([
         agenda,
-        say("proposal", "Cards first."),
+        // A reply may carry what a terminal would obey: the lane summary never does.
+        say("proposal", "Cards\u001b[31m first.\u0007\nMore below."),
         say("agreement", "Yes.", { answers: [1] }),
         say("position", "Reaches the goal."),
         say("agreement", "Yes.", { answers: [3] }),
@@ -224,6 +225,10 @@ describe("a roundtable from agenda to done", () => {
         say("agreement", "Fine."),
         say("agreement", "Fine.")
       ])
+      const spoken = (yield* room.events).flatMap((event) =>
+        event instanceof RoundtableTurn ? [event.summary] : []
+      )
+      assert.strictEqual(spoken[0], "Cards first.")
       const done = yield* room.meeting
       yield* room.files.writeAtomic(
         `${dir}/meeting.md`,
