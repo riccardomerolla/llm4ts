@@ -147,6 +147,68 @@ The epic's stories by column (planned, active, waiting, done, failed,
 skipped), or one story's Tasks by column (todo, doing, review, done).
 _Avoid_: kanban, dashboard (that is the whole screen), tree
 
+### Roundtable
+
+**Roundtable**:
+A meeting run by code: chosen Personas speak in turns about a Topic toward
+a Goal, item by item, until each item is settled or capped; then the Scribe
+writes the outline and the plan. The meeting file and the turn record are
+its state.
+_Avoid_: pipeline, workflow, council, debate, chat
+
+**Persona**:
+A card that says what a speaker is: a name, an order, a mandate, what it
+cares about, what it pushes back on, what it never decides alone, and a
+voice. Distinct from a role, which is a seat an Executor takes.
+_Avoid_: agent, role, seat, reviewer
+
+**Attendee**:
+A Persona chosen for one Roundtable. The Scribe and the Owner are never
+Attendees.
+_Avoid_: participant, member, agent
+
+**Scribe**:
+The Persona that writes a Roundtable's deliverables from the whole
+transcript and revises them after the review turn. Always present, never
+speaks in the discussion.
+_Avoid_: secretary, writer, finalizer, architect
+
+**Owner**:
+The person who called the Roundtable. Present only through the meeting
+file: answers to parked questions and feedback become Owner turns on the
+next run.
+_Avoid_: user, human, operator, chair
+
+**Chair**:
+The code that runs a Roundtable: turn order, rounds, what settles an item,
+caps, and the judgment that breaks a stalemate, recorded as Chair turns.
+_Avoid_: moderator, facilitator, orchestrator
+
+**Agenda item**:
+One question a Roundtable settles, with a title. Proposed by the first
+Attendee, edited by the Owner, followed by a fixed closing item (does the
+solution reach the Goal?) and, after drafting, a review item.
+_Avoid_: topic (that is the whole meeting's subject), story, task
+
+**Turn**:
+One Attendee's contribution on one Agenda item in one round: a kind
+(position, question, objection, agreement, proposal, pass), the turns it
+answers, whether an objection blocks, whether a question needs the Owner,
+and the prose body.
+_Avoid_: message, comment, post, utterance
+
+**Settled**:
+An Agenda item after a complete round with no open blocking objection and
+no unanswered question that is not parked for the Owner. A proposal in a
+settled item with no open blocking objection is a decision; non-blocking
+objections against it are its dissent.
+_Avoid_: closed, approved, resolved (that is one objection's state)
+
+**Capped**:
+An Agenda item that reached its round cap without settling. Left open and
+written to the open questions, never forced.
+_Avoid_: failed, timed out, skipped
+
 ### Findings and verdicts
 
 **Grounds**:

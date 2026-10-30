@@ -92,6 +92,7 @@
     "./SpecChecks": "./dist/SpecChecks.js",
     "./Spans": "./dist/Spans.js",
     "./Roster": "./dist/Roster.js",
+    "./Roundtable": "./dist/Roundtable.js",
     "./RosterSeats": "./dist/RosterSeats.js",
     "./Stall": "./dist/Stall.js",
     "./Stories": "./dist/Stories.js",
