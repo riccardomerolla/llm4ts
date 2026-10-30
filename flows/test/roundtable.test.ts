@@ -1,7 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
-import { Info, makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
+import {
+  Info,
+  RoundtableTurn,
+  StageCompleted,
+  StageStarted,
+  makeCollectingFlowEvents
+} from "@llm4ts/flow/FlowEvents"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import { OpenPoint } from "@llm4ts/flow/Decisions"
 import {
@@ -84,7 +90,16 @@ const setup = (options: { noPause?: boolean; truth?: number } = {}) =>
     const infos = Effect.map(events.recorded, (all) =>
       all.flatMap((event) => (event instanceof Info ? [event.message] : []))
     )
-    return { files, run, read, meeting, turns, infos, judged: fake.recorded }
+    return {
+      files,
+      run,
+      read,
+      meeting,
+      turns,
+      infos,
+      events: events.recorded,
+      judged: fake.recorded
+    }
   })
 
 describe("a roundtable from agenda to done", () => {
@@ -145,6 +160,50 @@ describe("a roundtable from agenda to done", () => {
         assert.match(first.prompts[3] ?? "", /Every API is versioned/)
         assert.match(first.prompts[4] ?? "", /#3/)
         assert.match(first.prompts[10] ?? "", /No rollback section/)
+        // The room is visible: one typed event per turn, a lane per attendee, an item per stage.
+        const recorded = yield* room.events
+        const spoken = recorded.flatMap((event) => (event instanceof RoundtableTurn ? [event] : []))
+        assert.strictEqual(spoken.length, 9)
+        assert.deepStrictEqual(
+          spoken[0],
+          RoundtableTurn.make({
+            lane: "PO",
+            meeting: "payments",
+            item: 1,
+            itemTitle: "Scope",
+            round: 1,
+            turn: 1,
+            kind: "proposal",
+            blocking: false,
+            answers: [],
+            summary: "Cards first."
+          })
+        )
+        assert.deepStrictEqual(
+          [spoken[4]?.lane, spoken[4]?.kind, spoken[4]?.answers],
+          [chairSpeaker, "agreement", [2]]
+        )
+        assert.strictEqual(spoken[8]?.itemTitle, "Review of the drafts")
+        const started = recorded.flatMap((event) =>
+          event instanceof StageStarted ? [event.stage] : []
+        )
+        assert.deepStrictEqual(started, [
+          "attendee PO",
+          "attendee SRE",
+          "item 1: Scope",
+          "item 2: Goal check",
+          "item 3: Review of the drafts"
+        ])
+        const completed = recorded.flatMap((event) =>
+          event instanceof StageCompleted ? [event.stage] : []
+        )
+        assert.deepStrictEqual(completed, [
+          "item 1: Scope",
+          "item 2: Goal check",
+          "item 3: Review of the drafts",
+          "attendee PO",
+          "attendee SRE"
+        ])
         // A rerun with nothing new asks nobody anything.
         const again = yield* room.run([])
         assert.strictEqual(again.calls, 0)

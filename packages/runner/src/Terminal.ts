@@ -42,6 +42,7 @@ export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean =>
     case "UsageProgress":
     case "ExecutorReleased":
     case "StoryJudged":
+    case "RoundtableTurn":
     case "Timed":
     case "TasksPlanned":
     case "TaskStarted":
@@ -253,6 +254,7 @@ export const terminalLine = (
     case "BlackboardRun":
     case "UsageProgress":
     case "StoryJudged":
+    case "RoundtableTurn":
     case "Timed":
     case "TasksPlanned":
     case "TaskStarted":

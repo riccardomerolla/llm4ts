@@ -14,7 +14,13 @@ import { truth } from "@llm4ts/core/judgment/Schemas"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import type { JsonSchema } from "@llm4ts/core/Models"
 import { cap } from "@llm4ts/flow/Context"
-import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import {
+  Info,
+  RoundtableTurn,
+  StageCompleted,
+  StageStarted,
+  type FlowEventsShape
+} from "@llm4ts/flow/FlowEvents"
 import { AgendaPending, FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import { decide, judgeOrEscalate } from "@llm4ts/flow/Judgment"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
@@ -28,6 +34,7 @@ import {
   closingItem,
   decodeTurns,
   encodeTurn,
+  itemOf,
   itemState,
   maxAgendaItems,
   Meeting,
@@ -478,6 +485,10 @@ export const runRoundtable = Effect.fn("roundtable.run")(function* (
   } else {
     meeting = loaded
   }
+  // Every attendee is a lane in the dashboard, from the first event of the run (ADR 0046).
+  for (const name of meeting.attendees) {
+    yield* events.publish(StageStarted.make({ stage: `attendee ${name}`, lane: name }))
+  }
   const personaOf = (name: string): Persona | undefined =>
     deps.attendees.find((persona) => persona.name === name)
   for (const name of meeting.attendees) {
@@ -502,6 +513,36 @@ export const runRoundtable = Effect.fn("roundtable.run")(function* (
         meeting = synced
         yield* save(meeting)
       }
+      yield* events.publish(
+        RoundtableTurn.make({
+          lane: turn.speaker,
+          meeting: meeting.id,
+          item: turn.item,
+          itemTitle: itemOf(meeting, turn.item)?.title ?? "",
+          round: turn.round,
+          turn: turn.id,
+          kind: turn.kind,
+          blocking: turn.blocking,
+          answers: turn.answers,
+          summary: firstLine(turn.body)
+        })
+      )
+    })
+  // The item under discussion is the run's open stage.
+  let openItem: AgendaItem | undefined
+  const itemStage = (item: AgendaItem): string => `item ${item.number}: ${item.title}`
+  const leaveItem = () =>
+    Effect.gen(function* () {
+      if (openItem === undefined) return
+      yield* events.publish(StageCompleted.make({ stage: itemStage(openItem) }))
+      openItem = undefined
+    })
+  const enterItem = (item: AgendaItem) =>
+    Effect.gen(function* () {
+      if (openItem?.number === item.number) return
+      yield* leaveItem()
+      yield* events.publish(StageStarted.make({ stage: itemStage(item) }))
+      openItem = item
     })
   const writeRecords = () =>
     Effect.gen(function* () {
@@ -601,6 +642,7 @@ export const runRoundtable = Effect.fn("roundtable.run")(function* (
         continue
       }
       case "Judge": {
+        yield* enterItem(action.item)
         const result = yield* judgeOrEscalate({
           judgment: deps.judgment,
           reasoning: deps.seat,
@@ -640,6 +682,7 @@ export const runRoundtable = Effect.fn("roundtable.run")(function* (
         continue
       }
       case "Speak": {
+        yield* enterItem(action.item)
         const persona = personaOf(action.speaker)
         if (persona === undefined) {
           return yield* ScriptUsage.make({ message: `no persona for ${action.speaker}` })
@@ -677,6 +720,7 @@ export const runRoundtable = Effect.fn("roundtable.run")(function* (
         continue
       }
       case "Draft": {
+        yield* leaveItem()
         if (meeting.status !== "drafting") {
           meeting = Meeting.make({ ...meeting, status: "drafting" })
           yield* save(meeting)
@@ -691,6 +735,7 @@ export const runRoundtable = Effect.fn("roundtable.run")(function* (
         continue
       }
       case "Finalize": {
+        yield* leaveItem()
         if (action.objections.length > 0) {
           const outline = (yield* files.read(paths.outline)) ?? ""
           const plan = (yield* files.read(paths.plan)) ?? ""
@@ -718,11 +763,20 @@ export const runRoundtable = Effect.fn("roundtable.run")(function* (
               ])
         ]
         for (const line of summary) yield* say(line)
+        for (const name of meeting.attendees) {
+          yield* events.publish(StageCompleted.make({ stage: `attendee ${name}`, lane: name }))
+        }
         return { _tag: "Finished", summary }
       }
     }
   }
 })
+
+/** The first line of a turn's body, cut short: what the dashboard shows on the lane. */
+const firstLine = (text: string): string => {
+  const line = (text.split(/\r?\n/)[0] ?? "").replace(/\s+/g, " ").trim()
+  return line.length > 80 ? `${line.slice(0, 77)}...` : line
+}
 
 const loadMeeting = Effect.fn("roundtable.loadMeeting")(function* (
   files: PlainFileStoreShape,

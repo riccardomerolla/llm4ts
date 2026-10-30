@@ -13,10 +13,15 @@
   `open-questions.md`. `meeting.md` is the state: answers and feedback
   written there become Owner turns on the next run. `--eject-personas`,
   `--list`, `--context`, `--rounds`, `--max-turns`, `--no-pause`.
+- **The room in `llm4ts watch`.** A typed `RoundtableTurn` event per turn;
+  every attendee is a lane in the agent tree (`--ui tree`, `llm4ts watch`)
+  showing its last turn and the item it is on; the Chair's and the Owner's
+  turns go to the session log; the item under discussion is the run's open
+  stage.
 - **Library seams.** `@llm4ts/flow/Roundtable`: persona cards, the meeting
   file, the turn record, the derived state and the chair's `nextAction`,
   all pure. New errors `PersonaInvalid`, `MeetingInvalid`, `TurnsInvalid`,
-  `AgendaPending`.
+  `AgendaPending`. `AgentTree` lanes carry a `kind` (`story` or `attendee`).
 
 ## 2.52.0
 

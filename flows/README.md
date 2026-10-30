@@ -172,6 +172,9 @@ llm4ts run roundtable --repo ~/work/portal "Architecture outline for the payment
   decisions of earlier items and the turns of the current one. Nothing in
   the repository's git is touched. `-- --list` shows the meetings and the
   personas.
+- **Watching.** `--ui tree` on the run, or `llm4ts watch` on its trace,
+  shows every attendee as a lane with its last turn and the item it is on;
+  the Chair's judgments and the Owner's answers appear in the session log.
 
 ## Designing an epic from a legacy analysis
 

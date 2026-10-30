@@ -253,6 +253,35 @@ export class Began extends Schema.TaggedClass<Began>()("Began", {
   executor: Schema.optionalKey(Schema.String)
 }) {}
 
+export const RoundtableTurnKind = Schema.Literals([
+  "position",
+  "question",
+  "objection",
+  "agreement",
+  "proposal",
+  "pass"
+])
+export type RoundtableTurnKind = typeof RoundtableTurnKind.Type
+
+/**
+ * Someone spoke in a roundtable (ADR 0046): one event per turn. `lane` is
+ * the speaker — an attendee has a lane of its own, the Chair and the Owner
+ * do not — so the dashboard shows the room as it shows stories. `summary`
+ * is the first line of the body, cut short.
+ */
+export class RoundtableTurn extends Schema.TaggedClass<RoundtableTurn>()("RoundtableTurn", {
+  lane: Schema.String,
+  meeting: Schema.String,
+  item: Schema.Int,
+  itemTitle: Schema.String,
+  round: Schema.Int,
+  turn: Schema.Int,
+  kind: RoundtableTurnKind,
+  blocking: Schema.Boolean,
+  answers: Schema.Array(Schema.Int),
+  summary: Schema.String
+}) {}
+
 /** One rubric dimension of a story verdict: its score out of `max`. */
 export const JudgedDimension = Schema.Struct({
   id: Schema.String,
@@ -477,6 +506,7 @@ export const FlowEvent = Schema.Union([
   ExecutorResumed,
   ExecutorHandedOver,
   StoryJudged,
+  RoundtableTurn,
   Timed,
   Began,
   TasksPlanned,

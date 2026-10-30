@@ -26,8 +26,12 @@ export type TreeInput =
 
 export type LaneStatus = "running" | "done" | "failed"
 
+/** What a lane stands for: a story's coder (ADR 0022), or a roundtable attendee (ADR 0046). */
+export type LaneKind = "story" | "attendee"
+
 export interface TreeLane {
   readonly id: string
+  readonly kind: LaneKind
   /** The lane's open stages below `story <id>`, innermost last. */
   readonly stages: ReadonlyArray<string>
   readonly executor: string | undefined
@@ -68,6 +72,15 @@ export interface TreeLane {
   readonly pause: { readonly label: string; readonly since: number } | undefined
   /** Tasks running beside the lane's coder, each on a coder of its own (ADR 0034). */
   readonly taskCoders: ReadonlyArray<TreeTaskCoder>
+  /** An attendee's last turn (ADR 0046); a story lane has none. */
+  readonly turn:
+    | {
+        readonly id: number
+        readonly kind: string
+        readonly summary: string
+        readonly blocking: boolean
+      }
+    | undefined
 }
 
 /** A task running beside a story's coder, in its own worktree (ADR 0034). */
@@ -257,7 +270,8 @@ const logged = (state: TreeState, entry: TreeLogEntry): TreeState => ({
   log: [...state.log, entry]
 })
 
-const storyStage = /^story (\S+)$/u
+/** The stage that opens a lane: a story's, or a roundtable attendee's (names may hold spaces). */
+const laneStage = /^(story|attendee) (.+)$/u
 const expandedTools = 20
 
 const updateLane = (
@@ -401,10 +415,13 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         }
   switch (event._tag) {
     case "StageStarted": {
-      const story = storyStage.exec(event.stage)?.[1]
+      const opened = laneStage.exec(event.stage)
+      const story = opened?.[2]
       if (story !== undefined && event.lane === story) {
+        const kind: LaneKind = opened?.[1] === "attendee" ? "attendee" : "story"
         const fresh: TreeLane = {
           id: story,
+          kind,
           stages: [],
           executor: event.executor,
           startedAt: at,
@@ -423,7 +440,8 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
           task: undefined,
           children: [],
           pause: undefined,
-          taskCoders: []
+          taskCoders: [],
+          turn: undefined
         }
         return {
           ...current,
@@ -444,7 +462,7 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
     }
     case "StageCompleted":
     case "StageFailed": {
-      if (lane !== undefined && event.stage === `story ${lane.id}`) {
+      if (lane !== undefined && event.stage === `${lane.kind} ${lane.id}`) {
         const status: LaneStatus = event._tag === "StageFailed" ? "failed" : "done"
         const closed = updateLane(current, lane.id, (open) => ({
           ...open,
@@ -541,6 +559,26 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
               ? { pause: { label: event.label, since: at } }
               : {})
           }))
+    }
+    case "RoundtableTurn": {
+      const what = `#${event.turn} ${event.kind}${event.blocking ? " (blocking)" : ""}${
+        event.answers.length === 0 ? "" : ` → ${event.answers.map((id) => `#${id}`).join(", ")}`
+      }: ${event.summary}`
+      if (lane === undefined) {
+        // The Chair and the Owner have no seat at the table: their words are the run's.
+        return logged(current, { at, source: "run", who: event.lane, what })
+      }
+      const spoken = updateLane(current, lane.id, (open) => ({
+        ...open,
+        stages: [`item ${event.item} r${event.round}`],
+        turn: {
+          id: event.turn,
+          kind: event.kind,
+          summary: event.summary,
+          blocking: event.blocking
+        }
+      }))
+      return logged(spoken, { at, source: "lane", who: lane.id, what })
     }
     case "StoryJudged": {
       const verdict: TreeVerdict = {
@@ -1266,6 +1304,12 @@ const statusMark = (lane: TreeLane, now: number | undefined, idleAfterMs: number
 }
 
 /** `3/5 wire session cookie`, or `2/5 tasks` between tasks, or nothing before the plan. */
+/** An attendee's last turn as one line: `#4 objection (blocking): …`. */
+const turnText = (lane: TreeLane): string =>
+  lane.turn === undefined
+    ? ""
+    : `#${lane.turn.id} ${lane.turn.kind}${lane.turn.blocking ? " (blocking)" : ""}: ${lane.turn.summary}`
+
 const taskText = (lane: TreeLane): string =>
   lane.task !== undefined
     ? `${lane.task.index}/${lane.task.count} ${lane.task.title}`
@@ -1287,14 +1331,17 @@ const laneLine = (
   selected: boolean,
   idleAfterMs: number
 ): Line => {
-  const task = taskText(lane)
-  const stage = lane.stages.at(-1) ?? "starting"
+  const task = lane.kind === "attendee" ? turnText(lane) : taskText(lane)
+  const stage = lane.stages.at(-1) ?? (lane.kind === "attendee" ? "listening" : "starting")
   const head: Line = [
     span(selected ? "▸ " : "  "),
     statusMark(lane, now, idleAfterMs),
     span(" "),
     span(lane.id, "bold"),
-    span(` ${cloneName(lane.executor ?? "(leasing)", lane.clone)}`),
+    // An attendee borrows the room's one seat: no executor of its own to show.
+    ...(lane.kind === "attendee"
+      ? []
+      : [span(` ${cloneName(lane.executor ?? "(leasing)", lane.clone)}`)]),
     ...(task.length === 0 ? [] : [span(" · "), span(task)]),
     // A task is a stage of its own name: say it once.
     ...(stage === lane.task?.title ? [] : [span(" · "), span(stage, "dim")]),
@@ -1417,25 +1464,28 @@ const detailBox = (
 ): Array<Line> => {
   const inner = width - 4
   const checklist: Array<Line> =
-    lane.tasks.length === 0
-      ? [[span("no task plan yet", "dim")]]
-      : lane.tasks.map((task): Line => {
-          const beside = lane.taskCoders.find((coder) => coder.index === task.index)
-          const running = lane.task?.index === task.index || beside !== undefined
-          const right = task.satisfies === undefined ? "" : `satisfies ${task.satisfies.join(",")}`
-          const left: Line = [
-            span(
-              `${tick(task, running)} ${task.index} ${task.title}`,
-              running ? "bold" : undefined
-            ),
-            ...(beside === undefined
-              ? []
-              : [span(`  ← ${cloneName(beside.executor ?? "(leasing)", beside.clone)}`, "dim")])
-          ]
-          return right.length === 0
-            ? left
-            : [...fit(left, Math.max(1, inner - [...right].length - 1)), span(` ${right}`, "dim")]
-        })
+    lane.kind === "attendee"
+      ? []
+      : lane.tasks.length === 0
+        ? [[span("no task plan yet", "dim")]]
+        : lane.tasks.map((task): Line => {
+            const beside = lane.taskCoders.find((coder) => coder.index === task.index)
+            const running = lane.task?.index === task.index || beside !== undefined
+            const right =
+              task.satisfies === undefined ? "" : `satisfies ${task.satisfies.join(",")}`
+            const left: Line = [
+              span(
+                `${tick(task, running)} ${task.index} ${task.title}`,
+                running ? "bold" : undefined
+              ),
+              ...(beside === undefined
+                ? []
+                : [span(`  ← ${cloneName(beside.executor ?? "(leasing)", beside.clone)}`, "dim")])
+            ]
+            return right.length === 0
+              ? left
+              : [...fit(left, Math.max(1, inner - [...right].length - 1)), span(` ${right}`, "dim")]
+          })
   const stages: Array<Line> = expanded
     ? lane.stages.map((stage): Line => [span(stage)])
     : [[span("stage  "), span(lane.stages.at(-1) ?? "starting")]]
@@ -1447,9 +1497,12 @@ const detailBox = (
     : lane.tools.length === 0
       ? []
       : [[span("tools  "), span(lane.tools.slice(-3).join(" · "), "dim")]]
-  const title = `${lane.id} · ${cloneName(lane.executor ?? "(leasing)", lane.clone)}${
-    lane.task === undefined ? "" : ` · task ${lane.task.index}/${lane.task.count}`
-  }`
+  const title =
+    lane.kind === "attendee"
+      ? `${lane.id} · ${lane.turn === undefined ? "listening" : turnText(lane)}`
+      : `${lane.id} · ${cloneName(lane.executor ?? "(leasing)", lane.clone)}${
+          lane.task === undefined ? "" : ` · task ${lane.task.index}/${lane.task.count}`
+        }`
   return box(
     width,
     "running",
