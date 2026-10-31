@@ -389,7 +389,8 @@ const scriptsIn = (packageJson: string | undefined): Record<string, string> => {
 /**
  * Why a package script may not run where it is about to: the worktree's
  * package.json names a different body for it than the repository's, or
- * none. A command that is not a script invocation is not checked here.
+ * none, or a `pre`/`post` hook the repository does not have. A command
+ * that is not a script invocation is not checked here.
  */
 export const scriptChanged = (
   trusted: string | undefined,
@@ -399,9 +400,17 @@ export const scriptChanged = (
   const known = scriptsIn(trusted)
   const script = scriptOf(argv, new Set(Object.keys(known)))
   if (script === undefined) return undefined
-  const here = scriptsIn(local)[script]
-  if (here === undefined) return `script ${script} is missing from the worktree's package.json`
-  return here === known[script] ? undefined : `script ${script} was changed in the worktree`
+  const here = scriptsIn(local)
+  if (here[script] === undefined) {
+    return `script ${script} is missing from the worktree's package.json`
+  }
+  for (const name of [script, `pre${script}`, `post${script}`]) {
+    if (here[name] === known[name]) continue
+    return known[name] === undefined
+      ? `the worktree adds a ${name} script`
+      : `script ${name} was changed in the worktree`
+  }
+  return undefined
 }
 
 // ---- Prompts ------------------------------------------------------------------
@@ -1262,8 +1271,10 @@ export const runTaskforce = Effect.fn("taskforce.run")(function* (
         if (violations.length > 0) {
           return yield* PlanInvalid.make({ path: paths.plan, violations })
         }
-        // The owner had the file before this run: what it holds is approved as written.
-        const approved = loaded === undefined ? [] : plan.briefs.map((brief) => brief.id)
+        // The owner had the file before this run and asked for the pause: what it
+        // holds is approved as written. Under --no-pause nothing is, by decision 5.
+        const approved =
+          loaded === undefined || deps.noPause ? [] : plan.briefs.map((brief) => brief.id)
         plan = Plan.make({ ...plan, status: "working", approved })
         yield* save(plan)
         yield* trail(

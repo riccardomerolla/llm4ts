@@ -79,10 +79,12 @@ Doc Writer delivers.
    commands only a `commands` card may run: a brief owned by anyone else
    that names commands gets a verifying brief after it, owned by the
    Operator, run in the Engineer's worktree when the brief had one. A brief the
-   owner had in the file before the run opened it is approved as written;
+   owner had in the file before the run opened it, without `--no-pause`, is
+   approved as written;
    any brief added later (a second wave, a fix, a rework), and every brief
    under `--no-pause`, runs only commands the project declares — a package
-   script invoked exactly, whose body the worktree has not changed, or a
+   script invoked exactly, whose body and `pre`/`post` hooks the worktree has
+   not changed, or a
    line of `.llm4ts/taskforce/commands.md` — and any other is reported
    BLOCKED with the command named. Deliverables are plain file names in
    the run's folder. FORBIDDEN is prose for the model; the grade is the fence.

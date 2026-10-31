@@ -3,12 +3,13 @@
 ## 2.54.1
 
 - **`taskforce`: commands and file names, tightened.** A brief the owner
-  had in `plan.md` before the run opened it runs its VERIFY as written
+  had in `plan.md` before the run opened it, without `--no-pause`, runs its
+  VERIFY as written
   (`Approved:` in the plan file); any brief added later — a second wave, a
   fix, a rework — and every brief under `--no-pause` runs only declared
   commands. A package script counts only when invoked exactly (`pnpm
 test`, `npm run lint`, nothing appended) and, in an Engineer's worktree,
-  only when its body matches the repository's. Deliverable names are plain
+  only when its body and `pre`/`post` hooks match the repository's. Deliverable names are plain
   `.md` or `.txt` file names in the run's folder.
 
 ## 2.54.0

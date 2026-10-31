@@ -205,11 +205,11 @@ llm4ts run taskforce --repo ~/work/portal "Can the auth module move behind the n
   `REPORT: PASS|ISSUES|BLOCKED — summary`; the Chief of Staff, the Doc
   Writer and the Memory Manager are toolless. VERIFY on any other brief is
   routed to an Operator brief after it. A brief you had in `plan.md` before the
-  run opened it runs its VERIFY as written; any brief added later (a
+  run opened it, without `--no-pause`, runs its VERIFY as written; any brief added later (a
   second wave, a fix, a rework), and every brief under `--no-pause`, runs
   only commands the project declares: a package script invoked exactly
-  (`pnpm test`, `npm run lint`, nothing appended) whose body the worktree
-  has not changed, or a line of `.llm4ts/taskforce/commands.md`.
+  (`pnpm test`, `npm run lint`, nothing appended) whose body and `pre`/`post`
+  hooks the worktree has not changed, or a line of `.llm4ts/taskforce/commands.md`.
 - **Waves.** Independent briefs run together (`--parallel`, default the
   roster's slots or 1). A report is PASS, ISSUES or BLOCKED with evidence
   paths and questions for you; BLOCKED is retried once, then final. After

