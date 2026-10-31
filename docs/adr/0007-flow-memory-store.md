@@ -98,3 +98,13 @@ the existing split — the runner stays thin, policy lives above the mechanism.
   implementations behind it.
 - Memory content is data, never instructions: prompts that consume injected
   digests must frame entries as untrusted context.
+
+## Status note (2026-10-31)
+
+The first slice shipped with `taskforce` (ADR 0047, decision 10):
+`.llm4ts/memory/*.md` topic notes the owner keeps, `.llm4ts/memory/runs/<id>.md`
+run notes a Memory Manager persona writes at the end of a run, and recall
+as code — keyword overlap between a goal and each note's title and
+headings, the top five under a budget — in `packages/flow/src/Memory.ts`.
+Scoping, distillation at phase boundaries and promotion from run notes to
+topic notes remain as described above and are not built.

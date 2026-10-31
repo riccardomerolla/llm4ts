@@ -1,5 +1,37 @@
 # Changelog
 
+## 2.54.0
+
+- **`taskforce` (ADR 0047).** A delegation loop run by code, after pstack
+  and Lauren Tan's bot team: a Chief of Staff card turns the goal into a
+  plan of two to twelve briefs (GOAL, SCOPE, CONTEXT, ACCEPTANCE, VERIFY,
+  TIMEBOX, FORBIDDEN, REPORT) with owners and dependencies; the run stops
+  for the owner to edit `plan.md` unless `--no-pause`. Specialists have
+  hands by card: the Researcher and the Reviewer read the repository, the
+  Operator's commands are run by code, the Engineer gets a throwaway
+  worktree per brief, the rest are toolless. Independent briefs run
+  together; a report is PASS, ISSUES or BLOCKED with evidence; BLOCKED is
+  retried once. The Chief of Staff checks the goal after a wave and may
+  plan one more. The Doc Writer writes the deliverables (`result.md`
+  always); review lenses and the Judgment service sort findings into
+  act-on, consider, noted, dismissed; one fix wave, a redraft, and the
+  Memory Manager writes `.llm4ts/memory/runs/<id>.md`. `decisions.tsv` is
+  the trail. Answers under `## Answers` rework the brief that asked;
+  feedback after done is a fix brief. `--agents`, `--run`, `--context`,
+  `--waves`, `--briefs`, `--parallel`, `--turns`, `--keep-work`,
+  `--no-memory`, `--eject-personas`, `--list`.
+- **Memory notes, the first slice of ADR 0007.** `.llm4ts/memory/*.md`
+  topic notes recalled by keyword overlap with the goal
+  (`@llm4ts/flow/Memory`), run notes written by the Memory Manager.
+- **The team in `llm4ts watch`.** A typed `BriefReported` event per
+  report; every specialist is a lane (`specialist <name>`) showing the
+  brief it is on and its last report; waves are run stages.
+- **Library seams.** `@llm4ts/flow/Taskforce`: the plan file, briefs,
+  reports, findings, the derived state, `nextAction`, the trail, all pure.
+  Persona cards gain `Tools`, `Seat` and `Result template` sections. New
+  errors `PlanInvalid`, `ReportInvalid`, `PlanPending`. `AgentTree` lanes
+  gain the kind `specialist` and a `report`.
+
 ## 2.53.0
 
 - **`roundtable` (ADR 0046).** A meeting run by code: personas chosen by

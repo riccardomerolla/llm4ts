@@ -5,6 +5,7 @@ import type { JsonSchema } from "@llm4ts/core/Models"
 import { makeOpenPointsCollector, OpenPoint } from "./Decisions.ts"
 import { MeetingInvalid, PersonaInvalid, TurnsInvalid } from "./FlowError.ts"
 import { RoundtableTurnKind } from "./FlowEvents.ts"
+import { Role } from "./Roster.ts"
 
 /**
  * The roundtable (ADR 0046): a meeting run by code. Chosen personas speak in
@@ -44,6 +45,18 @@ const sectionLines = (title: string, body: ReadonlyArray<string>): ReadonlyArray
  * A persona card: what a speaker is. A role is a seat an executor takes; a
  * persona is a voice. The order sorts attendees into speaking order.
  */
+/**
+ * The hands a specialist card has (ADR 0047, decision 4): nothing, a
+ * read-only view of the repository, commands run by code, or a throwaway
+ * worktree of its own.
+ */
+export const ToolGrade = Schema.Literals(["none", "read-only", "commands", "workspace"])
+export type ToolGrade = typeof ToolGrade.Type
+
+const isToolGrade = (value: string): value is ToolGrade =>
+  ToolGrade.literals.some((grade) => grade === value)
+const isRole = (value: string): value is Role => Role.literals.some((role) => role === value)
+
 export class Persona extends Schema.Class<Persona>("Persona")({
   name: Schema.String,
   order: Schema.Int,
@@ -55,7 +68,13 @@ export class Persona extends Schema.Class<Persona>("Persona")({
   /** The Scribe's section skeleton for `outline.md`; other cards have none. */
   outlineTemplate: Schema.optionalKey(Schema.String),
   /** The Scribe's section skeleton for `plan.md`. */
-  planTemplate: Schema.optionalKey(Schema.String)
+  planTemplate: Schema.optionalKey(Schema.String),
+  /** The Doc Writer's section skeleton for `result.md` (ADR 0047). */
+  resultTemplate: Schema.optionalKey(Schema.String),
+  /** What the card may touch in a taskforce (ADR 0047); absent means none. */
+  tools: Schema.optionalKey(ToolGrade),
+  /** The roster role the card speaks on in a taskforce; absent means planner. */
+  seat: Schema.optionalKey(Role)
 }) {}
 
 /** The order a card without one gets: after every bundled persona. */
@@ -68,7 +87,10 @@ const personaSections = {
   neverDecidesAlone: "Never decides alone",
   voice: "Voice",
   outlineTemplate: "Outline template",
-  planTemplate: "Plan template"
+  planTemplate: "Plan template",
+  resultTemplate: "Result template",
+  tools: "Tools",
+  seat: "Seat"
 } as const
 type PersonaSection = keyof typeof personaSections
 const personaSectionKeys: ReadonlyArray<PersonaSection> = [
@@ -78,10 +100,17 @@ const personaSectionKeys: ReadonlyArray<PersonaSection> = [
   "neverDecidesAlone",
   "voice",
   "outlineTemplate",
-  "planTemplate"
+  "planTemplate",
+  "resultTemplate",
+  "tools",
+  "seat"
 ]
 /** Sections whose body is a markdown skeleton: a `## ` line inside them is content, not a section. */
-const templateSections: ReadonlyArray<PersonaSection> = ["outlineTemplate", "planTemplate"]
+const templateSections: ReadonlyArray<PersonaSection> = [
+  "outlineTemplate",
+  "planTemplate",
+  "resultTemplate"
+]
 
 const personaSectionOf = (title: string): PersonaSection | undefined =>
   personaSectionKeys.find((key) => personaSections[key].toLowerCase() === title.toLowerCase())
@@ -131,7 +160,10 @@ export const parsePersona = Effect.fn("@llm4ts/flow/Roundtable.parsePersona")(fu
     neverDecidesAlone: [],
     voice: [],
     outlineTemplate: [],
-    planTemplate: []
+    planTemplate: [],
+    resultTemplate: [],
+    tools: [],
+    seat: []
   }
   let current: PersonaSection | "unknown" | "none" = "none"
   let fenced = false
@@ -159,6 +191,14 @@ export const parsePersona = Effect.fn("@llm4ts/flow/Roundtable.parsePersona")(fu
   }
   const text = (key: PersonaSection): string => bodies[key].join("\n").trim()
   if (text("mandate").length === 0) violations.push("missing the `## Mandate` section")
+  const tools = text("tools")
+  if (tools.length > 0 && !isToolGrade(tools)) {
+    violations.push(`Tools is one of ${ToolGrade.literals.join(", ")}, got: ${tools}`)
+  }
+  const seat = text("seat")
+  if (seat.length > 0 && !isRole(seat)) {
+    violations.push(`Seat is one of ${Role.literals.join(", ")}, got: ${seat}`)
+  }
   if (violations.length > 0) {
     return yield* PersonaInvalid.make({ name: fallbackName, violations })
   }
@@ -171,7 +211,10 @@ export const parsePersona = Effect.fn("@llm4ts/flow/Roundtable.parsePersona")(fu
     neverDecidesAlone: text("neverDecidesAlone"),
     voice: text("voice"),
     ...(bodies.outlineTemplate.length === 0 ? {} : { outlineTemplate: text("outlineTemplate") }),
-    ...(bodies.planTemplate.length === 0 ? {} : { planTemplate: text("planTemplate") })
+    ...(bodies.planTemplate.length === 0 ? {} : { planTemplate: text("planTemplate") }),
+    ...(bodies.resultTemplate.length === 0 ? {} : { resultTemplate: text("resultTemplate") }),
+    ...(isToolGrade(tools) ? { tools } : {}),
+    ...(isRole(seat) ? { seat } : {})
   })
 })
 

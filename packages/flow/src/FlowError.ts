@@ -405,6 +405,38 @@ export class AgendaPending extends Schema.TaggedError<AgendaPending>()("AgendaPe
   }
 }
 
+/** A taskforce plan file that does not parse, or a proposal that does not hold (ADR 0047). */
+export class PlanInvalid extends Schema.TaggedError<PlanInvalid>()("PlanInvalid", {
+  path: Schema.optionalKey(Schema.String),
+  violations: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const where = this.path === undefined ? "" : ` in ${this.path}`
+    return `taskforce plan invalid${where}:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** A taskforce report (`reports/<brief>.md`) that does not parse. */
+export class ReportInvalid extends Schema.TaggedError<ReportInvalid>()("ReportInvalid", {
+  path: Schema.optionalKey(Schema.String),
+  violations: Schema.Array(Schema.String)
+}) {
+  get message(): string {
+    const where = this.path === undefined ? "" : ` in ${this.path}`
+    return `report invalid${where}:\n${this.violations.map((violation) => `- ${violation}`).join("\n")}`
+  }
+}
+
+/** A taskforce proposed its plan and stopped for the owner to edit it. */
+export class PlanPending extends Schema.TaggedError<PlanPending>()("PlanPending", {
+  path: Schema.String,
+  briefs: Schema.Int
+}) {
+  get message(): string {
+    return `${this.briefs} brief(s) proposed in ${this.path} — edit them under '## Briefs' and rerun, or pass --no-pause`
+  }
+}
+
 export const FlowError = Schema.Union([
   PersistenceError,
   PlanParseError,
@@ -439,6 +471,9 @@ export const FlowError = Schema.Union([
   PersonaInvalid,
   MeetingInvalid,
   TurnsInvalid,
-  AgendaPending
+  AgendaPending,
+  PlanInvalid,
+  ReportInvalid,
+  PlanPending
 ])
 export type FlowError = typeof FlowError.Type

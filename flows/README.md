@@ -6,36 +6,37 @@ a single self-contained script: it imports only `@llm4ts/*`, `effect`, and
 one-line description. These scripts double as the built-in flows of the
 `llm4ts` shell.
 
-| Flow                        | What it does                                                                                                                        | Requirements                      |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `hello.ts`                  | One prompt to the configured provider, mock by default                                                                              | none                              |
-| `implement.ts`              | Persistent plan, branch, task review/fix, and commits                                                                               | selected CLI + Git                |
-| `epic-design.ts`            | Legacy extract pack + target repo → an approved epic brief for `epic-stories`                                                       | reasoner CLI                      |
-| `epic-stories.ts`           | Epic → story DAG → parallel coders in worktrees → epic branch                                                                       | reasoner CLI + pi + Git           |
-| `epic-mvp.ts`               | Epic → MVP cut → red tests first → coders make them green; the rest parked for `--iterate`                                          | reasoner CLI + pi + Git           |
-| `epic-draft.ts`             | Epic → stories without tests → one lens and the build gates; what was deferred is debt `--harden` pays                              | reasoner CLI + pi + Git           |
-| `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                      | reasoner CLI                      |
-| `roundtable.ts`             | A topic and a goal → personas discuss item by item, a Scribe writes the outline and the plan; you steer from the meeting file       | reasoner CLI                      |
-| `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                                 | selected CLI + GitHub             |
-| `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                              | selected CLI + Maven              |
-| `local.ts`                  | LM Studio reasoning followed by a local pi coding agent                                                                             | LM Studio + pi                    |
-| `judge-suite.ts`            | Three-run LLM-as-a-Judge evaluation with variance reporting                                                                         | selected CLI                      |
-| `modernize-survey.ts`       | Phase 0 — inventory, dependency graph, triage, wave plan                                                                            | selected CLI + Git + pack         |
-| `modernize-extract.ts`      | Phase 1 — legacy estate → judged, approved spec pack                                                                                | selected CLI + Git + pack         |
-| `modernize-refine.ts`       | Phase 1.5 (optional) — prune, deepen, consolidate the pack                                                                          | selected CLI + Git + pack         |
-| `modernize-pack-upgrade.ts` | Check a pack an older llm4ts extracted against the current rules; mark what to re-extract (no LLM)                                  | Git + pack                        |
-| `modernize-seed.ts`         | Phase 2 — seed the target from the approved pack (no LLM)                                                                           | Git + pack + legacy repo          |
-| `modernize-implement.ts`    | Phase 3 — implement the plan behind the pack's gates                                                                                | selected CLI + Git + build        |
-| `modernize-verify.ts`       | Phase 4 — equivalence vectors, replay, rule coverage                                                                                | selected CLI + replay cmd         |
-| `port-files.ts`             | Port a code base file by file on the work queue: one source per implementer, two votes, a fixer, a `PORT STATUS` trailer, a pilot   | selected CLI + porting pack + Git |
-| `port-compile.ts`           | Compiler diagnostics as a work queue: one unit per fixer, one rebuild per round, until dry                                          | selected CLI + porting pack + Git |
-| `port-guide.ts`             | Audit the rulebook: dimension auditors, three refuters per finding, a trial port by the rules and natively; a patch behind approval | reasoner CLI + porting pack       |
-| `port-ledger.ts`            | Classify every unit the pack names into `ledger.tsv` with evidence; implementers trust it over local guessing                       | reasoner CLI + porting pack + Git |
-| `port-tests.ts`             | The differential tier: every test file on the legacy build, then the target; diverge/crash/hang → one fixer each; rebuild per round | selected CLI + porting pack + Git |
-| `modernize-review.ts`       | Phase 5 — lens review, fix specs, distilled pack lessons                                                                            | selected CLI + Git + pack         |
-| `modernize-bench.ts`        | Measure an extraction run; report and project wave cost                                                                             | selected CLI + pack               |
-| `modernize-pack-check.ts`   | Phase -1 — load a pack, match its rules against an estate                                                                           | pack + estate (no LLM)            |
-| `pack-fork.ts`              | Fork a pack into one describing a real target repo's own conventions (not part of the legacy modernize sequence — no legacy repo)   | selected CLI + Git + pack         |
+| Flow                        | What it does                                                                                                                                           | Requirements                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
+| `hello.ts`                  | One prompt to the configured provider, mock by default                                                                                                 | none                              |
+| `implement.ts`              | Persistent plan, branch, task review/fix, and commits                                                                                                  | selected CLI + Git                |
+| `epic-design.ts`            | Legacy extract pack + target repo → an approved epic brief for `epic-stories`                                                                          | reasoner CLI                      |
+| `epic-stories.ts`           | Epic → story DAG → parallel coders in worktrees → epic branch                                                                                          | reasoner CLI + pi + Git           |
+| `epic-mvp.ts`               | Epic → MVP cut → red tests first → coders make them green; the rest parked for `--iterate`                                                             | reasoner CLI + pi + Git           |
+| `epic-draft.ts`             | Epic → stories without tests → one lens and the build gates; what was deferred is debt `--harden` pays                                                 | reasoner CLI + pi + Git           |
+| `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                                         | reasoner CLI                      |
+| `roundtable.ts`             | A topic and a goal → personas discuss item by item, a Scribe writes the outline and the plan; you steer from the meeting file                          | reasoner CLI                      |
+| `taskforce.ts`              | A goal → a Chief of Staff plans briefs, specialists work them in waves, a Reviewer interrogates, the Doc Writer delivers; you steer from the plan file | reasoner CLI, coder CLI, roster   |
+| `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                                                    | selected CLI + GitHub             |
+| `sdd.ts`                    | Spec → red tests → implementation → green verification                                                                                                 | selected CLI + Maven              |
+| `local.ts`                  | LM Studio reasoning followed by a local pi coding agent                                                                                                | LM Studio + pi                    |
+| `judge-suite.ts`            | Three-run LLM-as-a-Judge evaluation with variance reporting                                                                                            | selected CLI                      |
+| `modernize-survey.ts`       | Phase 0 — inventory, dependency graph, triage, wave plan                                                                                               | selected CLI + Git + pack         |
+| `modernize-extract.ts`      | Phase 1 — legacy estate → judged, approved spec pack                                                                                                   | selected CLI + Git + pack         |
+| `modernize-refine.ts`       | Phase 1.5 (optional) — prune, deepen, consolidate the pack                                                                                             | selected CLI + Git + pack         |
+| `modernize-pack-upgrade.ts` | Check a pack an older llm4ts extracted against the current rules; mark what to re-extract (no LLM)                                                     | Git + pack                        |
+| `modernize-seed.ts`         | Phase 2 — seed the target from the approved pack (no LLM)                                                                                              | Git + pack + legacy repo          |
+| `modernize-implement.ts`    | Phase 3 — implement the plan behind the pack's gates                                                                                                   | selected CLI + Git + build        |
+| `modernize-verify.ts`       | Phase 4 — equivalence vectors, replay, rule coverage                                                                                                   | selected CLI + replay cmd         |
+| `port-files.ts`             | Port a code base file by file on the work queue: one source per implementer, two votes, a fixer, a `PORT STATUS` trailer, a pilot                      | selected CLI + porting pack + Git |
+| `port-compile.ts`           | Compiler diagnostics as a work queue: one unit per fixer, one rebuild per round, until dry                                                             | selected CLI + porting pack + Git |
+| `port-guide.ts`             | Audit the rulebook: dimension auditors, three refuters per finding, a trial port by the rules and natively; a patch behind approval                    | reasoner CLI + porting pack       |
+| `port-ledger.ts`            | Classify every unit the pack names into `ledger.tsv` with evidence; implementers trust it over local guessing                                          | reasoner CLI + porting pack + Git |
+| `port-tests.ts`             | The differential tier: every test file on the legacy build, then the target; diverge/crash/hang → one fixer each; rebuild per round                    | selected CLI + porting pack + Git |
+| `modernize-review.ts`       | Phase 5 — lens review, fix specs, distilled pack lessons                                                                                               | selected CLI + Git + pack         |
+| `modernize-bench.ts`        | Measure an extraction run; report and project wave cost                                                                                                | selected CLI + pack               |
+| `modernize-pack-check.ts`   | Phase -1 — load a pack, match its rules against an estate                                                                                              | pack + estate (no LLM)            |
+| `pack-fork.ts`              | Fork a pack into one describing a real target repo's own conventions (not part of the legacy modernize sequence — no legacy repo)                      | selected CLI + Git + pack         |
 
 These flows deliberately invoke real providers or installed coding CLIs and
 are not part of the default test suite. Build the packages once before
@@ -175,6 +176,69 @@ llm4ts run roundtable --repo ~/work/portal "Architecture outline for the payment
 - **Watching.** `--ui tree` on the run, or `llm4ts watch` on its trace,
   shows every attendee as a lane with its last turn and the item it is on;
   the Chair's judgments and the Owner's answers appear in the session log.
+
+## Running a delegation loop: `taskforce`
+
+`taskforce` is for a goal that needs hands rather than a conversation: "can
+the auth module move behind the new gateway? outline and plan". A Chief of
+Staff turns the goal into briefs, specialists work them, a Reviewer tries
+to break the result, a Doc Writer writes it up (ADR 0047). It is pstack's
+practice — briefs, waves, interrogation, a decision trail — with Lauren
+Tan's cast.
+
+```sh
+llm4ts run taskforce --repo ~/work/portal "Can the auth module move behind the new gateway? Outline and plan." \
+  -- --context docs/standards
+```
+
+- **The Chief of Staff plans; code runs.** The plan is the deliverables
+  (`result.md` always) and two to twelve briefs, each with an owner,
+  dependencies and the eight fields GOAL, SCOPE, CONTEXT, ACCEPTANCE,
+  VERIFY, TIMEBOX, FORBIDDEN, REPORT. The run stops for you to edit
+  `plan.md` unless `--no-pause`. Code checks the plan (owners in the cast,
+  no cycle, every deliverable fed, acceptance present) and refuses it once
+  with the reasons before giving up.
+- **Specialists have hands by card.** Researcher and Reviewer read the
+  repository; the Operator's VERIFY commands are run by code and it reports
+  the exit codes and output; the Engineer gets a throwaway worktree beside
+  the repository (`LLM4TS_WORKTREE_ROOT`) and ends its message with
+  `REPORT: PASS|ISSUES|BLOCKED — summary`; the Chief of Staff, the Doc
+  Writer and the Memory Manager are toolless. VERIFY on any other brief is
+  routed to an Operator brief after it. Under `--no-pause` only commands
+  the project declares run: package scripts and
+  `.llm4ts/taskforce/commands.md`.
+- **Waves.** Independent briefs run together (`--parallel`, default the
+  roster's slots or 1). A report is PASS, ISSUES or BLOCKED with evidence
+  paths and questions for you; BLOCKED is retried once, then final. After
+  the wave the Chief of Staff checks the goal and may plan one more wave.
+  Three waves (`--waves`), twelve briefs (`--briefs`), thirty coder turns
+  per Engineer brief (`--turns`).
+- **Review and fix.** The Doc Writer drafts; the lenses under
+  `.llm4ts/lenses/` (two bundled: evidence, risk) read the deliverables and
+  the Engineer diffs on the Reviewer's seat; the Judgment service says
+  which findings block the goal; the Reviewer's lead turn sorts the rest
+  into consider, noted, dismissed (`review.md`). Act-on findings become one
+  fix wave for the work's owner; the Doc Writer redrafts.
+- **The file is the state.** `.llm4ts/taskforce/<id>/plan.md`, the reports
+  under `reports/`, `decisions.tsv` (every decision code took, append-only),
+  `open-questions.md`. Answer a question under `## Answers` and rerun: the
+  brief that asked is reworked one wave on and the deliverables redrafted.
+  Write under `## Feedback` after `done`: a fix brief for the Doc Writer.
+- **Memory.** Notes under `.llm4ts/memory/*.md` are recalled by keyword
+  overlap with the goal and folded into every brief; the Memory Manager
+  writes `.llm4ts/memory/runs/<id>.md` at the end. `--no-memory` turns both
+  off. Promotion from a run note to a topic note is yours.
+- **Cards and seats.** Seven bundled cards (Chief of Staff, Researcher,
+  Engineer, Operator, Reviewer, Doc Writer, Memory Manager), each with a
+  `Tools` grade and a roster `Seat`; `-- --eject-personas` writes them to
+  `.llm4ts/personas/`. `--agents` picks among the five selectable ones.
+  Without a roster every card speaks on `LLM4TS_REASONER` and the Engineer
+  codes on `LLM4TS_CODER`; with one, each card takes its role's seat, so a
+  `roster.json` with different executors per role is a multi-model team.
+  Nothing in the repository's git is touched.
+- **Watching.** `--ui tree` or `llm4ts watch` shows every specialist as a
+  lane with the brief it is on and its last report, and the waves as the
+  run's stages.
 
 ## Designing an epic from a legacy analysis
 

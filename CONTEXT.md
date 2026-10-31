@@ -209,6 +209,63 @@ An Agenda item that reached its round cap without settling. Left open and
 written to the open questions, never forced.
 _Avoid_: failed, timed out, skipped
 
+### Taskforce
+
+**Taskforce**:
+A delegation loop run by code: a Chief of Staff writes a Plan of Briefs
+toward a Goal, Specialists work their Briefs in Waves, a Reviewer
+interrogates the result, the Doc Writer delivers. The plan file and the
+reports are its state.
+_Avoid_: crew, team, swarm, pipeline, orchestration
+
+**Specialist**:
+A Persona chosen for one Taskforce, with hands: a tool grade (none,
+read-only, commands, workspace) and a Seat (a roster role). The Chief of
+Staff and the Doc Writer are always present.
+_Avoid_: agent, worker, attendee, bot
+
+**Chief of Staff**:
+The Persona whose only output is the Plan: the Deliverables and the Briefs.
+Speaks again only for a Goal check. Never writes prose for the reader.
+_Avoid_: coordinator, orchestrator, manager, chair
+
+**Brief**:
+One unit of delegated work in a Plan: an owner, what it depends on, its
+Wave, and the eight fields GOAL, SCOPE, CONTEXT, ACCEPTANCE, VERIFY,
+TIMEBOX, FORBIDDEN, REPORT. Its result is a Report.
+_Avoid_: task, story, ticket, assignment
+
+**Report**:
+What a Specialist hands back for a Brief: PASS, ISSUES or BLOCKED, the
+evidence paths, a one-line summary, questions for the Owner, and the body.
+_Avoid_: result, output, response
+
+**Wave**:
+The Briefs that run before the next Goal check: the first wave is the Plan,
+the second the Chief of Staff's re-plan, the fix wave the Reviewer's act-on
+findings. Capped.
+_Avoid_: round (that is a Roundtable's), phase, sprint, iteration
+
+**Goal check**:
+The Chief of Staff's turn after a Wave: reached, or a second Wave of
+Briefs, once.
+_Avoid_: retrospective, review, checkpoint
+
+**Finding**:
+What a review lens raised against the Deliverables or an Engineer's diff,
+in one of four buckets: act-on (a fix Brief), consider, noted, dismissed.
+_Avoid_: issue, comment, bug, objection
+
+**Trail**:
+`decisions.tsv`: one row per decision code took in a Taskforce, append-only.
+_Avoid_: log, audit, history, journal
+
+**Memory note**:
+A markdown note under `.llm4ts/memory/`: a topic note the Owner keeps, or a
+run note the Memory Manager writes. Recalled by keyword overlap with the
+Goal.
+_Avoid_: context, knowledge base, embedding, cache
+
 ### Findings and verdicts
 
 **Grounds**:

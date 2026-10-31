@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 import {
   Began,
+  BriefReported,
   StageCompleted,
   StageFailed,
   ExecutorExcluded,
@@ -977,5 +978,74 @@ describe("roundtable attendees (ADR 0046)", () => {
     const text = frame(state).join("\n")
     assert.match(text, /Chair\s+#2 agreement → #1: Judged resolved by #1/u)
     assert.match(text, /PO\s+done/u)
+  })
+})
+
+describe("taskforce specialists (ADR 0047)", () => {
+  const reported = (
+    lane: string,
+    brief: string,
+    status: "PASS" | "ISSUES" | "BLOCKED",
+    summary: string,
+    extra: { wave?: number; attempt?: number } = {}
+  ) =>
+    BriefReported.make({
+      lane,
+      run: "gateway",
+      brief,
+      title: `Work ${brief}`,
+      wave: extra.wave ?? 1,
+      attempt: extra.attempt ?? 1,
+      status,
+      summary
+    })
+
+  it("a specialist is a lane: its running brief as the stage, its last report as the task, no executor", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "wave 1" })),
+      at(0, StageStarted.make({ stage: "specialist Researcher", lane: "Researcher" })),
+      at(0, StageStarted.make({ stage: "specialist Engineer", lane: "Engineer" })),
+      at(1, StageStarted.make({ stage: "B1: Survey the module", lane: "Researcher" })),
+      at(5, StageCompleted.make({ stage: "B1: Survey the module", lane: "Researcher" })),
+      at(5, reported("Researcher", "B1", "PASS", "Sessions live in Redis.")),
+      at(6, StageStarted.make({ stage: "B2: Spike the gateway", lane: "Engineer" })),
+      at(9, reported("Engineer", "B2", "BLOCKED", "No network.", { attempt: 1 }))
+    ])
+    assert.deepStrictEqual(
+      state.lanes.map((lane) => [lane.id, lane.kind, lane.status]),
+      [
+        ["Researcher", "specialist", "running"],
+        ["Engineer", "specialist", "running"]
+      ]
+    )
+    assert.deepStrictEqual(state.lanes[0]?.report, {
+      brief: "B1",
+      status: "PASS",
+      summary: "Sessions live in Redis.",
+      attempt: 1
+    })
+    assert.deepStrictEqual(state.lanes[0]?.stages, [])
+    assert.deepStrictEqual(state.lanes[1]?.stages, ["B2: Spike the gateway"])
+    const text = frame(state).join("\n")
+    assert.include(text, "◐ Researcher · B1 PASS: Sessions live in Redis")
+    assert.include(text, "▸ ◐ Engineer · B2 BLOCKED: No network. · B2: Spi")
+    assert.notInclude(text, "(leasing)")
+    assert.notInclude(text, "no task plan yet")
+    assert.include(text, "┌─ Engineer · B2 BLOCKED: No network.")
+    assert.match(text, /Researcher\s+B1 PASS: Sessions live in Redis\./u)
+    assert.include(text, "wave 1")
+  })
+
+  it("a report from a name without a lane goes to the run log; a finished specialist is a chip", () => {
+    const state = fold([
+      at(0, StageStarted.make({ stage: "specialist Researcher", lane: "Researcher" })),
+      at(1, reported("Operator", "B3", "PASS", "pnpm test: exit 0")),
+      at(2, StageCompleted.make({ stage: "specialist Researcher", lane: "Researcher" }))
+    ])
+    assert.strictEqual(state.lanes.length, 1)
+    assert.strictEqual(state.lanes[0]?.status, "done")
+    const text = frame(state).join("\n")
+    assert.match(text, /Operator\s+B3 PASS: pnpm test: exit 0/u)
+    assert.match(text, /Researcher\s+done/u)
   })
 })

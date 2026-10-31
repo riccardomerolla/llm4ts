@@ -282,6 +282,26 @@ export class RoundtableTurn extends Schema.TaggedClass<RoundtableTurn>()("Roundt
   summary: Schema.String
 }) {}
 
+export const BriefStatus = Schema.Literals(["PASS", "ISSUES", "BLOCKED"])
+export type BriefStatus = typeof BriefStatus.Type
+
+/**
+ * A taskforce specialist handed in a report (ADR 0047): one event per
+ * report. `lane` is the owner — every specialist has a lane of its own —
+ * so the dashboard shows the team as it shows stories. `summary` is the
+ * report's one-line summary, cut short.
+ */
+export class BriefReported extends Schema.TaggedClass<BriefReported>()("BriefReported", {
+  lane: Schema.String,
+  run: Schema.String,
+  brief: Schema.String,
+  title: Schema.String,
+  wave: Schema.Int,
+  attempt: Schema.Int,
+  status: BriefStatus,
+  summary: Schema.String
+}) {}
+
 /** One rubric dimension of a story verdict: its score out of `max`. */
 export const JudgedDimension = Schema.Struct({
   id: Schema.String,
@@ -507,6 +527,7 @@ export const FlowEvent = Schema.Union([
   ExecutorHandedOver,
   StoryJudged,
   RoundtableTurn,
+  BriefReported,
   Timed,
   Began,
   TasksPlanned,
