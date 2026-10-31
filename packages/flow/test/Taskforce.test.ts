@@ -102,6 +102,7 @@ const plan = (
     feedback: "",
     drafts: 0,
     folded: [],
+    approved: [],
     ...overrides
   })
 
@@ -176,7 +177,8 @@ describe("the plan file (decision 2)", () => {
           ],
           feedback: "Shorter please.",
           drafts: 1,
-          folded: [2]
+          folded: [2],
+          approved: ["B1"]
         }
       )
       const text = renderPlan(original)
@@ -254,6 +256,20 @@ describe("a valid plan (decision 3)", () => {
     assert.isTrue(violations.some((v) => v.includes("deliverable design.md is named by no brief")))
     const one = plan("planned", [brief("B1", "Researcher")])
     assert.isTrue(planViolations(one, defaultCaps).some((v) => v.includes("2 to 12 briefs, got 1")))
+  })
+
+  it("a deliverable is a plain file name in the run's folder", () => {
+    const escaping = plan("planned", [brief("B1", "Researcher"), brief("B2", "Researcher")], {
+      deliverables: ["../../.zshrc", "notes/x.md", "ok-1.md"]
+    })
+    const violations = planViolations(escaping, defaultCaps)
+    assert.isTrue(
+      violations.some((v) => v.includes("deliverable ../../.zshrc is not a plain file name"))
+    )
+    assert.isTrue(
+      violations.some((v) => v.includes("deliverable notes/x.md is not a plain file name"))
+    )
+    assert.isTrue(violations.some((v) => v.includes("deliverable ok-1.md is named by no brief")))
   })
 })
 

@@ -78,11 +78,14 @@ Doc Writer delivers.
    report. VERIFY is a list of
    commands only a `commands` card may run: a brief owned by anyone else
    that names commands gets a verifying brief after it, owned by the
-   Operator, run in the Engineer's worktree when the brief had one. Under
-   `--no-pause` only commands the project declares run — package scripts
-   and `.llm4ts/taskforce/commands.md` — and any other is reported BLOCKED
-   with the command named; with the pause, the edited plan is the
-   allowlist. FORBIDDEN is prose for the model; the grade is the fence.
+   Operator, run in the Engineer's worktree when the brief had one. A brief the
+   owner had in the file before the run opened it is approved as written;
+   any brief added later (a second wave, a fix, a rework), and every brief
+   under `--no-pause`, runs only commands the project declares — a package
+   script invoked exactly, whose body the worktree has not changed, or a
+   line of `.llm4ts/taskforce/commands.md` — and any other is reported
+   BLOCKED with the command named. Deliverables are plain file names in
+   the run's folder. FORBIDDEN is prose for the model; the grade is the fence.
 
 6. **Waves.** Independent briefs (by `Depends on`) dispatch together up to
    `--parallel` (default the seat's roster slots, one without a roster). A

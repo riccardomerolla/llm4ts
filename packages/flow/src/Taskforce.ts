@@ -111,8 +111,18 @@ export class Plan extends Schema.Class<Plan>("TaskforcePlan")({
   /** Drafts the Doc Writer wrote: 0 none, 1 reviewed, 2 redrafted after the fix wave. */
   drafts: Schema.Int,
   /** Answer numbers already folded into a brief, so a rerun does not fold them twice. */
-  folded: Schema.Array(Schema.Int)
+  folded: Schema.Array(Schema.Int),
+  /**
+   * Briefs the owner had in the file before the run opened it: their VERIFY
+   * commands run as written. Any brief added later (a second wave, a fix, a
+   * rework) runs only declared commands, as under `--no-pause`.
+   */
+  approved: Schema.Array(Schema.String)
 }) {}
+
+/** A deliverable is a plain markdown or text file name in the run's folder: no path, no `..`. */
+export const isDeliverableName = (name: string): boolean =>
+  /^[A-Za-z0-9][A-Za-z0-9._-]*\.(md|txt)$/.test(name) && !name.includes("..")
 
 /** The turn cap a TIMEBOX names (`20 turns`, `20`), when it names one. */
 export const timeboxTurns = (brief: Brief): number | undefined => {
@@ -155,6 +165,7 @@ export const renderPlan = (plan: Plan): string =>
     `Cast: ${plan.cast.join(", ")}`,
     `Drafts: ${plan.drafts}`,
     `Folded: ${plan.folded.length === 0 ? "-" : plan.folded.join(", ")}`,
+    `Approved: ${plan.approved.length === 0 ? "-" : plan.approved.join(", ")}`,
     "",
     "## Briefs",
     "",
@@ -232,6 +243,7 @@ export const parsePlan = Effect.fn("@llm4ts/flow/Taskforce.parsePlan")(function*
   let status: PlanStatus | undefined
   let drafts = 0
   let folded: Array<number> = []
+  let approved: ReadonlyArray<string> = []
   const header: Record<string, string> = {}
   const briefs: Array<DraftBrief> = []
   const checks: Array<GoalCheck> = []
@@ -353,6 +365,8 @@ export const parsePlan = Effect.fn("@llm4ts/flow/Taskforce.parsePlan")(function*
         folded = splitList(value).flatMap((entry) =>
           /^\d+$/.test(entry) ? [Number.parseInt(entry, 10)] : []
         )
+      } else if (name === "approved") {
+        approved = splitList(value)
       } else {
         header[name] = value
       }
@@ -421,7 +435,8 @@ export const parsePlan = Effect.fn("@llm4ts/flow/Taskforce.parsePlan")(function*
     answers: points.points.map(settledPoint),
     feedback: feedback.join("\n").trim(),
     drafts,
-    folded
+    folded,
+    approved
   })
 })
 
@@ -478,6 +493,12 @@ export const planViolations = (plan: Plan, caps: Caps): ReadonlyArray<string> =>
   }
   if (hasCycle(plan.briefs)) violations.push("briefs depend on each other in a cycle")
   for (const deliverable of plan.deliverables) {
+    if (!isDeliverableName(deliverable)) {
+      violations.push(
+        `deliverable ${deliverable} is not a plain file name (letters, digits, dots, dashes; .md or .txt)`
+      )
+      continue
+    }
     const named = plan.briefs.some(
       (brief) =>
         brief.report.toLowerCase().includes(deliverable.toLowerCase()) ||

@@ -332,16 +332,7 @@ export const declaredCommands = (
   packageJson: string | undefined,
   commandsMarkdown: string | undefined
 ): ((argv: ReadonlyArray<string>) => boolean) => {
-  const scripts = new Set<string>()
-  if (packageJson !== undefined) {
-    const parsed = Schema.decodeUnknownOption(
-      Schema.fromJsonString(
-        Schema.Struct({ scripts: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)) })
-      )
-    )(packageJson)
-    if (parsed._tag === "Some")
-      for (const name of Object.keys(parsed.value.scripts ?? {})) scripts.add(name)
-  }
+  const scripts = new Set(Object.keys(scriptsIn(packageJson)))
   const lines = new Set(
     (commandsMarkdown ?? "")
       .split(/\r?\n/)
@@ -354,22 +345,63 @@ export const declaredCommands = (
       .filter((line) => line.length > 0 && !line.startsWith("#"))
       .map((line) => shellWords(line).join("\u0000"))
   )
+  // Exactly the script invocation, nothing appended: extra arguments reach the script.
   return (argv) => {
     if (argv.length === 0) return false
     if (lines.has(argv.join("\u0000"))) return true
-    const [runner, second, third] = argv
-    if (runner === "npm") {
-      return second === "test"
-        ? scripts.has("test")
-        : second === "run" && third !== undefined && scripts.has(third)
-    }
-    if (runner === "pnpm" || runner === "yarn") {
-      return second === "run"
-        ? third !== undefined && scripts.has(third)
-        : second !== undefined && scripts.has(second)
-    }
-    return false
+    return scriptOf(argv, scripts) !== undefined
   }
+}
+
+/** The package script an argv runs through npm, pnpm or yarn, when it is exactly that and nothing more. */
+const scriptOf = (
+  argv: ReadonlyArray<string>,
+  scripts: ReadonlySet<string>
+): string | undefined => {
+  const [runner, second, third] = argv
+  if (runner === "npm") {
+    if (argv.length === 2 && second === "test" && scripts.has("test")) return "test"
+    return argv.length === 3 && second === "run" && third !== undefined && scripts.has(third)
+      ? third
+      : undefined
+  }
+  if (runner === "pnpm" || runner === "yarn") {
+    if (argv.length === 2 && second !== undefined && second !== "run" && scripts.has(second)) {
+      return second
+    }
+    return argv.length === 3 && second === "run" && third !== undefined && scripts.has(third)
+      ? third
+      : undefined
+  }
+  return undefined
+}
+
+const scriptsIn = (packageJson: string | undefined): Record<string, string> => {
+  if (packageJson === undefined) return {}
+  const parsed = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({ scripts: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)) })
+    )
+  )(packageJson)
+  return parsed._tag === "Some" ? { ...(parsed.value.scripts ?? {}) } : {}
+}
+
+/**
+ * Why a package script may not run where it is about to: the worktree's
+ * package.json names a different body for it than the repository's, or
+ * none. A command that is not a script invocation is not checked here.
+ */
+export const scriptChanged = (
+  trusted: string | undefined,
+  local: string | undefined,
+  argv: ReadonlyArray<string>
+): string | undefined => {
+  const known = scriptsIn(trusted)
+  const script = scriptOf(argv, new Set(Object.keys(known)))
+  if (script === undefined) return undefined
+  const here = scriptsIn(local)[script]
+  if (here === undefined) return `script ${script} is missing from the worktree's package.json`
+  return here === known[script] ? undefined : `script ${script} was changed in the worktree`
 }
 
 // ---- Prompts ------------------------------------------------------------------
@@ -876,7 +908,8 @@ export const runTaskforce = Effect.fn("taskforce.run")(function* (
       answers: [],
       feedback: "",
       drafts: 0,
-      folded: []
+      folded: [],
+      approved: []
     })
     yield* save(plan)
     yield* say(`taskforce: ${paths.plan} opened — ${plan.cast.join(", ")}`)
@@ -953,13 +986,28 @@ export const runTaskforce = Effect.fn("taskforce.run")(function* (
     })
 
   /** Runs the commands a brief names; the log, and a reason it could not. */
+  /**
+   * Runs the commands a brief names; the log, and a reason it could not. A
+   * brief the owner had in the file before the run opened it runs its
+   * commands as written; any other (added by a check, a review or an
+   * answer, or every brief under --no-pause) runs only what the project
+   * declares (decision 5). In a worktree, a declared script whose body the
+   * worktree changed is not the declared one and is refused.
+   */
   const runCommands = (brief: Brief, cwd: string) =>
     Effect.gen(function* () {
       const lines: Array<string> = []
+      const approved = plan.approved.includes(brief.id)
+      const trusted = yield* files.read(join(deps.workDir, "package.json"))
+      const local = cwd === deps.workDir ? trusted : yield* files.read(join(cwd, "package.json"))
       for (const command of verifyCommands(brief)) {
         const argv = shellWords(command)
-        if (deps.noPause && !deps.allowedCommand(argv)) {
+        if (!approved && !deps.allowedCommand(argv)) {
           return { log: lines.join("\n"), refused: command }
+        }
+        const changed = scriptChanged(trusted, local, argv)
+        if (changed !== undefined) {
+          return { log: lines.join("\n"), refused: `${command} (${changed})` }
         }
         const result = yield* deps.processes.run(argv, cwd, {}).pipe(
           Effect.map((done) => ({
@@ -1062,8 +1110,8 @@ export const runTaskforce = Effect.fn("taskforce.run")(function* (
             return blocked(
               brief,
               attempt,
-              `command not declared, not run under --no-pause: ${ran.refused}`,
-              `Declare it in package.json scripts or ${commandsPath(deps.workDir)}, or run without --no-pause.\n\n${ran.log}`
+              `command not declared and not approved by the owner, not run: ${ran.refused}`,
+              `Declare it in package.json scripts or ${commandsPath(deps.workDir)}, or put the brief in plan.md before the run opens it.\n\n${ran.log}`
             )
           }
           commandOutput = ran.log
@@ -1214,7 +1262,9 @@ export const runTaskforce = Effect.fn("taskforce.run")(function* (
         if (violations.length > 0) {
           return yield* PlanInvalid.make({ path: paths.plan, violations })
         }
-        plan = Plan.make({ ...plan, status: "working" })
+        // The owner had the file before this run: what it holds is approved as written.
+        const approved = loaded === undefined ? [] : plan.briefs.map((brief) => brief.id)
+        plan = Plan.make({ ...plan, status: "working", approved })
         yield* save(plan)
         yield* trail(
           "plan",
