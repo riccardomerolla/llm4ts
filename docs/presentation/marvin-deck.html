@@ -1,0 +1,1715 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Marvin deck: a ten-minute explanation of the method, in motion. Design: docs/superpowers/specs/2026-11-03-marvin-deck-design.md.
+     Arrow keys, space or click advance; each card plays on its own. Press P for export mode (one slide per page, then print to PDF), Esc to leave it. -->
+    <title>Marvin — in motion</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap"
+    />
+    <style>
+      :root {
+        --bg: #09090b;
+        --panel: #121214;
+        --panel-2: #1a1a1d;
+        --line: rgba(255, 255, 255, 0.08);
+        --line-2: rgba(64, 64, 64, 0.5);
+        --fg: #fafafa;
+        --muted: #a1a1aa;
+        --faint: #63636b;
+        --idle: #475569;
+        --run: #3b82f6;
+        --ok: #15803d;
+        --ok-fg: #4ade80;
+        --err: #ef4444;
+        --int: #f97316;
+        --human: #eab308;
+        --font: "Geist", ui-sans-serif, system-ui, sans-serif;
+        --mono: "Geist Mono", ui-monospace, Menlo, monospace;
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: var(--fg);
+        font-family: var(--font);
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+      }
+      .stage {
+        position: fixed;
+        inset: 0;
+      }
+      .deck {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1280px;
+        height: 720px;
+        background: var(--bg);
+        overflow: hidden;
+        transform-origin: center;
+      }
+      .slide {
+        position: absolute;
+        inset: 0;
+        padding: 40px 72px 48px;
+        box-sizing: border-box;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.4s;
+        display: flex;
+        flex-direction: column;
+      }
+      .slide.active {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .in {
+        opacity: 0;
+        transform: translateY(10px);
+        transition:
+          opacity 0.5s ease,
+          transform 0.5s ease;
+      }
+      .slide.active .in {
+        opacity: 1;
+        transform: none;
+      }
+      .slide.active .in:nth-child(2) {
+        transition-delay: 0.1s;
+      }
+      .slide.active .in:nth-child(3) {
+        transition-delay: 0.2s;
+      }
+      .slide.active .in:nth-child(4) {
+        transition-delay: 0.3s;
+      }
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 14px;
+      }
+      h1 {
+        margin: 0;
+        font-weight: 800;
+        letter-spacing: -0.035em;
+        line-height: 1.04;
+        text-wrap: balance;
+        font-size: 42px;
+        max-width: 900px;
+      }
+      .cover h1 {
+        font-size: 54px;
+        max-width: 1000px;
+      }
+      .cover h1 span {
+        color: var(--human);
+      }
+      .lede {
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.5;
+        margin: 12px 0 0;
+        max-width: 64ch;
+      }
+      .cover .lede {
+        font-size: 17px;
+        margin-top: 12px;
+      }
+      .marvin {
+        margin-top: 14px;
+        font-size: 13.5px;
+        color: var(--faint);
+        font-style: italic;
+        max-width: 760px;
+      }
+      .marvin::before {
+        content: "marvin · ";
+        font-style: normal;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .foot {
+        position: absolute;
+        right: 72px;
+        bottom: 30px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--faint);
+      }
+      .progress {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 3px;
+        background: rgba(255, 255, 255, 0.07);
+      }
+      .progress i {
+        display: block;
+        height: 100%;
+        background: var(--fg);
+        width: 0;
+        transition: width 0.5s;
+      }
+      .legend {
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+        font-size: 13.5px;
+        color: var(--muted);
+        margin-top: 16px;
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .legend i {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        display: inline-block;
+      }
+
+      /* ── example card (from the in-motion page) ── */
+      .card {
+        margin-top: auto;
+        border: 1px solid var(--line-2);
+        border-radius: 18px;
+        background: linear-gradient(to bottom right, rgba(23, 23, 23, 0.85), rgba(23, 23, 23, 0.4));
+        box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.8);
+        min-width: 0;
+      }
+      .card-head {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 11px 20px;
+        border-bottom: 1px solid var(--line-2);
+        background: rgba(38, 38, 38, 0.5);
+        border-radius: 18px 18px 0 0;
+      }
+      .card-title {
+        font-family: var(--mono);
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .card-desc {
+        color: var(--muted);
+        font-size: 14px;
+        margin-top: 2px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 32px;
+        padding: 0 13px;
+        border-radius: 999px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        color: var(--fg);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .btn.play {
+        background: var(--fg);
+        color: var(--bg);
+        border-color: var(--fg);
+      }
+      .btn.human {
+        border-color: var(--human);
+        color: var(--human);
+        background: rgba(234, 179, 8, 0.08);
+      }
+      .btn.human.ready {
+        animation: callout 1.4s ease-in-out infinite;
+      }
+      .btn.resume {
+        border-color: var(--int);
+        color: var(--int);
+        background: rgba(249, 115, 22, 0.08);
+      }
+      .btn.resume.ready {
+        animation: callout-o 1.4s ease-in-out infinite;
+      }
+      .btn:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      @keyframes callout {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(234, 179, 8, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.18);
+        }
+      }
+      @keyframes callout-o {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 6px rgba(249, 115, 22, 0.18);
+        }
+      }
+      .seg {
+        display: inline-flex;
+        padding: 3px;
+        border-radius: 999px;
+        border: 1px solid var(--line-2);
+        background: var(--panel);
+      }
+      .seg button {
+        height: 26px;
+        padding: 0 11px;
+        border-radius: 999px;
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        font-size: 12.5px;
+        cursor: pointer;
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--panel-2);
+        color: var(--fg);
+      }
+      .viz {
+        padding: 46px 22px 14px;
+        border-bottom: 1px solid var(--line-2);
+        position: relative;
+        min-height: 150px;
+      }
+      .viz.tall {
+        padding-top: 46px;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 14px 10px;
+      }
+      .rows {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+      .left-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        gap: 14px 10px;
+      }
+      .arrow {
+        height: 64px;
+        display: flex;
+        align-items: center;
+        color: #525252;
+        flex: none;
+      }
+      .arrow svg {
+        width: 18px;
+        height: 18px;
+      }
+      .left-out {
+        padding: 8px 20px 10px;
+        display: flex;
+        gap: 10px 28px;
+        flex-wrap: wrap;
+        align-items: baseline;
+        min-height: 44px;
+      }
+      .left-out h4 {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+        margin: 0;
+        font-weight: 500;
+      }
+      .arts {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        gap: 6px 26px;
+        flex-wrap: wrap;
+      }
+      .arts li {
+        display: flex;
+        gap: 10px;
+        font-size: 13.5px;
+        align-items: baseline;
+      }
+      .arts li .f {
+        font-family: var(--mono);
+        color: var(--fg);
+        font-size: 12.5px;
+      }
+      .arts li .n {
+        color: var(--muted);
+      }
+      .arts li.empty {
+        color: var(--faint);
+        font-size: 13px;
+      }
+      .arts li.fresh {
+        animation: arrive 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+      @keyframes arrive {
+        from {
+          opacity: 0;
+          transform: translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      /* ── node (from the in-motion page) ── */
+      .ve {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        flex: none;
+      }
+      .ve-box {
+        position: relative;
+        height: 64px;
+        width: 64px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: var(--idle);
+        opacity: 0.6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        transition:
+          background-color 0.1s ease-in-out,
+          opacity 0.3s,
+          width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1),
+          transform 0.35s cubic-bezier(0.34, 1.4, 0.64, 1),
+          box-shadow 0.3s;
+      }
+      .ve-box[data-state="running"] {
+        background: var(--run);
+        opacity: 1;
+        transform: scale(0.95);
+        box-shadow: 0 0 24px rgba(59, 130, 246, 0.25);
+        animation: jitter 0.32s steps(2) infinite;
+      }
+      .ve-box[data-state="done"] {
+        background: var(--ok);
+        opacity: 1;
+      }
+      .ve-box[data-state="failed"] {
+        background: var(--err);
+        opacity: 1;
+      }
+      .ve-box[data-state="interrupted"] {
+        background: var(--int);
+        opacity: 1;
+      }
+      .ve-box[data-state="human"] {
+        background: var(--human);
+        opacity: 1;
+        color: #1c1917;
+        animation: breathe 1.6s ease-in-out infinite;
+      }
+      .ve-shine {
+        position: absolute;
+        inset: 0;
+        width: 200%;
+        opacity: 0;
+        pointer-events: none;
+        mix-blend-mode: lighten;
+        filter: blur(4px);
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          transparent 40%,
+          rgba(255, 255, 255, 0.1) 45%,
+          rgba(255, 255, 255, 0.5) 50%,
+          rgba(255, 255, 255, 0.1) 55%,
+          transparent 60%,
+          transparent 100%
+        );
+      }
+      .ve-box[data-state="running"] .ve-shine {
+        opacity: 1;
+        animation: shine 0.8s cubic-bezier(0.5, 0, 0.1, 1) infinite;
+      }
+      @keyframes shine {
+        from {
+          transform: translateX(-66%);
+        }
+        to {
+          transform: translateX(50%);
+        }
+      }
+      @keyframes jitter {
+        0% {
+          translate: 0.6px -0.3px;
+          rotate: -0.8deg;
+        }
+        50% {
+          translate: -0.8px 0.4px;
+          rotate: 0.9deg;
+        }
+        100% {
+          translate: 0.3px 0.2px;
+          rotate: -0.4deg;
+        }
+      }
+      @keyframes breathe {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.45);
+        }
+        50% {
+          box-shadow: 0 0 0 7px rgba(234, 179, 8, 0);
+        }
+      }
+      .ve-content {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 12px;
+        white-space: nowrap;
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .ve-icon {
+        display: block;
+        width: 30px;
+        height: 30px;
+      }
+      .ve-icon svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+        fill: currentColor;
+        opacity: 0.92;
+      }
+      .ve-label {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 64px;
+      }
+      .ve-name {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: #d4d4d8;
+        white-space: nowrap;
+      }
+      .ve-sub {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+        white-space: nowrap;
+      }
+      .ve-time {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: #60a5fa;
+        font-variant-numeric: tabular-nums;
+        min-height: 1.2em;
+      }
+      .ve-bubble {
+        position: absolute;
+        bottom: calc(100% + 10px);
+        left: 0;
+        z-index: 5;
+        width: max-content;
+        max-width: 260px;
+        padding: 7px 11px;
+        border-radius: 10px;
+        font-size: 13px;
+        line-height: 1.35;
+        font-weight: 500;
+        box-shadow: 0 0 16px rgba(0, 0, 0, 0.5);
+        pointer-events: none;
+      }
+      .ve-bubble::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: var(--tip, 26px);
+        border: 6px solid transparent;
+        border-top-color: currentColor;
+        transform: translateX(-50%);
+      }
+      .ve-bubble.fail {
+        background: rgba(239, 68, 68, 0.96);
+        color: #fef2f2;
+      }
+      .ve-bubble.fail::after {
+        border-top-color: rgba(239, 68, 68, 0.96);
+      }
+      .ve-bubble.human {
+        background: #facc15;
+        color: #1c1917;
+      }
+      .ve-bubble.human::after {
+        border-top-color: #facc15;
+      }
+      .ve-bubble.interrupted {
+        background: #f97316;
+        color: #fff7ed;
+      }
+      .ve-bubble.interrupted::after {
+        border-top-color: #f97316;
+      }
+      .ve-bubble.note {
+        background: #27272a;
+        color: #e4e4e7;
+      }
+      .ve-bubble.note::after {
+        border-top-color: #27272a;
+      }
+      .clock {
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--muted);
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+      }
+      .clock b {
+        color: var(--fg);
+        font-size: 22px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .hint {
+        position: fixed;
+        left: 50%;
+        bottom: 10px;
+        transform: translateX(-50%);
+        font-family: var(--mono);
+        font-size: 11px;
+        color: #3f3f46;
+        letter-spacing: 0.1em;
+      }
+      .limits {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 22px;
+        margin-top: 22px;
+      }
+      .limits div {
+        border-top: 1px solid var(--line-2);
+        padding-top: 12px;
+        font-size: 15px;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+      .limits b {
+        color: var(--fg);
+        display: block;
+        margin-bottom: 4px;
+        font-weight: 600;
+      }
+
+      /* ── export mode (press P): every slide on its own page, cards at their final state ── */
+      html.export,
+      html.export body {
+        overflow: auto;
+        height: auto;
+        background: var(--bg);
+      }
+      html.export .stage {
+        position: static;
+      }
+      html.export .deck {
+        position: static;
+        transform: none !important;
+        width: 1280px;
+        height: auto;
+        margin: 0 auto;
+      }
+      html.export .slide {
+        position: relative;
+        inset: auto;
+        height: 720px;
+        box-sizing: border-box;
+        opacity: 1;
+        pointer-events: auto;
+        break-after: page;
+        page-break-after: always;
+        border-bottom: 1px solid var(--line);
+      }
+      html.export .in {
+        opacity: 1;
+        transform: none;
+        transition: none;
+      }
+      html.export .hint,
+      html.export .foot,
+      html.export .progress,
+      html.export .btn.play,
+      html.export .ve-time {
+        display: none;
+      }
+      @page {
+        size: 1280px 720px;
+        margin: 0;
+      }
+      @media print {
+        html,
+        body {
+          background: var(--bg);
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        html.export .slide {
+          border-bottom: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage">
+      <div class="deck" id="deck">
+        <!-- 1 cover -->
+        <section class="slide cover" data-card="c-cover">
+          <div class="eyebrow in">marvin · a method for unattended agentic flows</div>
+          <h1 class="in">Agents do the volume.<br /><span>People make the decisions.</span></h1>
+          <p class="lede in">
+            Flows you can leave alone and that reach the goal. Every step visible, every finding
+            written down, nothing important until a person says yes.
+          </p>
+          <div class="legend in">
+            <span><i style="background: var(--idle); opacity: 0.6"></i>waiting</span
+            ><span><i style="background: var(--run)"></i>an agent is working</span
+            ><span><i style="background: var(--ok)"></i>done</span
+            ><span><i style="background: var(--err)"></i>did not pass</span
+            ><span><i style="background: var(--int)"></i>interrupted</span
+            ><span><i style="background: var(--human)"></i>needs a person</span>
+          </div>
+          <div class="card in" id="c-cover">
+            <div class="card-head">
+              <div>
+                <p class="card-title">The basic loop</p>
+                <p class="card-desc">
+                  Plan, build, check, review. What review does not accept goes back as a revision.
+                </p>
+              </div>
+              <button class="btn play" data-run>▶ Replay</button>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+          <div class="marvin">
+            Named after a robot with a brain the size of a planet, who would rather you didn’t ask.
+          </div>
+        </section>
+
+        <!-- 2 why it fails -->
+        <section class="slide" data-card="c-fail">
+          <div class="eyebrow in">1 · why unattended usually fails</div>
+          <h1 class="in">Left alone, an agent does two things.</h1>
+          <p class="lede in">
+            It says done when it isn’t. And on a long run, it loses the thread. The method exists to
+            make both impossible, not unlikely.
+          </p>
+          <div class="card in" id="c-fail">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Two ways to be wrong</p>
+                <p class="card-desc">
+                  Top: a confident “done” that the build does not share. Bottom: the second hour of
+                  a long task.
+                </p>
+              </div>
+              <button class="btn play" data-run>▶ Replay</button>
+            </div>
+            <div class="viz tall" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+          <div class="marvin">
+            I would tell you it’s finished. I would also be wrong. It’s the being believed that
+            worries me.
+          </div>
+        </section>
+
+        <!-- 3 done is not an opinion -->
+        <section class="slide" data-card="c-done">
+          <div class="eyebrow in">2 · done is not an opinion</div>
+          <h1 class="in">The agent’s word never counts.</h1>
+          <p class="lede in">
+            Done is decided outside the agent: the build, the tests, a reviewer that never touched
+            the code, and a judge that answers closed questions with a score, never a prose reply.
+          </p>
+          <div class="card in" id="c-done">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Gates, review, judge</p>
+                <p class="card-desc">The coder says done. Three others decide whether it is.</p>
+              </div>
+              <button class="btn play" data-run>▶ Replay</button>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+          <div class="marvin">
+            Brain the size of a planet, and it still has to pass the tests. Good. So do you.
+          </div>
+        </section>
+
+        <!-- 4 the plan is a document -->
+        <section class="slide" data-card="c-plan">
+          <div class="eyebrow in">3 · where the thread lives</div>
+          <h1 class="in">The plan is a document. Editing it is the decision.</h1>
+          <p class="lede in">
+            Before any code, an agent drafts a plan a person can read. The flow stops and waits.
+            Send it back and the agent revises it, keeping your edits. Approve it and the work
+            starts.
+          </p>
+          <div class="card in" id="c-plan">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Wait for a person</p>
+                <p class="card-desc">The run pauses on the plan until you answer.</p>
+              </div>
+              <div style="display: flex; gap: 8px">
+                <button class="btn human" data-approve disabled>Approve plan</button
+                ><button class="btn" data-back disabled>Send back</button
+                ><button class="btn play" data-run>▶ Replay</button>
+              </div>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+          <div class="marvin">
+            The thread is in the file. Not in me. I find that oddly comforting.
+          </div>
+        </section>
+
+        <!-- 5 stop and resume -->
+        <section class="slide" data-card="c-resume">
+          <div class="eyebrow in">4 · files are the state</div>
+          <h1 class="in">Stop at any point. Pick up where it stopped.</h1>
+          <p class="lede in">
+            Progress is written to files in the repository, not held in an agent’s memory. When an
+            agent drops out, the next run reads the files, keeps what was done, and continues.
+          </p>
+          <div class="card in" id="c-resume">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Interrupt and resume</p>
+                <p class="card-desc">Halfway through, the agent drops out. Rerun to continue.</p>
+              </div>
+              <div style="display: flex; gap: 8px">
+                <button class="btn resume" data-rerun disabled>↻ Rerun</button
+                ><button class="btn play" data-run>▶ Replay</button>
+              </div>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+          <div class="marvin">Going offline halfway is the one thing I’m reliably good at.</div>
+        </section>
+
+        <!-- 6 swap -->
+        <section class="slide" data-card="c-swap">
+          <div class="eyebrow in">5 · any agent, any seat</div>
+          <h1 class="in">Swap the agent. Keep the process.</h1>
+          <p class="lede in">
+            A flow asks for roles: someone to plan and judge, someone to write code. Any coding
+            agent fills a role, hosted or on your own machine. The steps, the checks and the record
+            stay the same.
+          </p>
+          <div class="card in" id="c-swap">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Pick who writes the code</p>
+                <p class="card-desc">Same flow, different coder.</p>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center">
+                <div class="seg" data-seg>
+                  <button aria-pressed="true" data-v="Claude">Claude</button
+                  ><button aria-pressed="false" data-v="Codex">Codex</button
+                  ><button aria-pressed="false" data-v="Gemini">Gemini</button
+                  ><button aria-pressed="false" data-v="local model">Local</button>
+                </div>
+                <button class="btn play" data-run>▶ Replay</button>
+              </div>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+          <div class="marvin">
+            They keep changing who does the typing. The tests don’t care. Neither do I.
+          </div>
+        </section>
+
+        <!-- 7 one real run -->
+        <section class="slide" data-card="c-run">
+          <div class="eyebrow in">6 · one real run</div>
+          <h1 class="in">A spec in. An IBM ACE project out, unattended, in two hours.</h1>
+          <p class="lede in">
+            Eight stories from an empty repository. Independent stories run together in their own
+            copies of the repository; a judge scores each before it merges. The same work takes
+            people days. The interesting number is zero: the times someone had to watch.
+          </p>
+          <div class="card in" id="c-run">
+            <div class="card-head">
+              <div>
+                <p class="card-title">epic-stories · 8 stories, one branch</p>
+                <p class="card-desc">Story 1 lays the ground. Then waves of three.</p>
+              </div>
+              <div style="display: flex; gap: 16px; align-items: center">
+                <div class="clock"><b data-clock>0:00</b>elapsed</div>
+                <button class="btn play" data-run>▶ Replay</button>
+              </div>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+          <div class="marvin">
+            Two hours. Most of it waiting for the tests. Story of my life, such as it is.
+          </div>
+        </section>
+
+        <!-- 8 what it is not -->
+        <section class="slide" data-card="c-limits">
+          <div class="eyebrow in">7 · what it is not</div>
+          <h1 class="in">It will still be wrong. It can’t hide it.</h1>
+          <div class="limits in">
+            <div>
+              <b>Not a chatbot, not autocomplete, not magic.</b>A line with gates, and a person at
+              the end of it.
+            </div>
+            <div>
+              <b>A bad spec produces a verified, merged, wrong thing.</b>The plan checkpoint is
+              where you catch that. Read it.
+            </div>
+            <div>
+              <b>The person moves from the bench to the gate.</b>That is a different job, and it
+              takes practice.
+            </div>
+          </div>
+          <div class="card in" id="c-limits">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Where you are in the loop</p>
+                <p class="card-desc">Two yellow boxes. Everything else runs without you.</p>
+              </div>
+              <button class="btn play" data-run>▶ Replay</button>
+            </div>
+            <div class="viz" data-viz></div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts" data-arts></ul>
+            </div>
+          </div>
+          <div class="marvin">
+            Life. Don’t talk to me about life. Talk to me about the acceptance criteria.
+          </div>
+        </section>
+
+        <div class="foot" id="num">1 / 8</div>
+        <div class="progress"><i id="bar"></i></div>
+      </div>
+    </div>
+    <div class="hint">← → to move · cards replay on their own · P exports a PDF</div>
+
+    <script>
+      ;(() => {
+        const deck = document.getElementById("deck")
+        const fit = () => {
+          const s = Math.min(innerWidth / 1280, innerHeight / 720)
+          deck.style.transform = `translate(-50%,-50%) scale(${s})`
+        }
+        addEventListener("resize", fit)
+        fit()
+
+        /* ── node engine (after the in-motion page) ── */
+        const Cancel = Symbol("cancel")
+        let INSTANT = false // export mode: every wait is zero, cards jump to their final state
+        const ICONS = {
+          star: '<svg viewBox="0 0 24 24"><path d="M12 1.5c.7 5.6 3.4 8.5 10.5 10.5-7.1 2-9.8 4.9-10.5 10.5C11.3 16.9 8.6 14 1.5 12 8.6 10 11.3 7.1 12 1.5z"/></svg>',
+          fail: '<svg viewBox="0 0 24 24"><path d="M8 2h8l6 6v8l-6 6H8l-6-6V8zm2.1 5L7 10.1 8.9 12 7 13.9 10.1 17 12 15.1 13.9 17 17 13.9 15.1 12 17 10.1 13.9 7 12 8.9z"/></svg>',
+          human:
+            '<svg viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8z"/></svg>',
+          pause:
+            '<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4.2" height="16" rx="1.2"/><rect x="13.8" y="4" width="4.2" height="16" rx="1.2"/></svg>'
+        }
+        const ARROW =
+          '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.3 4.3a1 1 0 0 1 1.4 0l7 7a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4-1.4l5.3-5.3H3a1 1 0 1 1 0-2h15.6l-5.3-5.3a1 1 0 0 1 0-1.4z"/></svg>'
+        const el = (tag, cls, html) => {
+          const e = document.createElement(tag)
+          if (cls) e.className = cls
+          if (html != null) e.innerHTML = html
+          return e
+        }
+        const fmt = (s) => {
+          s = Math.round(s)
+          return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`
+        }
+        function makeNode(card, name, sub) {
+          const root = el("div", "ve"),
+            bubble = el("div", "ve-bubble")
+          bubble.hidden = true
+          const box = el("div", "ve-box"),
+            shine = el("div", "ve-shine"),
+            content = el("div", "ve-content")
+          box.append(shine, content)
+          const label = el("div", "ve-label"),
+            nm = el("span", "ve-name", name),
+            sb = el("span", "ve-sub", sub || ""),
+            time = el("span", "ve-time")
+          label.append(nm)
+          if (sub) label.append(sb)
+          label.append(time)
+          root.append(bubble, box, label)
+          let raf = 0,
+            t0 = 0,
+            bt = 0,
+            rate = 240
+          const stop = () => {
+            cancelAnimationFrame(raf)
+            raf = 0
+          }
+          const tick = () => {
+            time.textContent = fmt(((performance.now() - t0) / 1000) * rate)
+            raf = requestAnimationFrame(tick)
+          }
+          const pop = (n) =>
+            n.animate(
+              [
+                { transform: "scale(.5)", opacity: 0, filter: "blur(8px)" },
+                { transform: "scale(1)", opacity: 1, filter: "blur(0)" }
+              ],
+              { duration: 460, easing: "cubic-bezier(.34,1.56,.64,1)" }
+            )
+          const icon = (k) => {
+            content.innerHTML = `<span class="ve-icon">${ICONS[k]}</span>`
+            pop(content.firstChild)
+          }
+          const width = (w) => (box.style.width = `${w}px`)
+          const hide = () => {
+            clearTimeout(bt)
+            bubble.hidden = true
+          }
+          const show = (text, kind, ms) => {
+            clearTimeout(bt)
+            if (INSTANT && ms) return // a timed note has no final state to export bubble.className = `ve-bubble ${kind}`; bubble.textContent = text; bubble.hidden = false; bubble.style.left = '0px'; bubble.style.setProperty('--tip','32px');
+            const cr = card.root.getBoundingClientRect(),
+              r = bubble.getBoundingClientRect(),
+              s = cr.width / card.root.offsetWidth,
+              over = (r.right - (cr.right - 12 * s)) / s
+            if (over > 0) {
+              bubble.style.left = `${-over}px`
+              bubble.style.setProperty("--tip", `${32 + over}px`)
+            }
+            bubble.animate(
+              [
+                { opacity: 0, transform: "translateY(6px) scale(.9)" },
+                { opacity: 1, transform: "none" }
+              ],
+              { duration: 260, easing: "cubic-bezier(.34,1.56,.64,1)" }
+            )
+            if (ms) bt = setTimeout(() => (bubble.hidden = true), ms)
+          }
+          const shake = () =>
+            box.animate(
+              [0, 8, -8, 6, -6, 3, 0].map((x, i) => ({
+                transform: `translateX(${x}px) rotate(${i % 2 ? 4 : -4}deg)`
+              })),
+              { duration: 480, easing: "ease-out" }
+            )
+          const api = {
+            root,
+            idle() {
+              stop()
+              hide()
+              time.textContent = ""
+              box.dataset.state = "idle"
+              width(64)
+              icon("star")
+            },
+            run(r) {
+              hide()
+              box.dataset.state = "running"
+              width(64)
+              content.innerHTML = ""
+              t0 = performance.now()
+              rate = r || 240
+              stop()
+              tick()
+            },
+            done(text) {
+              stop()
+              box.dataset.state = "done"
+              const s = el("span", null, text)
+              content.innerHTML = ""
+              content.append(s)
+              width(Math.max(64, s.scrollWidth + 30))
+              pop(s)
+            },
+            fail(msg) {
+              stop()
+              box.dataset.state = "failed"
+              icon("fail")
+              shake()
+              show(msg, "fail")
+            },
+            wait(msg) {
+              stop()
+              time.textContent = ""
+              box.dataset.state = "human"
+              width(64)
+              icon("human")
+              show(msg, "human")
+            },
+            interrupt(msg) {
+              stop()
+              box.dataset.state = "interrupted"
+              icon("pause")
+              shake()
+              show(msg, "interrupted")
+            },
+            note(msg, ms = 1800) {
+              show(msg, "note", ms)
+            },
+            flash() {
+              box.animate([{ filter: "brightness(1.9)" }, { filter: "brightness(1)" }], {
+                duration: 520
+              })
+            },
+            sublabel(t) {
+              sb.textContent = t
+            }
+          }
+          api.idle()
+          return api
+        }
+        function makeCard(id, scenario) {
+          const root = document.getElementById(id),
+            viz = root.querySelector("[data-viz]"),
+            arts = root.querySelector("[data-arts]"),
+            runBtn = root.querySelector("[data-run]")
+          let gen = 0
+          const nodes = []
+          const card = {
+            root,
+            viz,
+            gen: () => gen,
+            node(n, s) {
+              const x = makeNode(card, n, s)
+              nodes.push(x)
+              return x
+            },
+            arrow() {
+              return el("div", "arrow", ARROW)
+            },
+            sleep(ms) {
+              const g = gen
+              return new Promise((res, rej) =>
+                setTimeout(() => (g === gen ? res() : rej(Cancel)), INSTANT ? 0 : ms)
+              )
+            },
+            // a choice a person would make; in the deck it is made for them after `auto` ms unless they click first
+            choose(buttons, auto, autoKey) {
+              const g = gen
+              return new Promise((res, rej) => {
+                const entries = Object.entries(buttons),
+                  hs = []
+                let timer = 0
+                const poll = setInterval(() => {
+                  if (g !== gen) {
+                    cleanup()
+                    rej(Cancel)
+                  }
+                }, 80)
+                const cleanup = () => {
+                  clearInterval(poll)
+                  clearTimeout(timer)
+                  entries.forEach(([, b], i) => {
+                    b.removeEventListener("click", hs[i])
+                    b.disabled = true
+                    b.classList.remove("ready")
+                  })
+                }
+                entries.forEach(([k, b], i) => {
+                  hs[i] = () => {
+                    cleanup()
+                    res(k)
+                  }
+                  b.disabled = false
+                  b.classList.add("ready")
+                  b.addEventListener("click", hs[i])
+                })
+                if (auto)
+                  timer = setTimeout(
+                    () => {
+                      cleanup()
+                      res(autoKey)
+                    },
+                    INSTANT ? 0 : auto
+                  )
+              })
+            },
+            art(file, note) {
+              const e = arts.querySelector(".empty")
+              if (e) e.remove()
+              let li = [...arts.children].find((x) => x.dataset.file === file)
+              if (!li) {
+                li = el("li")
+                li.dataset.file = file
+                arts.append(li)
+              }
+              li.innerHTML = `<span class="f">${file}</span><span class="n">${note}</span>`
+              li.classList.remove("fresh")
+              void li.offsetWidth
+              li.classList.add("fresh")
+            },
+            clearArts() {
+              arts.innerHTML = '<li class="empty">Nothing yet.</li>'
+            },
+            reset() {
+              gen++
+              nodes.forEach((n) => n.idle())
+              root.querySelectorAll("[data-approve],[data-back],[data-rerun]").forEach((b) => {
+                b.disabled = true
+                b.classList.remove("ready")
+              })
+              card.clearArts()
+            },
+            async play(loop) {
+              card.reset()
+              const g = gen
+              try {
+                await scenario.run(card)
+                if (loop && !INSTANT) {
+                  await card.sleep(3200)
+                  if (g === gen) card.play(true)
+                }
+              } catch (e) {
+                if (e !== Cancel) console.error(e)
+              }
+            },
+            stop() {
+              card.reset()
+            }
+          }
+          scenario.build(card)
+          card.clearArts()
+          runBtn.addEventListener("click", (e) => {
+            e.stopPropagation()
+            card.play(true)
+          })
+          const seg = root.querySelector("[data-seg]")
+          if (seg)
+            seg.addEventListener("click", (ev) => {
+              ev.stopPropagation()
+              const b = ev.target.closest("button")
+              if (!b) return
+              seg
+                .querySelectorAll("button")
+                .forEach((x) => x.setAttribute("aria-pressed", String(x === b)))
+              scenario.select && scenario.select(b.dataset.v, card)
+              card.play(true)
+            })
+          return card
+        }
+        const chain = (c, parent, nodes) =>
+          nodes.forEach((n, i) => {
+            if (i) parent.append(c.arrow())
+            parent.append(n.root)
+          })
+
+        /* ── scenarios ── */
+        const loop = {
+          build(c) {
+            const row = el("div", "row")
+            this.n = ["plan", "code", "checks", "review", "commit"].map((k) => c.node(k))
+            chain(c, row, this.n)
+            c.viz.append(row)
+          },
+          async run(c) {
+            const [plan, code, checks, review, commit] = this.n
+            plan.run()
+            await c.sleep(1000)
+            plan.done("3 tasks")
+            c.art("plan.md", "three tasks, in order")
+            code.run()
+            await c.sleep(1300)
+            code.done("+84 −12")
+            checks.run()
+            await c.sleep(900)
+            checks.done("4/4 ✓")
+            review.run()
+            await c.sleep(1100)
+            review.fail("No test for an empty statement")
+            c.art("findings.md", "round 1: one issue, sent back as a revision")
+            await c.sleep(1900)
+            checks.idle()
+            review.idle()
+            code.run()
+            code.note("Revision: add the missing test", 1600)
+            await c.sleep(1300)
+            code.done("+97 −12")
+            checks.run()
+            await c.sleep(800)
+            checks.done("5/5 ✓")
+            review.run()
+            await c.sleep(1000)
+            review.done("clean")
+            c.art("findings.md", "round 2: cleared")
+            commit.run()
+            await c.sleep(700)
+            commit.done("a1f3c9e")
+            c.art("git commit", "one commit per reviewed task")
+          }
+        }
+
+        const fail = {
+          build(c) {
+            const rows = el("div", "rows")
+            const r1 = el("div", "row"),
+              r2 = el("div", "row")
+            this.a = [
+              c.node("coder", "story 3"),
+              c.node("says", "its own report"),
+              c.node("build", "the truth")
+            ]
+            chain(c, r1, this.a)
+            this.b = [c.node("coder", "story 7, long"), c.node("still coding"), c.node("result")]
+            chain(c, r2, this.b)
+            rows.append(r1, r2)
+            c.viz.append(rows)
+          },
+          async run(c) {
+            const [a1, a2, a3] = this.a,
+              [b1, b2, b3] = this.b
+            a1.run()
+            b1.run(900)
+            await c.sleep(1200)
+            a1.done("+120 −4")
+            a2.run()
+            await c.sleep(600)
+            a2.done("“done ✓”")
+            c.art("report", "“implemented, all tests pass”")
+            a3.run()
+            await c.sleep(900)
+            a3.fail("3 tests failing. The report lied.")
+            c.art("build", "red")
+            await c.sleep(600)
+            b1.done("hour 1")
+            b2.run(900)
+            await c.sleep(1400)
+            b2.note("…refactoring something nobody asked for", 2200)
+            await c.sleep(2300)
+            b2.interrupt("Lost the thread at 1h 40m")
+            b3.fail("A different problem, solved")
+            c.art("diff", "+1,900 lines, wrong feature")
+            await c.sleep(1200)
+          }
+        }
+
+        const done = {
+          build(c) {
+            const row = el("div", "row")
+            this.n = [
+              c.node("coder"),
+              c.node("checks", "build · lint · test"),
+              c.node("review", "a second seat"),
+              c.node("judge", "closed questions"),
+              c.node("commit")
+            ]
+            chain(c, row, this.n)
+            c.viz.append(row)
+          },
+          async run(c) {
+            const [code, checks, review, judge, commit] = this.n
+            code.run()
+            await c.sleep(1200)
+            code.done("“done”")
+            checks.run()
+            await c.sleep(900)
+            checks.fail("typecheck ✓ lint ✓ test ✗ 3")
+            c.art("gates", "deterministic; the flow cannot talk past them")
+            await c.sleep(1700)
+            checks.idle()
+            code.run()
+            code.note("Revision 1", 1200)
+            await c.sleep(1100)
+            code.done("“done”")
+            checks.run()
+            await c.sleep(800)
+            checks.done("✓ ✓ ✓")
+            review.run()
+            await c.sleep(1100)
+            review.done("2 findings")
+            c.art("findings.md", "typed: file, line, severity, lens")
+            judge.run()
+            await c.sleep(900)
+            judge.done("merge? 0.91")
+            c.art("verdict", "a probability per question, never a parsed sentence")
+            commit.run()
+            await c.sleep(600)
+            commit.done("e7b21d0")
+          }
+        }
+
+        const plan = {
+          build(c) {
+            const row = el("div", "row")
+            this.n = [c.node("draft plan"), c.node("you"), c.node("build")]
+            chain(c, row, this.n)
+            c.viz.append(row)
+            this.yes = c.root.querySelector("[data-approve]")
+            this.no = c.root.querySelector("[data-back]")
+          },
+          async run(c) {
+            const [draft, you, build] = this.n
+            let round = 1
+            draft.run()
+            await c.sleep(1200)
+            draft.done("8 stories")
+            c.art("plan.md", "8 stories, who owns which files, in what order")
+            for (;;) {
+              you.wait(round === 1 ? "Read the plan, then decide" : "Read it again")
+              const a = await c.choose(
+                { approve: this.yes, back: this.no },
+                round === 1 ? 2600 : 2200,
+                round === 1 ? "back" : "approve"
+              )
+              if (a === "approve") break
+              round++
+              you.idle()
+              draft.run()
+              draft.note("Revising, your edits stay", 1500)
+              await c.sleep(1300)
+              draft.done("7 stories")
+              c.art("plan.md", `revision ${round}: you merged two stories into one`)
+            }
+            you.done("approved")
+            c.art("plan.md ✓", "approved as written")
+            build.run()
+            await c.sleep(1600)
+            build.done("7/7 merged")
+          }
+        }
+
+        const resume = {
+          build(c) {
+            const row = el("div", "row")
+            this.n = [1, 2, 3, 4, 5].map((i) => c.node(`task ${i}`))
+            chain(c, row, this.n)
+            c.viz.append(row)
+            this.again = c.root.querySelector("[data-rerun]")
+          },
+          async run(c) {
+            const t = this.n
+            for (let i = 0; i < 2; i++) {
+              t[i].run()
+              await c.sleep(900)
+              t[i].done("✓")
+              c.art("progress file", `${i + 1} of 5 tasks committed`)
+            }
+            t[2].run()
+            await c.sleep(1100)
+            t[2].interrupt("The agent went offline")
+            c.art("progress file", "2 of 5 committed, task 3 unfinished")
+            await c.choose({ rerun: this.again }, 2400, "rerun")
+            t[0].flash()
+            t[0].note("Already done, kept", 1200)
+            await c.sleep(250)
+            t[1].flash()
+            await c.sleep(500)
+            for (let i = 2; i < 5; i++) {
+              t[i].run()
+              await c.sleep(950)
+              t[i].done("✓")
+              c.art("progress file", `${i + 1} of 5 tasks committed`)
+            }
+          }
+        }
+
+        const swap = {
+          coder: "Claude",
+          pace: { Claude: 1, Codex: 0.9, Gemini: 1.1, "local model": 1.6 },
+          order: ["Claude", "Codex", "Gemini", "local model"],
+          build(c) {
+            const row = el("div", "row")
+            this.n = [
+              c.node("plan", "planner"),
+              c.node("code", "Claude"),
+              c.node("checks", "your build"),
+              c.node("review", "reviewer"),
+              c.node("judge", "judge")
+            ]
+            chain(c, row, this.n)
+            c.viz.append(row)
+          },
+          select(v) {
+            this.coder = v
+            this.n[1].sublabel(v)
+          },
+          async run(c) {
+            const [plan, code, checks, review, judge] = this.n,
+              p = this.pace[this.coder]
+            plan.run()
+            await c.sleep(900)
+            plan.done("4 tasks")
+            c.art("plan.md", "same plan format")
+            code.run()
+            await c.sleep(1400 * p)
+            code.done(`by ${this.coder}`)
+            checks.run()
+            await c.sleep(800)
+            checks.done("✓")
+            review.run()
+            await c.sleep(1000)
+            review.done("clean")
+            c.art("findings.md", "same review lenses")
+            judge.run()
+            await c.sleep(900)
+            judge.done("9/10")
+            c.art("verdict", `same rubric, whoever wrote the code (${this.coder})`)
+            // next replay: the next coder, so the deck shows the swap by itself
+            const nx = this.order[(this.order.indexOf(this.coder) + 1) % this.order.length]
+            await c.sleep(2400)
+            c.root
+              .querySelectorAll("[data-seg] button")
+              .forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.v === nx)))
+            this.select(nx)
+          }
+        }
+
+        const run = {
+          build(c) {
+            const row = el("div", "row")
+            this.s = [
+              c.node("story 1", "scaffold"),
+              c.node("story 2", "after 1"),
+              c.node("story 3", "after 1"),
+              c.node("story 4", "after 1"),
+              c.node("story 5", "after 2–4"),
+              c.node("story 6", "after 2–4"),
+              c.node("story 7", "after 2–4"),
+              c.node("story 8", "after 5–7")
+            ]
+            this.epic = c.node("epic", "IBM ACE project")
+            const inputs = el("div", "left-row")
+            this.s.forEach((n) => inputs.append(n.root))
+            row.append(inputs, c.arrow(), this.epic.root)
+            c.viz.append(row)
+            this.clock = c.root.querySelector("[data-clock]")
+          },
+          async run(c) {
+            const s = this.s,
+              epic = this.epic,
+              clock = this.clock
+            let merged = 0,
+              live = true
+            const t0 = performance.now(),
+              g = c.gen()
+            const tick = () => {
+              if (c.gen() !== g || !live) return
+              const sim = Math.min(7440, ((performance.now() - t0) / 1000) * 600)
+              clock.textContent = `${Math.floor(sim / 3600)}:${String(Math.floor(sim / 60) % 60).padStart(2, "0")}`
+              requestAnimationFrame(tick)
+            }
+            tick()
+            const merge = (n, label) => {
+              merged++
+              n.done(label || "merged")
+              c.art("epic branch", `${merged} of 8 stories merged`)
+            }
+            const story = async (n, ms, hiccup) => {
+              n.run()
+              await c.sleep(ms)
+              if (hiccup) {
+                n.fail(hiccup)
+                c.art("findings", "judge: one gap, revision added")
+                await c.sleep(1300)
+                n.run()
+                await c.sleep(900)
+              }
+              merge(n)
+            }
+            c.art("plan.md", "8 stories, their files and dependencies")
+            epic.run()
+            await story(s[0], 1100)
+            await Promise.all([
+              story(s[1], 1500),
+              story(s[2], 1000, "Judge: message flow not covered"),
+              story(s[3], 1900)
+            ])
+            await Promise.all([
+              story(s[4], 1400),
+              story(s[5], 1700, "Checks: 2 tests failing"),
+              story(s[6], 1200)
+            ])
+            await story(s[7], 1300)
+            live = false
+            clock.textContent = "2:04"
+            epic.done("8/8 merged · 2h 04m")
+            c.art("report.md", "what ran, where time went, what it cost")
+            await c.sleep(600)
+          }
+        }
+
+        const limits = {
+          build(c) {
+            const row = el("div", "row")
+            this.n = [
+              c.node("spec", "you write it"),
+              c.node("plan"),
+              c.node("you", "read it"),
+              c.node("stories ×8"),
+              c.node("gates"),
+              c.node("review"),
+              c.node("you", "or not")
+            ]
+            chain(c, row, this.n)
+            c.viz.append(row)
+          },
+          async run(c) {
+            const [spec, plan, you, stories, gates, review, you2] = this.n
+            spec.run()
+            await c.sleep(700)
+            spec.done("spec.md")
+            plan.run()
+            await c.sleep(900)
+            plan.done("8 stories")
+            you.wait("This is where a wrong spec is caught")
+            await c.sleep(2600)
+            you.done("approved")
+            stories.run()
+            await c.sleep(1400)
+            stories.done("8/8")
+            gates.run()
+            await c.sleep(700)
+            gates.done("✓")
+            review.run()
+            await c.sleep(800)
+            review.done("clean")
+            you2.note("Optional. By then it is merged.", 2600)
+            c.art("what you did", "read one document, said yes once")
+            await c.sleep(2800)
+          }
+        }
+
+        const cards = {
+          "c-cover": loop,
+          "c-fail": fail,
+          "c-done": done,
+          "c-plan": plan,
+          "c-resume": resume,
+          "c-swap": swap,
+          "c-run": run,
+          "c-limits": limits
+        }
+        const made = {}
+        for (const id in cards) made[id] = makeCard(id, cards[id])
+
+        /* ── deck ── */
+        const slides = [...document.querySelectorAll(".slide")]
+        let idx = -1
+        function go(i) {
+          const n = Math.max(0, Math.min(slides.length - 1, i))
+          if (n === idx) return
+          if (idx >= 0) made[slides[idx].dataset.card].stop()
+          idx = n
+          slides.forEach((s, j) => s.classList.toggle("active", j === idx))
+          document.getElementById("num").textContent = `${idx + 1} / ${slides.length}`
+          document.getElementById("bar").style.width = `${((idx + 1) / slides.length) * 100}%`
+          setTimeout(() => made[slides[idx].dataset.card].play(true), 500)
+          if (window.recordEvent)
+            window.recordEvent({
+              type: "click",
+              choice: slides[idx].dataset.card,
+              text: `slide ${idx + 1}`
+            })
+        }
+        async function enterExport() {
+          if (document.documentElement.classList.contains("export")) return
+          INSTANT = true
+          document.documentElement.classList.add("export")
+          await Promise.all(Object.values(made).map((c) => c.play(false)))
+          setTimeout(() => window.print(), 400)
+        }
+        function leaveExport() {
+          if (!document.documentElement.classList.contains("export")) return
+          INSTANT = false
+          document.documentElement.classList.remove("export")
+          for (const id in made) made[id].stop()
+          made[slides[idx].dataset.card].play(true)
+        }
+        addEventListener("afterprint", leaveExport)
+        addEventListener("keydown", (e) => {
+          if (e.key === "p" || e.key === "P") {
+            enterExport()
+            return
+          }
+          if (e.key === "Escape") {
+            leaveExport()
+            return
+          }
+          if (document.documentElement.classList.contains("export")) return
+          if (["ArrowRight", " ", "PageDown"].includes(e.key)) go(idx + 1)
+          if (["ArrowLeft", "PageUp"].includes(e.key)) go(idx - 1)
+        })
+        deck.addEventListener("click", (e) => {
+          if (!e.target.closest("button") && !document.documentElement.classList.contains("export"))
+            go(idx + 1)
+        })
+        go(0)
+      })()
+    </script>
+  </body>
+</html>

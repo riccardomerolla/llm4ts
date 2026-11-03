@@ -22,3 +22,6 @@ packages/shell/kits/
 
 # Autonomous loop state (tools/ralph)
 progress-auto.txt
+
+# Brainstorming mockups (visual companion); not source.
+.superpowers/
