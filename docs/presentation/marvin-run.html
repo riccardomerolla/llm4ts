@@ -1,0 +1,1165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Marvin, second cut: the run is the talk. Design: docs/superpowers/specs/2026-11-04-marvin-run-design.md.
+     A two-hour epic-stories run replayed at 14x on one screen; seven ideas surface as the run earns them.
+     Space starts and pauses, arrows jump between beats, R restarts, L switches language, P exports one page per beat. -->
+    <title>Marvin — the run is the talk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap"
+    />
+    <style>
+      :root {
+        --bg: #09090b;
+        --panel: #121214;
+        --line: rgba(255, 255, 255, 0.08);
+        --fg: #fafafa;
+        --muted: #a1a1aa;
+        --faint: #63636b;
+        --idle: #475569;
+        --run: #3b82f6;
+        --ok: #15803d;
+        --ok-fg: #4ade80;
+        --err: #ef4444;
+        --int: #f97316;
+        --human: #eab308;
+        --font: "Geist", ui-sans-serif, system-ui, sans-serif;
+        --mono: "Geist Mono", ui-monospace, Menlo, monospace;
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: var(--fg);
+        font-family: var(--font);
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+      }
+      .stage {
+        position: fixed;
+        inset: 0;
+      }
+      .deck {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1280px;
+        height: 720px;
+        background: var(--bg);
+        overflow: hidden;
+        transform-origin: center;
+        display: flex;
+        flex-direction: column;
+        padding: 30px 64px 34px;
+        box-sizing: border-box;
+        cursor: default;
+        user-select: none;
+      }
+
+      /* ── top bar ── */
+      .bar {
+        display: flex;
+        align-items: flex-end;
+        gap: 28px;
+        height: 64px;
+        flex: none;
+      }
+      .bar .who {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 300px;
+      }
+      .bar .who b {
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        font-size: 22px;
+      }
+      .bar .who span {
+        color: var(--muted);
+        font-size: 13.5px;
+      }
+      .bar .clock {
+        margin-left: auto;
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+      }
+      .bar .clock .big {
+        font-family: var(--mono);
+        font-weight: 600;
+        font-size: 44px;
+        letter-spacing: -0.02em;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        min-width: 180px;
+        text-align: right;
+      }
+      .bar .clock .k {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .bar .talk {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+        min-width: 88px;
+      }
+      .bar .talk .t {
+        font-family: var(--mono);
+        font-size: 18px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .progress {
+        height: 2px;
+        background: var(--line);
+        margin: 12px 0 18px;
+        flex: none;
+        position: relative;
+      }
+      .progress i {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0;
+        background: var(--run);
+        transition: width 0.25s linear;
+      }
+
+      /* ── graph ── */
+      .graph {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        min-height: 0;
+      }
+      .lane {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        height: 34px;
+        flex: none;
+        transition: opacity 0.6s;
+      }
+      .lane.epic {
+        height: 44px;
+        margin-bottom: 6px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--line);
+      }
+      .lane.finished {
+        opacity: 0.55;
+      }
+      .lane .label {
+        width: 292px;
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding-right: 18px;
+        box-sizing: border-box;
+      }
+      .lane .label b {
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--muted);
+        transition: color 0.3s;
+      }
+      .lane.active .label b {
+        color: var(--fg);
+      }
+      .lane .label .seat {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+        letter-spacing: 0.02em;
+      }
+      .lane .label .seat em {
+        font-style: normal;
+        color: var(--muted);
+      }
+      .lane.epic .label b {
+        font-size: 15px;
+        color: var(--fg);
+      }
+      .lane .nodes {
+        display: flex;
+        align-items: center;
+        flex: none;
+      }
+      .lane .note {
+        margin-left: 26px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--muted);
+        white-space: nowrap;
+        opacity: 0;
+        transform: translateX(-4px);
+        transition:
+          opacity 0.3s,
+          transform 0.3s;
+      }
+      .lane .note.on {
+        opacity: 1;
+        transform: none;
+      }
+      .lane .note.err {
+        color: var(--err);
+      }
+      .lane .note.ok {
+        color: var(--ok-fg);
+      }
+      .lane .note.int {
+        color: var(--int);
+      }
+      .lane .note.human {
+        color: var(--human);
+      }
+      .n {
+        position: relative;
+        height: 29px;
+        padding: 0 13px;
+        border-radius: 9px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: var(--idle);
+        opacity: 0.55;
+        display: flex;
+        align-items: center;
+        font-weight: 600;
+        font-size: 13px;
+        color: #fff;
+        white-space: nowrap;
+        flex: none;
+        transition:
+          background-color 0.12s ease-in-out,
+          opacity 0.3s,
+          transform 0.35s cubic-bezier(0.34, 1.4, 0.64, 1),
+          box-shadow 0.3s;
+      }
+      .lane.epic .n {
+        height: 38px;
+        font-size: 14px;
+        padding: 0 16px;
+        border-radius: 11px;
+      }
+      .n[data-state="running"] {
+        background: var(--run);
+        opacity: 1;
+        transform: scale(0.96);
+        box-shadow: 0 0 22px rgba(59, 130, 246, 0.28);
+        animation: jitter 0.32s steps(2) infinite;
+      }
+      .n[data-state="done"] {
+        background: var(--ok);
+        opacity: 1;
+      }
+      .n[data-state="failed"] {
+        background: var(--err);
+        opacity: 1;
+      }
+      .n[data-state="interrupted"] {
+        background: var(--int);
+        opacity: 1;
+      }
+      .n[data-state="human"] {
+        background: var(--human);
+        opacity: 1;
+        color: #1c1917;
+        animation: breathe 1.6s ease-in-out infinite;
+      }
+      .n .shine {
+        position: absolute;
+        inset: 0;
+        width: 200%;
+        opacity: 0;
+        pointer-events: none;
+        mix-blend-mode: lighten;
+        filter: blur(4px);
+        background: linear-gradient(
+          90deg,
+          transparent 40%,
+          rgba(255, 255, 255, 0.1) 45%,
+          rgba(255, 255, 255, 0.5) 50%,
+          rgba(255, 255, 255, 0.1) 55%,
+          transparent 60%
+        );
+      }
+      .n[data-state="running"] .shine {
+        opacity: 1;
+        animation: shine 0.8s cubic-bezier(0.5, 0, 0.1, 1) infinite;
+      }
+      @keyframes shine {
+        from {
+          transform: translateX(-66%);
+        }
+        to {
+          transform: translateX(50%);
+        }
+      }
+      @keyframes jitter {
+        0% {
+          translate: 0.6px -0.3px;
+          rotate: -0.8deg;
+        }
+        50% {
+          translate: -0.8px 0.4px;
+          rotate: 0.9deg;
+        }
+        100% {
+          translate: 0.3px 0.2px;
+          rotate: -0.4deg;
+        }
+      }
+      @keyframes breathe {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.45);
+        }
+        50% {
+          box-shadow: 0 0 0 7px rgba(234, 179, 8, 0);
+        }
+      }
+      .arr {
+        width: 22px;
+        height: 1px;
+        background: rgba(255, 255, 255, 0.18);
+        position: relative;
+        flex: none;
+      }
+      .arr::after {
+        content: "";
+        position: absolute;
+        right: -1px;
+        top: -3px;
+        border: 3.5px solid transparent;
+        border-left-color: rgba(255, 255, 255, 0.3);
+      }
+
+      /* ── callout ── */
+      .callout {
+        flex: none;
+        height: 140px;
+        margin-top: 8px;
+        padding: 16px 24px 14px;
+        box-sizing: border-box;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        opacity: 0;
+        transform: translateY(8px);
+        transition:
+          opacity 0.5s,
+          transform 0.5s;
+      }
+      .callout.on {
+        opacity: 1;
+        transform: none;
+      }
+      .callout.dim {
+        opacity: 0.58;
+      }
+      .callout .eyebrow {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .callout h2 {
+        margin: 0;
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+      }
+      .callout p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.45;
+        max-width: 110ch;
+      }
+      .callout .marvin {
+        margin-top: auto;
+        font-size: 12.5px;
+        color: var(--faint);
+        font-style: italic;
+      }
+      .callout .marvin::before {
+        content: "marvin · ";
+        font-style: normal;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      /* ── footer, start overlay ── */
+      .foot {
+        position: absolute;
+        left: 64px;
+        right: 64px;
+        bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .start {
+        position: absolute;
+        inset: 0;
+        background: var(--bg);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 0 110px;
+        box-sizing: border-box;
+        transition: opacity 0.6s;
+        z-index: 2;
+      }
+      .start.off {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .start .eyebrow {
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 18px;
+      }
+      .start h1 {
+        margin: 0;
+        font-size: 60px;
+        font-weight: 800;
+        letter-spacing: -0.035em;
+        line-height: 1.04;
+        max-width: 900px;
+        text-wrap: balance;
+      }
+      .start h1 span {
+        color: var(--human);
+      }
+      .start .sub {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 19px;
+        max-width: 60ch;
+      }
+      .start .legend {
+        margin-top: 44px;
+        display: flex;
+        gap: 22px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .start .legend i {
+        display: inline-block;
+        width: 11px;
+        height: 11px;
+        border-radius: 3px;
+        vertical-align: -1px;
+        margin-right: 7px;
+      }
+      .start .hint {
+        position: absolute;
+        bottom: 26px;
+        left: 110px;
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+
+      /* ── export: one page per beat ── */
+      html.export,
+      html.export body {
+        overflow: visible;
+        height: auto;
+        background: var(--bg);
+      }
+      html.export #live {
+        display: none;
+      }
+      .pages {
+        display: none;
+      }
+      html.export .pages {
+        display: block;
+        width: 1280px;
+      }
+      html.export .page {
+        position: relative;
+        width: 1280px;
+        height: 720px;
+        break-after: page;
+        overflow: hidden;
+      }
+      html.export .page .deck {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform: none !important;
+      }
+      html.export .n[data-state="running"],
+      html.export .n[data-state="human"] {
+        animation: none;
+        transform: none;
+      }
+      html.export .start,
+      html.export .page .foot .keys {
+        display: none;
+      }
+      @page {
+        size: 1280px 720px;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage" id="live"></div>
+    <div class="pages" id="pages"></div>
+    <script>
+      /* ── copy, in two languages ── */
+      const T = {
+        en: {
+          tagline: "A two-hour run, in nine minutes.",
+          sub: "An IBM ACE project from a spec, unattended. Count the decisions a person makes.",
+          hint: "space to start · ← → beats · L italiano · P export",
+          keys: "space pause · ← → beats · P export",
+          recon: "replay at 14× · a reconstruction of a real run",
+          run: "run time",
+          talk: "talk",
+          legend: ["waiting", "running", "done", "rejected", "interrupted", "a person"],
+          epic: ["spec", "plan", "you", "integrate", "8/8"],
+          steps: ["coder", "checks", "review", "judge", "merge"],
+          stories: [
+            "message flow skeleton",
+            "HTTP input + schema",
+            "ESQL mapping",
+            "error subflow",
+            "MQ output",
+            "test cases",
+            "BAR + policies",
+            "end-to-end check"
+          ],
+          seats: [
+            "Claude",
+            "Codex",
+            "Claude",
+            "Gemini",
+            "Codex",
+            "Claude",
+            "Gemini",
+            "local model"
+          ],
+          notes: {
+            reading: "reading the spec",
+            drafting: "drafting the plan",
+            approve: "a person reads it",
+            approved: "approved · hands off",
+            done: "coder: done ✓",
+            red3: "checks: 3 tests red",
+            fixing: "coder: fixing",
+            green: "checks: green",
+            f1: "review: 1 finding",
+            f2: "review: 2 findings",
+            f3: "review: 3 findings",
+            f0: "review: 0 findings",
+            revising: "coder: revising with findings",
+            lost: "coder: context lost at 1h 03m",
+            resumed: "resumed · 2/3 tasks kept",
+            lint: "checks: lint red",
+            building: "full build + tests",
+            merged: "merged",
+            all: "8/8 merged · 2h 04m",
+            judge: (p) => `judge: merge? ${p}`
+          },
+          beats: [
+            {
+              t: "The plan is a document.",
+              l: "The flow drafts it. One person reads it and approves it. From here on, nobody touches the run.",
+              m: "Three minutes of a human reading. I waited. I am good at that."
+            },
+            {
+              t: "Done is not an opinion.",
+              l: "The coder reports done. The build disagrees. The report is discarded, the build is kept, the coder goes again.",
+              m: "It was very confident. So was the iceberg."
+            },
+            {
+              t: "The judge answers a question. It does not write.",
+              l: "merge? 0.31 — a closed question, a probability, a threshold. Below it, the story goes back to the coder with the findings attached.",
+              m: "Somebody finally asked me a yes-or-no question. It is a start."
+            },
+            {
+              t: "Long runs lose the thread. Checkpoints do not.",
+              l: "One hour in, a coder drops out with its context gone. The lane resumes from the last checkpoint: two tasks kept, one redone. Nobody was paged.",
+              m: "Life. Don't talk to me about life. Talk to me about checkpoints."
+            },
+            {
+              t: "The agent is a seat.",
+              l: "Four different agents wrote this project. The gates, the judge and the plan did not change. Swap the seat, keep the method.",
+              m: "They keep replacing the help. The help keeps being replaced. I remain."
+            },
+            {
+              t: "Two hours. Two decisions.",
+              l: "8 of 8 stories merged. A person wrote the spec and approved the plan. Everything else was the flow, and every red node on this screen is a gate someone wrote once.",
+              m: "Brain the size of a planet, and they have me merging branches. It went fine."
+            },
+            {
+              t: "What it is not.",
+              l: "Not faster thinking: the same work, unattended. Not a substitute for the spec: a bad spec runs in two hours too. Not magic: the gates are yours to write, and they are the whole trick.",
+              m: "I would tell you it was hard. It was not. That is rather the point."
+            },
+            {
+              t: "Marvin.",
+              l: "The deck, this replay and the run sheet live in docs/presentation of the llm4ts repository. Questions.",
+              m: "Thank you for listening. I assume you did."
+            }
+          ]
+        },
+        it: {
+          tagline: "Due ore di lavoro, in nove minuti.",
+          sub: "Un progetto IBM ACE da una specifica, senza supervisione. Contate le decisioni prese da una persona.",
+          hint: "spazio per partire · ← → tappe · L english · P esporta",
+          keys: "spazio pausa · ← → tappe · P esporta",
+          recon: "replay a 14× · ricostruzione di un run reale",
+          run: "tempo del run",
+          talk: "talk",
+          legend: ["in attesa", "in corso", "fatto", "respinto", "interrotto", "una persona"],
+          epic: ["specifica", "piano", "tu", "integra", "8/8"],
+          steps: ["coder", "gate", "revisione", "giudice", "merge"],
+          stories: [
+            "scheletro del message flow",
+            "input HTTP + schema",
+            "mapping ESQL",
+            "subflow degli errori",
+            "output MQ",
+            "test case",
+            "BAR + policy",
+            "verifica end-to-end"
+          ],
+          seats: [
+            "Claude",
+            "Codex",
+            "Claude",
+            "Gemini",
+            "Codex",
+            "Claude",
+            "Gemini",
+            "modello locale"
+          ],
+          notes: {
+            reading: "legge la specifica",
+            drafting: "scrive il piano",
+            approve: "una persona lo legge",
+            approved: "approvato · mani giù",
+            done: "coder: fatto ✓",
+            red3: "gate: 3 test rossi",
+            fixing: "coder: corregge",
+            green: "gate: verde",
+            f1: "revisione: 1 rilievo",
+            f2: "revisione: 2 rilievi",
+            f3: "revisione: 3 rilievi",
+            f0: "revisione: 0 rilievi",
+            revising: "coder: rivede con i rilievi",
+            lost: "coder: contesto perso a 1h 03m",
+            resumed: "ripreso · 2/3 task conservati",
+            lint: "gate: lint rosso",
+            building: "build + test completi",
+            merged: "integrata",
+            all: "8/8 integrate · 2h 04m",
+            judge: (p) => `giudice: merge? ${p}`
+          },
+          beats: [
+            {
+              t: "Il piano è un documento.",
+              l: "Il flow lo scrive. Una persona lo legge e lo approva. Da qui in poi nessuno tocca il run.",
+              m: "Tre minuti di un umano che legge. Ho aspettato. Mi riesce bene."
+            },
+            {
+              t: "«Fatto» non è un'opinione.",
+              l: "Il coder dichiara fatto. La build non è d'accordo. Il resoconto si butta, la build si tiene, il coder riparte.",
+              m: "Era molto sicuro di sé. Anche l'iceberg."
+            },
+            {
+              t: "Il giudice risponde a una domanda. Non scrive.",
+              l: "merge? 0.31 — una domanda chiusa, una probabilità, una soglia. Sotto la soglia la storia torna al coder con i rilievi allegati.",
+              m: "Finalmente qualcuno mi fa una domanda da sì o no. È un inizio."
+            },
+            {
+              t: "I run lunghi perdono il filo. I checkpoint no.",
+              l: "Dopo un'ora un coder cade, contesto perso. La corsia riparte dall'ultimo checkpoint: due task conservati, uno rifatto. Nessuno è stato chiamato.",
+              m: "La vita. Non parlatemi della vita. Parlatemi di checkpoint."
+            },
+            {
+              t: "L'agente è una sedia.",
+              l: "Quattro agenti diversi hanno scritto questo progetto. Gate, giudice e piano non sono cambiati. Cambi la sedia, tieni il metodo.",
+              m: "Continuano a sostituire gli aiutanti. Gli aiutanti continuano a essere sostituiti. Io resto."
+            },
+            {
+              t: "Due ore. Due decisioni.",
+              l: "8 storie su 8 integrate. Una persona ha scritto la specifica e approvato il piano. Tutto il resto è stato il flow, e ogni nodo rosso su questo schermo è un gate che qualcuno ha scritto una volta.",
+              m: "Un cervello grande come un pianeta, e mi fanno fare i merge. È andata bene."
+            },
+            {
+              t: "Cosa non è.",
+              l: "Non è pensare più in fretta: è lo stesso lavoro, senza supervisione. Non sostituisce la specifica: una specifica sbagliata gira in due ore lo stesso. Non è magia: i gate li scrivete voi, e sono tutto il trucco.",
+              m: "Vi direi che è stato difficile. Non lo è stato. È proprio quello il punto."
+            },
+            {
+              t: "Marvin.",
+              l: "Il deck, questo replay e la scaletta sono in docs/presentation del repository llm4ts. Domande.",
+              m: "Grazie per aver ascoltato. Presumo lo abbiate fatto."
+            }
+          ]
+        }
+      }
+
+      /* ── the run: minutes of run time, node, state, note ── */
+      const SPEED = 14
+      const END = 124
+      const J = (p) => ["judge", p]
+      const EVENTS = [
+        [0, "e.spec", "running", "reading"],
+        [1, "e.spec", "done"],
+        [1, "e.plan", "running", "drafting"],
+        [3, "e.plan", "done"],
+        [3, "e.you", "human", "approve"],
+        [6, "e.you", "done", "approved"],
+        // wave 1
+        [6, "s1.coder", "running"],
+        [6, "s2.coder", "running"],
+        [6, "s3.coder", "running"],
+        [19, "s2.coder", "done", "done"],
+        [19, "s2.checks", "running"],
+        [21, "s2.checks", "failed", "red3"],
+        [22, "s2.coder", "running", "fixing"],
+        [24, "s1.coder", "done", "done"],
+        [24, "s1.checks", "running"],
+        [27, "s1.checks", "done", "green"],
+        [27, "s1.review", "running"],
+        [29, "s2.coder", "done", "done"],
+        [29, "s2.checks", "running"],
+        [31, "s2.checks", "done", "green"],
+        [31, "s2.review", "running"],
+        [32, "s1.review", "done", "f1"],
+        [32, "s1.judge", "running"],
+        [33, "s3.coder", "done", "done"],
+        [33, "s3.checks", "running"],
+        [34, "s1.judge", "done", J("0.91")],
+        [34, "s1.merge", "running"],
+        [35, "s1.merge", "done", "merged"],
+        [35, "s4.coder", "running"],
+        [36, "s3.checks", "done", "green"],
+        [36, "s3.review", "running"],
+        [37, "s2.review", "done", "f2"],
+        [37, "s2.judge", "running"],
+        [39, "s2.judge", "done", J("0.88")],
+        [39, "s2.merge", "running"],
+        [40, "s2.merge", "done", "merged"],
+        [40, "s5.coder", "running"],
+        [41, "s3.review", "done", "f3"],
+        [41, "s3.judge", "running"],
+        [43, "s3.judge", "failed", J("0.31")],
+        [44, "s3.coder", "running", "revising"],
+        [44, "s3.checks", "idle"],
+        [44, "s3.review", "idle"],
+        [44, "s3.judge", "idle"],
+        [52, "s4.coder", "done", "done"],
+        [52, "s4.checks", "running"],
+        [54, "s4.checks", "done", "green"],
+        [54, "s4.review", "running"],
+        [56, "s3.coder", "done", "done"],
+        [56, "s3.checks", "running"],
+        [58, "s3.checks", "done", "green"],
+        [58, "s3.review", "running"],
+        [59, "s4.review", "done", "f1"],
+        [59, "s4.judge", "running"],
+        [61, "s4.judge", "done", J("0.86")],
+        [61, "s4.merge", "running"],
+        [62, "s4.merge", "done", "merged"],
+        [62, "s7.coder", "running"],
+        [62, "s3.review", "done", "f0"],
+        [62, "s3.judge", "running"],
+        [63, "s5.coder", "interrupted", "lost"],
+        [64, "s3.judge", "done", J("0.90")],
+        [64, "s3.merge", "running"],
+        [65, "s3.merge", "done", "merged"],
+        [65, "s6.coder", "running"],
+        [65, "s5.coder", "running", "resumed"],
+        [74, "s5.coder", "done", "done"],
+        [74, "s5.checks", "running"],
+        [76, "s5.checks", "done", "green"],
+        [76, "s5.review", "running"],
+        [80, "s7.coder", "done", "done"],
+        [80, "s7.checks", "running"],
+        [81, "s5.review", "done", "f2"],
+        [81, "s5.judge", "running"],
+        [82, "s6.coder", "done", "done"],
+        [82, "s6.checks", "running"],
+        [82, "s7.checks", "failed", "lint"],
+        [83, "s5.judge", "done", J("0.89")],
+        [83, "s5.merge", "running"],
+        [83, "s7.coder", "running", "fixing"],
+        [84, "s5.merge", "done", "merged"],
+        [84, "s8.coder", "running"],
+        [84, "s6.checks", "done", "green"],
+        [84, "s6.review", "running"],
+        [89, "s6.review", "done", "f1"],
+        [89, "s6.judge", "running"],
+        [91, "s6.judge", "done", J("0.93")],
+        [91, "s6.merge", "running"],
+        [91, "s7.coder", "done", "done"],
+        [91, "s7.checks", "running"],
+        [92, "s6.merge", "done", "merged"],
+        [93, "s7.checks", "done", "green"],
+        [93, "s7.review", "running"],
+        [98, "s7.review", "done", "f2"],
+        [98, "s7.judge", "running"],
+        [100, "s7.judge", "done", J("0.87")],
+        [100, "s7.merge", "running"],
+        [101, "s7.merge", "done", "merged"],
+        [105, "s8.coder", "done", "done"],
+        [105, "s8.checks", "running"],
+        [107, "s8.checks", "done", "green"],
+        [107, "s8.review", "running"],
+        [112, "s8.review", "done", "f1"],
+        [112, "s8.judge", "running"],
+        [115, "s8.judge", "done", J("0.84")],
+        [115, "s8.merge", "running"],
+        [116, "s8.merge", "done", "merged"],
+        [116, "e.integrate", "running", "building"],
+        [123, "e.integrate", "done"],
+        [124, "e.done", "done", "all"]
+      ]
+      const toTalk = (runMin) => (runMin * 60) / SPEED
+      // talk seconds at which each beat starts; the first six are moments of the run
+      const BEATS = [3, 21, 43, 63, 84, 124]
+        .map(toTalk)
+        .concat([toTalk(END) + 25, toTalk(END) + 54])
+      const HOLD = 25
+
+      /* ── state of the run at a moment ── */
+      function stateAt(runMin) {
+        const nodes = {}
+        const notes = {}
+        for (const [t, id, state, note] of EVENTS) {
+          if (t > runMin) break
+          nodes[id] = state
+          if (note) notes[id.split(".")[0]] = { note, state }
+        }
+        return { nodes, notes }
+      }
+      const beatAt = (talk) => {
+        let b = -1
+        BEATS.forEach((t, i) => {
+          if (talk >= t) b = i
+        })
+        return b
+      }
+
+      /* ── one stage: builds the DOM, returns a render function ── */
+      function makeStage(root, lang) {
+        const S = T[lang]
+        const el = (tag, cls, text) => {
+          const e = document.createElement(tag)
+          if (cls) e.className = cls
+          if (text != null) e.textContent = text
+          return e
+        }
+        const deck = el("div", "deck")
+        root.appendChild(deck)
+
+        const bar = el("div", "bar")
+        const who = el("div", "who")
+        who.appendChild(el("b", null, "Marvin"))
+        who.appendChild(el("span", null, S.tagline))
+        bar.appendChild(who)
+        const talkBox = el("div", "talk")
+        talkBox.appendChild(el("span", "k", S.talk))
+        const talkEl = el("span", "t", "0:00")
+        talkBox.appendChild(talkEl)
+        const clock = el("div", "clock")
+        clock.appendChild(el("span", "k", S.run))
+        const bigEl = el("span", "big", "0h 00m")
+        clock.appendChild(bigEl)
+        bar.appendChild(talkBox)
+        bar.appendChild(clock)
+        deck.appendChild(bar)
+        const progress = el("div", "progress")
+        const progressBar = el("i")
+        progress.appendChild(progressBar)
+        deck.appendChild(progress)
+
+        const graph = el("div", "graph")
+        deck.appendChild(graph)
+        const nodeEls = {}
+        const noteEls = {}
+        const laneEls = {}
+        const lane = (key, cls, title, seat, steps) => {
+          const l = el("div", "lane " + cls)
+          const label = el("div", "label")
+          label.appendChild(el("b", null, title))
+          if (seat) {
+            const s = el("span", "seat")
+            s.appendChild(document.createTextNode("coder · "))
+            s.appendChild(el("em", null, seat))
+            label.appendChild(s)
+          }
+          l.appendChild(label)
+          const nodes = el("div", "nodes")
+          steps.forEach(([id, name], i) => {
+            if (i) nodes.appendChild(el("i", "arr"))
+            const n = el("div", "n", name)
+            n.dataset.state = "idle"
+            n.prepend(el("span", "shine"))
+            nodes.appendChild(n)
+            nodeEls[key + "." + id] = n
+          })
+          l.appendChild(nodes)
+          const note = el("span", "note")
+          l.appendChild(note)
+          noteEls[key] = note
+          laneEls[key] = l
+          graph.appendChild(l)
+        }
+        lane(
+          "e",
+          "epic",
+          "IBM ACE · " + S.epic[0],
+          null,
+          ["spec", "plan", "you", "integrate", "done"].map((id, i) => [id, S.epic[i]])
+        )
+        const stepIds = ["coder", "checks", "review", "judge", "merge"]
+        S.stories.forEach((name, i) =>
+          lane(
+            "s" + (i + 1),
+            "story",
+            `S${i + 1} · ${name}`,
+            S.seats[i],
+            stepIds.map((id, k) => [id, S.steps[k]])
+          )
+        )
+
+        const callout = el("div", "callout")
+        const eyebrow = el("div", "eyebrow")
+        const h2 = el("h2")
+        const p = el("p")
+        const marvin = el("div", "marvin")
+        callout.append(eyebrow, h2, p, marvin)
+        deck.appendChild(callout)
+
+        const foot = el("div", "foot")
+        foot.appendChild(el("span", null, S.recon))
+        foot.appendChild(el("span", "keys", S.keys))
+        deck.appendChild(foot)
+
+        const start = el("div", "start")
+        start.appendChild(el("div", "eyebrow", "Marvin · " + S.recon.split(" · ")[1]))
+        const h1 = el("h1")
+        h1.appendChild(document.createTextNode(S.tagline + " "))
+        h1.appendChild(el("span", null, S.sub.split(". ")[1] || ""))
+        start.appendChild(h1)
+        start.appendChild(el("div", "sub", S.sub.split(". ")[0] + "."))
+        const legend = el("div", "legend")
+        ;[["--idle"], ["--run"], ["--ok"], ["--err"], ["--int"], ["--human"]].forEach(([v], i) => {
+          const s = el("span")
+          const dot = el("i")
+          dot.style.background = `var(${v})`
+          s.appendChild(dot)
+          s.appendChild(document.createTextNode(S.legend[i]))
+          legend.appendChild(s)
+        })
+        start.appendChild(legend)
+        start.appendChild(el("div", "hint", S.hint))
+        deck.appendChild(start)
+
+        const fmtRun = (m) =>
+          `${Math.floor(m / 60)}h ${String(Math.floor(m % 60)).padStart(2, "0")}m`
+        const fmtTalk = (s) =>
+          `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`
+        const noteText = (n) => (Array.isArray(n) ? S.notes.judge(n[1]) : S.notes[n])
+        const noteCls = (st) =>
+          st === "failed"
+            ? "err"
+            : st === "interrupted"
+              ? "int"
+              : st === "human"
+                ? "human"
+                : st === "done"
+                  ? "ok"
+                  : ""
+        let shownBeat = -2
+
+        function render(talk, started) {
+          const runMin = Math.min(END, (talk * SPEED) / 60)
+          const { nodes, notes } = stateAt(runMin)
+          for (const id in nodeEls) {
+            const st = nodes[id] || "idle"
+            if (nodeEls[id].dataset.state !== st) nodeEls[id].dataset.state = st
+          }
+          for (const key in laneEls) {
+            const ids = Object.keys(nodeEls).filter((k) => k.startsWith(key + "."))
+            const states = ids.map((k) => nodes[k] || "idle")
+            const active = states.some(
+              (s) => s === "running" || s === "failed" || s === "interrupted" || s === "human"
+            )
+            const finished = key !== "e" && nodes[key + ".merge"] === "done"
+            laneEls[key].classList.toggle("active", active)
+            laneEls[key].classList.toggle("finished", finished && !active)
+            const n = notes[key]
+            const ne = noteEls[key]
+            const txt = n ? noteText(n.note) : ""
+            if (ne.textContent !== txt) {
+              ne.textContent = txt
+              ne.className = "note " + (txt ? "on " + noteCls(n.state) : "")
+            }
+          }
+          bigEl.textContent = fmtRun(runMin)
+          talkEl.textContent = fmtTalk(talk)
+          progressBar.style.width = `${(100 * runMin) / END}%`
+          const b = beatAt(talk)
+          if (b !== shownBeat) {
+            shownBeat = b
+            if (b >= 0) {
+              const B = S.beats[b]
+              eyebrow.textContent = `${b + 1} / ${S.beats.length}`
+              h2.textContent = B.t
+              p.textContent = B.l
+              marvin.textContent = B.m
+            }
+          }
+          callout.classList.toggle("on", b >= 0)
+          callout.classList.toggle(
+            "dim",
+            b >= 0 && talk - BEATS[b] > HOLD && b < S.beats.length - 1
+          )
+          start.classList.toggle("off", started)
+        }
+        return { deck, render }
+      }
+
+      /* ── live ── */
+      let lang = location.hash === "#it" ? "it" : "en"
+      const live = document.getElementById("live")
+      let stage
+      let talk = 0
+      let started = false
+      let paused = false
+      let last = 0
+      function build() {
+        live.innerHTML = ""
+        stage = makeStage(live, lang)
+        fit()
+        stage.render(talk, started)
+      }
+      function fit() {
+        const s = Math.min(innerWidth / 1280, innerHeight / 720)
+        stage.deck.style.transform = `translate(-50%, -50%) scale(${s})`
+      }
+      addEventListener("resize", fit)
+      function frame(now) {
+        if (started && !paused && !INSTANT) talk += (now - last) / 1000
+        last = now
+        stage.render(talk, started)
+        requestAnimationFrame(frame)
+      }
+      function toggle() {
+        if (!started) {
+          started = true
+          paused = false
+        } else paused = !paused
+      }
+      function jump(dir) {
+        const b = beatAt(talk)
+        const next =
+          dir > 0
+            ? Math.min(BEATS.length - 1, b + 1)
+            : Math.max(0, talk - BEATS[Math.max(0, b)] > 2 ? b : b - 1)
+        talk = BEATS[next] + 0.01
+        started = true
+      }
+
+      /* ── export: one page per beat ── */
+      let INSTANT = false
+      const pages = document.getElementById("pages")
+      function enterExport() {
+        if (INSTANT) return
+        INSTANT = true
+        paused = true
+        document.documentElement.classList.add("export")
+        pages.innerHTML = ""
+        BEATS.forEach((t) => {
+          const page = document.createElement("div")
+          page.className = "page"
+          pages.appendChild(page)
+          makeStage(page, lang).render(t + 0.01, true)
+        })
+        setTimeout(() => window.print(), 400)
+      }
+      function leaveExport() {
+        if (!INSTANT) return
+        INSTANT = false
+        document.documentElement.classList.remove("export")
+        pages.innerHTML = ""
+      }
+      addEventListener("afterprint", leaveExport)
+
+      addEventListener("keydown", (e) => {
+        if (e.key === "Escape") return leaveExport()
+        if (INSTANT) return
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault()
+          toggle()
+        } else if (e.key === "ArrowRight") jump(1)
+        else if (e.key === "ArrowLeft") jump(-1)
+        else if (e.key === "r" || e.key === "R") {
+          talk = 0
+          started = false
+          paused = false
+        } else if (e.key === "l" || e.key === "L") {
+          lang = lang === "en" ? "it" : "en"
+          location.hash = lang === "it" ? "#it" : ""
+          build()
+        } else if (e.key === "p" || e.key === "P") enterExport()
+      })
+      live.addEventListener("click", () => {
+        if (!INSTANT) toggle()
+      })
+
+      build()
+      requestAnimationFrame((now) => {
+        last = now
+        requestAnimationFrame(frame)
+      })
+    </script>
+  </body>
+</html>
