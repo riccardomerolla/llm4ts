@@ -3,10 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Marvin v2 (2026-11-04): an internal pitch, eight slides, three moments (our problem, one real run, the ask).
+     Generated for both languages from one script; yellow ⟨ fields ⟩ are placeholders to fill before presenting. -->
     <title>Marvin</title>
     <meta
       name="description"
-      content="Marvin: flow agentici che arrivano all'obiettivo, senza supervisione. Un talk di Riccardo Merolla."
+      content="Marvin: il nostro legacy in cloud, con agenti AI che fanno il lavoro e le nostre persone che prendono ogni decisione. Una presentazione interna di Riccardo Merolla."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -1763,18 +1765,313 @@
       html[lang="it"] .dontpanic {
         font-size: 104px;
       }
+
+      /* ── v2 (2026-11-04): internal pitch ── */
+      .tbd {
+        font-family: var(--mono);
+        font-size: 0.78em;
+        font-weight: 500;
+        color: var(--human-fg);
+        border: 1.5px dashed rgba(234, 179, 8, 0.6);
+        border-radius: 8px;
+        padding: 0 0.35em;
+        white-space: nowrap;
+      }
+      .tbd::before {
+        content: "⟨ ";
+        opacity: 0.6;
+      }
+      .tbd::after {
+        content: " ⟩";
+        opacity: 0.6;
+      }
+      #draft {
+        position: fixed;
+        left: 18px;
+        top: 14px;
+        z-index: 5;
+        font-family: var(--mono);
+        font-size: 13px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--human-fg);
+        border: 1px dashed rgba(234, 179, 8, 0.6);
+        border-radius: 999px;
+        padding: 6px 12px;
+        background: rgba(5, 7, 11, 0.7);
+      }
+      #draft:empty {
+        display: none;
+      }
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 28px;
+        margin-top: 60px;
+      }
+      .fact {
+        border: 1px solid var(--line-2);
+        border-radius: 20px;
+        padding: 30px 34px;
+        background: rgba(14, 17, 22, 0.7);
+      }
+      .fact .v {
+        font-size: 72px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1;
+      }
+      .fact .k {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 27px;
+        line-height: 1.3;
+      }
+      .s3v2 {
+        display: grid;
+        grid-template-columns: 800px 1fr;
+        gap: 56px;
+        margin-top: 6px;
+        align-items: start;
+      }
+      .s3v2 .bigq {
+        font-size: 64px;
+      }
+      .why {
+        list-style: none;
+        padding: 0;
+        margin: 30px 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .why li {
+        display: flex;
+        gap: 18px;
+        font-size: 23px;
+        line-height: 1.35;
+        color: var(--muted);
+      }
+      .why li b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .why li i {
+        font-style: normal;
+        font-family: var(--mono);
+        color: var(--guide);
+        flex: none;
+        width: 30px;
+        padding-top: 3px;
+      }
+      .s3v2 .card .cbody {
+        grid-template-columns: 1fr;
+      }
+      .s3v2 .card .cbody .viz {
+        padding: 26px 22px 18px;
+      }
+      .s3v2 .card .left-out {
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding: 16px 26px 20px;
+      }
+      .s3v2 .row.zoom {
+        transform: scale(0.86);
+        transform-origin: left top;
+      }
+      .s3 .legend-wrap {
+        margin-top: 26px;
+      }
+      .vid {
+        width: 100%;
+        max-height: 620px;
+        aspect-ratio: 16 / 9;
+        background: #000;
+        border-radius: 0 0 24px 24px;
+        display: block;
+        object-fit: contain;
+      }
+      .card[data-mode="sim"] .vid {
+        display: none;
+      }
+      .card:not([data-mode="sim"]) [data-sim] {
+        display: none;
+      }
+      .card:not([data-mode="sim"]) [data-simtag] {
+        display: none;
+      }
+      .card[data-mode="sim"] [data-rectag] {
+        display: none;
+      }
+      .docs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
+        margin-top: 48px;
+      }
+      .doc {
+        font-family: var(--mono);
+        font-size: 27px;
+        line-height: 1.65;
+        color: var(--muted);
+        margin: 0;
+        padding: 24px 32px 30px;
+        white-space: pre-wrap;
+      }
+      .doc .hl {
+        color: var(--fg);
+      }
+      .doc .c {
+        color: var(--faint);
+      }
+      .proof {
+        display: grid;
+        grid-template-columns: 1.25fr 1fr;
+        gap: 32px;
+        margin-top: 36px;
+        align-items: stretch;
+      }
+      .proof .viz {
+        padding: 40px 30px 34px;
+      }
+      .cov {
+        padding: 26px 32px 30px;
+      }
+      .cov .big {
+        font-size: 72px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1;
+      }
+      .cov .track {
+        height: 20px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+        margin-top: 22px;
+      }
+      .cov .track i {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: linear-gradient(90deg, var(--guide-dim), var(--guide));
+        transition: width 1.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .cov p {
+        color: var(--muted);
+        font-size: 22px;
+        margin-top: 18px;
+        line-height: 1.4;
+      }
+      .numtable {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 56px;
+        font-size: 32px;
+      }
+      .numtable th {
+        font-family: var(--mono);
+        font-size: 18px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--faint);
+        text-align: left;
+        padding: 0 16px 14px;
+        border-bottom: 1px solid var(--line-2);
+        font-weight: 500;
+      }
+      .numtable td {
+        padding: 34px 16px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+      .numtable td:first-child {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .numtable td .s {
+        display: block;
+        color: var(--faint);
+        font-size: 22px;
+        font-weight: 400;
+        margin-top: 4px;
+      }
+      .status {
+        margin-top: 60px;
+        font-size: 30px;
+        color: var(--muted);
+        line-height: 1.55;
+        max-width: 1600px;
+      }
+      .status b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .ask {
+        list-style: none;
+        padding: 0;
+        margin: 44px 0 0;
+        counter-reset: a;
+      }
+      .ask li {
+        font-size: 38px;
+        line-height: 1.35;
+        padding-left: 80px;
+        position: relative;
+        margin-bottom: 30px;
+        max-width: 1600px;
+      }
+      .ask li::before {
+        counter-increment: a;
+        content: counter(a);
+        position: absolute;
+        left: 0;
+        top: 2px;
+        width: 54px;
+        height: 54px;
+        border-radius: 14px;
+        background: var(--human);
+        color: #1c1917;
+        font-family: var(--mono);
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+      }
+      .owners {
+        margin-top: 26px;
+        font-size: 30px;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .owners b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .s8close .closing {
+        font-size: 52px;
+        margin-top: 18px;
+      }
+      .s8close .thanks {
+        bottom: 118px;
+      }
+      .s8close .sigh {
+        bottom: 170px;
+      }
     </style>
   </head>
   <body>
     <canvas id="stars" aria-hidden="true"></canvas>
     <div class="nebula" aria-hidden="true"></div>
     <div id="progress"></div>
+    <div id="draft"></div>
     <div class="hint" id="hint">← → · spazio · clic per muoversi · F schermo intero · N note</div>
     <div id="viewport">
       <main id="stage" aria-live="polite">
         <!-- 1 -->
         <section class="slide s1" data-title="Marvin">
-          <div class="panic-badge in" style="--d: 1600">NIENTE PANICO</div>
+          <div class="panic-badge in" style="--d: 1600">DON'T PANIC</div>
           <div class="planet-wrap in" style="--d: 300" aria-hidden="true">
             <div class="planet">
               <div class="sphere"></div>
@@ -1803,7 +2100,7 @@
               </div>
             </div>
           </div>
-          <p class="kicker in">Presentazione di progetto · ingegneria agentica</p>
+          <p class="kicker in">Interno · modernizzazione WMF · <span class="tbd">data</span></p>
           <h1 class="in" style="--d: 120">Marvin</h1>
           <p
             class="quote"
@@ -1812,90 +2109,69 @@
             <span class="t"></span><span class="caret"></span>
           </p>
           <p class="sub in" style="--d: 400">
-            Flow agentici che arrivano all'obiettivo senza supervisione, dentro un processo che si
-            può leggere.
+            Marvin porta il nostro legacy in cloud. Gli agenti AI fanno il lavoro, le nostre persone
+            prendono ogni decisione, e il risultato è dimostrato equivalente.
           </p>
           <div class="who in" style="--d: 600">
-            <b>Riccardo Merolla</b><i class="sep"></i><span>designer · ingegnere</span>
+            <b>Riccardo Merolla</b><i class="sep"></i><span>Tech Lead · modernizzazione WMF</span>
           </div>
           <p class="keys in" style="--d: 900">
-            <kbd>←</kbd> <kbd>→</kbd> avanti/indietro · <kbd>F</kbd> schermo intero ·
-            <kbd>N</kbd> note
+            <kbd>←</kbd> <kbd>→</kbd> muoversi · <kbd>F</kbd> schermo intero · <kbd>N</kbd> note
           </p>
           <aside class="notes">
             <p>
-              Ciao, sono Riccardo. Questo talk parla di Marvin: un modo di far lavorare gli agenti
-              AI di programmazione dentro workflow espliciti, così che un run possa andare avanti da
-              solo e arrivare comunque dove doveva arrivare.
+              Ciao. Sono Riccardo, Tech Lead della modernizzazione WMF. Questa è una presentazione
+              interna, e me ne assumo la responsabilità: in dieci minuti voglio farvi vedere il
+              nostro COBOL che gira sul nuovo stack, come ci è arrivato, e cosa vi chiedo alla fine.
             </p>
             <p>
-              Il nome viene da Marvin, l'androide paranoico della Guida galattica per gli
-              autostoppisti: un cervello grande come un pianeta, a cui affidano lavoretti, convinto
-              che andrà tutto storto. È un ritratto piuttosto fedele di un agente di programmazione
-              oggi. Bravissimo, e prontissimo a perdersi per strada.
+              Il nome è Marvin, l'androide della Guida galattica per gli autostoppisti: un cervello
+              grande come un pianeta, messo a fare commissioni, convinto che andrà tutto male. È un
+              ritratto onesto di un agente di coding, ed è proprio per questo che il metodo non si
+              fida mai della sua parola.
             </p>
-            <p>
-              Non è una presentazione commerciale. Voglio spiegare il metodo: le idee, la forma di
-              un run e cosa è cambiato nella pratica. Dieci minuti, undici slide. I quadratini
-              colorati che girano attorno al pianeta sono gli stati che vedrete in tutte le slide.
-            </p>
+            <p>Niente panico: ogni decisione che vedrete oggi la prende una persona.</p>
           </aside>
         </section>
 
         <!-- 2 -->
-        <section class="slide s2" data-title="Il problema">
-          <p class="eyebrow in">Il problema</p>
-          <h2 class="title in" style="--d: 100">
-            Lasciati da soli, gli agenti dicono “fatto” quando non è vero, e nei run lunghi perdono
-            il filo.
+        <section class="slide s2" data-title="Il nostro problema">
+          <p class="eyebrow in">Il nostro problema</p>
+          <h2 class="title in" style="--d: 100; max-width: 1680px">
+            <span class="tbd">nome applicazione</span>: <span class="tbd">N</span> programmi COBOL
+            dietro un front end J2EE, e <span class="tbd">M</span> persone che sanno ancora
+            modificarli.
           </h2>
-          <div class="two">
-            <div class="card in" style="--d: 300" data-card="a">
-              <div class="card-head">
-                <div>
-                  <p class="card-title">“Fatto”</p>
-                  <p class="card-desc">L'agente dichiara il successo. Nessuno ha controllato.</p>
-                </div>
-                <span class="tag">esempio</span>
-              </div>
-              <div class="viz nob"><div class="row" data-row></div></div>
+          <div class="facts">
+            <div class="fact in" style="--d: 250">
+              <div class="v"><span class="tbd">righe</span></div>
+              <div class="k">righe di COBOL e JSP</div>
             </div>
-            <div class="card in" style="--d: 450" data-card="b">
-              <div class="card-head">
-                <div>
-                  <p class="card-title">Il run lungo</p>
-                  <p class="card-desc">A ogni passo l'obiettivo si allontana un po' di più.</p>
-                </div>
-                <span class="tag">esempio</span>
-              </div>
-              <div class="viz nob"><div class="row" data-row></div></div>
-              <div class="meter">
-                <div class="lab">
-                  <span>l'obiettivo, nella testa dell'agente</span><span data-pct>chiaro</span>
-                </div>
-                <div class="bar"><div class="fill" data-fill></div></div>
-              </div>
+            <div class="fact in" style="--d: 400">
+              <div class="v"><span class="tbd">€ / anno</span></div>
+              <div class="k">all'anno per tenerla in vita: licenze, persone, incidenti</div>
+            </div>
+            <div class="fact in" style="--d: 550">
+              <div class="v"><span class="tbd">anni</span></div>
+              <div class="k">dall'ultimo tentativo di riscrittura abbandonato</div>
             </div>
           </div>
-          <p class="quip">Marvin: <em>“Fatto”, ha detto. Non lo era. Potevo dirglielo io.</em></p>
+          <p class="lede in" style="--d: 700; max-width: 1650px; margin-top: 60px; font-size: 34px">
+            Riscriverla a mano non succede mai. Non è mai urgente, chi la conosce è occupato a
+            tenerla in piedi, e
+            <b>nessuno può dimostrare che il nuovo sistema si comporti come il vecchio.</b> Marvin è
+            nato per quest'ultimo punto.
+          </p>
           <aside class="notes">
-            <p>Quando lasciavo lavorare gli agenti da soli, tornavano sempre due problemi.</p>
             <p>
-              Il primo, a sinistra: l'agente dichiara il lavoro finito quando non lo è. Scrive
-              “tutti i test passano” senza averli lanciati, oppure completa tre funzionalità su
-              cinque e annuncia il successo. Nel ciclo non c'è niente che gli chieda di dimostrare
-              qualcosa.
+              Sessanta secondi sul nostro problema, con le nostre parole. Compila i tre numeri
+              dall'inventario WMF; se uno non è certo, togli il riquadro invece di tirare a
+              indovinare.
             </p>
             <p>
-              Il secondo, a destra: in un run lungo l'agente perde il filo. L'obiettivo e le
-              decisioni prese un'ora prima escono dalla sua memoria di lavoro, così i passi
-              successivi contraddicono quelli precedenti, oppure si mette tranquillamente a
-              risolvere un altro problema.
-            </p>
-            <p>
-              La radice è la stessa: ci fidiamo del racconto che l'agente fa del proprio lavoro, e
-              teniamo lo stato del lavoro dentro l'agente. Il resto del talk parla di come portare
-              tutte e due le cose fuori dall'agente. Queste due card sono esempi, non misurazioni.
+              Il motivo per cui la riscrittura non succede mai non sono i soldi. È che nessuno può
+              firmare che il nuovo sistema è equivalente. Tieni quella parola, equivalente: la demo
+              finisce lì.
             </p>
           </aside>
         </section>
@@ -1903,541 +2179,392 @@
         <!-- 3 -->
         <section class="slide s3" data-title="L'idea">
           <p class="eyebrow in">L'idea</p>
-          <div class="s3grid">
+          <div class="s3v2">
             <div>
               <p class="bigq in" style="--d: 100">
                 Gli agenti fanno il volume.<br /><span class="y"
                   >Le persone prendono le decisioni.</span
                 >
               </p>
-              <p class="lede in" style="--d: 350">
-                Il processo vive nel codice. <b>Gli agenti possono cambiare.</b> Ogni passo è
-                visibile, ogni rilievo è messo per iscritto, e non succede niente di importante
-                finché una persona non dice sì.
+              <p class="lede in" style="--d: 250; font-size: 26px">
+                Supervisionato nelle decisioni: il piano, la specifica, il merge. Tutto quello che
+                sta in mezzo è un flow che gira da solo e mette per iscritto ogni passo.
               </p>
+              <ol class="why">
+                <li class="in" style="--d: 350">
+                  <i>01</i
+                  ><span
+                    ><b>Solo il lavoro revisionato finisce in commit.</b> La build e un secondo
+                    agente controllano ogni modifica. L'agente non si corregge mai i compiti da
+                    solo.</span
+                  >
+                </li>
+                <li class="in" style="--d: 500">
+                  <i>02</i
+                  ><span
+                    ><b>Ogni passo è un file nel nostro repository.</b> Piano, rilievi, avanzamento,
+                    verdetto. Un run si ferma ovunque e riparte da dove era.</span
+                  >
+                </li>
+                <li class="in" style="--d: 650">
+                  <i>03</i
+                  ><span
+                    ><b>L'agente è una sedia.</b> Oggi Gemini CLI, attraverso
+                    <span class="tbd">il nostro progetto Vertex AI</span>; un modello locale dove i
+                    dati non possono uscire. Codice e dati restano nel nostro perimetro.</span
+                  >
+                </li>
+              </ol>
             </div>
-            <div class="card in" style="--d: 300">
+            <div class="card hero-card in" style="--d: 300">
               <div class="card-head">
-                <div><p class="card-title">un workflow, come codice</p></div>
-                <span class="tag">illustrativo</span>
-              </div>
-              <div class="flowcode" data-code></div>
-              <div class="seats">
-                <div class="seat">
-                  <p class="role">pianifica e giudica</p>
-                  <span class="who" data-seat="plan">Claude</span>
+                <div>
+                  <p class="card-title">Il ciclo base</p>
+                  <p class="card-desc">Un task, dall'inizio al commit.</p>
                 </div>
-                <div class="seat">
-                  <p class="role">scrive il codice</p>
-                  <span class="who g" data-seat="code">Claude</span>
+                <span class="tag">simulato · quello che passa ogni story</span>
+              </div>
+              <div class="cbody">
+                <div class="viz">
+                  <svg class="arc" data-arc aria-hidden="true">
+                    <path d="" />
+                    <text></text>
+                  </svg>
+                  <div class="row zoom" data-row></div>
+                </div>
+                <div class="left-out">
+                  <h4>Cosa resta</h4>
+                  <ul class="arts" data-arts></ul>
                 </div>
               </div>
             </div>
           </div>
-          <div class="legend-wrap in" style="--d: 700">
-            <div class="legend" aria-label="Legenda">
+          <div class="legend-wrap in" style="--d: 800">
+            <div class="legend" aria-label="Legend">
               <span class="tag">come leggere i run</span>
-              <span><i style="background: var(--idle); opacity: 0.6"></i>in attesa</span>
-              <span><i style="background: var(--run)"></i>un agente sta lavorando</span>
-              <span><i style="background: var(--ok)"></i>fatto</span>
-              <span><i style="background: var(--err)"></i>non ha passato la review</span>
-              <span><i style="background: var(--int)"></i>interrotto</span>
-              <span><i style="background: var(--human)"></i>serve una persona</span>
+              <span><i style="background: var(--idle); opacity: 0.6)"></i>in attesa</span
+              ><span><i style="background: var(--run)"></i>un agente lavora</span
+              ><span><i style="background: var(--ok)"></i>fatto</span
+              ><span><i style="background: var(--err)"></i>non ha passato la review</span
+              ><span><i style="background: var(--int)"></i>interrotto</span
+              ><span><i style="background: var(--human)"></i>serve una persona</span>
             </div>
           </div>
           <p class="quip">
-            Marvin:
-            <em>Sostituitemi pure. Il processo non se ne accorgerà. Nessuno se ne accorge mai.</em>
+            Marvin: <em>Sostituitemi pure. Il processo non se ne accorgerà nemmeno.</em>
           </p>
           <aside class="notes">
             <p>
-              L'idea sta in una frase: gli agenti fanno il volume, le persone prendono le decisioni.
+              Il metodo in una frase: gli agenti fanno il volume, le persone prendono le decisioni.
+              Non «senza supervisione»: supervisionato nelle decisioni. Piano, specifica e merge
+              sono di una persona; tutto il resto è un flow.
             </p>
             <p>
-              Il processo, cioè i passi, i controlli, chi approva cosa e cosa viene messo per
-              iscritto, vive nel codice, nel repository, accanto al progetto. Non è un prompt e non
-              sta nella testa di qualcuno. Gli agenti sono la parte sostituibile: a destra, il ruolo
-              di chi scrive il codice passa da un agente all'altro, e il testo del workflow non si
-              muove.
+              Tre motivi per fidarsi di un run, con il ciclo più piccolo che gira a destra. Guardate
+              la review diventare rossa: il rilievo va in un file e torna indietro come revisione.
+              Solo allora c'è un commit. «Fatto» non è qualcosa che l'agente dice di sé.
             </p>
             <p>
-              Siccome il processo è esplicito, ogni passo è visibile e ogni rilievo finisce in un
-              file. E le decisioni che contano, come approvare un piano, restano a una persona.
-            </p>
-            <p>
-              In basso c'è la legenda per il resto della presentazione. Grigio è in attesa, blu è un
-              agente al lavoro, verde è fatto, rosso non ha passato la review, arancione è
-              interrotto, giallo vuol dire che serve una persona.
+              Sulla sedia, dillo prima che lo chiedano: usiamo Gemini CLI attraverso il nostro
+              progetto Vertex AI, niente esce dal tenant, e un modello locale è la riserva per i
+              dati che non possono uscire affatto. Conferma la formulazione esatta del perimetro con
+              la sicurezza prima della riunione.
             </p>
           </aside>
         </section>
 
         <!-- 4 -->
-        <section class="slide s4" data-title="Il ciclo di base">
-          <p class="eyebrow in">Il ciclo di base</p>
+        <section class="slide s4" data-title="Un run, registrato">
+          <p class="eyebrow in">Un run · <span class="tbd">nome modulo</span> · ambiente di test</p>
           <h2 class="title in" style="--d: 100">
-            Piano, build, controlli, review.
-            <span class="g">Solo il lavoro revisionato finisce nel commit.</span>
+            Novanta secondi di un run da <span class="tbd">N</span> minuti.
+            <span class="g">L'orologio è vero.</span>
           </h2>
-          <p class="lede in" style="--d: 250">
-            Quello che la review non accetta torna indietro come revisione. L'agente non si corregge
-            mai i compiti da solo.
+          <p class="lede in" style="--d: 250; max-width: 1600px">
+            Registrato il <span class="tbd">data</span>. Tre cose da guardare: il run si ferma per
+            il piano, un rilievo della review rimanda indietro una story, e il replay finale
+            confronta vecchio e nuovo.
           </p>
           <div class="card hero-card in" style="--d: 350">
             <div class="card-head">
               <div>
-                <p class="card-title">Il ciclo di base</p>
-                <p class="card-desc">Un task, dall'inizio al commit.</p>
+                <p class="card-title">Il run</p>
+                <p class="card-desc">Compresso; i timestamp sullo schermo sono quelli originali.</p>
               </div>
-              <span class="tag">run simulato · cifre illustrative</span>
+              <span class="tag" data-rectag>registrazione</span>
+              <span class="tag" data-simtag>simulato · da sostituire con la registrazione</span>
             </div>
-            <div class="cbody">
-              <div class="viz">
-                <svg class="revarc" data-arc>
-                  <path d="" />
-                  <text></text>
-                </svg>
-                <div class="row zoom" data-row></div>
+            <video
+              class="vid"
+              src="media/marvin-run.mp4"
+              muted
+              playsinline
+              controls
+              preload="metadata"
+            ></video>
+            <div data-sim>
+              <div class="viz" style="padding-top: 22px; padding-bottom: 20px">
+                <div class="dag" data-dag></div>
               </div>
               <div class="left-out">
                 <h4>Cosa resta</h4>
-                <ul class="arts" data-arts></ul>
+                <ul class="arts cols" data-arts></ul>
               </div>
             </div>
           </div>
-          <p class="quip">Marvin: <em>Gira e rigira. Non parlatemi dei cicli.</em></p>
           <aside class="notes">
             <p>
-              Questa è l'unità più piccola del metodo, e tutto il resto è costruito a partire da
-              qui.
+              Non dal vivo, di proposito: un run dura un'ora e non fa mai esattamente la stessa cosa
+              due volte, e un fallimento in diretta in videochiamata sarebbe l'unica cosa che la
+              gente ricorderebbe. Questo è un run vero, compresso; i timestamp sono quelli
+              originali.
             </p>
             <p>
-              Un agente scrive un piano. Un agente costruisce seguendo il piano. Poi partono i
-              controlli: la vostra build, i vostri test, tutto quello che una macchina può
-              verificare. Poi una review separata guarda il lavoro. Guardate la review diventare
-              rossa: ha trovato un test mancante. Quel rilievo viene scritto in un file e torna a
-              chi scrive il codice come revisione. Lui lo sistema, i controlli ripartono, la review
-              dà il via libera, e solo allora c'è un commit.
+              Per fare la registrazione: cattura il run sull'ambiente di test (la vista watch o un
+              registratore dello schermo), taglialo a circa novanta secondi tenendo l'orologio
+              visibile, e salvalo come docs/presentation/media/marvin-run.mp4. Finché il file non
+              esiste la slide mostra la simulazione e lo dichiara.
             </p>
             <p>
-              Questo risponde al primo problema di prima. “Fatto” non è più qualcosa che l'agente
-              dice di sé. Fatto vuol dire che ha passato controlli e review, e che resta una traccia
-              scritta di cosa è emerso lungo la strada. Guardate la lista “cosa resta”: il piano, i
-              rilievi di ogni giro e un commit per ogni task revisionato.
+              Racconta i tre momenti mentre passano: lo stop giallo, la review rossa, il replay.
             </p>
           </aside>
         </section>
 
         <!-- 5 -->
-        <section class="slide s5" data-title="Il piano è un documento">
-          <div class="split">
-            <div>
-              <p class="eyebrow in" style="--d: 0">Decidono le persone</p>
-              <h2 class="title in" style="--d: 100">
-                Il piano è un documento. <span class="y">Modificarlo è la decisione.</span>
-              </h2>
-              <p class="body in" style="--d: 250">
-                Prima di scrivere codice, un agente prepara un piano che una persona può leggere. Il
-                flow <b>si ferma e aspetta</b>. Lo approvi e il lavoro parte. Lo rimandi indietro e
-                l'agente lo rivede, <b>mantenendo le tue modifiche</b>.
-              </p>
-            </div>
-            <div class="card in" style="--d: 300; margin-top: 20px">
+        <section class="slide s5" data-title="Cosa ha deciso una persona">
+          <p class="eyebrow in">Cosa ha deciso una persona</p>
+          <h2 class="title in" style="--d: 100; max-width: 1700px">
+            Ho approvato il piano.
+            <span class="g">La review ha trovato una lacuna che mi era sfuggita.</span>
+          </h2>
+          <p class="lede in" style="--d: 250; max-width: 1600px">
+            Entrambi i file sono nel repository, accanto al codice. Niente qui è stato scritto per
+            la slide: è quello che il run ha lasciato.
+          </p>
+          <div class="docs">
+            <div class="card in" style="--d: 350">
               <div class="card-head">
                 <div>
-                  <p class="card-title">Aspetta una persona</p>
+                  <p class="card-title">plan.md</p>
                   <p class="card-desc">
-                    Il run resta fermo sul piano finché non rispondi. Simulato.
+                    approvato da <span class="tbd">nome</span> il <span class="tbd">data</span>
                   </p>
                 </div>
-                <div class="controls">
-                  <button class="btn human" data-approve disabled tabindex="-1">
-                    Approva il piano</button
-                  ><button class="btn" data-back disabled tabindex="-1">Rimanda indietro</button>
+                <span class="tag">human</span>
+              </div>
+              <pre
+                class="doc"
+              ><span class="c"># <span class="tbd">modulo</span> → <span class="tbd">target</span></span>
+<span class="hl">story:</span>
+  1. <span class="tbd">story 1</span>
+  2. <span class="tbd">story 2</span>
+  3. <span class="tbd">story 3</span>
+<span class="c"># responsabili, ordine, cosa vuol dire fatto: tutto in questo file</span>
+<span class="y">→ fermo qui finché una persona non ha risposto</span></pre>
+            </div>
+            <div class="card in" style="--d: 500">
+              <div class="card-head">
+                <div>
+                  <p class="card-title">findings.md</p>
+                  <p class="card-desc">review · giro 1</p>
                 </div>
+                <span class="tag">review</span>
               </div>
-              <div class="viz"><div class="row" data-row></div></div>
-              <div class="left-out">
-                <h4>Cosa resta</h4>
-                <ul class="arts" data-arts></ul>
-              </div>
+              <pre
+                class="doc"
+              >story <span class="tbd">n</span>: <span class="tbd">la lacuna trovata dalla review</span>
+<span class="r">→ non passata · rimandata come revisione</span>
+
+<span class="c"># giro 2</span>
+<span class="g">risolta ✓</span></pre>
             </div>
           </div>
-          <p class="quip">
-            Marvin:
-            <em
-              >Si sono fermati a chiedere a un umano. Be', qualcuno dovrà pur prendersi la
-              colpa.</em
-            >
-          </p>
           <aside class="notes">
             <p>
-              Senza supervisione non vuol dire senza controllo. Il flow ha alcune fermate volute, e
-              la prima è il piano.
+              Lascia le slide per un minuto: premi F per uscire dallo schermo intero e apri i veri
+              plan.md e findings.md del run. Mostra lo stop nel piano, la tua modifica, e il
+              rilievo. Poi torna.
             </p>
             <p>
-              Un agente scrive il piano come un normale documento nel repository: le story, chi
-              possiede quali file, in che ordine. Poi il run si ferma, il nodo giallo, e aspetta una
-              persona. Finché non rispondete non succede nient'altro.
-            </p>
-            <p>
-              Nel run vedete che prima lo rimando indietro. Ho modificato il piano, e l'agente lo
-              rivede mantenendo le mie modifiche. Poi lo approvo, e parte la build.
-            </p>
-            <p>
-              Il punto è che la decisione si prende modificando un documento, non chattando con un
-              agente. Il piano è leggibile, è versionato come il codice, ed è la cosa su cui tutti
-              si sono messi d'accordo. È anche il punto dove un team che adotta il metodo concentra
-              la maggior parte della sua attenzione.
+              Il punto: la decisione è stata presa modificando un documento, e la lacuna l'ha
+              trovata una sedia di review, non una persona che legge diff per un pomeriggio.
             </p>
           </aside>
         </section>
 
         <!-- 6 -->
-        <section class="slide s6" data-title="Un'epic, tanti agenti, un solo branch">
-          <p class="eyebrow in">Agenti in parallelo</p>
-          <h2 class="title in" style="--d: 100">Un'epic, tanti agenti, un solo branch.</h2>
+        <section class="slide s6" data-title="La prova">
+          <p class="eyebrow in">La prova</p>
+          <h2 class="title in" style="--d: 100; max-width: 1700px">
+            Vecchio e nuovo, stessi input registrati:
+            <span class="g"><span class="tbd">0</span> differenze</span> su
+            <span class="tbd">N</span> transazioni.
+          </h2>
           <p class="lede in" style="--d: 250; max-width: 1600px">
-            Ogni story dichiara quali file possiede e da cosa dipende. Le story indipendenti vengono
-            costruite in contemporanea, ognuna nella propria copia del repository.
-            <b>Un giudice valuta ogni story prima del merge.</b>
+            Nemmeno l'equivalenza è un'opinione. Il comportamento registrato del vecchio sistema
+            viene rieseguito sul nuovo modulo, e la copertura dice quanta parte del modulo le
+            registrazioni esercitano.
           </p>
-          <div class="card hero-card in" style="--d: 350">
-            <div class="card-head">
-              <div>
-                <p class="card-title">Story, tre alla volta</p>
-                <p class="card-desc">
-                  La story 1 prepara il terreno. Le story 2–4 girano insieme. La 5 le aspetta.
+          <div class="proof">
+            <div class="card in" style="--d: 350">
+              <div class="card-head">
+                <div>
+                  <p class="card-title">Replay</p>
+                  <p class="card-desc">
+                    Registrato sul lato legacy, rieseguito sul lato nuovo, confrontato.
+                  </p>
+                </div>
+                <span class="tag">simulato · cifre dal diff report</span>
+              </div>
+              <div class="viz"><div class="row" data-row></div></div>
+              <div class="left-out">
+                <h4>Cosa resta</h4>
+                <ul class="arts cols" data-arts></ul>
+              </div>
+            </div>
+            <div class="card in" style="--d: 500">
+              <div class="card-head">
+                <div>
+                  <p class="card-title">Copertura</p>
+                  <p class="card-desc">delle regole del modulo esercitate dalle registrazioni</p>
+                </div>
+              </div>
+              <div class="cov">
+                <div class="big"><span class="tbd">Y</span>%</div>
+                <div class="track" data-cov data-cov="0"><i></i></div>
+                <p>
+                  Le regole non coperte sono elencate in coverage.md, ognuna con un responsabile e
+                  una data.
                 </p>
               </div>
-              <span class="tag">run simulato · nomi file illustrativi</span>
-            </div>
-            <div class="viz" style="padding-top: 22px; padding-bottom: 20px">
-              <div class="dag" data-dag></div>
-            </div>
-            <div class="left-out">
-              <h4>Cosa resta</h4>
-              <ul class="arts cols" data-arts></ul>
             </div>
           </div>
-          <p class="quip">
-            Marvin: <em>Cinque di noi insieme. Cinque volte la tristezza, un solo branch.</em>
-          </p>
           <aside class="notes">
             <p>
-              Il lavoro vero è più grande di un singolo task, quindi il piano divide un'epic in
-              story. Ogni story dichiara quali file possiede e da quali altre story dipende. È
-              questa dichiarazione che rende sicuro il lavoro in parallelo.
+              Questa è la slide per cui la sala è venuta. Vecchio e nuovo, stessi input, zero
+              differenze, e un numero di copertura accanto così nessuno deve chiederlo.
             </p>
             <p>
-              Guardate il run. La story 1 prepara il terreno: il modello di cui hanno bisogno tutte
-              le altre. Poi le story 2, 3 e 4 non toccano gli stessi file, quindi girano in
-              contemporanea, ogni agente nella propria copia del repository. La story 3 non passa il
-              giudice al primo colpo: la lacuna viene scritta, arriva una revisione, e al secondo
-              giro passa. La story 5 dipende da tutte e tre, quindi aspetta.
-            </p>
-            <p>
-              Ogni story viene valutata da un giudice prima di essere integrata nell'unico branch
-              dell'epic. Alla fine c'è un solo branch, revisionato story per story, e un report di
-              cosa è girato e di dove è andato il tempo.
+              Se la copertura è più bassa di quanto vorresti, di' cosa non è coperto e chi ne è
+              responsabile. Un numero vero e piccolo batte un numero tondo davanti al CIO. Apri
+              diff-report.md dal vivo se c'è tempo.
             </p>
           </aside>
         </section>
 
         <!-- 7 -->
-        <section class="slide s7" data-title="Fermati ovunque, riparti ovunque">
-          <div class="split" style="grid-template-columns: 620px 1fr">
-            <div>
-              <p class="eyebrow in">I file sono lo stato</p>
-              <h2 class="title in" style="--d: 100">
-                Fermati quando vuoi. <span class="o">Riparti da dove si era fermato.</span>
-              </h2>
-              <p class="body in" style="--d: 250">
-                L'avanzamento viene scritto in file nel repository,
-                <b>non tenuto nella memoria di un agente</b>. Se un agente cade o il portatile si
-                chiude, il run successivo legge i file, tiene quello che è fatto e prosegue.
-              </p>
-              <p class="callout in" style="--d: 450">
-                È la soluzione al filo perso: il filo è un file.
-              </p>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 24px">
-              <div class="card in" style="--d: 300">
-                <div class="card-head">
-                  <div>
-                    <p class="card-title">Interruzione e ripresa</p>
-                    <p class="card-desc">A metà strada, l'agente cade.</p>
-                  </div>
-                  <div class="controls">
-                    <button class="btn resume" data-rerun disabled tabindex="-1">↻ Rilancia</button>
-                  </div>
-                </div>
-                <div class="viz nob"><div class="row" data-row></div></div>
-              </div>
-              <div class="card in" style="--d: 420">
-                <div class="card-head">
-                  <div><p class="card-title">file di avanzamento</p></div>
-                  <span class="tag">nel repo</span>
-                </div>
-                <div class="pfile" data-pfile></div>
-              </div>
-            </div>
-          </div>
-          <p class="quip">Marvin: <em>Io dimenticherò tutto. Per fortuna i file no.</em></p>
+        <section class="slide s7" data-title="I numeri · solo quello che abbiamo misurato">
+          <p class="eyebrow in">I numeri · solo quello che abbiamo misurato</p>
+          <table class="numtable in" style="--d: 150">
+            <thead>
+              <tr>
+                <th>Caso</th>
+                <th>Ore umane</th>
+                <th>Ore agenti</th>
+                <th>Costo</th>
+                <th>Rilievi review</th>
+                <th>Copertura</th>
+                <th>Diff output</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  Integrazione IBM ACE<span class="s"
+                    >da una specifica · non legacy ·
+                    <span class="tbd">progetto CREDEM? sì / no</span></span
+                  >
+                </td>
+                <td><span class="tbd">h</span></td>
+                <td>2 h 04 m</td>
+                <td><span class="tbd">€</span></td>
+                <td><span class="tbd">n</span></td>
+                <td>—</td>
+                <td>—</td>
+              </tr>
+              <tr>
+                <td>
+                  <span class="tbd">modulo COBOL 1</span
+                  ><span class="s">ambiente di test · <span class="tbd">data</span></span>
+                </td>
+                <td><span class="tbd">h</span></td>
+                <td><span class="tbd">h</span></td>
+                <td><span class="tbd">€</span></td>
+                <td><span class="tbd">n</span></td>
+                <td><span class="tbd">%</span></td>
+                <td><span class="tbd">0</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="status in" style="--d: 500">
+            <b>A che punto è la migrazione:</b> fatto <span class="tbd">cosa è fatto</span> ·
+            dimostrato equivalente <span class="tbd">cosa</span> · prossimo
+            <span class="tbd">modulo, data</span>. Se il giorno della riunione una cella è vuota,
+            dillo e dai la data in cui sarà riempita.
+          </p>
           <aside class="notes">
-            <p>Questa slide risponde al secondo problema: perdere il filo.</p>
             <p>
-              L'avanzamento non resta mai solo nel contesto dell'agente. Dopo ogni task il flow
-              scrive a che punto è in file nel repository: cosa è nel commit, cosa è rimasto a metà,
-              cosa è stato deciso. A destra vedete quel file che si riempie.
+              Nessuna affermazione generale: la riga «le settimane diventano ore» è sparita, perché
+              non potevamo difenderla. Una riga per caso misurato, etichettata esattamente:
+              ambiente, ore umane, ore agenti, costo, rilievi, copertura, differenze in output.
             </p>
             <p>
-              Nel run, l'agente va offline a metà del task 3. Succede: limiti di utilizzo, un crash,
-              il coperchio di un portatile. Premo rilancia. Il nuovo run non ricomincia da capo e
-              non ha bisogno che qualcuno si ricordi qualcosa. Legge il file, tiene i task 1 e 2
-              come fatti e riparte dal task 3.
+              Il caso ACE è vero ma è stato costruito da una specifica, non migrato; dillo. Se il
+              modulo 1 non è finito per la riunione, lascia la sua riga con la data e di': un
+              modulo, ecco il diff report.
             </p>
             <p>
-              È anche il motivo per cui i run lunghi restano in carreggiata: ogni passo parte dalla
-              traccia scritta dell'obiettivo e delle decisioni prese finora, non da una memoria che
-              sbiadisce da ore.
+              Prepara prima della riunione la risposta a «quanta parte della migrazione COBOL è
+              davvero fatta?». La faranno.
             </p>
           </aside>
         </section>
 
         <!-- 8 -->
-        <section class="slide s8" data-title="Qualsiasi agente, qualsiasi ruolo">
-          <p class="eyebrow in">Qualsiasi agente, qualsiasi ruolo</p>
-          <h2 class="title in" style="--d: 100">
-            Cambia l'agente. <span class="g">Tieni il processo.</span>
-          </h2>
-          <p class="lede in" style="--d: 250; max-width: 1600px">
-            Un workflow chiede dei ruoli: qualcuno che pianifichi e giudichi, qualcuno che scriva il
-            codice. Claude, Codex, Gemini o un modello locale occupano un ruolo. I passi, i
-            controlli e la traccia restano gli stessi.
+        <section class="slide s8 s11 s8close" data-title="La richiesta">
+          <p class="eyebrow in">La richiesta</p>
+          <p class="owners">
+            <span class="in" style="--d: 200; display: block"
+              >In esercizio oggi in CREDEM:
+              <span class="tbd">modulo 1, ambiente di test</span>.</span
+            ><span class="in" style="--d: 700; display: block"
+              >Sponsor: <span class="tbd">MD</span>, <span class="tbd">CIO</span>,
+              <span class="tbd">Simone, ruolo</span>.</span
+            >
           </p>
-          <div class="card hero-card in" style="--d: 350">
-            <div class="card-head">
-              <div>
-                <p class="card-title">Scegli chi scrive il codice</p>
-                <p class="card-desc">
-                  Cambia chi scrive il codice, rilancia lo stesso flow. Simulato.
-                </p>
-              </div>
-              <div class="controls">
-                <span class="card-desc" style="margin: 0 6px 0 0">Chi scrive</span>
-                <div class="seg" data-seg>
-                  <span data-v="Claude">Claude</span><span data-v="Codex">Codex</span
-                  ><span data-v="Gemini">Gemini</span
-                  ><span data-v="local model">Modello locale</span>
-                </div>
-              </div>
-            </div>
-            <div class="viz" style="padding-top: 64px; padding-bottom: 28px">
-              <div class="row zoom" data-row style="zoom: 1.3"></div>
-            </div>
-            <div class="verdicts" data-verdicts></div>
-          </div>
-          <p class="quip">Marvin: <em>Sostituibile. La storia della mia vita.</em></p>
-          <aside class="notes">
-            <p>Siccome il processo è codice, l'agente è semplicemente chi occupa un ruolo.</p>
-            <p>
-              Un workflow chiede dei ruoli: qualcuno che pianifichi e giudichi, qualcuno che scriva
-              il codice. Qualsiasi agente di programmazione può occupare un ruolo: Claude, Codex,
-              Gemini, o un modello che gira sulla vostra macchina. Nel run vedete il ruolo di chi
-              scrive il codice cambiare quattro volte. Il formato del piano è lo stesso, i controlli
-              sono gli stessi, i criteri della review sono gli stessi, e il giudice usa la stessa
-              griglia chiunque abbia scritto il codice.
-            </p>
-            <p>
-              Conta per due motivi. I modelli cambiano ogni pochi mesi, e non volete riscrivere il
-              vostro processo di sviluppo ogni volta. E permette a un team di combinarli: un modello
-              forte per pianificare e giudicare, uno più economico o locale per fare il volume.
-            </p>
-          </aside>
-        </section>
-
-        <!-- 9 -->
-        <section class="slide s9" data-title="Dal legacy al nuovo sistema">
-          <p class="eyebrow in">Modernizzazione</p>
-          <h2 class="title in" style="--d: 100; font-size: 60px">
-            Leggere il vecchio sistema una volta sola. Costruire il nuovo da ciò che le persone
-            hanno approvato.
-          </h2>
-          <div class="card in" style="--d: 300; margin-top: 36px">
-            <div class="card-head">
-              <div>
-                <p class="card-title">Dal legacy al nuovo</p>
-                <p class="card-desc">
-                  Stesso processo per ogni tecnologia. Il kit porta la conoscenza.
-                </p>
-              </div>
-              <div class="controls">
-                <div class="seg">
-                  <span class="on">COBOL → Java</span><span>JSP → Next.js</span
-                  ><span>SOAP → REST</span>
-                </div>
-                <button class="btn human" data-approve disabled tabindex="-1">
-                  Approva la specifica
-                </button>
-              </div>
-            </div>
-            <div class="viz" style="padding-top: 104px; padding-bottom: 22px">
-              <div class="row" data-row style="align-items: stretch"></div>
-            </div>
-          </div>
-          <div class="trio">
-            <div class="t in" style="--d: 500">
-              <h3>Kit</h3>
-              <p>
-                Tutto ciò che serve a un percorso di migrazione, in forma di file. Una tecnologia si
-                aggiunge scrivendo un kit.
-              </p>
-            </div>
-            <div class="t in" style="--d: 600">
-              <h3>Pack</h3>
-              <p>
-                Il contratto dentro un kit: controlli, come valuta il giudice, cosa vuol dire
-                “equivalente”.
-              </p>
-            </div>
-            <div class="t in" style="--d: 700">
-              <h3>Pattern card</h3>
-              <p>
-                Una breve ricetta per un vecchio idioma. Ogni agente riceve solo le card che gli
-                servono.
-              </p>
-            </div>
-            <div class="t in" style="--d: 800">
-              <h3>Epic brief</h3>
-              <p>La spec, distillata con una persona prima di costruire:</p>
-              <div class="chips">
-                <span class="chip ok">incluso</span><span class="chip dr">scartato</span
-                ><span class="chip df">rimandato</span>
-              </div>
-            </div>
-          </div>
-          <p class="quip">
-            Marvin: <em>Codice vecchio. Più vecchio di me. Infelice quasi quanto me.</em>
+          <ol class="ask">
+            <li class="in" style="--d: 1200">
+              Il prossimo modulo: <span class="tbd">nome</span>, responsabile
+              <span class="tbd">nome</span>, entro <span class="tbd">data</span>.
+            </li>
+            <li class="in" style="--d: 1600">
+              Un referente compliance per le evidenze di equivalenza: <span class="tbd">nome</span>.
+            </li>
+            <li class="in" style="--d: 2000">
+              Due team eseguono il ciclo base su un task reale nel Q1:
+              <span class="tbd">team</span> e <span class="tbd">team</span>.
+            </li>
+          </ol>
+          <p class="sigh in" style="--d: 2600">
+            <b>Marvin:</b> Vi direi di non farvi prendere dal panico, ma l'avete già letto.
           </p>
+          <p class="thanks in" style="--d: 2900">
+            <b>Riccardo Merolla</b> · Tech Lead · modernizzazione WMF
+          </p>
+          <div class="dontpanic" aria-label="Don't Panic">DON'T PANIC</div>
           <aside class="notes">
             <p>
-              La stessa macchina si applica alla modernizzazione, che è il punto da cui partono
-              molti team.
+              Chiudi con una decisione, non con un applauso. Nomina sponsor e responsabili, poi
+              chiedi le tre cose e di' chi deve dire di sì.
             </p>
             <p>
-              Dal lato legacy, gli agenti esplorano il vecchio codice e lo trasformano in una
-              specifica: cosa fa ogni programma, sotto forma di regole e scenari, ognuno ricondotto
-              alla riga di codice da cui viene. Poi una persona approva la specifica. È la fermata
-              gialla.
+              Prima della riunione: fai vedere il deck a Simone e lascia che sia lui a presentarti.
+              Fatti dare conferma scritta da HR o legale che presentare internamente un progetto
+              open source tuo non apre una questione di proprietà; questa riunione lo rende
+              pubblico.
             </p>
-            <p>
-              Solo la specifica approvata attraversa il muro della clean room. Dal lato nuovo, gli
-              agenti costruiscono il nuovo sistema senza poter vedere il vecchio codice, e ne
-              dimostrano l'equivalenza rieseguendo sul nuovo sistema il comportamento registrato del
-              vecchio.
-            </p>
-            <p>
-              La conoscenza per ogni percorso sta in un kit, come COBOL verso Java, JSP verso
-              Next.js, SOAP verso REST. Dentro il kit, un pack definisce controlli e criteri di
-              valutazione, e le pattern card traducono un idioma ciascuna. E non tutti i programmi
-              meritano di essere portati: la spec viene prima distillata con una persona in un epic
-              brief, cosa è incluso, scartato o rimandato, e le story in parallelo costruiscono
-              quella porzione.
-            </p>
-          </aside>
-        </section>
-
-        <!-- 10 -->
-        <section class="slide s10" data-title="I numeri">
-          <p class="eyebrow in">Cosa è cambiato nella pratica</p>
-          <div class="s10grid">
-            <div class="morph in" style="--d: 100" data-morph>
-              <div class="from">Settimane</div>
-              <div class="from-sub">di sviluppo</div>
-              <div class="to">Ore</div>
-              <div class="to-sub" style="color: var(--fg)">di run del flow</div>
-            </div>
-            <div class="race in" style="--d: 250">
-              <div>
-                <p class="case">Caso · flow epic-story</p>
-                <h3>Un progetto IBM ACE, da zero, partendo da una spec.</h3>
-              </div>
-              <div class="lane">
-                <div class="lh">
-                  <b>Sviluppo solo umano</b><span class="val" data-hval>giorni</span>
-                </div>
-                <div class="track hum"><div class="fill" data-hfill></div></div>
-              </div>
-              <div class="lane">
-                <div class="lh">
-                  <b class="g">Flow epic-story</b><span class="val g" data-fval>0 h 00 m</span>
-                </div>
-                <div class="track flow"><div class="fill" data-ffill></div></div>
-              </div>
-              <p class="foot-note">
-                Barre non in scala: circa 2 ore di run del flow, contro giorni di sviluppo solo
-                umano.
-              </p>
-            </div>
-          </div>
-          <p class="quip">Marvin: <em>Ore invece di settimane. Più tempo per deprimersi.</em></p>
-          <aside class="notes">
-            <p>
-              Cosa è cambiato nella pratica? Due affermazioni oneste, e nessun numero in più di
-              quelli che posso sostenere.
-            </p>
-            <p>
-              In generale: un lavoro che richiedeva settimane di sviluppo ora richiede ore di run
-              del flow. Il tempo delle persone si sposta sulla scrittura e sull'approvazione del
-              piano, e sulla lettura dei rilievi della review.
-            </p>
-            <p>
-              Un caso concreto: un progetto di integrazione IBM ACE, costruito da zero. L'input era
-              una specifica. Il flow epic-story, quello in parallelo di qualche slide fa, lo ha
-              completato in circa due ore. A confronto, lo sviluppo solo umano richiedeva giorni.
-            </p>
-            <p>
-              Le barre volutamente non sono in scala; il contatore è un orologio stilizzato. Il
-              rapporto preciso dipende dal progetto. Quello che non dipende dal progetto è dove va
-              il tempo: gli agenti fanno il volume, e le ore delle persone vanno nelle decisioni.
-            </p>
-          </aside>
-        </section>
-
-        <!-- 11 -->
-        <section class="slide s11" data-title="Chiusura">
-          <p class="eyebrow in">Per chiudere</p>
-          <p class="closing" style="margin-top: 30px">
-            <span class="in" style="--d: 200; display: block">Il processo è codice.</span>
-            <span class="in" style="--d: 900; display: block">Gli agenti sono sostituibili.</span>
-            <span class="in y" style="--d: 1600; display: block">La traccia è tua.</span>
-          </p>
-          <p class="sigh in" style="--d: 2200">
-            <b>Marvin:</b> *sospiro* Immagino che adesso vorrete fare domande.
-          </p>
-          <p class="thanks in" style="--d: 2600"><b>Riccardo Merolla</b> · grazie</p>
-          <div class="dontpanic" aria-label="Niente panico">NIENTE PANICO</div>
-          <aside class="notes">
-            <p>Per chiudere, tre frasi.</p>
-            <p>
-              Il processo è codice: passi, controlli, approvazioni e cosa viene messo per iscritto
-              vivono nel repository, versionati, revisionabili, e uguali per ogni run.
-            </p>
-            <p>
-              Gli agenti sono sostituibili: chiunque di loro può occupare un ruolo, e il modello
-              dell'anno prossimo entra nello stesso flow.
-            </p>
-            <p>
-              E la traccia è vostra: piani, rilievi, file di avanzamento, verdetti e commit restano
-              nel vostro repository. È questo che permette a un run di andare avanti da solo ed
-              essere comunque affidabile, ed è questo che permette a una persona di riprenderlo in
-              qualsiasi momento.
-            </p>
-            <p>
-              Per il team che lo adotta: partite dal ciclo di base su un task reale, poi
-              l'approvazione del piano, poi le story in parallelo. Grazie. Domande, e niente panico.
-            </p>
+            <p>Poi le domande.</p>
           </aside>
         </section>
 
@@ -2452,153 +2579,76 @@
             /></svg
           ><span class="ring"></span>
         </div>
-        <nav class="chrome" aria-label="Navigazione slide">
-          <button data-nav="-1" aria-label="Slide precedente">‹</button
-          ><span class="num" id="num">01 / 11</span
-          ><button data-nav="1" aria-label="Slide successiva">›</button>
+        <nav class="chrome" aria-label="Slide navigation">
+          <button data-nav="-1" aria-label="Previous slide">‹</button
+          ><span class="num" id="num">01 / 8</span
+          ><button data-nav="1" aria-label="Next slide">›</button>
         </nav>
       </main>
     </div>
-    <aside id="notes" aria-label="Note del relatore">
+    <aside id="notes" aria-label="Speaker notes">
       <h5 id="notes-h">Note</h5>
       <div id="notes-body"></div>
     </aside>
 
     <script>
-      window.MARVIN_L = (() => {
-        const L = {
-          Notes: "Note",
-          "Nothing yet.": "Ancora niente.",
-          // slide 2
-          task: "task",
-          "from a spec": "da una spec",
-          agent: "agente",
-          coder: "sviluppatore",
-          "someone checks": "qualcuno controlla",
-          later: "dopo",
-          spec: "spec",
-          "done ✓": "fatto ✓",
-          "All done. Everything works!": "Tutto fatto. Funziona tutto!",
-          "It wasn't: the tests never ran": "Non era vero: i test non sono mai partiti",
-          clear: "chiaro",
-          fuzzy: "sfocato",
-          fading: "sbiadito",
-          gone: "perso",
-          "…what was the goal again?": "…qual era l'obiettivo, scusa?",
-          // slide 3
-          "local model": "modello locale",
-          "Local model": "Modello locale",
-          // slide 4
-          plan: "piano",
-          code: "codice",
-          checks: "controlli",
-          review: "review",
-          commit: "commit",
-          "3 tasks": "3 task",
-          "three tasks, in order": "tre task, in ordine",
-          "No test for an empty statement": "Manca un test per l'estratto conto vuoto",
-          "round 1: one issue, sent back as a revision":
-            "giro 1: un problema, rimandato come revisione",
-          "Revision: add the missing test": "Revisione: aggiungi il test mancante",
-          clean: "pulita",
-          "round 2: cleared": "giro 2: risolto",
-          "one commit per reviewed task": "un commit per ogni task revisionato",
-          "back as a revision": "torna indietro come revisione",
-          // slide 5
-          "draft plan": "bozza del piano",
-          you: "tu",
-          build: "build",
-          "8 stories": "8 story",
-          "7 stories": "7 story",
-          "8 stories, who owns which files, in what order":
-            "8 story: chi possiede quali file, in che ordine",
-          "Read the plan, then decide": "Leggi il piano, poi decidi",
-          "Revising, your edits stay": "Lo rivedo, le tue modifiche restano",
-          "revision 2: your edits kept, one story merged into another":
-            "revisione 2: tue modifiche mantenute, una story accorpata a un'altra",
-          approved: "approvato",
-          "approved as written": "approvato così com'è",
-          "7/7 merged": "7/7 integrate",
-          // slide 6
-          "owns model/": "possiede model/",
-          "owns api/": "possiede api/",
-          "owns statements/": "possiede statements/",
-          "owns ui/": "possiede ui/",
-          "after 2–4": "dopo la 2–4",
-          epic: "epic",
-          "one branch": "un solo branch",
-          "in parallel · each in its own copy of the repo":
-            "in parallelo · ognuna nella sua copia del repo",
-          merged: "integrata",
-          "epic branch": "branch dell'epic",
-          "{n} of 5 stories merged": "{n} story su 5 integrate",
-          "five stories, their files and dependencies": "cinque story, i loro file e le dipendenze",
-          "Judge: totals not covered": "Giudice: totali non coperti",
-          "story-3 findings": "rilievi story 3",
-          "judge round 1: one gap, revision added":
-            "giudice, giro 1: una lacuna, aggiunta una revisione",
-          "judge round 1: one gap · round 2: cleared":
-            "giudice, giro 1: una lacuna · giro 2: risolta",
-          "5/5 merged": "5/5 integrate",
-          "what ran, where time went, what it cost":
-            "cosa è girato, dove è andato il tempo, quanto è costato",
-          // slide 7
-          committed: "nel commit",
-          unfinished: "non finito",
-          "The agent went offline": "L'agente è andato offline",
-          "# run stopped: agent offline": "# run interrotto: agente offline",
-          "# rerun: read this file, keep 1–2, resume at 3":
-            "# rilancio: leggo questo file, tengo 1–2, riparto dal 3",
-          "Already done, kept": "Già fatto, lo tengo",
-          "# rerun: resumed at task 3": "# rilancio: ripartito dal task 3",
-          // slide 8
-          planner: "pianificatore",
-          "your build": "la tua build",
-          reviewer: "revisore",
-          judge: "giudice",
-          "4 tasks": "4 task",
-          "by {who}": "da {who}",
-          passed: "superato",
-          "same plan · checks · rubric": "stesso piano · controlli · criteri",
-          // slide 9
-          survey: "ricognizione",
-          extract: "estrazione",
-          "rules · scenarios": "regole · scenari",
-          approve: "approva",
-          seed: "avvio",
-          implement: "implementa",
-          verify: "verifica",
-          replay: "replay",
-          "legacy side": "lato legacy",
-          "new side": "lato nuovo",
-          "clean room": "clean room",
-          inventory: "inventario",
-          "Each rule traced to its source line": "Ogni regola risale alla sua riga di codice",
-          "Approve the spec to cross the wall": "Approva la spec per superare il muro",
-          scaffold: "scheletro",
-          "Pattern cards: COBOL idioms → Java": "Pattern card: idiomi COBOL → Java",
-          built: "costruito",
-          "identical ✓": "identico ✓",
-          "Recorded behaviour replayed": "Comportamento registrato rieseguito",
-          "lessons → kit": "lezioni → kit"
-        }
-        for (let i = 1; i <= 5; i++) {
-          L[`step ${i}`] = `passo ${i}`
-          L[`task ${i}`] = `task ${i}`
-          L[`story ${i}`] = `story ${i}`
-        }
-        L["task {n}"] = "task {n}"
-        L.__lines = [
-          '<span class="k">workflow</span> story:',
-          '  plan     <span class="c"># un agente scrive plan.md</span>',
-          '  <span class="s">approve</span>  <span class="c"># una persona dice sì</span>',
-          '  build    <span class="c"># ruolo: scrive il codice</span>',
-          '  check    <span class="c"># la tua build, i tuoi test</span>',
-          '  review   <span class="c"># non accettato → revisione</span>',
-          '  commit   <span class="c"># solo lavoro revisionato</span>'
-        ]
-        return L
-      })()
+      window.MARVIN_L = {
+        Notes: "Note",
+        "Nothing yet.": "Ancora niente.",
+        "DRAFT · {n} fields to fill": "BOZZA · {n} campi da compilare",
+        plan: "piano",
+        code: "codice",
+        checks: "controlli",
+        review: "review",
+        commit: "commit",
+        "3 tasks": "3 task",
+        "three tasks, in order": "tre task, in ordine",
+        "No test for an empty statement": "Manca un test per l'estratto conto vuoto",
+        "round 1: one issue, sent back as a revision":
+          "giro 1: un problema, rimandato come revisione",
+        "Revision: add the missing test": "Revisione: aggiungi il test mancante",
+        clean: "pulita",
+        "round 2: cleared": "giro 2: risolto",
+        "one commit per reviewed task": "un commit per ogni task revisionato",
+        "back as a revision": "torna indietro come revisione",
+        "owns model/": "possiede model/",
+        "owns api/": "possiede api/",
+        "owns statements/": "possiede statements/",
+        "owns ui/": "possiede ui/",
+        "after 2–4": "dopo la 2–4",
+        epic: "epic",
+        "one branch": "un solo branch",
+        "in parallel · each in its own copy of the repo":
+          "in parallelo · ognuna nella sua copia del repo",
+        merged: "integrata",
+        "epic branch": "branch dell'epic",
+        "{n} of 5 stories merged": "{n} story su 5 integrate",
+        "five stories, their files and dependencies": "cinque story, i loro file e le dipendenze",
+        "Judge: totals not covered": "Giudice: totali non coperti",
+        "story-3 findings": "rilievi story 3",
+        "judge round 1: one gap, revision added":
+          "giudice, giro 1: una lacuna, aggiunta una revisione",
+        "judge round 1: one gap · round 2: cleared":
+          "giudice, giro 1: una lacuna · giro 2: risolta",
+        "5/5 merged": "5/5 integrate",
+        "what ran, where time went, what it cost":
+          "cosa è girato, dove è andato il tempo, quanto è costato",
+        record: "registra",
+        "legacy · test env": "legacy · ambiente di test",
+        replay: "replay",
+        "new module": "nuovo modulo",
+        compare: "confronta",
+        recorded: "registrato",
+        replayed: "rieseguito",
+        "identical ✓": "identico ✓",
+        "recordings.jsonl": "recordings.jsonl",
+        "the old system's behaviour, as data": "il comportamento del vecchio sistema, come dati",
+        "diff-report.md": "diff-report.md",
+        "every transaction, old vs new": "ogni transazione, vecchio contro nuovo",
+        "coverage.md": "coverage.md",
+        "rules exercised · rules not, with owners":
+          "regole esercitate · regole no, con responsabili"
+      }
       ;(() => {
         "use strict"
         const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -2936,7 +2986,7 @@
           }
         }
 
-        /* ── scenarios ── */
+        /* ── scenarios (v2) ── */
         const S = {}
 
         S[1] = {
@@ -2959,98 +3009,8 @@
           }
         }
 
-        S[2] = {
-          build(c) {
-            const [a, b] = $$("[data-row]", c.root)
-            this.a = [
-              c.node("task", "from a spec"),
-              c.node("agent", "coder"),
-              c.node("someone checks", "later")
-            ]
-            c.chain(a, this.a)
-            this.b = [1, 2, 3, 4, 5].map((i) => c.node(`step ${i}`))
-            c.chain(b, this.b)
-            this.fill = $("[data-fill]", c.root)
-            this.pct = $("[data-pct]", c.root)
-          },
-          reset() {
-            if (this.fill) {
-              this.fill.style.width = "100%"
-              this.fill.classList.remove("low")
-              this.pct.textContent = tr("clear")
-            }
-          },
-          async run(c) {
-            const left = async () => {
-              const [task, agent, chk] = this.a
-              task.done("spec")
-              await c.sleep(500)
-              agent.run()
-              await c.sleep(1700)
-              agent.done("done ✓")
-              agent.note("All done. Everything works!", 2200)
-              await c.sleep(2300)
-              chk.run()
-              await c.sleep(1200)
-              chk.fail("It wasn't: the tests never ran")
-            }
-            const right = async () => {
-              await c.sleep(400)
-              const words = ["clear", "clear", "fuzzy", "fading", "fading", "gone"]
-              for (let i = 0; i < 5; i++) {
-                const n = this.b[i]
-                n.run()
-                await c.sleep(900)
-                this.fill.style.width = `${100 - (i + 1) * 18}%`
-                this.pct.textContent = tr(words[i + 1])
-                if (i >= 2) this.fill.classList.add("low")
-                if (i < 4) n.done("✓")
-                else n.fail("…what was the goal again?")
-              }
-            }
-            await Promise.all([left(), right()])
-          }
-        }
-
         S[3] = {
-          delay: 600,
-          lines: [
-            '<span class="k">workflow</span> story:',
-            '  plan     <span class="c"># an agent drafts plan.md</span>',
-            '  <span class="s">approve</span>  <span class="c"># a person says yes</span>',
-            '  build    <span class="c"># seat: writes code</span>',
-            '  check    <span class="c"># your build, your tests</span>',
-            '  review   <span class="c"># not accepted → revision</span>',
-            '  commit   <span class="c"># only reviewed work</span>'
-          ],
-          build(c) {
-            this.code = $("[data-code]", c.root)
-            this.code.innerHTML = (L.__lines || this.lines)
-              .map((l) => `<div class="ln">${l}</div>`)
-              .join("")
-            this.seat = $('[data-seat="code"]', c.root)
-          },
-          reset() {
-            $$(".ln", this.code).forEach((l) => l.classList.remove("on"))
-            this.seat.textContent = "Claude"
-          },
-          async run(c) {
-            for (const l of $$(".ln", this.code)) {
-              l.classList.add("on")
-              await c.sleep(230)
-            }
-            await c.sleep(600)
-            for (const who of ["Codex", "Gemini", "local model", "Claude"]) {
-              this.seat.textContent = tr(who)
-              this.seat.classList.remove("swap")
-              void this.seat.offsetWidth
-              this.seat.classList.add("swap")
-              await c.sleep(1300)
-            }
-          }
-        }
-
-        S[4] = {
+          delay: 1200,
           build(c) {
             this.row = $("[data-row]", c.root)
             this.viz = this.row.parentElement
@@ -3126,43 +3086,18 @@
           }
         }
 
-        S[5] = {
+        /* the recording, with the simulated epic run as a fallback until media/marvin-run.mp4 exists */
+        S[4] = {
+          delay: 400,
           build(c) {
-            this.n = [c.node("draft plan"), c.node("you"), c.node("build")]
-            c.chain($("[data-row]", c.root), this.n)
-            this.yes = $("[data-approve]", c.root)
-            this.no = $("[data-back]", c.root)
-          },
-          async run(c) {
-            const [draft, you, build] = this.n
-            draft.run()
-            await c.sleep(1200)
-            draft.done("8 stories")
-            c.art("plan.md", "8 stories, who owns which files, in what order")
-            you.wait("Read the plan, then decide")
-            this.yes.disabled = false
-            this.yes.classList.add("ready")
-            await c.press(this.no, 1800)
-            this.yes.disabled = true
-            this.yes.classList.remove("ready")
-            you.idle()
-            draft.run()
-            draft.note("Revising, your edits stay", 1500)
-            await c.sleep(1400)
-            draft.done("7 stories")
-            c.art("plan.md", "revision 2: your edits kept, one story merged into another")
-            you.wait("Read the plan, then decide")
-            await c.press(this.yes, 1700)
-            you.done("approved")
-            c.art("plan.md ✓", "approved as written")
-            build.run()
-            await c.sleep(1600)
-            build.done("7/7 merged")
-          }
-        }
-
-        S[6] = {
-          build(c) {
+            this.card = $(".card", c.root)
+            this.video = $("video", c.root)
+            const sim = () => (this.card.dataset.mode = "sim")
+            this.video.addEventListener("error", sim)
+            /* no metadata after a moment: the file is missing (or blocked), show the simulation */
+            setTimeout(() => {
+              if (this.video.readyState < 1) sim()
+            }, 1500)
             const dag = $("[data-dag]", c.root)
             const h = { h: true }
             this.s = [
@@ -3188,7 +3123,23 @@
               this.epic.root
             )
           },
+          reset() {
+            if (this.video && !this.video.paused) this.video.pause()
+          },
           async run(c) {
+            if (this.card.dataset.mode !== "sim" && this.video.readyState < 1) {
+              await c.sleep(1600)
+              if (this.video.readyState < 1) this.card.dataset.mode = "sim"
+            }
+            if (this.card.dataset.mode !== "sim") {
+              try {
+                this.video.currentTime = 0
+                await this.video.play()
+              } catch (e) {
+                /* autoplay blocked: the presenter presses play */
+              }
+              return
+            }
             const [s1, s2, s3, s4, s5] = this.s,
               epic = this.epic
             let merged = 0
@@ -3233,225 +3184,49 @@
           }
         }
 
-        S[7] = {
-          build(c) {
-            this.t = [1, 2, 3, 4, 5].map((i) => c.node(`task ${i}`))
-            c.chain($("[data-row]", c.root), this.t)
-            this.again = $("[data-rerun]", c.root)
-            this.pf = $("[data-pfile]", c.root)
-          },
-          reset() {
-            this.file(["", "", "", "", ""], null)
-          },
-          file(st, extra, fresh = -1) {
-            const L = ['<div class="ln c"># progress.md</div>']
-            st.forEach((s, i) => {
-              const mark =
-                s === "x"
-                  ? '<span class="x">[x]</span>'
-                  : s === "u"
-                    ? '<span class="u">[~]</span>'
-                    : '<span class="c">[ ]</span>'
-              const note =
-                s === "x"
-                  ? `<span class="x">${tr("committed")}</span>`
-                  : s === "u"
-                    ? `<span class="u">${tr("unfinished")}</span>`
-                    : ""
-              L.push(
-                `<div class="ln${i === fresh ? " fresh" : ""}">${mark} ${tr("task {n}", { n: i + 1 })}   ${note}</div>`
-              )
-            })
-            if (extra) L.push(`<div class="ln fresh c">${tr(extra)}</div>`)
-            this.pf.innerHTML = L.join("")
-          },
-          async run(c) {
-            const t = this.t,
-              st = ["", "", "", "", ""]
-            for (let i = 0; i < 2; i++) {
-              t[i].run()
-              await c.sleep(900)
-              t[i].done("✓")
-              st[i] = "x"
-              this.file(st, null, i)
-            }
-            t[2].run()
-            await c.sleep(1100)
-            t[2].interrupt("The agent went offline")
-            st[2] = "u"
-            this.file(st, "# run stopped: agent offline", 2)
-            await c.press(this.again, 1800)
-            t[2].hide()
-            this.file(st, "# rerun: read this file, keep 1–2, resume at 3")
-            t[0].flash()
-            t[0].note("Already done, kept", 1300)
-            await c.sleep(250)
-            t[1].flash()
-            await c.sleep(600)
-            for (let i = 2; i < 5; i++) {
-              t[i].run()
-              await c.sleep(950)
-              t[i].done("✓")
-              st[i] = "x"
-              this.file(st, "# rerun: resumed at task 3", i)
-            }
-          }
-        }
-
-        S[8] = {
-          coders: ["Claude", "Codex", "Gemini", "local model"],
-          pace: { Claude: 1, Codex: 0.9, Gemini: 1.1, "local model": 1.5 },
+        S[6] = {
+          delay: 900,
           build(c) {
             this.n = [
-              c.node("plan", "planner"),
-              c.node("code", "Claude"),
-              c.node("checks", "your build"),
-              c.node("review", "reviewer"),
-              c.node("judge", "judge")
+              c.node("record", "legacy · test env"),
+              c.node("replay", "new module"),
+              c.node("compare")
             ]
             c.chain($("[data-row]", c.root), this.n)
-            this.seg = $$("[data-seg] span", c.root)
-            this.v = $("[data-verdicts]", c.root)
-            this.v.innerHTML = this.coders
-              .map(
-                (k) =>
-                  `<div class="verdict"><p class="n">${tr(k === "local model" ? "Local model" : k)}</p><p class="m">${tr("same plan · checks · rubric")}</p></div>`
-              )
-              .join("")
+            this.bar = $("[data-cov] i", c.root)
+            this.cov = Number($("[data-cov]", c.root).dataset.cov) || 0
           },
           reset() {
-            $$(".verdict", this.v).forEach((x) => x.classList.remove("on"))
-            this.seg.forEach((s, i) => s.classList.toggle("on", i === 0))
-            this.n[1].sublabel("Claude")
+            if (this.bar) {
+              this.bar.style.transition = "none"
+              this.bar.style.width = "0"
+            }
           },
           async run(c) {
-            const [plan, code, checks, review, judge] = this.n
-            for (let k = 0; k < this.coders.length; k++) {
-              const who = this.coders[k],
-                p = this.pace[who]
-              this.seg.forEach((s, i) => s.classList.toggle("on", i === k))
-              code.sublabel(who)
-              if (k) {
-                this.n.forEach((n) => n.idle())
-                code.flash()
-                await c.sleep(450)
-              }
-              plan.run()
-              await c.sleep(600)
-              plan.done("4 tasks")
-              code.run()
-              await c.sleep(1000 * p)
-              code.done(tr("by {who}", { who: tr(who) }))
-              checks.run()
-              await c.sleep(500)
-              checks.done("✓")
-              review.run()
-              await c.sleep(600)
-              review.done("clean")
-              judge.run()
-              await c.sleep(500)
-              judge.done("passed")
-              $$(".verdict", this.v)[k].classList.add("on")
-              await c.sleep(900)
-            }
-          }
-        }
-
-        S[9] = {
-          build(c) {
-            const row = $("[data-row]", c.root)
-            const mk = (cap, list) => {
-              const s = el("div", "side")
-              const r = el("div", "row")
-              c.chain(r, list)
-              s.append(el("span", "side-cap", tr(cap)), r)
-              return s
-            }
-            this.l = [
-              c.node("survey"),
-              c.node("extract", "rules · scenarios"),
-              c.node("you", "approve")
-            ]
-            this.t = [
-              c.node("seed"),
-              c.node("implement"),
-              c.node("verify", "replay"),
-              c.node("review")
-            ]
-            this.wall = el("div", "wall", `<span>${tr("clean room")}</span>`)
-            row.append(mk("legacy side", this.l), this.wall, mk("new side", this.t))
-            this.yes = $("[data-approve]", c.root)
-          },
-          reset() {
-            this.wall.classList.remove("pulse")
-          },
-          async run(c) {
-            const [survey, extract, you] = this.l,
-              [seed, impl, verify, review] = this.t
-            survey.run()
+            const [rec, rep, cmp] = this.n
+            rec.run()
             await c.sleep(1100)
-            survey.done("inventory")
-            extract.run()
+            rec.done("recorded")
+            c.art("recordings.jsonl", "the old system's behaviour, as data")
+            rep.run()
             await c.sleep(1400)
-            extract.done("spec")
-            extract.note("Each rule traced to its source line", 1800)
-            await c.sleep(600)
-            you.wait("Approve the spec to cross the wall")
-            await c.press(this.yes, 1600)
-            you.done("approved")
-            this.wall.classList.remove("pulse")
-            void this.wall.offsetWidth
-            this.wall.classList.add("pulse")
-            seed.run()
-            await c.sleep(800)
-            seed.done("scaffold")
-            impl.run()
-            impl.note("Pattern cards: COBOL idioms → Java", 1900)
-            await c.sleep(1800)
-            impl.done("built")
-            verify.run()
-            await c.sleep(1300)
-            verify.done("identical ✓")
-            verify.note("Recorded behaviour replayed", 2000)
-            review.run()
-            await c.sleep(1000)
-            review.done("lessons → kit")
+            rep.done("replayed")
+            cmp.run()
+            await c.sleep(1200)
+            cmp.done("identical ✓")
+            c.art("diff-report.md", "every transaction, old vs new")
+            await c.sleep(500)
+            this.bar.style.transition = ""
+            this.bar.style.width = `${this.cov}%`
+            c.art("coverage.md", "rules exercised · rules not, with owners")
           }
         }
 
-        S[10] = {
-          delay: 700,
-          build(c) {
-            this.m = $("[data-morph]", c.root)
-            this.hf = $("[data-hfill]", c.root)
-            this.ff = $("[data-ffill]", c.root)
-            this.fv = $("[data-fval]", c.root)
-          },
-          reset() {
-            this.m.classList.remove("struck")
-            for (const f of [this.hf, this.ff]) {
-              f.style.transition = "none"
-              f.style.width = "0"
-            }
-            this.fv.textContent = "0 h 00 m"
-          },
-          async run(c) {
-            this.m.classList.add("struck")
-            await c.sleep(1100)
-            const dur = reduce ? 0 : 1
-            this.hf.style.transition = `width ${4.2 * dur}s cubic-bezier(.3,.1,.3,1)`
-            this.hf.style.width = "100%"
-            this.ff.style.transition = `width ${1.6 * dur}s cubic-bezier(.2,.8,.2,1)`
-            this.ff.style.width = "6%"
-            const steps = 24
-            for (let i = 1; i <= steps; i++) {
-              const mins = Math.round((120 * i) / steps)
-              this.fv.textContent = `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")} m`
-              await c.sleep(1600 / steps)
-            }
-            this.fv.textContent = "≈ 2 h ✓"
-            await c.sleep(2800)
-          }
+        /* draft badge: how many fields are still placeholders */
+        {
+          const d = $("#draft"),
+            n = $$(".tbd").length
+          d.textContent = n ? tr("DRAFT · {n} fields to fill", { n }) : ""
         }
 
         const runs = slides.map((s, i) => (S[i + 1] ? makeRun(s, S[i + 1]) : null))
