@@ -77,6 +77,7 @@ the only thing to replace.
   `#it` opens in Italian).
 - `docs/presentation/marvin-run-sheet.md` — the presenter's run sheet:
   minute marks, what is on screen, what to say, what not to say.
+  `marvin-run-sheet.it.md` is the same sheet in Italian.
 
 ## Non-goals
 
