@@ -1,1120 +1,3421 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Marvin</title>
-<meta name="description" content="Marvin: agentic flows that reach the goal, unattended. A talk by Riccardo Merolla.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&family=Fredoka:wght@600&display=swap">
-<style>
-:root{
-  --bg:#05070b; --panel:#0e1116; --panel-2:#161a21;
-  --line:rgba(255,255,255,.08); --line-2:rgba(120,140,130,.28);
-  --fg:#f4f6f3; --muted:#a7b0aa; --faint:#828d86;
-  --guide:#7cf29c; --guide-dim:#4fbf72; --guide-glow:rgba(124,242,156,.35);
-  --idle:#475569; --run:#3b82f6; --ok:#15803d; --ok-fg:#4ade80;
-  --err:#ef4444; --int:#f97316; --human:#eab308; --human-fg:#facc15;
-  --font:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
-  --round:"Fredoka","Arial Rounded MT Bold",ui-rounded,"Nunito","Varela Round",var(--font);
-  color-scheme:dark;
-}
-*{box-sizing:border-box}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);overflow:hidden}
-body{font-family:var(--font);-webkit-font-smoothing:antialiased;line-height:1.35}
-p{margin:0} h1,h2,h3,h4{margin:0;letter-spacing:-.03em;line-height:1.04;text-wrap:balance}
-button{font:inherit}
-#stars{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:0}
-.nebula{position:fixed;inset:-20%;z-index:0;pointer-events:none;
-  background:radial-gradient(40% 35% at 78% 22%,rgba(60,140,100,.13),transparent 70%),
-             radial-gradient(35% 30% at 15% 85%,rgba(40,80,160,.10),transparent 70%);
-  transition:transform 1.4s cubic-bezier(.2,.8,.2,1)}
-#viewport{position:fixed;inset:0;z-index:1;display:flex;align-items:center;justify-content:center}
-#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:0 0}
-.slide{position:absolute;inset:0;padding:96px 120px 120px;display:flex;flex-direction:column;
-  opacity:0;visibility:hidden;transform:translateX(40px);
-  transition:opacity .6s ease,transform .7s cubic-bezier(.2,.8,.2,1),visibility 0s linear .7s}
-.slide.prev{transform:translateX(-40px)}
-.slide.active{opacity:1;visibility:visible;transform:none;transition:opacity .6s ease,transform .7s cubic-bezier(.2,.8,.2,1),visibility 0s}
-/* entrance */
-.slide .in{opacity:0}
-.slide.active .in{animation:rise .8s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--d,0) * 1ms)}
-@keyframes rise{from{opacity:0;transform:translateY(22px);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
-
-/* type */
-.eyebrow{font-family:var(--mono);font-size:22px;letter-spacing:.16em;text-transform:uppercase;color:var(--guide);display:flex;align-items:center;gap:14px}
-.eyebrow::before{content:"";width:10px;height:10px;border-radius:2px;background:var(--guide);box-shadow:0 0 12px var(--guide-glow)}
-.title{font-size:76px;font-weight:800;margin-top:22px;max-width:1500px}
-.lede{font-size:30px;color:var(--muted);margin-top:22px;max-width:1300px;line-height:1.4}
-.lede b,.body b{color:var(--fg);font-weight:600}
-.y{color:var(--human-fg)} .g{color:var(--guide)} .r{color:#f87171} .o{color:#fb923c} .b{color:#60a5fa}
-.mono{font-family:var(--mono)}
-.quip{position:absolute;left:120px;bottom:44px;font-family:var(--mono);font-size:20px;color:var(--faint);max-width:1300px}
-.quip::before{content:"> ";color:var(--guide-dim)}
-.quip em{font-style:normal;color:#8fa596}
-.tag{font-family:var(--mono);font-size:16px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);border:1px solid var(--line-2);border-radius:999px;padding:4px 12px;white-space:nowrap}
-
-/* chrome */
-#progress{position:fixed;left:0;top:0;height:4px;width:0;background:linear-gradient(90deg,var(--guide-dim),var(--guide));box-shadow:0 0 12px var(--guide-glow);z-index:5;transition:width .5s cubic-bezier(.2,.8,.2,1)}
-.chrome{position:absolute;right:120px;bottom:40px;font-family:var(--mono);font-size:20px;color:var(--faint);display:flex;gap:18px;align-items:center;z-index:3}
-.chrome .num{color:var(--guide);font-variant-numeric:tabular-nums}
-.chrome button{background:transparent;border:1px solid var(--line-2);color:var(--muted);width:44px;height:44px;border-radius:999px;cursor:pointer;font-size:20px;line-height:1}
-.chrome button:hover{color:var(--fg);border-color:var(--guide-dim)}
-#notes{position:fixed;left:0;right:0;bottom:0;z-index:10;max-height:42vh;overflow:auto;background:rgba(8,12,10,.96);border-top:1px solid var(--guide-dim);
-  padding:18px 28px 24px;font-size:clamp(15px,1.25vw,21px);line-height:1.55;color:#dfe7e1;transform:translateY(105%);transition:transform .35s ease;box-shadow:0 -20px 60px rgba(0,0,0,.6)}
-#notes.open{transform:none}
-#notes h5{margin:0 0 8px;font-family:var(--mono);font-size:.75em;letter-spacing:.14em;text-transform:uppercase;color:var(--guide)}
-#notes p+p{margin-top:.6em}
-.hint{position:fixed;left:50%;top:18px;transform:translateX(-50%);z-index:6;font-family:var(--mono);font-size:13px;color:var(--faint);opacity:0;transition:opacity .6s;pointer-events:none;white-space:nowrap}
-.hint.show{opacity:1}
-
-/* card (after visual-effect's example card) */
-.card{border:1px solid var(--line-2);border-radius:24px;background:linear-gradient(to bottom right,rgba(22,26,24,.92),rgba(14,17,16,.72));box-shadow:0 40px 80px -40px rgba(0,0,0,.9);position:relative;min-width:0;backdrop-filter:blur(2px)}
-.card-head{display:flex;gap:20px;align-items:center;justify-content:space-between;padding:20px 28px;border-bottom:1px solid var(--line-2);background:rgba(38,42,40,.45);border-radius:24px 24px 0 0}
-.card-title{font-family:var(--mono);font-size:22px;font-weight:600;color:var(--fg)}
-.card-desc{color:var(--muted);font-size:20px;margin-top:4px}
-.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-.btn{display:inline-flex;align-items:center;gap:8px;height:46px;padding:0 20px;border-radius:999px;border:1px solid var(--line-2);background:var(--panel-2);color:var(--fg);font-size:19px;font-weight:500;transition:background .15s,opacity .15s,transform .1s,box-shadow .2s;white-space:nowrap}
-.btn:disabled{opacity:.35}
-.btn.human{border-color:var(--human);color:var(--human-fg);background:rgba(234,179,8,.08)}
-.btn.resume{border-color:var(--int);color:#fb923c;background:rgba(249,115,22,.08)}
-.btn.ready{opacity:1}
-.btn.human.ready{animation:callout 1.4s ease-in-out infinite}
-.btn.resume.ready{animation:callout-o 1.4s ease-in-out infinite}
-.btn.pressed{transform:scale(.94);filter:brightness(1.5)}
-@keyframes callout{0%,100%{box-shadow:0 0 0 0 rgba(234,179,8,0)}50%{box-shadow:0 0 0 8px rgba(234,179,8,.2)}}
-@keyframes callout-o{0%,100%{box-shadow:0 0 0 0 rgba(249,115,22,0)}50%{box-shadow:0 0 0 8px rgba(249,115,22,.2)}}
-.seg{display:inline-flex;padding:4px;border-radius:999px;border:1px solid var(--line-2);background:var(--panel)}
-.seg span{height:38px;padding:0 16px;border-radius:999px;color:var(--muted);font-size:18px;display:inline-flex;align-items:center;transition:background .25s,color .25s,box-shadow .25s}
-.seg span.on{background:var(--panel-2);color:var(--fg);box-shadow:inset 0 0 0 1px var(--guide-dim)}
-.card-config{padding:14px 28px;border-bottom:1px solid var(--line-2);display:flex;gap:16px;align-items:center;font-size:19px;color:var(--muted)}
-.viz{padding:96px 28px 26px;border-bottom:1px solid var(--line-2);position:relative}
-.viz.nob{border-bottom:0}
-.row{display:flex;align-items:flex-start;gap:16px 12px}
-.arrow{height:84px;display:flex;align-items:center;color:#56605a;flex:none}
-.arrow svg{width:24px;height:24px}
-.left-out{padding:16px 28px 22px}
-.left-out h4{font-family:var(--mono);font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:0 0 10px;font-weight:500}
-.arts{list-style:none;margin:0;padding:0;display:grid;gap:6px;min-height:34px}
-.arts li{display:grid;grid-template-columns:minmax(0,15rem) minmax(0,1fr);gap:18px;font-size:20px;align-items:baseline}
-.arts li .f{font-family:var(--mono);color:var(--fg);font-size:18px}
-.arts li .n{color:var(--muted)}
-.arts li.empty{display:block;color:var(--faint);font-size:18px}
-.arts li.fresh{animation:arrive .45s cubic-bezier(.34,1.56,.64,1)}
-@keyframes arrive{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-
-/* node (after visual-effect's EffectNode) */
-.ve{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:10px;flex:none}
-.ve-box{position:relative;height:84px;width:84px;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,.12);background:var(--idle);opacity:.6;display:flex;align-items:center;justify-content:center;color:#fff;
-  transition:background-color .12s ease-in-out,opacity .3s,width .6s cubic-bezier(.34,1.56,.64,1),transform .35s cubic-bezier(.34,1.4,.64,1),box-shadow .3s}
-.ve-box[data-state=running]{background:var(--run);opacity:1;transform:scale(.95);box-shadow:0 0 30px rgba(59,130,246,.35);animation:jitter .32s steps(2) infinite}
-.ve-box[data-state=done]{background:var(--ok);opacity:1}
-.ve-box[data-state=failed]{background:var(--err);opacity:1}
-.ve-box[data-state=interrupted]{background:var(--int);opacity:1}
-.ve-box[data-state=human]{background:var(--human);opacity:1;color:#1c1917;animation:breathe 1.6s ease-in-out infinite}
-.ve-shine{position:absolute;inset:0;width:200%;opacity:0;pointer-events:none;mix-blend-mode:lighten;filter:blur(4px);
-  background:linear-gradient(90deg,transparent 0%,transparent 40%,rgba(255,255,255,.1) 45%,rgba(255,255,255,.5) 50%,rgba(255,255,255,.1) 55%,transparent 60%,transparent 100%)}
-.ve-box[data-state=running] .ve-shine{opacity:1;animation:shine .8s cubic-bezier(.5,0,.1,1) infinite}
-@keyframes shine{from{transform:translateX(-66%)}to{transform:translateX(50%)}}
-@keyframes jitter{0%{translate:.6px -.3px;rotate:-.8deg}50%{translate:-.8px .4px;rotate:.9deg}100%{translate:.3px .2px;rotate:-.4deg}}
-@keyframes breathe{0%,100%{box-shadow:0 0 0 0 rgba(234,179,8,.5)}50%{box-shadow:0 0 0 10px rgba(234,179,8,0)}}
-.ve-content{position:relative;display:flex;align-items:center;justify-content:center;padding:0 16px;white-space:nowrap;font-weight:600;font-size:21px}
-.ve-icon{display:block;width:38px;height:38px}
-.ve-icon svg{width:100%;height:100%;display:block;fill:currentColor;opacity:.92}
-.ve-label{display:flex;flex-direction:column;gap:2px;min-width:84px}
-.ve-name{font-family:var(--mono);font-size:19px;color:#dfe3e0;white-space:nowrap}
-.ve-sub{font-family:var(--mono);font-size:16px;color:var(--faint);white-space:nowrap}
-.ve-time{font-family:var(--mono);font-size:16px;color:#60a5fa;font-variant-numeric:tabular-nums;min-height:1.2em}
-.ve-bubble{position:absolute;bottom:calc(100% + 14px);left:0;z-index:5;width:max-content;max-width:340px;padding:10px 15px;border-radius:12px;font-size:19px;line-height:1.3;font-weight:500;box-shadow:0 0 20px rgba(0,0,0,.55);pointer-events:none}
-.ve-bubble::after{content:"";position:absolute;top:100%;left:var(--tip,42px);border:8px solid transparent;transform:translateX(-50%)}
-.ve-bubble.fail{background:#ef4444;color:#fff5f5}.ve-bubble.fail::after{border-top-color:#ef4444}
-.ve-bubble.human{background:#facc15;color:#1c1917}.ve-bubble.human::after{border-top-color:#facc15}
-.ve-bubble.interrupted{background:#f97316;color:#fff7ed}.ve-bubble.interrupted::after{border-top-color:#f97316}
-.ve-bubble.note{background:#2a302c;color:#eef2ef;border:1px solid rgba(255,255,255,.08)}.ve-bubble.note::after{border-top-color:#2a302c}
-/* horizontal node variant (label at right, bubble at right) */
-.ve.h{flex-direction:row;align-items:center;gap:16px}
-.ve.h .ve-bubble{bottom:auto;top:50%;left:calc(100% + 18px);transform:translateY(-50%)}
-.ve.h .ve-bubble::after{top:50%;left:-8px;transform:translateY(-50%);border-top-color:transparent!important}
-.ve.h .ve-bubble.fail::after{border-right-color:#ef4444}
-.ve.h .ve-bubble.note::after{border-right-color:#2a302c}
-
-.legend{display:flex;flex-wrap:wrap;gap:12px 30px;font-size:22px;color:var(--muted)}
-.legend span{display:inline-flex;align-items:center;gap:12px}
-.legend i{width:22px;height:22px;border-radius:6px;display:inline-block}
-
-/* simulated presenter cursor */
-#cursor{position:absolute;left:0;top:0;width:34px;height:34px;z-index:20;pointer-events:none;opacity:0;transition:opacity .3s;filter:drop-shadow(0 4px 8px rgba(0,0,0,.6))}
-#cursor.on{opacity:1}
-#cursor svg{width:100%;height:100%}
-#cursor .ring{position:absolute;left:-14px;top:-14px;width:40px;height:40px;border-radius:50%;border:2px solid var(--human-fg);opacity:0}
-#cursor.click .ring{animation:ripple .5s ease-out}
-@keyframes ripple{from{opacity:.9;transform:scale(.3)}to{opacity:0;transform:scale(1.4)}}
-
-/* ── slide 1 ── */
-.s1{justify-content:center}
-.s1 .kicker{font-family:var(--mono);font-size:24px;color:var(--guide);letter-spacing:.16em;text-transform:uppercase}
-.s1 h1{font-size:240px;font-weight:800;letter-spacing:-.055em;line-height:.9;margin-top:24px;background:linear-gradient(180deg,#ffffff 30%,#b8f7c9);-webkit-background-clip:text;background-clip:text;color:transparent}
-.s1 .quote{font-family:var(--mono);font-size:36px;color:#dff9e6;margin-top:44px;min-height:1.3em;max-width:1100px;line-height:1.35}
-.s1 .quote .caret{display:inline-block;width:.55em;height:1em;background:var(--guide);vertical-align:-.12em;margin-left:4px;animation:blink 1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
-.s1 .sub{font-size:34px;color:var(--muted);margin-top:30px;max-width:1000px}
-.s1 .who{margin-top:56px;display:flex;gap:26px;align-items:center;font-size:26px}
-.s1 .who b{font-weight:600}
-.s1 .who .sep{width:1px;height:30px;background:var(--line-2)}
-.s1 .who span{color:var(--muted)}
-.planet-wrap{position:absolute;right:150px;top:200px;width:560px;height:560px}
-.planet{position:absolute;inset:0}
-.planet .sphere{position:absolute;inset:60px;transform:translateZ(0);border-radius:50%;
-  background:radial-gradient(circle at 34% 30%,#b7ffd0 0%,#3fbf6c 14%,#14532d 46%,#06140c 78%);
-  box-shadow:0 0 80px rgba(124,242,156,.18),inset -40px -50px 80px rgba(0,0,0,.65);animation:float 9s ease-in-out infinite}
-.planet .sphere::after{content:"";position:absolute;inset:0;border-radius:50%;background:repeating-linear-gradient(170deg,transparent 0 26px,rgba(0,0,0,.12) 26px 30px);mix-blend-mode:multiply}
-@keyframes float{0%,100%{transform:translateZ(0)}50%{transform:translateZ(0) translateY(-12px)}}
-.panic-badge{position:absolute;right:120px;top:84px;font-family:var(--round);font-weight:600;font-size:30px;letter-spacing:.06em;color:#0b1a10;background:var(--guide);padding:8px 22px 10px;border-radius:16px;box-shadow:0 0 30px var(--guide-glow);transform:rotate(-3deg)}
-.keys{position:absolute;left:120px;bottom:44px;font-family:var(--mono);font-size:18px;color:var(--faint)}
-.keys kbd{font-family:var(--mono);border:1px solid var(--line-2);border-radius:6px;padding:1px 8px;color:var(--muted)}
-
-/* ── slide 2 ── */
-.two{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:56px}
-.meter{margin:0 28px 26px;}
-.meter .lab{display:flex;justify-content:space-between;font-family:var(--mono);font-size:17px;color:var(--faint);margin-bottom:10px}
-.meter .bar{height:14px;border-radius:99px;background:#1d2420;overflow:hidden}
-.meter .fill{height:100%;width:100%;border-radius:99px;background:linear-gradient(90deg,var(--guide-dim),var(--guide));transition:width 1s ease,background .6s}
-.meter .fill.low{background:linear-gradient(90deg,#b91c1c,#ef4444)}
-
-/* ── slide 3 ── */
-.s3grid{display:grid;grid-template-columns:1.05fr 1fr;gap:70px;margin-top:40px;align-items:start}
-.bigq{font-size:84px;font-weight:800;letter-spacing:-.045em;line-height:1.02}
-.s3grid .lede{font-size:30px}
-.flowcode{padding:26px 30px 10px;font-family:var(--mono);font-size:24px;line-height:1.7;color:#cfd8d2;min-height:300px}
-.flowcode .ln{white-space:pre;opacity:0;transform:translateX(-8px);transition:opacity .35s,transform .35s}
-.flowcode .ln.on{opacity:1;transform:none}
-.flowcode .k{color:var(--guide)} .flowcode .c{color:var(--faint)} .flowcode .s{color:#fbbf24}
-.seats{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:12px 30px 28px}
-.seat{border:1px dashed var(--line-2);border-radius:16px;padding:16px 20px}
-.seat .role{font-family:var(--mono);font-size:16px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
-.seat .who{font-size:30px;font-weight:700;margin-top:6px;display:inline-block}
-.seat .who.swap{animation:swapin .5s cubic-bezier(.34,1.56,.64,1)}
-@keyframes swapin{from{opacity:0;transform:translateY(14px) scale(.9);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
-.legend-wrap{margin-top:auto;padding-top:30px;border-top:1px solid var(--line)}
-.legend-wrap .tag{margin-right:20px}
-
-/* ── slide 4/6/7/9 common ── */
-.split{display:grid;grid-template-columns:560px 1fr;gap:60px;margin-top:48px;align-items:start}
-.split .title{font-size:64px;margin-top:18px}
-.split .body{font-size:28px;color:var(--muted);margin-top:24px;line-height:1.45}
-.hero-card{margin-top:44px}
-.hero-card .viz{padding-top:110px;padding-bottom:110px}
-.revarc{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible}
-.revarc path{fill:none;stroke:#f87171;stroke-width:3;stroke-dasharray:10 8;opacity:0}
-.revarc path.on{opacity:1;animation:dash 1s linear infinite}
-.revarc text{fill:#fca5a5;font-family:var(--mono);font-size:18px;opacity:0;transition:opacity .3s}
-.revarc text.on{opacity:1}
-@keyframes dash{to{stroke-dashoffset:-36}}
-
-/* ── slide 6 ── */
-.dag{display:flex;align-items:center;gap:22px}
-.lanes{display:flex;flex-direction:column;gap:22px;padding:16px 18px;border-left:2px solid rgba(96,165,250,.35);border-right:2px solid rgba(96,165,250,.35);border-radius:14px;width:560px}
-.lanes-cap{font-family:var(--mono);font-size:15px;color:#60a5fa;letter-spacing:.1em;text-transform:uppercase;margin-bottom:-6px}
-.dag .ve.h .ve-label{min-width:0}
-.dag .ve-time{display:none}
-.judge-chip{font-family:var(--mono);font-size:15px;color:var(--faint)}
-
-/* ── slide 7 ── */
-.pfile{font-family:var(--mono);font-size:22px;line-height:1.75;padding:18px 26px 22px;color:#cfd8d2;min-height:260px}
-.pfile .ln{white-space:pre;transition:color .3s}
-.pfile .ln.fresh{animation:arrive .45s cubic-bezier(.34,1.56,.64,1)}
-.pfile .x{color:var(--ok-fg)} .pfile .u{color:#fb923c} .pfile .c{color:var(--faint)}
-.callout{margin-top:30px;border-left:4px solid var(--guide);padding:6px 0 6px 22px;font-size:28px;color:var(--fg)}
-
-/* ── slide 8 ── */
-.verdicts{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:18px 28px 24px}
-.verdict{border:1px solid var(--line-2);border-radius:14px;padding:14px 16px;opacity:.25;transition:opacity .4s,border-color .4s}
-.verdict.on{opacity:1;border-color:rgba(74,222,128,.5)}
-.verdict .n{font-size:24px;font-weight:700}
-.verdict .m{font-family:var(--mono);font-size:16px;color:var(--muted);margin-top:4px}
-
-/* ── slide 9 ── */
-.side{display:flex;flex-direction:column;gap:10px}
-.side-cap{font-family:var(--mono);font-size:15px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
-.wall{align-self:stretch;width:18px;min-height:140px;border-radius:5px;flex:none;background:repeating-linear-gradient(135deg,#b91c1c 0 7px,transparent 7px 14px);opacity:.85;position:relative;margin-inline:14px}
-.wall span{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-90deg);white-space:nowrap;font-family:var(--mono);font-size:15px;letter-spacing:.14em;text-transform:uppercase;color:#fca5a5;background:var(--bg);padding:3px 8px;border-radius:5px}
-.wall.pulse{animation:wallp 1.2s ease-in-out 2}
-@keyframes wallp{50%{box-shadow:0 0 24px rgba(239,68,68,.6)}}
-.trio{display:grid;grid-template-columns:repeat(3,1fr) 1.25fr;gap:24px;margin-top:28px}
-.trio .t{border:1px solid var(--line);background:rgba(14,17,16,.7);border-radius:18px;padding:18px 22px}
-.trio h3{font-size:28px;font-weight:700}
-.trio p{font-size:20px;color:var(--muted);margin-top:8px;line-height:1.4}
-.chips{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
-.chip{font-family:var(--mono);font-size:17px;padding:4px 12px;border-radius:999px;border:1px solid}
-.chip.ok{color:var(--ok-fg);border-color:rgba(74,222,128,.5)} .chip.dr{color:#f87171;border-color:rgba(248,113,113,.5)} .chip.df{color:#fbbf24;border-color:rgba(251,191,36,.5)}
-
-/* ── slide 10 ── */
-.s10grid{display:grid;grid-template-columns:780px 1fr;gap:80px;margin-top:56px;align-items:center}
-.morph{position:relative;font-size:104px;font-weight:800;letter-spacing:-.045em;line-height:1.05}
-.morph .from{color:var(--muted);position:relative;display:inline-block}
-.morph .from::after{content:"";position:absolute;left:-4px;right:-4px;top:54%;height:8px;background:#ef4444;border-radius:4px;transform:scaleX(0);transform-origin:left;transition:transform .7s cubic-bezier(.7,0,.2,1)}
-.morph.struck .from::after{transform:scaleX(1)}
-.morph .from-sub,.morph .to-sub{font-size:32px;font-weight:500;letter-spacing:-.01em;color:var(--muted);margin-top:6px}
-.morph .to{color:var(--guide);opacity:0;transform:translateY(20px);transition:opacity .6s,transform .6s cubic-bezier(.34,1.56,.64,1);margin-top:36px}
-.morph.struck .to{opacity:1;transform:none}
-.race{display:flex;flex-direction:column;gap:38px}
-.race .case{font-family:var(--mono);font-size:20px;color:var(--guide);letter-spacing:.1em;text-transform:uppercase}
-.race h3{font-size:44px;font-weight:700;margin-top:10px}
-.lane{display:grid;grid-template-columns:1fr;gap:12px}
-.lane .lh{display:flex;justify-content:space-between;align-items:baseline;font-size:26px}
-.lane .lh b{font-weight:600}
-.lane .val{font-family:var(--mono);font-size:30px;font-variant-numeric:tabular-nums}
-.track{height:40px;border-radius:12px;background:#151a17;border:1px solid var(--line);overflow:hidden;position:relative}
-.track .fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:11px}
-.track.hum .fill{background:repeating-linear-gradient(135deg,#64748b 0 14px,#475569 14px 28px)}
-.track.flow .fill{background:linear-gradient(90deg,var(--ok),var(--ok-fg));box-shadow:0 0 24px rgba(74,222,128,.4)}
-.foot-note{font-family:var(--mono);font-size:17px;color:var(--faint)}
-
-/* ── slide 11 ── */
-.s11{justify-content:center}
-.s11 .closing{font-size:104px;font-weight:800;letter-spacing:-.045em;line-height:1.05}
-.s11 .sigh{font-family:var(--mono);font-size:30px;color:#9fb3a6;margin-top:56px}
-.s11 .sigh b{color:var(--guide);font-weight:500}
-.dontpanic{position:absolute;right:120px;bottom:150px;font-family:var(--round);font-weight:600;font-size:118px;line-height:1;letter-spacing:.04em;color:var(--guide);
-  text-shadow:0 0 30px var(--guide-glow),0 0 2px #fff;transform:rotate(-4deg)}
-.slide.active .dontpanic{animation:panic 1.2s cubic-bezier(.34,1.56,.64,1) both;animation-delay:2.4s}
-@keyframes panic{from{opacity:0;transform:rotate(-14deg) scale(.4)}to{opacity:1;transform:rotate(-4deg) scale(1)}}
-.thanks{position:absolute;left:120px;bottom:150px;font-size:28px;color:var(--muted)}
-.thanks b{color:var(--fg);font-weight:600}
-
-@media (prefers-reduced-motion: reduce){
-  .slide,.slide.active{transition:opacity .2s ease,visibility 0s;transform:none!important}
-  .slide.active .in,.slide.active .dontpanic{animation:none;opacity:1}
-  .ve-box[data-state=running],.ve-box[data-state=running] .ve-shine,.ve-box[data-state=human],.btn.ready,.planet .sphere,.planet .arm,.planet .arm i,.s1 .quote .caret,.revarc path.on,.wall.pulse{animation:none!important}
-  .ve-box{transition:background-color .1s}
-  .nebula{transition:none}
-}
-
-.slide aside.notes{display:none}
-
-.planet{transform-style:preserve-3d}
-.planet .orb{position:absolute;left:50%;top:50%;width:0;height:0;transform-style:preserve-3d;transform:rotateZ(-16deg) rotateX(76deg)}
-.planet .oring{position:absolute;left:-320px;top:-320px;width:640px;height:640px;border-radius:50%;border:2px solid rgba(124,242,156,.38);box-shadow:0 0 30px rgba(124,242,156,.1)}
-.planet .arm{position:absolute;left:0;top:0;transform-style:preserve-3d;animation:spin 18s linear infinite}
-.planet .arm i{position:absolute;left:307px;top:-13px;width:26px;height:26px;border-radius:7px;box-shadow:0 0 14px currentColor;animation:face 18s linear infinite;animation-delay:inherit}
-@keyframes spin{to{transform:rotateZ(360deg)}}
-@keyframes face{from{transform:rotateZ(0deg) rotateX(-76deg)}to{transform:rotateZ(-360deg) rotateX(-76deg)}}
-.cbody{display:grid;grid-template-columns:1fr 540px}
-.cbody .viz{border-bottom:0;border-right:1px solid var(--line-2);padding:104px 28px 104px}
-.cbody .left-out{padding-top:26px}
-.row.zoom{zoom:1.15}
-.hero-card{margin-top:34px}
-.hero-card .viz{padding-top:100px;padding-bottom:40px}
-.arts.cols{grid-template-columns:1fr 1fr;column-gap:40px}
-.arts.cols li{grid-template-columns:minmax(0,12rem) minmax(0,1fr)}
-.lanes{gap:12px;padding:12px 18px}
-.verdicts{padding:14px 28px 18px}
-.verdict{padding:10px 16px}
-.btn.used{opacity:.7}
-.s2 .two{margin-top:64px}
-
-.s5 .split,.s7 .split{margin-top:auto;margin-bottom:auto}
-.s5 .row{zoom:1.3}
-.s5 .viz{padding-top:84px}
-.s10 .s10grid{margin-top:auto;margin-bottom:auto;grid-template-columns:760px 1fr}
-.s10 .morph{font-size:150px}
-.s10 .morph .from-sub,.s10 .morph .to-sub{font-size:38px}
-.s10 .race h3{font-size:56px}
-.s10 .race{gap:46px}
-.s10 .track{height:58px;border-radius:14px}
-.s10 .lane .lh{font-size:30px}
-.s10 .lane .val{font-size:36px}
-.s10 .foot-note{font-size:20px;color:var(--muted)}
-.hero-card .cbody .viz{padding:100px 28px 124px}
-.lanes .ve{align-self:flex-start}
-.lanes{width:600px}
-
-</style>
-</head>
-<body>
-<canvas id="stars" aria-hidden="true"></canvas>
-<div class="nebula" aria-hidden="true"></div>
-<div id="progress"></div>
-<div class="hint" id="hint">← → · space · click to move · F fullscreen · N notes</div>
-<div id="viewport">
-<main id="stage" aria-live="polite">
-
-<!-- 1 -->
-<section class="slide s1" data-title="Marvin">
-  <div class="panic-badge in" style="--d:1600">DON'T PANIC</div>
-  <div class="planet-wrap in" style="--d:300" aria-hidden="true"><div class="planet">
-    <div class="sphere"></div>
-    <div class="orb"><div class="oring"></div><div class="arm" style="animation-delay:0s"><i style="background:var(--idle);color:var(--idle);animation-delay:0s"></i></div><div class="arm" style="animation-delay:-3s"><i style="background:var(--run);color:var(--run);animation-delay:-3s"></i></div><div class="arm" style="animation-delay:-6s"><i style="background:var(--ok);color:var(--ok-fg);animation-delay:-6s"></i></div><div class="arm" style="animation-delay:-9s"><i style="background:var(--err);color:var(--err);animation-delay:-9s"></i></div><div class="arm" style="animation-delay:-12s"><i style="background:var(--int);color:var(--int);animation-delay:-12s"></i></div><div class="arm" style="animation-delay:-15s"><i style="background:var(--human);color:var(--human);animation-delay:-15s"></i></div></div>
-  </div></div>
-  <p class="kicker in">A project presentation · agentic engineering</p>
-  <h1 class="in" style="--d:120">Marvin</h1>
-  <p class="quote" data-type="“Brain the size of a planet, and they ask me to write code.”"><span class="t"></span><span class="caret"></span></p>
-  <p class="sub in" style="--d:400">Agentic flows that reach the goal, unattended, inside a process you can read.</p>
-  <div class="who in" style="--d:600"><b>Riccardo Merolla</b><i class="sep"></i><span>designer · engineer</span></div>
-  <p class="keys in" style="--d:900"><kbd>←</kbd> <kbd>→</kbd> move · <kbd>F</kbd> fullscreen · <kbd>N</kbd> notes</p>
-  <aside class="notes">
-    <p>Hi, I'm Riccardo. This talk is about Marvin: a way of running AI coding agents inside explicit workflows, so that a run can go on unattended and still arrive where it was meant to go.</p>
-    <p>The name comes from Marvin, the Paranoid Android in The Hitchhiker's Guide to the Galaxy: a brain the size of a planet, given small chores, and convinced it will all go wrong. That is a fair picture of a coding agent today. Very capable, and quite happy to wander off.</p>
-    <p>This is not a product pitch. I want to explain the method: the ideas, the shape of a run, and what it changed in practice. Ten minutes, eleven slides. The coloured squares orbiting the planet are the states you'll see on every slide.</p>
-  </aside>
-</section>
-
-<!-- 2 -->
-<section class="slide s2" data-title="The problem">
-  <p class="eyebrow in">The problem</p>
-  <h2 class="title in" style="--d:100">Left alone, agents say “done” when they aren't, and lose the thread on long runs.</h2>
-  <div class="two">
-    <div class="card in" style="--d:300" data-card="a">
-      <div class="card-head"><div><p class="card-title">“Done”</p><p class="card-desc">The agent reports success. Nobody checked.</p></div><span class="tag">illustration</span></div>
-      <div class="viz nob"><div class="row" data-row></div></div>
-    </div>
-    <div class="card in" style="--d:450" data-card="b">
-      <div class="card-head"><div><p class="card-title">The long run</p><p class="card-desc">Each step pushes the goal further out of view.</p></div><span class="tag">illustration</span></div>
-      <div class="viz nob"><div class="row" data-row></div></div>
-      <div class="meter"><div class="lab"><span>goal still in the agent's head</span><span data-pct>clear</span></div><div class="bar"><div class="fill" data-fill></div></div></div>
-    </div>
-  </div>
-  <p class="quip">Marvin: <em>“Done,” it said. It wasn't. I could have told them.</em></p>
-  <aside class="notes">
-    <p>Two problems kept coming back when I let agents work on their own.</p>
-    <p>First, on the left: the agent declares the job done when it isn't. It writes “all tests pass” without running them, or finishes three of five features and reports success. Nothing in the loop asks it to prove anything.</p>
-    <p>Second, on the right: on a long run the agent loses the thread. The goal and the decisions made an hour ago drift out of its working memory, so later steps contradict earlier ones, or it quietly starts solving a different problem.</p>
-    <p>Both are the same root issue: we trust the agent's own account of the work, and we keep the state of the work inside the agent. The rest of this talk is about moving both of those out of the agent. These two cards are illustrations, not measurements.</p>
-  </aside>
-</section>
-
-<!-- 3 -->
-<section class="slide s3" data-title="The idea">
-  <p class="eyebrow in">The idea</p>
-  <div class="s3grid">
-    <div>
-      <p class="bigq in" style="--d:100">Agents do the volume.<br><span class="y">People make the decisions.</span></p>
-      <p class="lede in" style="--d:350">The process lives in code. <b>The agents can change.</b> Every step is visible, every finding is written down, and nothing important happens until a person says yes.</p>
-    </div>
-    <div class="card in" style="--d:300">
-      <div class="card-head"><div><p class="card-title">a workflow, as code</p></div><span class="tag">illustrative</span></div>
-      <div class="flowcode" data-code></div>
-      <div class="seats">
-        <div class="seat"><p class="role">plans &amp; judges</p><span class="who" data-seat="plan">Claude</span></div>
-        <div class="seat"><p class="role">writes code</p><span class="who g" data-seat="code">Claude</span></div>
-      </div>
-    </div>
-  </div>
-  <div class="legend-wrap in" style="--d:700">
-    <div class="legend" aria-label="Legend"><span class="tag">how to read the runs</span>
-      <span><i style="background:var(--idle);opacity:.6"></i>waiting</span>
-      <span><i style="background:var(--run)"></i>an agent is working</span>
-      <span><i style="background:var(--ok)"></i>done</span>
-      <span><i style="background:var(--err)"></i>did not pass review</span>
-      <span><i style="background:var(--int)"></i>interrupted</span>
-      <span><i style="background:var(--human)"></i>needs a person</span>
-    </div>
-  </div>
-  <p class="quip">Marvin: <em>Swap me out if you like. The process won't even notice. Nobody does.</em></p>
-  <aside class="notes">
-    <p>The idea is one sentence: agents do the volume, people make the decisions.</p>
-    <p>The process, meaning the steps, the checks, who approves what, and what gets written down, lives in code, in the repository, next to the project. It is not a prompt and it is not in anyone's head. The agents are the replaceable part: on the right, the seat that writes code changes from one agent to another, and the workflow text doesn't move.</p>
-    <p>Because the process is explicit, every step is visible and every finding is written to a file. And the decisions that matter, like approving a plan, stay with a person.</p>
-    <p>At the bottom is the legend for the rest of the deck. Slate is waiting, blue is an agent working, green is done, red did not pass review, orange is interrupted, and yellow needs a person.</p>
-  </aside>
-</section>
-
-<!-- 4 -->
-<section class="slide s4" data-title="The basic loop">
-  <p class="eyebrow in">The basic loop</p>
-  <h2 class="title in" style="--d:100">Plan, build, check, review. <span class="g">Only reviewed work is committed.</span></h2>
-  <p class="lede in" style="--d:250">What review does not accept goes back as a revision. The agent never grades its own homework.</p>
-  <div class="card hero-card in" style="--d:350">
-    <div class="card-head"><div><p class="card-title">The basic loop</p><p class="card-desc">One task, start to commit.</p></div><span class="tag">simulated run · figures illustrative</span></div>
-    <div class="cbody"><div class="viz"><svg class="revarc" data-arc><path d=""/><text></text></svg><div class="row zoom" data-row></div></div>
-    <div class="left-out"><h4>Left behind</h4><ul class="arts" data-arts></ul></div></div>
-  </div>
-  <p class="quip">Marvin: <em>Round and round. Don't talk to me about loops.</em></p>
-  <aside class="notes">
-    <p>This is the smallest unit of the method, and everything else is built from it.</p>
-    <p>An agent writes a plan. An agent builds against it. Then checks run: your build, your tests, the things a machine can verify. Then a separate review looks at the work. Watch the review go red: it found a missing test. That finding is written to a file and goes back to the coder as a revision. The coder fixes it, checks run again, review clears it, and only then is there a commit.</p>
-    <p>This answers the first problem from earlier. “Done” is no longer something the agent says about itself. Done means it passed checks and review, and there is a written trail of what was found along the way. Look at the “left behind” list: the plan, the findings from each round, and one commit per reviewed task.</p>
-  </aside>
-</section>
-
-<!-- 5 -->
-<section class="slide s5" data-title="The plan is a document">
-  <div class="split">
-    <div>
-      <p class="eyebrow in" style="--d:0">People approve</p>
-      <h2 class="title in" style="--d:100">The plan is a document. <span class="y">Editing it is the decision.</span></h2>
-      <p class="body in" style="--d:250">Before any code is written, an agent drafts a plan a person can read. The flow <b>stops and waits</b>. Approve it and the work starts. Send it back and the agent revises it, <b>keeping your edits</b>.</p>
-    </div>
-    <div class="card in" style="--d:300;margin-top:20px">
-      <div class="card-head"><div><p class="card-title">Wait for a person</p><p class="card-desc">The run pauses on the plan until you answer. Simulated.</p></div>
-        <div class="controls"><button class="btn human" data-approve disabled tabindex="-1">Approve plan</button><button class="btn" data-back disabled tabindex="-1">Send back</button></div></div>
-      <div class="viz"><div class="row" data-row></div></div>
-      <div class="left-out"><h4>Left behind</h4><ul class="arts" data-arts></ul></div>
-    </div>
-  </div>
-  <p class="quip">Marvin: <em>They stopped and asked a human. Well, someone has to take the blame.</em></p>
-  <aside class="notes">
-    <p>Unattended doesn't mean unsupervised. The flow has a few deliberate stops, and the first one is the plan.</p>
-    <p>An agent drafts the plan as a normal document in the repository: the stories, who owns which files, in what order. Then the run stops, the yellow node, and waits for a person. Nothing else happens until you answer.</p>
-    <p>In the run you see me send it back first. I edited the plan, and the agent revises it while keeping my edits. Then I approve, and the build starts.</p>
-    <p>The point is that the decision is made by editing a document, not by chatting with an agent. The plan is readable, it is versioned like code, and it is the thing everyone agreed to. It's also where a team that adopts this spends most of its attention.</p>
-  </aside>
-</section>
-
-<!-- 6 -->
-<section class="slide s6" data-title="One epic, many agents, one branch">
-  <p class="eyebrow in">Agents in parallel</p>
-  <h2 class="title in" style="--d:100">One epic, many agents, one branch.</h2>
-  <p class="lede in" style="--d:250;max-width:1600px">Stories declare the files they own and what they depend on. Independent stories are built at the same time, each in its own copy of the repository. <b>A judge scores every story before it merges.</b></p>
-  <div class="card hero-card in" style="--d:350">
-    <div class="card-head"><div><p class="card-title">Stories, three at a time</p><p class="card-desc">Story 1 lays the ground. Stories 2 to 4 run together. Story 5 waits for them.</p></div><span class="tag">simulated run · file names illustrative</span></div>
-    <div class="viz" style="padding-top:22px;padding-bottom:20px"><div class="dag" data-dag></div></div>
-    <div class="left-out"><h4>Left behind</h4><ul class="arts cols" data-arts></ul></div>
-  </div>
-  <p class="quip">Marvin: <em>Five of us at once. Five times the gloom, one branch.</em></p>
-  <aside class="notes">
-    <p>Real work is bigger than one task, so the plan splits an epic into stories. Each story declares which files it owns and which stories it depends on. That declaration is what makes parallel work safe.</p>
-    <p>Watch the run. Story 1 lays the ground: the model everything else needs. Then stories 2, 3 and 4 don't touch each other's files, so they run at the same time, each agent in its own copy of the repository. Story 3 doesn't pass the judge the first time: a gap is written down, it gets a revision, and it passes on the second round. Story 5 depends on all three, so it waits.</p>
-    <p>Every story is scored by a judge before it merges into the single epic branch. At the end there is one branch, reviewed story by story, and a report of what ran and where the time went.</p>
-  </aside>
-</section>
-
-<!-- 7 -->
-<section class="slide s7" data-title="Stop anywhere, resume anywhere">
-  <div class="split" style="grid-template-columns:620px 1fr">
-    <div>
-      <p class="eyebrow in">Files are the state</p>
-      <h2 class="title in" style="--d:100">Stop at any point. <span class="o">Pick up where it stopped.</span></h2>
-      <p class="body in" style="--d:250">Progress is written to files in the repository, <b>not held in an agent's memory</b>. When an agent drops out or a laptop closes, the next run reads the files, keeps what was done, and continues.</p>
-      <p class="callout in" style="--d:450">This is the fix for losing the thread: the thread is a file.</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:24px">
-      <div class="card in" style="--d:300">
-        <div class="card-head"><div><p class="card-title">Interrupt and resume</p><p class="card-desc">Halfway through, the agent drops out.</p></div>
-          <div class="controls"><button class="btn resume" data-rerun disabled tabindex="-1">↻ Rerun</button></div></div>
-        <div class="viz nob"><div class="row" data-row></div></div>
-      </div>
-      <div class="card in" style="--d:420">
-        <div class="card-head"><div><p class="card-title">progress file</p></div><span class="tag">in the repo</span></div>
-        <div class="pfile" data-pfile></div>
-      </div>
-    </div>
-  </div>
-  <p class="quip">Marvin: <em>I'll forget everything. Fortunately, the files won't.</em></p>
-  <aside class="notes">
-    <p>This slide answers the second problem, losing the thread.</p>
-    <p>Progress is never kept only in the agent's context. After every task the flow writes where it is to files in the repository: what is committed, what is unfinished, what was decided. On the right you can see that file filling in.</p>
-    <p>In the run, the agent goes offline in the middle of task 3. That happens: rate limits, a crash, a laptop lid. I press rerun. The new run doesn't start over and doesn't need anybody to remember anything. It reads the file, keeps tasks 1 and 2 as done, and continues from task 3.</p>
-    <p>That's also why long runs stay on track: each step starts from the written record of the goal and the decisions so far, not from a memory that has been fading for hours.</p>
-  </aside>
-</section>
-
-<!-- 8 -->
-<section class="slide s8" data-title="Any agent, any seat">
-  <p class="eyebrow in">Any agent, any seat</p>
-  <h2 class="title in" style="--d:100">Swap the agent. <span class="g">Keep the process.</span></h2>
-  <p class="lede in" style="--d:250">A workflow asks for roles: someone to plan and judge, someone to write code. Claude, Codex, Gemini or a local model fills a seat. The steps, the checks and the record stay the same.</p>
-  <div class="card hero-card in" style="--d:350">
-    <div class="card-head"><div><p class="card-title">Pick who writes the code</p><p class="card-desc">Change the coder, run the same flow again. Simulated.</p></div><div class="controls"><span class="card-desc" style="margin:0 6px 0 0">Coder</span><div class="seg" data-seg><span data-v="Claude">Claude</span><span data-v="Codex">Codex</span><span data-v="Gemini">Gemini</span><span data-v="local model">Local model</span></div></div></div>
-    <div class="viz" style="padding-top:64px;padding-bottom:28px"><div class="row zoom" data-row style="zoom:1.3"></div></div>
-    <div class="verdicts" data-verdicts></div>
-  </div>
-  <p class="quip">Marvin: <em>Replaceable. Story of my life.</em></p>
-  <aside class="notes">
-    <p>Because the process is code, the agent is just whoever fills a role.</p>
-    <p>A workflow asks for roles: someone to plan and judge, someone to write code. Any coding agent can fill a role: Claude, Codex, Gemini, or a model running on your own machine. In the run you see the coder seat change four times. The plan format is the same, the checks are the same, the review lenses are the same, and the judge uses the same rubric whoever wrote the code.</p>
-    <p>This matters for two reasons. Models change every few months, and you don't want your engineering process to be rewritten each time. And it lets a team mix them: a strong model to plan and judge, a cheaper or local one to do the volume.</p>
-  </aside>
-</section>
-
-<!-- 9 -->
-<section class="slide s9" data-title="Legacy to new system">
-  <p class="eyebrow in">Modernization</p>
-  <h2 class="title in" style="--d:100;font-size:60px">Read the old system once. Build the new one from what people approved.</h2>
-  <div class="card in" style="--d:300;margin-top:36px">
-    <div class="card-head"><div><p class="card-title">Legacy to target</p><p class="card-desc">Same process for every technology. The kit supplies the knowledge.</p></div>
-      <div class="controls"><div class="seg"><span class="on">COBOL → Java</span><span>JSP → Next.js</span><span>SOAP → REST</span></div><button class="btn human" data-approve disabled tabindex="-1">Approve specification</button></div></div>
-    <div class="viz" style="padding-top:104px;padding-bottom:22px"><div class="row" data-row style="align-items:stretch"></div></div>
-  </div>
-  <div class="trio">
-    <div class="t in" style="--d:500"><h3>Kit</h3><p>Everything one migration path needs, as files. Add a technology by writing a kit.</p></div>
-    <div class="t in" style="--d:600"><h3>Pack</h3><p>The contract inside a kit: checks, how a judge scores, what “equivalent” means.</p></div>
-    <div class="t in" style="--d:700"><h3>Pattern card</h3><p>A short recipe for one old idiom. Each agent gets only the cards it needs.</p></div>
-    <div class="t in" style="--d:800"><h3>Epic brief</h3><p>The spec, distilled with a person, before anything is built:</p><div class="chips"><span class="chip ok">in scope</span><span class="chip dr">dropped</span><span class="chip df">deferred</span></div></div>
-  </div>
-  <p class="quip">Marvin: <em>Old code. Older than me. Nearly as miserable.</em></p>
-  <aside class="notes">
-    <p>The same machinery applies to modernization, which is where many teams start.</p>
-    <p>On the legacy side, agents survey the old code base and turn it into a specification: what each program does, as rules and scenarios, each traced back to the source line it came from. Then a person approves that specification. That's the yellow stop.</p>
-    <p>Only the approved specification crosses the clean-room wall. On the new side, agents build the new system without being able to see the old code, and prove it equivalent by replaying recorded behaviour of the old system against the new one.</p>
-    <p>The knowledge for each path lives in a kit, like COBOL to Java, JSP to Next.js, SOAP to REST. Inside it a pack defines checks and scoring, and pattern cards translate one idiom each. And not every program deserves a port: the spec is first distilled with a person into an epic brief, what's in scope, dropped or deferred, and the parallel stories build that slice.</p>
-  </aside>
-</section>
-
-<!-- 10 -->
-<section class="slide s10" data-title="The numbers">
-  <p class="eyebrow in">What changed in practice</p>
-  <div class="s10grid">
-    <div class="morph in" style="--d:100" data-morph>
-      <div class="from">Weeks</div><div class="from-sub">of development</div>
-      <div class="to">Hours</div><div class="to-sub" style="color:var(--fg)">of flow runs</div>
-    </div>
-    <div class="race in" style="--d:250">
-      <div><p class="case">Case · epic-stories flow</p><h3>An IBM ACE project, from scratch, given a spec.</h3></div>
-      <div class="lane"><div class="lh"><b>Human-only development</b><span class="val" data-hval>days</span></div><div class="track hum"><div class="fill" data-hfill></div></div></div>
-      <div class="lane"><div class="lh"><b class="g">Epic-stories flow</b><span class="val g" data-fval>0 h 00 m</span></div><div class="track flow"><div class="fill" data-ffill></div></div></div>
-      <p class="foot-note">Bars not to scale: about 2 hours of flow runs, compared with days of human-only development.</p>
-    </div>
-  </div>
-  <p class="quip">Marvin: <em>Hours instead of weeks. More time to be depressed.</em></p>
-  <aside class="notes">
-    <p>What did this change in practice? Two honest statements, and no more numbers than I can stand behind.</p>
-    <p>In general: work that took weeks of development now takes hours of flow runs. The people's time moves to writing and approving the plan and reading the review findings.</p>
-    <p>One concrete case: an IBM ACE integration project, built from scratch. The input was a specification. The epic-stories flow, the parallel one from a few slides ago, completed it in about two hours. Compared with that, human-only development took days.</p>
-    <p>The bars are deliberately not to scale; the counter is a stylised clock. The precise ratio depends on the project. What doesn't depend on the project is where the time goes: the agents do the volume, and the people's hours go into the decisions.</p>
-  </aside>
-</section>
-
-<!-- 11 -->
-<section class="slide s11" data-title="Close">
-  <p class="eyebrow in">To sum up</p>
-  <p class="closing" style="margin-top:30px">
-    <span class="in" style="--d:200;display:block">The process is code.</span>
-    <span class="in" style="--d:900;display:block">The agents are replaceable.</span>
-    <span class="in y" style="--d:1600;display:block">The record is yours.</span>
-  </p>
-  <p class="sigh in" style="--d:2200"><b>Marvin:</b> *sigh* I suppose you'll want questions now.</p>
-  <p class="thanks in" style="--d:2600"><b>Riccardo Merolla</b> · thank you</p>
-  <div class="dontpanic" aria-label="Don't Panic">DON'T PANIC</div>
-  <aside class="notes">
-    <p>To close, three lines.</p>
-    <p>The process is code: steps, checks, approvals and what gets written down live in the repository, versioned, reviewable, and the same for every run.</p>
-    <p>The agents are replaceable: any of them can fill a seat, and next year's model drops into the same flow.</p>
-    <p>And the record is yours: plans, findings, progress files, verdicts and commits stay in your repository. That's what lets a run go unattended and still be trusted, and it's what lets a person pick it up at any point.</p>
-    <p>For the team adopting this: start with the basic loop on one real task, then the plan approval, then parallel stories. Thank you. Questions, and don't panic.</p>
-  </aside>
-</section>
-
-<div id="cursor" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 2l16 9.5-7 1.6L9.6 20z" fill="#fff" stroke="#111" stroke-width="1.2" stroke-linejoin="round"/></svg><span class="ring"></span></div>
-<nav class="chrome" aria-label="Slide navigation"><button data-nav="-1" aria-label="Previous slide">‹</button><span class="num" id="num">01 / 11</span><button data-nav="1" aria-label="Next slide">›</button></nav>
-</main>
-</div>
-<aside id="notes" aria-label="Speaker notes"><h5 id="notes-h">Notes</h5><div id="notes-body"></div></aside>
-
-<script>
-;(() => {
-  "use strict"
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  const SPEED = reduce ? 0.02 : 1
-  const Cancel = Symbol("cancel")
-  const $ = (s, r = document) => r.querySelector(s)
-  const $$ = (s, r = document) => [...r.querySelectorAll(s)]
-  const stage = $("#stage")
-  const slides = $$(".slide", stage)
-  const N = slides.length
-  let SCALE = 1
-
-  const ICONS = {
-    star: '<svg viewBox="0 0 24 24"><path d="M12 1.5c.7 5.6 3.4 8.5 10.5 10.5-7.1 2-9.8 4.9-10.5 10.5C11.3 16.9 8.6 14 1.5 12 8.6 10 11.3 7.1 12 1.5z"/></svg>',
-    fail: '<svg viewBox="0 0 24 24"><path d="M8 2h8l6 6v8l-6 6H8l-6-6V8zm2.1 5L7 10.1 8.9 12 7 13.9 10.1 17 12 15.1 13.9 17 17 13.9 15.1 12 17 10.1 13.9 7 12 8.9z"/></svg>',
-    human: '<svg viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8z"/></svg>',
-    pause: '<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4.2" height="16" rx="1.2"/><rect x="13.8" y="4" width="4.2" height="16" rx="1.2"/></svg>'
-  }
-  const ARROW = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.3 4.3a1 1 0 0 1 1.4 0l7 7a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4-1.4l5.3-5.3H3a1 1 0 1 1 0-2h15.6l-5.3-5.3a1 1 0 0 1 0-1.4z"/></svg>'
-  const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e }
-  const fmt = (sim) => { const s = Math.round(sim); return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` }
-  const rel = (node, base) => { const a = node.getBoundingClientRect(), b = base.getBoundingClientRect(); return { x: (a.left - b.left) / SCALE, y: (a.top - b.top) / SCALE, w: a.width / SCALE, h: a.height / SCALE } }
-
-  /* ── node (after visual-effect's EffectNode) ── */
-  function makeNode(name, sub, opts = {}) {
-    const root = el("div", "ve" + (opts.h ? " h" : ""))
-    const bubble = el("div", "ve-bubble"); bubble.hidden = true
-    const box = el("div", "ve-box"), shine = el("div", "ve-shine"), content = el("div", "ve-content")
-    box.append(shine, content)
-    const label = el("div", "ve-label"), nm = el("span", "ve-name", name), sb = el("span", "ve-sub", sub || ""), time = el("span", "ve-time")
-    label.append(nm); if (sub != null) label.append(sb); label.append(time)
-    root.append(bubble, box, label)
-    let raf = 0, t0 = 0, bt = 0
-    const stopTimer = () => { cancelAnimationFrame(raf); raf = 0 }
-    const tick = () => { time.textContent = fmt(((performance.now() - t0) / 1000) * 240); raf = requestAnimationFrame(tick) }
-    const pop = (n) => { if (!reduce && n) n.animate([{ transform: "scale(.5)", opacity: 0, filter: "blur(8px)" }, { transform: "scale(1)", opacity: 1, filter: "blur(0)" }], { duration: 460, easing: "cubic-bezier(.34,1.56,.64,1)" }) }
-    const icon = (k) => { content.innerHTML = `<span class="ve-icon">${ICONS[k]}</span>`; pop(content.firstChild) }
-    const width = (w) => { box.style.width = `${w}px` }
-    const hideBubble = () => { clearTimeout(bt); bubble.hidden = true }
-    const showBubble = (text, kind, ms) => {
-      clearTimeout(bt)
-      bubble.className = `ve-bubble ${kind}`; bubble.textContent = text; bubble.hidden = false
-      if (!opts.h) {
-        bubble.style.left = "0px"; bubble.style.setProperty("--tip", "42px")
-        const card = root.closest(".card")
-        if (card) {
-          const cr = card.getBoundingClientRect(), r = bubble.getBoundingClientRect()
-          const over = (r.right - (cr.right - 16 * SCALE)) / SCALE
-          if (over > 0) { bubble.style.left = `${-over}px`; bubble.style.setProperty("--tip", `${42 + over}px`) }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Marvin</title>
+    <meta
+      name="description"
+      content="Marvin: agentic flows that reach the goal, unattended. A talk by Riccardo Merolla."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&family=Fredoka:wght@600&display=swap"
+    />
+    <style>
+      :root {
+        --bg: #05070b;
+        --panel: #0e1116;
+        --panel-2: #161a21;
+        --line: rgba(255, 255, 255, 0.08);
+        --line-2: rgba(120, 140, 130, 0.28);
+        --fg: #f4f6f3;
+        --muted: #a7b0aa;
+        --faint: #828d86;
+        --guide: #7cf29c;
+        --guide-dim: #4fbf72;
+        --guide-glow: rgba(124, 242, 156, 0.35);
+        --idle: #475569;
+        --run: #3b82f6;
+        --ok: #15803d;
+        --ok-fg: #4ade80;
+        --err: #ef4444;
+        --int: #f97316;
+        --human: #eab308;
+        --human-fg: #facc15;
+        --font:
+          "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+          Arial, sans-serif;
+        --mono:
+          "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        --round:
+          "Fredoka", "Arial Rounded MT Bold", ui-rounded, "Nunito", "Varela Round", var(--font);
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        overflow: hidden;
+      }
+      body {
+        font-family: var(--font);
+        -webkit-font-smoothing: antialiased;
+        line-height: 1.35;
+      }
+      p {
+        margin: 0;
+      }
+      h1,
+      h2,
+      h3,
+      h4 {
+        margin: 0;
+        letter-spacing: -0.03em;
+        line-height: 1.04;
+        text-wrap: balance;
+      }
+      button {
+        font: inherit;
+      }
+      #stars {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        z-index: 0;
+      }
+      .nebula {
+        position: fixed;
+        inset: -20%;
+        z-index: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(40% 35% at 78% 22%, rgba(60, 140, 100, 0.13), transparent 70%),
+          radial-gradient(35% 30% at 15% 85%, rgba(40, 80, 160, 0.1), transparent 70%);
+        transition: transform 1.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      #viewport {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #stage {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1920px;
+        height: 1080px;
+        transform-origin: 0 0;
+      }
+      .slide {
+        position: absolute;
+        inset: 0;
+        padding: 96px 120px 120px;
+        display: flex;
+        flex-direction: column;
+        opacity: 0;
+        visibility: hidden;
+        transform: translateX(40px);
+        transition:
+          opacity 0.6s ease,
+          transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1),
+          visibility 0s linear 0.7s;
+      }
+      .slide.prev {
+        transform: translateX(-40px);
+      }
+      .slide.active {
+        opacity: 1;
+        visibility: visible;
+        transform: none;
+        transition:
+          opacity 0.6s ease,
+          transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1),
+          visibility 0s;
+      }
+      /* entrance */
+      .slide .in {
+        opacity: 0;
+      }
+      .slide.active .in {
+        animation: rise 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+        animation-delay: calc(var(--d, 0) * 1ms);
+      }
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(22px);
+          filter: blur(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+          filter: none;
         }
       }
-      if (!reduce) bubble.animate([{ opacity: 0, scale: ".9" }, { opacity: 1, scale: "1" }], { duration: 260, easing: "cubic-bezier(.34,1.56,.64,1)" })
-      if (ms) bt = setTimeout(() => { bubble.hidden = true }, ms * SPEED + (reduce ? 0 : 0))
-    }
-    const shake = () => { if (!reduce) box.animate([0, 8, -8, 6, -6, 3, 0].map((x, i) => ({ transform: `translateX(${x}px) rotate(${i % 2 ? 4 : -4}deg)` })), { duration: 480, easing: "ease-out" }) }
-    const api = {
-      root, box,
-      idle() { stopTimer(); hideBubble(); time.textContent = ""; box.dataset.state = "idle"; width(84); icon("star") },
-      run() { hideBubble(); box.dataset.state = "running"; width(84); content.innerHTML = ""; t0 = performance.now(); stopTimer(); if (!reduce) tick() },
-      done(text) { stopTimer(); hideBubble(); time.textContent = ""; box.dataset.state = "done"; const s = el("span", null, text); content.innerHTML = ""; content.append(s); width(Math.max(84, s.scrollWidth + 40)); pop(s) },
-      fail(msg) { stopTimer(); time.textContent = ""; box.dataset.state = "failed"; icon("fail"); shake(); showBubble(msg, "fail") },
-      wait(msg) { stopTimer(); time.textContent = ""; box.dataset.state = "human"; width(84); icon("human"); showBubble(msg, "human") },
-      interrupt(msg) { stopTimer(); time.textContent = ""; box.dataset.state = "interrupted"; icon("pause"); shake(); showBubble(msg, "interrupted") },
-      note(msg, ms = 1800) { showBubble(msg, "note", ms) },
-      hide: hideBubble,
-      flash() { if (!reduce) box.animate([{ filter: "brightness(2)" }, { filter: "brightness(1)" }], { duration: 560 }) },
-      label(t) { nm.textContent = t }, sublabel(t) { sb.textContent = t }
-    }
-    api.idle()
-    return api
-  }
 
-  /* ── simulated presenter cursor ── */
-  const cursor = $("#cursor")
-  let cursorPos = { x: 1500, y: 900 }
-  async function clickOn(btn, c) {
-    const r = rel(btn, stage)
-    const tx = r.x + r.w * 0.6, ty = r.y + r.h * 0.62
-    if (!reduce) {
-      cursor.style.transition = "none"
-      cursor.style.transform = `translate(${cursorPos.x}px,${cursorPos.y}px)`
-      cursor.classList.add("on")
-      await c.sleep(60)
-      cursor.style.transition = "transform .75s cubic-bezier(.5,0,.2,1), opacity .3s"
-      cursor.style.transform = `translate(${tx}px,${ty}px)`
-      await c.sleep(800)
-      cursor.classList.remove("click"); void cursor.offsetWidth; cursor.classList.add("click")
-    }
-    cursorPos = { x: tx, y: ty }
-    btn.classList.add("pressed")
-    await c.sleep(220)
-    btn.classList.remove("pressed")
-    if (!reduce) setTimeout(() => cursor.classList.remove("on"), 700)
-  }
-
-  /* ── run context per slide ── */
-  function makeRun(slide, scenario) {
-    let gen = 0
-    const nodes = []
-    const c = {
-      root: slide,
-      node(name, sub, opts) { const n = makeNode(name, sub, opts); nodes.push(n); return n },
-      arrow() { return el("div", "arrow", ARROW) },
-      chain(parent, list) { list.forEach((n, i) => { if (i) parent.append(c.arrow()); parent.append(n.root) }) },
-      sleep(ms) { const g = gen; return new Promise((res, rej) => setTimeout(() => (g === gen ? res() : rej(Cancel)), ms * SPEED)) },
-      check() { },
-      async press(btn, waitMs = 1600) {
-        const g = gen
-        btn.disabled = false; btn.classList.add("ready")
-        await c.sleep(waitMs)
-        await clickOn(btn, c)
-        if (g !== gen) throw Cancel
-        btn.disabled = true; btn.classList.remove("ready"); btn.classList.add("used")
-      },
-      art(file, note, list) {
-        list = list || $("[data-arts]", slide); if (!list) return
-        const empty = $(".empty", list); if (empty) empty.remove()
-        let li = [...list.children].find((x) => x.dataset.file === file)
-        if (!li) { li = el("li"); li.dataset.file = file; list.append(li) }
-        li.innerHTML = `<span class="f">${file}</span><span class="n">${note}</span>`
-        li.classList.remove("fresh"); void li.offsetWidth; li.classList.add("fresh")
-      },
-      reset() {
-        gen++
-        nodes.forEach((n) => n.idle())
-        $$("[data-approve],[data-back],[data-rerun]", slide).forEach((b) => { b.disabled = true; b.classList.remove("ready", "pressed", "used") })
-        $$("[data-arts]", slide).forEach((l) => (l.innerHTML = '<li class="empty">Nothing yet.</li>'))
-        cursor.classList.remove("on")
-        scenario.reset && scenario.reset(c)
+      /* type */
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 22px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--guide);
+        display: flex;
+        align-items: center;
+        gap: 14px;
       }
-    }
-    scenario.build && scenario.build(c)
-    c.reset()
-    return {
-      async play() {
-        c.reset(); slide.dataset.settled = "0"
-        const g = gen
-        try { await c.sleep(scenario.delay ?? 900); await scenario.run(c) } catch (e) { if (e !== Cancel) console.error(e) }
-        if (g === gen) slide.dataset.settled = "1"
-      },
-      stop() { c.reset(); slide.dataset.settled = "0" }
-    }
-  }
-
-  /* ── scenarios ── */
-  const S = {}
-
-  S[1] = {
-    delay: 500,
-    reset(c) { $(".quote .t", c.root).textContent = "" },
-    async run(c) {
-      const q = $(".quote", c.root), t = $(".t", q), txt = q.dataset.type
-      if (reduce) { t.textContent = txt; return }
-      for (let i = 1; i <= txt.length; i++) { t.textContent = txt.slice(0, i); await c.sleep(txt[i - 1] === "," ? 260 : 34) }
-    }
-  }
-
-  S[2] = {
-    build(c) {
-      const [a, b] = $$("[data-row]", c.root)
-      this.a = [c.node("task", "from a spec"), c.node("agent", "coder"), c.node("someone checks", "later")]
-      c.chain(a, this.a)
-      this.b = [1, 2, 3, 4, 5].map((i) => c.node(`step ${i}`))
-      c.chain(b, this.b)
-      this.fill = $("[data-fill]", c.root); this.pct = $("[data-pct]", c.root)
-    },
-    reset() { if (this.fill) { this.fill.style.width = "100%"; this.fill.classList.remove("low"); this.pct.textContent = "clear" } },
-    async run(c) {
-      const left = async () => {
-        const [task, agent, chk] = this.a
-        task.done("spec"); await c.sleep(500)
-        agent.run(); await c.sleep(1700)
-        agent.done("done ✓"); agent.note("All done. Everything works!", 2200)
-        await c.sleep(2300)
-        chk.run(); await c.sleep(1200)
-        chk.fail("It wasn't: the tests never ran")
+      .eyebrow::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+        background: var(--guide);
+        box-shadow: 0 0 12px var(--guide-glow);
       }
-      const right = async () => {
-        await c.sleep(400)
-        const words = ["clear", "clear", "fuzzy", "fading", "fading", "gone"]
-        for (let i = 0; i < 5; i++) {
-          const n = this.b[i]
-          n.run(); await c.sleep(900)
-          this.fill.style.width = `${100 - (i + 1) * 18}%`; this.pct.textContent = words[i + 1]
-          if (i >= 2) this.fill.classList.add("low")
-          if (i < 4) n.done("✓")
-          else n.fail("…what was the goal again?")
+      .title {
+        font-size: 76px;
+        font-weight: 800;
+        margin-top: 22px;
+        max-width: 1500px;
+      }
+      .lede {
+        font-size: 30px;
+        color: var(--muted);
+        margin-top: 22px;
+        max-width: 1300px;
+        line-height: 1.4;
+      }
+      .lede b,
+      .body b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .y {
+        color: var(--human-fg);
+      }
+      .g {
+        color: var(--guide);
+      }
+      .r {
+        color: #f87171;
+      }
+      .o {
+        color: #fb923c;
+      }
+      .b {
+        color: #60a5fa;
+      }
+      .mono {
+        font-family: var(--mono);
+      }
+      .quip {
+        position: absolute;
+        left: 120px;
+        bottom: 44px;
+        font-family: var(--mono);
+        font-size: 20px;
+        color: var(--faint);
+        max-width: 1300px;
+      }
+      .quip::before {
+        content: "> ";
+        color: var(--guide-dim);
+      }
+      .quip em {
+        font-style: normal;
+        color: #8fa596;
+      }
+      .tag {
+        font-family: var(--mono);
+        font-size: 16px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--faint);
+        border: 1px solid var(--line-2);
+        border-radius: 999px;
+        padding: 4px 12px;
+        white-space: nowrap;
+      }
+
+      /* chrome */
+      #progress {
+        position: fixed;
+        left: 0;
+        top: 0;
+        height: 4px;
+        width: 0;
+        background: linear-gradient(90deg, var(--guide-dim), var(--guide));
+        box-shadow: 0 0 12px var(--guide-glow);
+        z-index: 5;
+        transition: width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .chrome {
+        position: absolute;
+        right: 120px;
+        bottom: 40px;
+        font-family: var(--mono);
+        font-size: 20px;
+        color: var(--faint);
+        display: flex;
+        gap: 18px;
+        align-items: center;
+        z-index: 3;
+      }
+      .chrome .num {
+        color: var(--guide);
+        font-variant-numeric: tabular-nums;
+      }
+      .chrome button {
+        background: transparent;
+        border: 1px solid var(--line-2);
+        color: var(--muted);
+        width: 44px;
+        height: 44px;
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 20px;
+        line-height: 1;
+      }
+      .chrome button:hover {
+        color: var(--fg);
+        border-color: var(--guide-dim);
+      }
+      #notes {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 10;
+        max-height: 42vh;
+        overflow: auto;
+        background: rgba(8, 12, 10, 0.96);
+        border-top: 1px solid var(--guide-dim);
+        padding: 18px 28px 24px;
+        font-size: clamp(15px, 1.25vw, 21px);
+        line-height: 1.55;
+        color: #dfe7e1;
+        transform: translateY(105%);
+        transition: transform 0.35s ease;
+        box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.6);
+      }
+      #notes.open {
+        transform: none;
+      }
+      #notes h5 {
+        margin: 0 0 8px;
+        font-family: var(--mono);
+        font-size: 0.75em;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--guide);
+      }
+      #notes p + p {
+        margin-top: 0.6em;
+      }
+      .hint {
+        position: fixed;
+        left: 50%;
+        top: 18px;
+        transform: translateX(-50%);
+        z-index: 6;
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--faint);
+        opacity: 0;
+        transition: opacity 0.6s;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      .hint.show {
+        opacity: 1;
+      }
+
+      /* card (after visual-effect's example card) */
+      .card {
+        border: 1px solid var(--line-2);
+        border-radius: 24px;
+        background: linear-gradient(
+          to bottom right,
+          rgba(22, 26, 24, 0.92),
+          rgba(14, 17, 16, 0.72)
+        );
+        box-shadow: 0 40px 80px -40px rgba(0, 0, 0, 0.9);
+        position: relative;
+        min-width: 0;
+        backdrop-filter: blur(2px);
+      }
+      .card-head {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 28px;
+        border-bottom: 1px solid var(--line-2);
+        background: rgba(38, 42, 40, 0.45);
+        border-radius: 24px 24px 0 0;
+      }
+      .card-title {
+        font-family: var(--mono);
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--fg);
+      }
+      .card-desc {
+        color: var(--muted);
+        font-size: 20px;
+        margin-top: 4px;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 46px;
+        padding: 0 20px;
+        border-radius: 999px;
+        border: 1px solid var(--line-2);
+        background: var(--panel-2);
+        color: var(--fg);
+        font-size: 19px;
+        font-weight: 500;
+        transition:
+          background 0.15s,
+          opacity 0.15s,
+          transform 0.1s,
+          box-shadow 0.2s;
+        white-space: nowrap;
+      }
+      .btn:disabled {
+        opacity: 0.35;
+      }
+      .btn.human {
+        border-color: var(--human);
+        color: var(--human-fg);
+        background: rgba(234, 179, 8, 0.08);
+      }
+      .btn.resume {
+        border-color: var(--int);
+        color: #fb923c;
+        background: rgba(249, 115, 22, 0.08);
+      }
+      .btn.ready {
+        opacity: 1;
+      }
+      .btn.human.ready {
+        animation: callout 1.4s ease-in-out infinite;
+      }
+      .btn.resume.ready {
+        animation: callout-o 1.4s ease-in-out infinite;
+      }
+      .btn.pressed {
+        transform: scale(0.94);
+        filter: brightness(1.5);
+      }
+      @keyframes callout {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(234, 179, 8, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 8px rgba(234, 179, 8, 0.2);
         }
       }
-      await Promise.all([left(), right()])
-    }
-  }
-
-  S[3] = {
-    delay: 600,
-    lines: [
-      '<span class="k">workflow</span> story:',
-      '  plan     <span class="c"># an agent drafts plan.md</span>',
-      '  <span class="s">approve</span>  <span class="c"># a person says yes</span>',
-      '  build    <span class="c"># seat: writes code</span>',
-      '  check    <span class="c"># your build, your tests</span>',
-      '  review   <span class="c"># not accepted → revision</span>',
-      '  commit   <span class="c"># only reviewed work</span>'
-    ],
-    build(c) { this.code = $("[data-code]", c.root); this.code.innerHTML = this.lines.map((l) => `<div class="ln">${l}</div>`).join(""); this.seat = $('[data-seat="code"]', c.root) },
-    reset() { $$(".ln", this.code).forEach((l) => l.classList.remove("on")); this.seat.textContent = "Claude" },
-    async run(c) {
-      for (const l of $$(".ln", this.code)) { l.classList.add("on"); await c.sleep(230) }
-      await c.sleep(600)
-      for (const who of ["Codex", "Gemini", "local model", "Claude"]) {
-        this.seat.textContent = who; this.seat.classList.remove("swap"); void this.seat.offsetWidth; this.seat.classList.add("swap")
-        await c.sleep(1300)
+      @keyframes callout-o {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+        }
+        50% {
+          box-shadow: 0 0 0 8px rgba(249, 115, 22, 0.2);
+        }
       }
-    }
-  }
-
-  S[4] = {
-    build(c) {
-      this.row = $("[data-row]", c.root); this.viz = this.row.parentElement
-      this.n = ["plan", "code", "checks", "review", "commit"].map((k) => c.node(k))
-      c.chain(this.row, this.n)
-      this.svg = $("[data-arc]", c.root); this.path = $("path", this.svg); this.text = $("text", this.svg)
-      this.svg.insertAdjacentHTML("afterbegin", '<defs><marker id="ah" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f87171"/></marker></defs>')
-      this.path.setAttribute("marker-end", "url(#ah)")
-    },
-    reset() { this.path.classList.remove("on"); this.text.classList.remove("on") },
-    arc() {
-      const a = rel(this.n[3].box, this.viz), b = rel(this.n[1].box, this.viz), lab = rel(this.n[3].root, this.viz)
-      const y = lab.y + lab.h + 14, x1 = a.x + a.w / 2, x2 = b.x + b.w / 2
-      this.path.setAttribute("d", `M ${x1} ${y} C ${x1} ${y + 70}, ${x2} ${y + 70}, ${x2} ${y + 4}`)
-      this.text.setAttribute("x", (x1 + x2) / 2 - 60); this.text.setAttribute("y", y + 82); this.text.textContent = "back as a revision"
-      this.path.classList.add("on"); this.text.classList.add("on")
-    },
-    async run(c) {
-      const [plan, code, checks, review, commit] = this.n
-      plan.run(); await c.sleep(1000); plan.done("3 tasks"); c.art("plan.md", "three tasks, in order")
-      code.run(); await c.sleep(1300); code.done("+84 −12")
-      checks.run(); await c.sleep(900); checks.done("4/4 ✓")
-      review.run(); await c.sleep(1100); review.fail("No test for an empty statement")
-      c.art("findings.md", "round 1: one issue, sent back as a revision")
-      this.arc()
-      await c.sleep(2000)
-      checks.idle(); review.idle()
-      code.run(); code.note("Revision: add the missing test", 1600)
-      await c.sleep(1300); code.done("+97 −12")
-      this.path.classList.remove("on"); this.text.classList.remove("on")
-      checks.run(); await c.sleep(800); checks.done("5/5 ✓")
-      review.run(); await c.sleep(1000); review.done("clean"); c.art("findings.md", "round 2: cleared")
-      commit.run(); await c.sleep(700); commit.done("a1f3c9e"); c.art("git commit", "one commit per reviewed task")
-    }
-  }
-
-  S[5] = {
-    build(c) {
-      this.n = [c.node("draft plan"), c.node("you"), c.node("build")]
-      c.chain($("[data-row]", c.root), this.n)
-      this.yes = $("[data-approve]", c.root); this.no = $("[data-back]", c.root)
-    },
-    async run(c) {
-      const [draft, you, build] = this.n
-      draft.run(); await c.sleep(1200); draft.done("8 stories"); c.art("plan.md", "8 stories, who owns which files, in what order")
-      you.wait("Read the plan, then decide")
-      this.yes.disabled = false; this.yes.classList.add("ready")
-      await c.press(this.no, 1800)
-      this.yes.disabled = true; this.yes.classList.remove("ready")
-      you.idle(); draft.run(); draft.note("Revising, your edits stay", 1500)
-      await c.sleep(1400); draft.done("7 stories"); c.art("plan.md", "revision 2: your edits kept, one story merged into another")
-      you.wait("Read the plan, then decide")
-      await c.press(this.yes, 1700)
-      you.done("approved"); c.art("plan.md ✓", "approved as written")
-      build.run(); await c.sleep(1600); build.done("7/7 merged")
-    }
-  }
-
-  S[6] = {
-    build(c) {
-      const dag = $("[data-dag]", c.root)
-      const h = { h: true }
-      this.s = [
-        c.node("story 1", "owns model/", h),
-        c.node("story 2", "owns api/", h),
-        c.node("story 3", "owns statements/", h),
-        c.node("story 4", "owns ui/", h),
-        c.node("story 5", "after 2–4", h)
-      ]
-      this.epic = c.node("epic", "one branch", h)
-      const lanes = el("div", "lanes")
-      lanes.append(el("div", "lanes-cap", "in parallel · each in its own copy of the repo"))
-      this.s.slice(1, 4).forEach((n) => lanes.append(n.root))
-      dag.append(this.s[0].root, c.arrow(), lanes, c.arrow(), this.s[4].root, c.arrow(), this.epic.root)
-    },
-    async run(c) {
-      const [s1, s2, s3, s4, s5] = this.s, epic = this.epic
-      let merged = 0
-      const merge = (n) => { merged++; n.done("merged"); c.art("epic branch", `${merged} of 5 stories merged`) }
-      c.art("plan.md", "five stories, their files and dependencies")
-      epic.run(); s1.run(); await c.sleep(1200); merge(s1)
-      await Promise.all([
-        (async () => { s2.run(); await c.sleep(1700); merge(s2) })(),
-        (async () => { s3.run(); await c.sleep(1100); s3.fail("Judge: totals not covered"); c.art("story-3 findings", "judge round 1: one gap, revision added"); await c.sleep(1700); s3.run(); await c.sleep(1100); merge(s3); c.art("story-3 findings", "judge round 1: one gap · round 2: cleared") })(),
-        (async () => { s4.run(); await c.sleep(2100); merge(s4) })()
-      ])
-      s5.run(); await c.sleep(1300); merge(s5)
-      epic.done("5/5 merged"); c.art("report.md", "what ran, where time went, what it cost")
-    }
-  }
-
-  S[7] = {
-    build(c) {
-      this.t = [1, 2, 3, 4, 5].map((i) => c.node(`task ${i}`))
-      c.chain($("[data-row]", c.root), this.t)
-      this.again = $("[data-rerun]", c.root); this.pf = $("[data-pfile]", c.root)
-    },
-    reset() { this.file(["", "", "", "", ""], null) },
-    file(st, extra, fresh = -1) {
-      const L = ['<div class="ln c"># progress.md</div>']
-      st.forEach((s, i) => {
-        const mark = s === "x" ? '<span class="x">[x]</span>' : s === "u" ? '<span class="u">[~]</span>' : '<span class="c">[ ]</span>'
-        const note = s === "x" ? '<span class="x">committed</span>' : s === "u" ? '<span class="u">unfinished</span>' : ""
-        L.push(`<div class="ln${i === fresh ? " fresh" : ""}">${mark} task ${i + 1}   ${note}</div>`)
-      })
-      if (extra) L.push(`<div class="ln fresh c">${extra}</div>`)
-      this.pf.innerHTML = L.join("")
-    },
-    async run(c) {
-      const t = this.t, st = ["", "", "", "", ""]
-      for (let i = 0; i < 2; i++) { t[i].run(); await c.sleep(900); t[i].done("✓"); st[i] = "x"; this.file(st, null, i) }
-      t[2].run(); await c.sleep(1100); t[2].interrupt("The agent went offline"); st[2] = "u"; this.file(st, "# run stopped: agent offline", 2)
-      await c.press(this.again, 1800)
-      t[2].hide()
-      this.file(st, "# rerun: read this file, keep 1–2, resume at 3")
-      t[0].flash(); t[0].note("Already done, kept", 1300); await c.sleep(250); t[1].flash(); await c.sleep(600)
-      for (let i = 2; i < 5; i++) { t[i].run(); await c.sleep(950); t[i].done("✓"); st[i] = "x"; this.file(st, "# rerun: resumed at task 3", i) }
-    }
-  }
-
-  S[8] = {
-    coders: ["Claude", "Codex", "Gemini", "local model"],
-    pace: { Claude: 1, Codex: 0.9, Gemini: 1.1, "local model": 1.5 },
-    build(c) {
-      this.n = [c.node("plan", "planner"), c.node("code", "Claude"), c.node("checks", "your build"), c.node("review", "reviewer"), c.node("judge", "judge")]
-      c.chain($("[data-row]", c.root), this.n)
-      this.seg = $$("[data-seg] span", c.root)
-      this.v = $("[data-verdicts]", c.root)
-      this.v.innerHTML = this.coders.map((k) => `<div class="verdict"><p class="n">${k === "local model" ? "Local model" : k}</p><p class="m">same plan · checks · rubric</p></div>`).join("")
-    },
-    reset() { $$(".verdict", this.v).forEach((x) => x.classList.remove("on")); this.seg.forEach((s, i) => s.classList.toggle("on", i === 0)); this.n[1].sublabel("Claude") },
-    async run(c) {
-      const [plan, code, checks, review, judge] = this.n
-      for (let k = 0; k < this.coders.length; k++) {
-        const who = this.coders[k], p = this.pace[who]
-        this.seg.forEach((s, i) => s.classList.toggle("on", i === k)); code.sublabel(who)
-        if (k) { this.n.forEach((n) => n.idle()); code.flash(); await c.sleep(450) }
-        plan.run(); await c.sleep(600); plan.done("4 tasks")
-        code.run(); await c.sleep(1000 * p); code.done(`by ${who}`)
-        checks.run(); await c.sleep(500); checks.done("✓")
-        review.run(); await c.sleep(600); review.done("clean")
-        judge.run(); await c.sleep(500); judge.done("passed")
-        $$(".verdict", this.v)[k].classList.add("on")
-        await c.sleep(900)
+      .seg {
+        display: inline-flex;
+        padding: 4px;
+        border-radius: 999px;
+        border: 1px solid var(--line-2);
+        background: var(--panel);
       }
-    }
-  }
-
-  S[9] = {
-    build(c) {
-      const row = $("[data-row]", c.root)
-      const mk = (cap, list) => { const s = el("div", "side"); const r = el("div", "row"); c.chain(r, list); s.append(el("span", "side-cap", cap), r); return s }
-      this.l = [c.node("survey"), c.node("extract", "rules · scenarios"), c.node("you", "approve")]
-      this.t = [c.node("seed"), c.node("implement"), c.node("verify", "replay"), c.node("review")]
-      this.wall = el("div", "wall", "<span>clean room</span>")
-      row.append(mk("legacy side", this.l), this.wall, mk("new side", this.t))
-      this.yes = $("[data-approve]", c.root)
-    },
-    reset() { this.wall.classList.remove("pulse") },
-    async run(c) {
-      const [survey, extract, you] = this.l, [seed, impl, verify, review] = this.t
-      survey.run(); await c.sleep(1100); survey.done("inventory")
-      extract.run(); await c.sleep(1400); extract.done("spec")
-      extract.note("Each rule traced to its source line", 1800)
-      await c.sleep(600)
-      you.wait("Approve the spec to cross the wall")
-      await c.press(this.yes, 1600)
-      you.done("approved")
-      this.wall.classList.remove("pulse"); void this.wall.offsetWidth; this.wall.classList.add("pulse")
-      seed.run(); await c.sleep(800); seed.done("scaffold")
-      impl.run(); impl.note("Pattern cards: COBOL idioms → Java", 1900); await c.sleep(1800); impl.done("built")
-      verify.run(); await c.sleep(1300); verify.done("identical ✓")
-      verify.note("Recorded behaviour replayed", 2000)
-      review.run(); await c.sleep(1000); review.done("lessons → kit")
-    }
-  }
-
-  S[10] = {
-    delay: 700,
-    build(c) { this.m = $("[data-morph]", c.root); this.hf = $("[data-hfill]", c.root); this.ff = $("[data-ffill]", c.root); this.fv = $("[data-fval]", c.root) },
-    reset() {
-      this.m.classList.remove("struck")
-      for (const f of [this.hf, this.ff]) { f.style.transition = "none"; f.style.width = "0" }
-      this.fv.textContent = "0 h 00 m"
-    },
-    async run(c) {
-      this.m.classList.add("struck")
-      await c.sleep(1100)
-      const dur = reduce ? 0 : 1
-      this.hf.style.transition = `width ${4.2 * dur}s cubic-bezier(.3,.1,.3,1)`; this.hf.style.width = "100%"
-      this.ff.style.transition = `width ${1.6 * dur}s cubic-bezier(.2,.8,.2,1)`; this.ff.style.width = "6%"
-      const steps = 24
-      for (let i = 1; i <= steps; i++) {
-        const mins = Math.round((120 * i) / steps)
-        this.fv.textContent = `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")} m`
-        await c.sleep(1600 / steps)
+      .seg span {
+        height: 38px;
+        padding: 0 16px;
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 18px;
+        display: inline-flex;
+        align-items: center;
+        transition:
+          background 0.25s,
+          color 0.25s,
+          box-shadow 0.25s;
       }
-      this.fv.textContent = "≈ 2 h ✓"
-      await c.sleep(2800)
-    }
-  }
+      .seg span.on {
+        background: var(--panel-2);
+        color: var(--fg);
+        box-shadow: inset 0 0 0 1px var(--guide-dim);
+      }
+      .card-config {
+        padding: 14px 28px;
+        border-bottom: 1px solid var(--line-2);
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        font-size: 19px;
+        color: var(--muted);
+      }
+      .viz {
+        padding: 96px 28px 26px;
+        border-bottom: 1px solid var(--line-2);
+        position: relative;
+      }
+      .viz.nob {
+        border-bottom: 0;
+      }
+      .row {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px 12px;
+      }
+      .arrow {
+        height: 84px;
+        display: flex;
+        align-items: center;
+        color: #56605a;
+        flex: none;
+      }
+      .arrow svg {
+        width: 24px;
+        height: 24px;
+      }
+      .left-out {
+        padding: 16px 28px 22px;
+      }
+      .left-out h4 {
+        font-family: var(--mono);
+        font-size: 15px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--faint);
+        margin: 0 0 10px;
+        font-weight: 500;
+      }
+      .arts {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+        min-height: 34px;
+      }
+      .arts li {
+        display: grid;
+        grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+        gap: 18px;
+        font-size: 20px;
+        align-items: baseline;
+      }
+      .arts li .f {
+        font-family: var(--mono);
+        color: var(--fg);
+        font-size: 18px;
+      }
+      .arts li .n {
+        color: var(--muted);
+      }
+      .arts li.empty {
+        display: block;
+        color: var(--faint);
+        font-size: 18px;
+      }
+      .arts li.fresh {
+        animation: arrive 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+      @keyframes arrive {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
 
-  const runs = slides.map((s, i) => (S[i + 1] ? makeRun(s, S[i + 1]) : null))
+      /* node (after visual-effect's EffectNode) */
+      .ve {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+        flex: none;
+      }
+      .ve-box {
+        position: relative;
+        height: 84px;
+        width: 84px;
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: var(--idle);
+        opacity: 0.6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        transition:
+          background-color 0.12s ease-in-out,
+          opacity 0.3s,
+          width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1),
+          transform 0.35s cubic-bezier(0.34, 1.4, 0.64, 1),
+          box-shadow 0.3s;
+      }
+      .ve-box[data-state="running"] {
+        background: var(--run);
+        opacity: 1;
+        transform: scale(0.95);
+        box-shadow: 0 0 30px rgba(59, 130, 246, 0.35);
+        animation: jitter 0.32s steps(2) infinite;
+      }
+      .ve-box[data-state="done"] {
+        background: var(--ok);
+        opacity: 1;
+      }
+      .ve-box[data-state="failed"] {
+        background: var(--err);
+        opacity: 1;
+      }
+      .ve-box[data-state="interrupted"] {
+        background: var(--int);
+        opacity: 1;
+      }
+      .ve-box[data-state="human"] {
+        background: var(--human);
+        opacity: 1;
+        color: #1c1917;
+        animation: breathe 1.6s ease-in-out infinite;
+      }
+      .ve-shine {
+        position: absolute;
+        inset: 0;
+        width: 200%;
+        opacity: 0;
+        pointer-events: none;
+        mix-blend-mode: lighten;
+        filter: blur(4px);
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          transparent 40%,
+          rgba(255, 255, 255, 0.1) 45%,
+          rgba(255, 255, 255, 0.5) 50%,
+          rgba(255, 255, 255, 0.1) 55%,
+          transparent 60%,
+          transparent 100%
+        );
+      }
+      .ve-box[data-state="running"] .ve-shine {
+        opacity: 1;
+        animation: shine 0.8s cubic-bezier(0.5, 0, 0.1, 1) infinite;
+      }
+      @keyframes shine {
+        from {
+          transform: translateX(-66%);
+        }
+        to {
+          transform: translateX(50%);
+        }
+      }
+      @keyframes jitter {
+        0% {
+          translate: 0.6px -0.3px;
+          rotate: -0.8deg;
+        }
+        50% {
+          translate: -0.8px 0.4px;
+          rotate: 0.9deg;
+        }
+        100% {
+          translate: 0.3px 0.2px;
+          rotate: -0.4deg;
+        }
+      }
+      @keyframes breathe {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.5);
+        }
+        50% {
+          box-shadow: 0 0 0 10px rgba(234, 179, 8, 0);
+        }
+      }
+      .ve-content {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 16px;
+        white-space: nowrap;
+        font-weight: 600;
+        font-size: 21px;
+      }
+      .ve-icon {
+        display: block;
+        width: 38px;
+        height: 38px;
+      }
+      .ve-icon svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+        fill: currentColor;
+        opacity: 0.92;
+      }
+      .ve-label {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 84px;
+      }
+      .ve-name {
+        font-family: var(--mono);
+        font-size: 19px;
+        color: #dfe3e0;
+        white-space: nowrap;
+      }
+      .ve-sub {
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--faint);
+        white-space: nowrap;
+      }
+      .ve-time {
+        font-family: var(--mono);
+        font-size: 16px;
+        color: #60a5fa;
+        font-variant-numeric: tabular-nums;
+        min-height: 1.2em;
+      }
+      .ve-bubble {
+        position: absolute;
+        bottom: calc(100% + 14px);
+        left: 0;
+        z-index: 5;
+        width: max-content;
+        max-width: 340px;
+        padding: 10px 15px;
+        border-radius: 12px;
+        font-size: 19px;
+        line-height: 1.3;
+        font-weight: 500;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.55);
+        pointer-events: none;
+      }
+      .ve-bubble::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: var(--tip, 42px);
+        border: 8px solid transparent;
+        transform: translateX(-50%);
+      }
+      .ve-bubble.fail {
+        background: #ef4444;
+        color: #fff5f5;
+      }
+      .ve-bubble.fail::after {
+        border-top-color: #ef4444;
+      }
+      .ve-bubble.human {
+        background: #facc15;
+        color: #1c1917;
+      }
+      .ve-bubble.human::after {
+        border-top-color: #facc15;
+      }
+      .ve-bubble.interrupted {
+        background: #f97316;
+        color: #fff7ed;
+      }
+      .ve-bubble.interrupted::after {
+        border-top-color: #f97316;
+      }
+      .ve-bubble.note {
+        background: #2a302c;
+        color: #eef2ef;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .ve-bubble.note::after {
+        border-top-color: #2a302c;
+      }
+      /* horizontal node variant (label at right, bubble at right) */
+      .ve.h {
+        flex-direction: row;
+        align-items: center;
+        gap: 16px;
+      }
+      .ve.h .ve-bubble {
+        bottom: auto;
+        top: 50%;
+        left: calc(100% + 18px);
+        transform: translateY(-50%);
+      }
+      .ve.h .ve-bubble::after {
+        top: 50%;
+        left: -8px;
+        transform: translateY(-50%);
+        border-top-color: transparent !important;
+      }
+      .ve.h .ve-bubble.fail::after {
+        border-right-color: #ef4444;
+      }
+      .ve.h .ve-bubble.note::after {
+        border-right-color: #2a302c;
+      }
 
-  /* ── starfield with parallax ── */
-  const cv = $("#stars"), ctx = cv.getContext("2d"), neb = $(".nebula")
-  let stars = [], W = 0, H = 0, off = 0, target = 0, last = 0
-  function seed() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    W = cv.width = Math.floor(innerWidth * dpr); H = cv.height = Math.floor(innerHeight * dpr)
-    let r = 1337; const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647)
-    stars = Array.from({ length: Math.round((innerWidth * innerHeight) / 5200) }, () => {
-      const z = rnd() ** 2 * 0.9 + 0.1
-      return { x: rnd() * W, y: rnd() * H, z, r: (0.4 + z * 1.4) * dpr, p: rnd() * 6.28, g: rnd() < 0.12 }
-    })
-  }
-  function draw(t) {
-    ctx.clearRect(0, 0, W, H)
-    for (const s of stars) {
-      let x = (s.x - off * s.z * 3) % W; if (x < 0) x += W
-      const tw = reduce ? 0.8 : 0.55 + 0.45 * Math.sin(t / 900 + s.p)
-      ctx.globalAlpha = (0.25 + s.z * 0.75) * tw
-      ctx.fillStyle = s.g ? "#9ff5b8" : "#e8eef7"
-      ctx.beginPath(); ctx.arc(x, s.y, s.r, 0, 6.283); ctx.fill()
-    }
-    ctx.globalAlpha = 1
-  }
-  function loop(t) { off += (target - off) * 0.05; draw(t); last = requestAnimationFrame(loop) }
-  seed()
-  if (reduce) draw(0); else requestAnimationFrame(loop)
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 30px;
+        font-size: 22px;
+        color: var(--muted);
+      }
+      .legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .legend i {
+        width: 22px;
+        height: 22px;
+        border-radius: 6px;
+        display: inline-block;
+      }
 
-  /* ── deck ── */
-  const prog = $("#progress"), num = $("#num"), notes = $("#notes"), notesBody = $("#notes-body"), notesH = $("#notes-h")
-  let cur = -1
-  function fit() {
-    SCALE = Math.min(innerWidth / 1920, innerHeight / 1080)
-    stage.style.transform = `translate(${-960 * SCALE}px,${-540 * SCALE}px) scale(${SCALE})`
-  }
-  function go(i, push = true) {
-    i = Math.max(0, Math.min(N - 1, i))
-    if (i === cur) return
-    const prev = cur
-    if (prev >= 0 && runs[prev]) runs[prev].stop()
-    slides.forEach((s, k) => { s.classList.toggle("active", k === i); s.classList.toggle("prev", k < i) })
-    cur = i
-    prog.style.width = `${((i + 1) / N) * 100}%`
-    num.textContent = `${String(i + 1).padStart(2, "0")} / ${N}`
-    const n = $("aside.notes", slides[i])
-    notesH.textContent = `Notes · ${i + 1} / ${N} · ${slides[i].dataset.title}`
-    notesBody.innerHTML = n ? n.innerHTML : ""
-    document.title = `Marvin · ${i + 1}. ${slides[i].dataset.title}`
-    if (push) history.replaceState(null, "", `#${i + 1}`)
-    target = i * 120 * (window.devicePixelRatio || 1)
-    if (reduce) { off = target; draw(0) }
-    neb.style.transform = `translateX(${-i * 1.2}%)`
-    if (runs[i]) runs[i].play(); else slides[i].dataset.settled = "1"
-  }
-  const next = () => go(cur + 1), prevS = () => go(cur - 1)
-  const fromHash = () => { const k = parseInt(location.hash.slice(1), 10); return Number.isFinite(k) ? k - 1 : 0 }
-  function fullscreen() {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {})
-    else document.exitFullscreen?.()
-  }
-  document.addEventListener("keydown", (e) => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return
-    const k = e.key
-    if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(k)) { e.preventDefault(); next() }
-    else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(k)) { e.preventDefault(); prevS() }
-    else if (k === "Home") go(0)
-    else if (k === "End") go(N - 1)
-    else if (k === "f" || k === "F") fullscreen()
-    else if (k === "n" || k === "N") notes.classList.toggle("open")
-    else if (k === "Escape") notes.classList.remove("open")
-  })
-  $$(".chrome [data-nav]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); go(cur + Number(b.dataset.nav)) }))
-  $("#viewport").addEventListener("click", (e) => {
-    if (e.target.closest("button,a,#notes")) return
-    if (e.clientX < innerWidth / 3) prevS(); else next()
-  })
-  let tx = null, ty = null
-  addEventListener("touchstart", (e) => { tx = e.touches[0].clientX; ty = e.touches[0].clientY }, { passive: true })
-  addEventListener("touchend", (e) => {
-    if (tx == null) return
-    const dx = e.changedTouches[0].clientX - tx, dy = e.changedTouches[0].clientY - ty
-    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) { dx < 0 ? next() : prevS() }
-    tx = null
-  }, { passive: true })
-  addEventListener("hashchange", () => go(fromHash(), false))
-  addEventListener("resize", () => { fit(); seed(); if (reduce) draw(0) })
-  fit()
-  go(fromHash(), false)
-  if (cur === 0) { const h = $("#hint"); h.classList.add("show"); setTimeout(() => h.classList.remove("show"), 4500) }
-  window.__deck = { go: (i) => go(i - 1), get current() { return cur + 1 }, count: N }
-})()
+      /* simulated presenter cursor */
+      #cursor {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 34px;
+        height: 34px;
+        z-index: 20;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.3s;
+        filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.6));
+      }
+      #cursor.on {
+        opacity: 1;
+      }
+      #cursor svg {
+        width: 100%;
+        height: 100%;
+      }
+      #cursor .ring {
+        position: absolute;
+        left: -14px;
+        top: -14px;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: 2px solid var(--human-fg);
+        opacity: 0;
+      }
+      #cursor.click .ring {
+        animation: ripple 0.5s ease-out;
+      }
+      @keyframes ripple {
+        from {
+          opacity: 0.9;
+          transform: scale(0.3);
+        }
+        to {
+          opacity: 0;
+          transform: scale(1.4);
+        }
+      }
 
-</script>
-</body>
+      /* ── slide 1 ── */
+      .s1 {
+        justify-content: center;
+      }
+      .s1 .kicker {
+        font-family: var(--mono);
+        font-size: 24px;
+        color: var(--guide);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+      .s1 h1 {
+        font-size: 240px;
+        font-weight: 800;
+        letter-spacing: -0.055em;
+        line-height: 0.9;
+        margin-top: 24px;
+        background: linear-gradient(180deg, #ffffff 30%, #b8f7c9);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .s1 .quote {
+        font-family: var(--mono);
+        font-size: 36px;
+        color: #dff9e6;
+        margin-top: 44px;
+        min-height: 1.3em;
+        max-width: 1100px;
+        line-height: 1.35;
+      }
+      .s1 .quote .caret {
+        display: inline-block;
+        width: 0.55em;
+        height: 1em;
+        background: var(--guide);
+        vertical-align: -0.12em;
+        margin-left: 4px;
+        animation: blink 1s steps(1) infinite;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0;
+        }
+      }
+      .s1 .sub {
+        font-size: 34px;
+        color: var(--muted);
+        margin-top: 30px;
+        max-width: 1000px;
+      }
+      .s1 .who {
+        margin-top: 56px;
+        display: flex;
+        gap: 26px;
+        align-items: center;
+        font-size: 26px;
+      }
+      .s1 .who b {
+        font-weight: 600;
+      }
+      .s1 .who .sep {
+        width: 1px;
+        height: 30px;
+        background: var(--line-2);
+      }
+      .s1 .who span {
+        color: var(--muted);
+      }
+      .planet-wrap {
+        position: absolute;
+        right: 150px;
+        top: 200px;
+        width: 560px;
+        height: 560px;
+      }
+      .planet {
+        position: absolute;
+        inset: 0;
+      }
+      .planet .sphere {
+        position: absolute;
+        inset: 60px;
+        transform: translateZ(0);
+        border-radius: 50%;
+        background: radial-gradient(
+          circle at 34% 30%,
+          #b7ffd0 0%,
+          #3fbf6c 14%,
+          #14532d 46%,
+          #06140c 78%
+        );
+        box-shadow:
+          0 0 80px rgba(124, 242, 156, 0.18),
+          inset -40px -50px 80px rgba(0, 0, 0, 0.65);
+        animation: float 9s ease-in-out infinite;
+      }
+      .planet .sphere::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: repeating-linear-gradient(
+          170deg,
+          transparent 0 26px,
+          rgba(0, 0, 0, 0.12) 26px 30px
+        );
+        mix-blend-mode: multiply;
+      }
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateZ(0);
+        }
+        50% {
+          transform: translateZ(0) translateY(-12px);
+        }
+      }
+      .panic-badge {
+        position: absolute;
+        right: 120px;
+        top: 84px;
+        font-family: var(--round);
+        font-weight: 600;
+        font-size: 30px;
+        letter-spacing: 0.06em;
+        color: #0b1a10;
+        background: var(--guide);
+        padding: 8px 22px 10px;
+        border-radius: 16px;
+        box-shadow: 0 0 30px var(--guide-glow);
+        transform: rotate(-3deg);
+      }
+      .keys {
+        position: absolute;
+        left: 120px;
+        bottom: 44px;
+        font-family: var(--mono);
+        font-size: 18px;
+        color: var(--faint);
+      }
+      .keys kbd {
+        font-family: var(--mono);
+        border: 1px solid var(--line-2);
+        border-radius: 6px;
+        padding: 1px 8px;
+        color: var(--muted);
+      }
+
+      /* ── slide 2 ── */
+      .two {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 40px;
+        margin-top: 56px;
+      }
+      .meter {
+        margin: 0 28px 26px;
+      }
+      .meter .lab {
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--mono);
+        font-size: 17px;
+        color: var(--faint);
+        margin-bottom: 10px;
+      }
+      .meter .bar {
+        height: 14px;
+        border-radius: 99px;
+        background: #1d2420;
+        overflow: hidden;
+      }
+      .meter .fill {
+        height: 100%;
+        width: 100%;
+        border-radius: 99px;
+        background: linear-gradient(90deg, var(--guide-dim), var(--guide));
+        transition:
+          width 1s ease,
+          background 0.6s;
+      }
+      .meter .fill.low {
+        background: linear-gradient(90deg, #b91c1c, #ef4444);
+      }
+
+      /* ── slide 3 ── */
+      .s3grid {
+        display: grid;
+        grid-template-columns: 1.05fr 1fr;
+        gap: 70px;
+        margin-top: 40px;
+        align-items: start;
+      }
+      .bigq {
+        font-size: 84px;
+        font-weight: 800;
+        letter-spacing: -0.045em;
+        line-height: 1.02;
+      }
+      .s3grid .lede {
+        font-size: 30px;
+      }
+      .flowcode {
+        padding: 26px 30px 10px;
+        font-family: var(--mono);
+        font-size: 24px;
+        line-height: 1.7;
+        color: #cfd8d2;
+        min-height: 300px;
+      }
+      .flowcode .ln {
+        white-space: pre;
+        opacity: 0;
+        transform: translateX(-8px);
+        transition:
+          opacity 0.35s,
+          transform 0.35s;
+      }
+      .flowcode .ln.on {
+        opacity: 1;
+        transform: none;
+      }
+      .flowcode .k {
+        color: var(--guide);
+      }
+      .flowcode .c {
+        color: var(--faint);
+      }
+      .flowcode .s {
+        color: #fbbf24;
+      }
+      .seats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        padding: 12px 30px 28px;
+      }
+      .seat {
+        border: 1px dashed var(--line-2);
+        border-radius: 16px;
+        padding: 16px 20px;
+      }
+      .seat .role {
+        font-family: var(--mono);
+        font-size: 16px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .seat .who {
+        font-size: 30px;
+        font-weight: 700;
+        margin-top: 6px;
+        display: inline-block;
+      }
+      .seat .who.swap {
+        animation: swapin 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+      @keyframes swapin {
+        from {
+          opacity: 0;
+          transform: translateY(14px) scale(0.9);
+          filter: blur(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+          filter: none;
+        }
+      }
+      .legend-wrap {
+        margin-top: auto;
+        padding-top: 30px;
+        border-top: 1px solid var(--line);
+      }
+      .legend-wrap .tag {
+        margin-right: 20px;
+      }
+
+      /* ── slide 4/6/7/9 common ── */
+      .split {
+        display: grid;
+        grid-template-columns: 560px 1fr;
+        gap: 60px;
+        margin-top: 48px;
+        align-items: start;
+      }
+      .split .title {
+        font-size: 64px;
+        margin-top: 18px;
+      }
+      .split .body {
+        font-size: 28px;
+        color: var(--muted);
+        margin-top: 24px;
+        line-height: 1.45;
+      }
+      .hero-card {
+        margin-top: 44px;
+      }
+      .hero-card .viz {
+        padding-top: 110px;
+        padding-bottom: 110px;
+      }
+      .revarc {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        overflow: visible;
+      }
+      .revarc path {
+        fill: none;
+        stroke: #f87171;
+        stroke-width: 3;
+        stroke-dasharray: 10 8;
+        opacity: 0;
+      }
+      .revarc path.on {
+        opacity: 1;
+        animation: dash 1s linear infinite;
+      }
+      .revarc text {
+        fill: #fca5a5;
+        font-family: var(--mono);
+        font-size: 18px;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+      .revarc text.on {
+        opacity: 1;
+      }
+      @keyframes dash {
+        to {
+          stroke-dashoffset: -36;
+        }
+      }
+
+      /* ── slide 6 ── */
+      .dag {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+      }
+      .lanes {
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        padding: 16px 18px;
+        border-left: 2px solid rgba(96, 165, 250, 0.35);
+        border-right: 2px solid rgba(96, 165, 250, 0.35);
+        border-radius: 14px;
+        width: 560px;
+      }
+      .lanes-cap {
+        font-family: var(--mono);
+        font-size: 15px;
+        color: #60a5fa;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: -6px;
+      }
+      .dag .ve.h .ve-label {
+        min-width: 0;
+      }
+      .dag .ve-time {
+        display: none;
+      }
+      .judge-chip {
+        font-family: var(--mono);
+        font-size: 15px;
+        color: var(--faint);
+      }
+
+      /* ── slide 7 ── */
+      .pfile {
+        font-family: var(--mono);
+        font-size: 22px;
+        line-height: 1.75;
+        padding: 18px 26px 22px;
+        color: #cfd8d2;
+        min-height: 260px;
+      }
+      .pfile .ln {
+        white-space: pre;
+        transition: color 0.3s;
+      }
+      .pfile .ln.fresh {
+        animation: arrive 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+      .pfile .x {
+        color: var(--ok-fg);
+      }
+      .pfile .u {
+        color: #fb923c;
+      }
+      .pfile .c {
+        color: var(--faint);
+      }
+      .callout {
+        margin-top: 30px;
+        border-left: 4px solid var(--guide);
+        padding: 6px 0 6px 22px;
+        font-size: 28px;
+        color: var(--fg);
+      }
+
+      /* ── slide 8 ── */
+      .verdicts {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        padding: 18px 28px 24px;
+      }
+      .verdict {
+        border: 1px solid var(--line-2);
+        border-radius: 14px;
+        padding: 14px 16px;
+        opacity: 0.25;
+        transition:
+          opacity 0.4s,
+          border-color 0.4s;
+      }
+      .verdict.on {
+        opacity: 1;
+        border-color: rgba(74, 222, 128, 0.5);
+      }
+      .verdict .n {
+        font-size: 24px;
+        font-weight: 700;
+      }
+      .verdict .m {
+        font-family: var(--mono);
+        font-size: 16px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      /* ── slide 9 ── */
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .side-cap {
+        font-family: var(--mono);
+        font-size: 15px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .wall {
+        align-self: stretch;
+        width: 18px;
+        min-height: 140px;
+        border-radius: 5px;
+        flex: none;
+        background: repeating-linear-gradient(135deg, #b91c1c 0 7px, transparent 7px 14px);
+        opacity: 0.85;
+        position: relative;
+        margin-inline: 14px;
+      }
+      .wall span {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) rotate(-90deg);
+        white-space: nowrap;
+        font-family: var(--mono);
+        font-size: 15px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #fca5a5;
+        background: var(--bg);
+        padding: 3px 8px;
+        border-radius: 5px;
+      }
+      .wall.pulse {
+        animation: wallp 1.2s ease-in-out 2;
+      }
+      @keyframes wallp {
+        50% {
+          box-shadow: 0 0 24px rgba(239, 68, 68, 0.6);
+        }
+      }
+      .trio {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr) 1.25fr;
+        gap: 24px;
+        margin-top: 28px;
+      }
+      .trio .t {
+        border: 1px solid var(--line);
+        background: rgba(14, 17, 16, 0.7);
+        border-radius: 18px;
+        padding: 18px 22px;
+      }
+      .trio h3 {
+        font-size: 28px;
+        font-weight: 700;
+      }
+      .trio p {
+        font-size: 20px;
+        color: var(--muted);
+        margin-top: 8px;
+        line-height: 1.4;
+      }
+      .chips {
+        display: flex;
+        gap: 10px;
+        margin-top: 12px;
+        flex-wrap: wrap;
+      }
+      .chip {
+        font-family: var(--mono);
+        font-size: 17px;
+        padding: 4px 12px;
+        border-radius: 999px;
+        border: 1px solid;
+      }
+      .chip.ok {
+        color: var(--ok-fg);
+        border-color: rgba(74, 222, 128, 0.5);
+      }
+      .chip.dr {
+        color: #f87171;
+        border-color: rgba(248, 113, 113, 0.5);
+      }
+      .chip.df {
+        color: #fbbf24;
+        border-color: rgba(251, 191, 36, 0.5);
+      }
+
+      /* ── slide 10 ── */
+      .s10grid {
+        display: grid;
+        grid-template-columns: 780px 1fr;
+        gap: 80px;
+        margin-top: 56px;
+        align-items: center;
+      }
+      .morph {
+        position: relative;
+        font-size: 104px;
+        font-weight: 800;
+        letter-spacing: -0.045em;
+        line-height: 1.05;
+      }
+      .morph .from {
+        color: var(--muted);
+        position: relative;
+        display: inline-block;
+      }
+      .morph .from::after {
+        content: "";
+        position: absolute;
+        left: -4px;
+        right: -4px;
+        top: 54%;
+        height: 8px;
+        background: #ef4444;
+        border-radius: 4px;
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.7s cubic-bezier(0.7, 0, 0.2, 1);
+      }
+      .morph.struck .from::after {
+        transform: scaleX(1);
+      }
+      .morph .from-sub,
+      .morph .to-sub {
+        font-size: 32px;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+      .morph .to {
+        color: var(--guide);
+        opacity: 0;
+        transform: translateY(20px);
+        transition:
+          opacity 0.6s,
+          transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+        margin-top: 36px;
+      }
+      .morph.struck .to {
+        opacity: 1;
+        transform: none;
+      }
+      .race {
+        display: flex;
+        flex-direction: column;
+        gap: 38px;
+      }
+      .race .case {
+        font-family: var(--mono);
+        font-size: 20px;
+        color: var(--guide);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      .race h3 {
+        font-size: 44px;
+        font-weight: 700;
+        margin-top: 10px;
+      }
+      .lane {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+      .lane .lh {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: 26px;
+      }
+      .lane .lh b {
+        font-weight: 600;
+      }
+      .lane .val {
+        font-family: var(--mono);
+        font-size: 30px;
+        font-variant-numeric: tabular-nums;
+      }
+      .track {
+        height: 40px;
+        border-radius: 12px;
+        background: #151a17;
+        border: 1px solid var(--line);
+        overflow: hidden;
+        position: relative;
+      }
+      .track .fill {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 0;
+        border-radius: 11px;
+      }
+      .track.hum .fill {
+        background: repeating-linear-gradient(135deg, #64748b 0 14px, #475569 14px 28px);
+      }
+      .track.flow .fill {
+        background: linear-gradient(90deg, var(--ok), var(--ok-fg));
+        box-shadow: 0 0 24px rgba(74, 222, 128, 0.4);
+      }
+      .foot-note {
+        font-family: var(--mono);
+        font-size: 17px;
+        color: var(--faint);
+      }
+
+      /* ── slide 11 ── */
+      .s11 {
+        justify-content: center;
+      }
+      .s11 .closing {
+        font-size: 104px;
+        font-weight: 800;
+        letter-spacing: -0.045em;
+        line-height: 1.05;
+      }
+      .s11 .sigh {
+        font-family: var(--mono);
+        font-size: 30px;
+        color: #9fb3a6;
+        margin-top: 56px;
+      }
+      .s11 .sigh b {
+        color: var(--guide);
+        font-weight: 500;
+      }
+      .dontpanic {
+        position: absolute;
+        right: 120px;
+        bottom: 150px;
+        font-family: var(--round);
+        font-weight: 600;
+        font-size: 118px;
+        line-height: 1;
+        letter-spacing: 0.04em;
+        color: var(--guide);
+        text-shadow:
+          0 0 30px var(--guide-glow),
+          0 0 2px #fff;
+        transform: rotate(-4deg);
+      }
+      .slide.active .dontpanic {
+        animation: panic 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        animation-delay: 2.4s;
+      }
+      @keyframes panic {
+        from {
+          opacity: 0;
+          transform: rotate(-14deg) scale(0.4);
+        }
+        to {
+          opacity: 1;
+          transform: rotate(-4deg) scale(1);
+        }
+      }
+      .thanks {
+        position: absolute;
+        left: 120px;
+        bottom: 150px;
+        font-size: 28px;
+        color: var(--muted);
+      }
+      .thanks b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .slide,
+        .slide.active {
+          transition:
+            opacity 0.2s ease,
+            visibility 0s;
+          transform: none !important;
+        }
+        .slide.active .in,
+        .slide.active .dontpanic {
+          animation: none;
+          opacity: 1;
+        }
+        .ve-box[data-state="running"],
+        .ve-box[data-state="running"] .ve-shine,
+        .ve-box[data-state="human"],
+        .btn.ready,
+        .planet .sphere,
+        .planet .arm,
+        .planet .arm i,
+        .s1 .quote .caret,
+        .revarc path.on,
+        .wall.pulse {
+          animation: none !important;
+        }
+        .ve-box {
+          transition: background-color 0.1s;
+        }
+        .nebula {
+          transition: none;
+        }
+      }
+
+      .slide aside.notes {
+        display: none;
+      }
+
+      .planet {
+        transform-style: preserve-3d;
+      }
+      .planet .orb {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 0;
+        height: 0;
+        transform-style: preserve-3d;
+        transform: rotateZ(-16deg) rotateX(76deg);
+      }
+      .planet .oring {
+        position: absolute;
+        left: -320px;
+        top: -320px;
+        width: 640px;
+        height: 640px;
+        border-radius: 50%;
+        border: 2px solid rgba(124, 242, 156, 0.38);
+        box-shadow: 0 0 30px rgba(124, 242, 156, 0.1);
+      }
+      .planet .arm {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform-style: preserve-3d;
+        animation: spin 18s linear infinite;
+      }
+      .planet .arm i {
+        position: absolute;
+        left: 307px;
+        top: -13px;
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
+        box-shadow: 0 0 14px currentColor;
+        animation: face 18s linear infinite;
+        animation-delay: inherit;
+      }
+      @keyframes spin {
+        to {
+          transform: rotateZ(360deg);
+        }
+      }
+      @keyframes face {
+        from {
+          transform: rotateZ(0deg) rotateX(-76deg);
+        }
+        to {
+          transform: rotateZ(-360deg) rotateX(-76deg);
+        }
+      }
+      .cbody {
+        display: grid;
+        grid-template-columns: 1fr 540px;
+      }
+      .cbody .viz {
+        border-bottom: 0;
+        border-right: 1px solid var(--line-2);
+        padding: 104px 28px 104px;
+      }
+      .cbody .left-out {
+        padding-top: 26px;
+      }
+      .row.zoom {
+        zoom: 1.15;
+      }
+      .hero-card {
+        margin-top: 34px;
+      }
+      .hero-card .viz {
+        padding-top: 100px;
+        padding-bottom: 40px;
+      }
+      .arts.cols {
+        grid-template-columns: 1fr 1fr;
+        column-gap: 40px;
+      }
+      .arts.cols li {
+        grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+      }
+      .lanes {
+        gap: 12px;
+        padding: 12px 18px;
+      }
+      .verdicts {
+        padding: 14px 28px 18px;
+      }
+      .verdict {
+        padding: 10px 16px;
+      }
+      .btn.used {
+        opacity: 0.7;
+      }
+      .s2 .two {
+        margin-top: 64px;
+      }
+
+      .s5 .split,
+      .s7 .split {
+        margin-top: auto;
+        margin-bottom: auto;
+      }
+      .s5 .row {
+        zoom: 1.3;
+      }
+      .s5 .viz {
+        padding-top: 84px;
+      }
+      .s10 .s10grid {
+        margin-top: auto;
+        margin-bottom: auto;
+        grid-template-columns: 760px 1fr;
+      }
+      .s10 .morph {
+        font-size: 150px;
+      }
+      .s10 .morph .from-sub,
+      .s10 .morph .to-sub {
+        font-size: 38px;
+      }
+      .s10 .race h3 {
+        font-size: 56px;
+      }
+      .s10 .race {
+        gap: 46px;
+      }
+      .s10 .track {
+        height: 58px;
+        border-radius: 14px;
+      }
+      .s10 .lane .lh {
+        font-size: 30px;
+      }
+      .s10 .lane .val {
+        font-size: 36px;
+      }
+      .s10 .foot-note {
+        font-size: 20px;
+        color: var(--muted);
+      }
+      .hero-card .cbody .viz {
+        padding: 100px 28px 124px;
+      }
+      .lanes .ve {
+        align-self: flex-start;
+      }
+      .lanes {
+        width: 600px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="stars" aria-hidden="true"></canvas>
+    <div class="nebula" aria-hidden="true"></div>
+    <div id="progress"></div>
+    <div class="hint" id="hint">← → · space · click to move · F fullscreen · N notes</div>
+    <div id="viewport">
+      <main id="stage" aria-live="polite">
+        <!-- 1 -->
+        <section class="slide s1" data-title="Marvin">
+          <div class="panic-badge in" style="--d: 1600">DON'T PANIC</div>
+          <div class="planet-wrap in" style="--d: 300" aria-hidden="true">
+            <div class="planet">
+              <div class="sphere"></div>
+              <div class="orb">
+                <div class="oring"></div>
+                <div class="arm" style="animation-delay: 0s">
+                  <i style="background: var(--idle); color: var(--idle); animation-delay: 0s"></i>
+                </div>
+                <div class="arm" style="animation-delay: -3s">
+                  <i style="background: var(--run); color: var(--run); animation-delay: -3s"></i>
+                </div>
+                <div class="arm" style="animation-delay: -6s">
+                  <i style="background: var(--ok); color: var(--ok-fg); animation-delay: -6s"></i>
+                </div>
+                <div class="arm" style="animation-delay: -9s">
+                  <i style="background: var(--err); color: var(--err); animation-delay: -9s"></i>
+                </div>
+                <div class="arm" style="animation-delay: -12s">
+                  <i style="background: var(--int); color: var(--int); animation-delay: -12s"></i>
+                </div>
+                <div class="arm" style="animation-delay: -15s">
+                  <i
+                    style="background: var(--human); color: var(--human); animation-delay: -15s"
+                  ></i>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="kicker in">A project presentation · agentic engineering</p>
+          <h1 class="in" style="--d: 120">Marvin</h1>
+          <p class="quote" data-type="“Brain the size of a planet, and they ask me to write code.”">
+            <span class="t"></span><span class="caret"></span>
+          </p>
+          <p class="sub in" style="--d: 400">
+            Agentic flows that reach the goal, unattended, inside a process you can read.
+          </p>
+          <div class="who in" style="--d: 600">
+            <b>Riccardo Merolla</b><i class="sep"></i><span>designer · engineer</span>
+          </div>
+          <p class="keys in" style="--d: 900">
+            <kbd>←</kbd> <kbd>→</kbd> move · <kbd>F</kbd> fullscreen · <kbd>N</kbd> notes
+          </p>
+          <aside class="notes">
+            <p>
+              Hi, I'm Riccardo. This talk is about Marvin: a way of running AI coding agents inside
+              explicit workflows, so that a run can go on unattended and still arrive where it was
+              meant to go.
+            </p>
+            <p>
+              The name comes from Marvin, the Paranoid Android in The Hitchhiker's Guide to the
+              Galaxy: a brain the size of a planet, given small chores, and convinced it will all go
+              wrong. That is a fair picture of a coding agent today. Very capable, and quite happy
+              to wander off.
+            </p>
+            <p>
+              This is not a product pitch. I want to explain the method: the ideas, the shape of a
+              run, and what it changed in practice. Ten minutes, eleven slides. The coloured squares
+              orbiting the planet are the states you'll see on every slide.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 2 -->
+        <section class="slide s2" data-title="The problem">
+          <p class="eyebrow in">The problem</p>
+          <h2 class="title in" style="--d: 100">
+            Left alone, agents say “done” when they aren't, and lose the thread on long runs.
+          </h2>
+          <div class="two">
+            <div class="card in" style="--d: 300" data-card="a">
+              <div class="card-head">
+                <div>
+                  <p class="card-title">“Done”</p>
+                  <p class="card-desc">The agent reports success. Nobody checked.</p>
+                </div>
+                <span class="tag">illustration</span>
+              </div>
+              <div class="viz nob"><div class="row" data-row></div></div>
+            </div>
+            <div class="card in" style="--d: 450" data-card="b">
+              <div class="card-head">
+                <div>
+                  <p class="card-title">The long run</p>
+                  <p class="card-desc">Each step pushes the goal further out of view.</p>
+                </div>
+                <span class="tag">illustration</span>
+              </div>
+              <div class="viz nob"><div class="row" data-row></div></div>
+              <div class="meter">
+                <div class="lab">
+                  <span>goal still in the agent's head</span><span data-pct>clear</span>
+                </div>
+                <div class="bar"><div class="fill" data-fill></div></div>
+              </div>
+            </div>
+          </div>
+          <p class="quip">Marvin: <em>“Done,” it said. It wasn't. I could have told them.</em></p>
+          <aside class="notes">
+            <p>Two problems kept coming back when I let agents work on their own.</p>
+            <p>
+              First, on the left: the agent declares the job done when it isn't. It writes “all
+              tests pass” without running them, or finishes three of five features and reports
+              success. Nothing in the loop asks it to prove anything.
+            </p>
+            <p>
+              Second, on the right: on a long run the agent loses the thread. The goal and the
+              decisions made an hour ago drift out of its working memory, so later steps contradict
+              earlier ones, or it quietly starts solving a different problem.
+            </p>
+            <p>
+              Both are the same root issue: we trust the agent's own account of the work, and we
+              keep the state of the work inside the agent. The rest of this talk is about moving
+              both of those out of the agent. These two cards are illustrations, not measurements.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 3 -->
+        <section class="slide s3" data-title="The idea">
+          <p class="eyebrow in">The idea</p>
+          <div class="s3grid">
+            <div>
+              <p class="bigq in" style="--d: 100">
+                Agents do the volume.<br /><span class="y">People make the decisions.</span>
+              </p>
+              <p class="lede in" style="--d: 350">
+                The process lives in code. <b>The agents can change.</b> Every step is visible,
+                every finding is written down, and nothing important happens until a person says
+                yes.
+              </p>
+            </div>
+            <div class="card in" style="--d: 300">
+              <div class="card-head">
+                <div><p class="card-title">a workflow, as code</p></div>
+                <span class="tag">illustrative</span>
+              </div>
+              <div class="flowcode" data-code></div>
+              <div class="seats">
+                <div class="seat">
+                  <p class="role">plans &amp; judges</p>
+                  <span class="who" data-seat="plan">Claude</span>
+                </div>
+                <div class="seat">
+                  <p class="role">writes code</p>
+                  <span class="who g" data-seat="code">Claude</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="legend-wrap in" style="--d: 700">
+            <div class="legend" aria-label="Legend">
+              <span class="tag">how to read the runs</span>
+              <span><i style="background: var(--idle); opacity: 0.6"></i>waiting</span>
+              <span><i style="background: var(--run)"></i>an agent is working</span>
+              <span><i style="background: var(--ok)"></i>done</span>
+              <span><i style="background: var(--err)"></i>did not pass review</span>
+              <span><i style="background: var(--int)"></i>interrupted</span>
+              <span><i style="background: var(--human)"></i>needs a person</span>
+            </div>
+          </div>
+          <p class="quip">
+            Marvin: <em>Swap me out if you like. The process won't even notice. Nobody does.</em>
+          </p>
+          <aside class="notes">
+            <p>The idea is one sentence: agents do the volume, people make the decisions.</p>
+            <p>
+              The process, meaning the steps, the checks, who approves what, and what gets written
+              down, lives in code, in the repository, next to the project. It is not a prompt and it
+              is not in anyone's head. The agents are the replaceable part: on the right, the seat
+              that writes code changes from one agent to another, and the workflow text doesn't
+              move.
+            </p>
+            <p>
+              Because the process is explicit, every step is visible and every finding is written to
+              a file. And the decisions that matter, like approving a plan, stay with a person.
+            </p>
+            <p>
+              At the bottom is the legend for the rest of the deck. Slate is waiting, blue is an
+              agent working, green is done, red did not pass review, orange is interrupted, and
+              yellow needs a person.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 4 -->
+        <section class="slide s4" data-title="The basic loop">
+          <p class="eyebrow in">The basic loop</p>
+          <h2 class="title in" style="--d: 100">
+            Plan, build, check, review. <span class="g">Only reviewed work is committed.</span>
+          </h2>
+          <p class="lede in" style="--d: 250">
+            What review does not accept goes back as a revision. The agent never grades its own
+            homework.
+          </p>
+          <div class="card hero-card in" style="--d: 350">
+            <div class="card-head">
+              <div>
+                <p class="card-title">The basic loop</p>
+                <p class="card-desc">One task, start to commit.</p>
+              </div>
+              <span class="tag">simulated run · figures illustrative</span>
+            </div>
+            <div class="cbody">
+              <div class="viz">
+                <svg class="revarc" data-arc>
+                  <path d="" />
+                  <text></text>
+                </svg>
+                <div class="row zoom" data-row></div>
+              </div>
+              <div class="left-out">
+                <h4>Left behind</h4>
+                <ul class="arts" data-arts></ul>
+              </div>
+            </div>
+          </div>
+          <p class="quip">Marvin: <em>Round and round. Don't talk to me about loops.</em></p>
+          <aside class="notes">
+            <p>This is the smallest unit of the method, and everything else is built from it.</p>
+            <p>
+              An agent writes a plan. An agent builds against it. Then checks run: your build, your
+              tests, the things a machine can verify. Then a separate review looks at the work.
+              Watch the review go red: it found a missing test. That finding is written to a file
+              and goes back to the coder as a revision. The coder fixes it, checks run again, review
+              clears it, and only then is there a commit.
+            </p>
+            <p>
+              This answers the first problem from earlier. “Done” is no longer something the agent
+              says about itself. Done means it passed checks and review, and there is a written
+              trail of what was found along the way. Look at the “left behind” list: the plan, the
+              findings from each round, and one commit per reviewed task.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 5 -->
+        <section class="slide s5" data-title="The plan is a document">
+          <div class="split">
+            <div>
+              <p class="eyebrow in" style="--d: 0">People approve</p>
+              <h2 class="title in" style="--d: 100">
+                The plan is a document. <span class="y">Editing it is the decision.</span>
+              </h2>
+              <p class="body in" style="--d: 250">
+                Before any code is written, an agent drafts a plan a person can read. The flow
+                <b>stops and waits</b>. Approve it and the work starts. Send it back and the agent
+                revises it, <b>keeping your edits</b>.
+              </p>
+            </div>
+            <div class="card in" style="--d: 300; margin-top: 20px">
+              <div class="card-head">
+                <div>
+                  <p class="card-title">Wait for a person</p>
+                  <p class="card-desc">The run pauses on the plan until you answer. Simulated.</p>
+                </div>
+                <div class="controls">
+                  <button class="btn human" data-approve disabled tabindex="-1">Approve plan</button
+                  ><button class="btn" data-back disabled tabindex="-1">Send back</button>
+                </div>
+              </div>
+              <div class="viz"><div class="row" data-row></div></div>
+              <div class="left-out">
+                <h4>Left behind</h4>
+                <ul class="arts" data-arts></ul>
+              </div>
+            </div>
+          </div>
+          <p class="quip">
+            Marvin: <em>They stopped and asked a human. Well, someone has to take the blame.</em>
+          </p>
+          <aside class="notes">
+            <p>
+              Unattended doesn't mean unsupervised. The flow has a few deliberate stops, and the
+              first one is the plan.
+            </p>
+            <p>
+              An agent drafts the plan as a normal document in the repository: the stories, who owns
+              which files, in what order. Then the run stops, the yellow node, and waits for a
+              person. Nothing else happens until you answer.
+            </p>
+            <p>
+              In the run you see me send it back first. I edited the plan, and the agent revises it
+              while keeping my edits. Then I approve, and the build starts.
+            </p>
+            <p>
+              The point is that the decision is made by editing a document, not by chatting with an
+              agent. The plan is readable, it is versioned like code, and it is the thing everyone
+              agreed to. It's also where a team that adopts this spends most of its attention.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 6 -->
+        <section class="slide s6" data-title="One epic, many agents, one branch">
+          <p class="eyebrow in">Agents in parallel</p>
+          <h2 class="title in" style="--d: 100">One epic, many agents, one branch.</h2>
+          <p class="lede in" style="--d: 250; max-width: 1600px">
+            Stories declare the files they own and what they depend on. Independent stories are
+            built at the same time, each in its own copy of the repository.
+            <b>A judge scores every story before it merges.</b>
+          </p>
+          <div class="card hero-card in" style="--d: 350">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Stories, three at a time</p>
+                <p class="card-desc">
+                  Story 1 lays the ground. Stories 2 to 4 run together. Story 5 waits for them.
+                </p>
+              </div>
+              <span class="tag">simulated run · file names illustrative</span>
+            </div>
+            <div class="viz" style="padding-top: 22px; padding-bottom: 20px">
+              <div class="dag" data-dag></div>
+            </div>
+            <div class="left-out">
+              <h4>Left behind</h4>
+              <ul class="arts cols" data-arts></ul>
+            </div>
+          </div>
+          <p class="quip">Marvin: <em>Five of us at once. Five times the gloom, one branch.</em></p>
+          <aside class="notes">
+            <p>
+              Real work is bigger than one task, so the plan splits an epic into stories. Each story
+              declares which files it owns and which stories it depends on. That declaration is what
+              makes parallel work safe.
+            </p>
+            <p>
+              Watch the run. Story 1 lays the ground: the model everything else needs. Then stories
+              2, 3 and 4 don't touch each other's files, so they run at the same time, each agent in
+              its own copy of the repository. Story 3 doesn't pass the judge the first time: a gap
+              is written down, it gets a revision, and it passes on the second round. Story 5
+              depends on all three, so it waits.
+            </p>
+            <p>
+              Every story is scored by a judge before it merges into the single epic branch. At the
+              end there is one branch, reviewed story by story, and a report of what ran and where
+              the time went.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 7 -->
+        <section class="slide s7" data-title="Stop anywhere, resume anywhere">
+          <div class="split" style="grid-template-columns: 620px 1fr">
+            <div>
+              <p class="eyebrow in">Files are the state</p>
+              <h2 class="title in" style="--d: 100">
+                Stop at any point. <span class="o">Pick up where it stopped.</span>
+              </h2>
+              <p class="body in" style="--d: 250">
+                Progress is written to files in the repository,
+                <b>not held in an agent's memory</b>. When an agent drops out or a laptop closes,
+                the next run reads the files, keeps what was done, and continues.
+              </p>
+              <p class="callout in" style="--d: 450">
+                This is the fix for losing the thread: the thread is a file.
+              </p>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 24px">
+              <div class="card in" style="--d: 300">
+                <div class="card-head">
+                  <div>
+                    <p class="card-title">Interrupt and resume</p>
+                    <p class="card-desc">Halfway through, the agent drops out.</p>
+                  </div>
+                  <div class="controls">
+                    <button class="btn resume" data-rerun disabled tabindex="-1">↻ Rerun</button>
+                  </div>
+                </div>
+                <div class="viz nob"><div class="row" data-row></div></div>
+              </div>
+              <div class="card in" style="--d: 420">
+                <div class="card-head">
+                  <div><p class="card-title">progress file</p></div>
+                  <span class="tag">in the repo</span>
+                </div>
+                <div class="pfile" data-pfile></div>
+              </div>
+            </div>
+          </div>
+          <p class="quip">Marvin: <em>I'll forget everything. Fortunately, the files won't.</em></p>
+          <aside class="notes">
+            <p>This slide answers the second problem, losing the thread.</p>
+            <p>
+              Progress is never kept only in the agent's context. After every task the flow writes
+              where it is to files in the repository: what is committed, what is unfinished, what
+              was decided. On the right you can see that file filling in.
+            </p>
+            <p>
+              In the run, the agent goes offline in the middle of task 3. That happens: rate limits,
+              a crash, a laptop lid. I press rerun. The new run doesn't start over and doesn't need
+              anybody to remember anything. It reads the file, keeps tasks 1 and 2 as done, and
+              continues from task 3.
+            </p>
+            <p>
+              That's also why long runs stay on track: each step starts from the written record of
+              the goal and the decisions so far, not from a memory that has been fading for hours.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 8 -->
+        <section class="slide s8" data-title="Any agent, any seat">
+          <p class="eyebrow in">Any agent, any seat</p>
+          <h2 class="title in" style="--d: 100">
+            Swap the agent. <span class="g">Keep the process.</span>
+          </h2>
+          <p class="lede in" style="--d: 250">
+            A workflow asks for roles: someone to plan and judge, someone to write code. Claude,
+            Codex, Gemini or a local model fills a seat. The steps, the checks and the record stay
+            the same.
+          </p>
+          <div class="card hero-card in" style="--d: 350">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Pick who writes the code</p>
+                <p class="card-desc">Change the coder, run the same flow again. Simulated.</p>
+              </div>
+              <div class="controls">
+                <span class="card-desc" style="margin: 0 6px 0 0">Coder</span>
+                <div class="seg" data-seg>
+                  <span data-v="Claude">Claude</span><span data-v="Codex">Codex</span
+                  ><span data-v="Gemini">Gemini</span><span data-v="local model">Local model</span>
+                </div>
+              </div>
+            </div>
+            <div class="viz" style="padding-top: 64px; padding-bottom: 28px">
+              <div class="row zoom" data-row style="zoom: 1.3"></div>
+            </div>
+            <div class="verdicts" data-verdicts></div>
+          </div>
+          <p class="quip">Marvin: <em>Replaceable. Story of my life.</em></p>
+          <aside class="notes">
+            <p>Because the process is code, the agent is just whoever fills a role.</p>
+            <p>
+              A workflow asks for roles: someone to plan and judge, someone to write code. Any
+              coding agent can fill a role: Claude, Codex, Gemini, or a model running on your own
+              machine. In the run you see the coder seat change four times. The plan format is the
+              same, the checks are the same, the review lenses are the same, and the judge uses the
+              same rubric whoever wrote the code.
+            </p>
+            <p>
+              This matters for two reasons. Models change every few months, and you don't want your
+              engineering process to be rewritten each time. And it lets a team mix them: a strong
+              model to plan and judge, a cheaper or local one to do the volume.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 9 -->
+        <section class="slide s9" data-title="Legacy to new system">
+          <p class="eyebrow in">Modernization</p>
+          <h2 class="title in" style="--d: 100; font-size: 60px">
+            Read the old system once. Build the new one from what people approved.
+          </h2>
+          <div class="card in" style="--d: 300; margin-top: 36px">
+            <div class="card-head">
+              <div>
+                <p class="card-title">Legacy to target</p>
+                <p class="card-desc">
+                  Same process for every technology. The kit supplies the knowledge.
+                </p>
+              </div>
+              <div class="controls">
+                <div class="seg">
+                  <span class="on">COBOL → Java</span><span>JSP → Next.js</span
+                  ><span>SOAP → REST</span>
+                </div>
+                <button class="btn human" data-approve disabled tabindex="-1">
+                  Approve specification
+                </button>
+              </div>
+            </div>
+            <div class="viz" style="padding-top: 104px; padding-bottom: 22px">
+              <div class="row" data-row style="align-items: stretch"></div>
+            </div>
+          </div>
+          <div class="trio">
+            <div class="t in" style="--d: 500">
+              <h3>Kit</h3>
+              <p>
+                Everything one migration path needs, as files. Add a technology by writing a kit.
+              </p>
+            </div>
+            <div class="t in" style="--d: 600">
+              <h3>Pack</h3>
+              <p>The contract inside a kit: checks, how a judge scores, what “equivalent” means.</p>
+            </div>
+            <div class="t in" style="--d: 700">
+              <h3>Pattern card</h3>
+              <p>A short recipe for one old idiom. Each agent gets only the cards it needs.</p>
+            </div>
+            <div class="t in" style="--d: 800">
+              <h3>Epic brief</h3>
+              <p>The spec, distilled with a person, before anything is built:</p>
+              <div class="chips">
+                <span class="chip ok">in scope</span><span class="chip dr">dropped</span
+                ><span class="chip df">deferred</span>
+              </div>
+            </div>
+          </div>
+          <p class="quip">Marvin: <em>Old code. Older than me. Nearly as miserable.</em></p>
+          <aside class="notes">
+            <p>The same machinery applies to modernization, which is where many teams start.</p>
+            <p>
+              On the legacy side, agents survey the old code base and turn it into a specification:
+              what each program does, as rules and scenarios, each traced back to the source line it
+              came from. Then a person approves that specification. That's the yellow stop.
+            </p>
+            <p>
+              Only the approved specification crosses the clean-room wall. On the new side, agents
+              build the new system without being able to see the old code, and prove it equivalent
+              by replaying recorded behaviour of the old system against the new one.
+            </p>
+            <p>
+              The knowledge for each path lives in a kit, like COBOL to Java, JSP to Next.js, SOAP
+              to REST. Inside it a pack defines checks and scoring, and pattern cards translate one
+              idiom each. And not every program deserves a port: the spec is first distilled with a
+              person into an epic brief, what's in scope, dropped or deferred, and the parallel
+              stories build that slice.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 10 -->
+        <section class="slide s10" data-title="The numbers">
+          <p class="eyebrow in">What changed in practice</p>
+          <div class="s10grid">
+            <div class="morph in" style="--d: 100" data-morph>
+              <div class="from">Weeks</div>
+              <div class="from-sub">of development</div>
+              <div class="to">Hours</div>
+              <div class="to-sub" style="color: var(--fg)">of flow runs</div>
+            </div>
+            <div class="race in" style="--d: 250">
+              <div>
+                <p class="case">Case · epic-stories flow</p>
+                <h3>An IBM ACE project, from scratch, given a spec.</h3>
+              </div>
+              <div class="lane">
+                <div class="lh">
+                  <b>Human-only development</b><span class="val" data-hval>days</span>
+                </div>
+                <div class="track hum"><div class="fill" data-hfill></div></div>
+              </div>
+              <div class="lane">
+                <div class="lh">
+                  <b class="g">Epic-stories flow</b><span class="val g" data-fval>0 h 00 m</span>
+                </div>
+                <div class="track flow"><div class="fill" data-ffill></div></div>
+              </div>
+              <p class="foot-note">
+                Bars not to scale: about 2 hours of flow runs, compared with days of human-only
+                development.
+              </p>
+            </div>
+          </div>
+          <p class="quip">Marvin: <em>Hours instead of weeks. More time to be depressed.</em></p>
+          <aside class="notes">
+            <p>
+              What did this change in practice? Two honest statements, and no more numbers than I
+              can stand behind.
+            </p>
+            <p>
+              In general: work that took weeks of development now takes hours of flow runs. The
+              people's time moves to writing and approving the plan and reading the review findings.
+            </p>
+            <p>
+              One concrete case: an IBM ACE integration project, built from scratch. The input was a
+              specification. The epic-stories flow, the parallel one from a few slides ago,
+              completed it in about two hours. Compared with that, human-only development took days.
+            </p>
+            <p>
+              The bars are deliberately not to scale; the counter is a stylised clock. The precise
+              ratio depends on the project. What doesn't depend on the project is where the time
+              goes: the agents do the volume, and the people's hours go into the decisions.
+            </p>
+          </aside>
+        </section>
+
+        <!-- 11 -->
+        <section class="slide s11" data-title="Close">
+          <p class="eyebrow in">To sum up</p>
+          <p class="closing" style="margin-top: 30px">
+            <span class="in" style="--d: 200; display: block">The process is code.</span>
+            <span class="in" style="--d: 900; display: block">The agents are replaceable.</span>
+            <span class="in y" style="--d: 1600; display: block">The record is yours.</span>
+          </p>
+          <p class="sigh in" style="--d: 2200">
+            <b>Marvin:</b> *sigh* I suppose you'll want questions now.
+          </p>
+          <p class="thanks in" style="--d: 2600"><b>Riccardo Merolla</b> · thank you</p>
+          <div class="dontpanic" aria-label="Don't Panic">DON'T PANIC</div>
+          <aside class="notes">
+            <p>To close, three lines.</p>
+            <p>
+              The process is code: steps, checks, approvals and what gets written down live in the
+              repository, versioned, reviewable, and the same for every run.
+            </p>
+            <p>
+              The agents are replaceable: any of them can fill a seat, and next year's model drops
+              into the same flow.
+            </p>
+            <p>
+              And the record is yours: plans, findings, progress files, verdicts and commits stay in
+              your repository. That's what lets a run go unattended and still be trusted, and it's
+              what lets a person pick it up at any point.
+            </p>
+            <p>
+              For the team adopting this: start with the basic loop on one real task, then the plan
+              approval, then parallel stories. Thank you. Questions, and don't panic.
+            </p>
+          </aside>
+        </section>
+
+        <div id="cursor" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path
+              d="M4 2l16 9.5-7 1.6L9.6 20z"
+              fill="#fff"
+              stroke="#111"
+              stroke-width="1.2"
+              stroke-linejoin="round"
+            /></svg
+          ><span class="ring"></span>
+        </div>
+        <nav class="chrome" aria-label="Slide navigation">
+          <button data-nav="-1" aria-label="Previous slide">‹</button
+          ><span class="num" id="num">01 / 11</span
+          ><button data-nav="1" aria-label="Next slide">›</button>
+        </nav>
+      </main>
+    </div>
+    <aside id="notes" aria-label="Speaker notes">
+      <h5 id="notes-h">Notes</h5>
+      <div id="notes-body"></div>
+    </aside>
+
+    <script>
+      ;(() => {
+        "use strict"
+        const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        const SPEED = reduce ? 0.02 : 1
+        const Cancel = Symbol("cancel")
+        const $ = (s, r = document) => r.querySelector(s)
+        const $$ = (s, r = document) => [...r.querySelectorAll(s)]
+        const stage = $("#stage")
+        const slides = $$(".slide", stage)
+        const N = slides.length
+        let SCALE = 1
+
+        const ICONS = {
+          star: '<svg viewBox="0 0 24 24"><path d="M12 1.5c.7 5.6 3.4 8.5 10.5 10.5-7.1 2-9.8 4.9-10.5 10.5C11.3 16.9 8.6 14 1.5 12 8.6 10 11.3 7.1 12 1.5z"/></svg>',
+          fail: '<svg viewBox="0 0 24 24"><path d="M8 2h8l6 6v8l-6 6H8l-6-6V8zm2.1 5L7 10.1 8.9 12 7 13.9 10.1 17 12 15.1 13.9 17 17 13.9 15.1 12 17 10.1 13.9 7 12 8.9z"/></svg>',
+          human:
+            '<svg viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8z"/></svg>',
+          pause:
+            '<svg viewBox="0 0 24 24"><rect x="6" y="4" width="4.2" height="16" rx="1.2"/><rect x="13.8" y="4" width="4.2" height="16" rx="1.2"/></svg>'
+        }
+        const ARROW =
+          '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.3 4.3a1 1 0 0 1 1.4 0l7 7a1 1 0 0 1 0 1.4l-7 7a1 1 0 0 1-1.4-1.4l5.3-5.3H3a1 1 0 1 1 0-2h15.6l-5.3-5.3a1 1 0 0 1 0-1.4z"/></svg>'
+        const el = (tag, cls, html) => {
+          const e = document.createElement(tag)
+          if (cls) e.className = cls
+          if (html != null) e.innerHTML = html
+          return e
+        }
+        const fmt = (sim) => {
+          const s = Math.round(sim)
+          return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`
+        }
+        const rel = (node, base) => {
+          const a = node.getBoundingClientRect(),
+            b = base.getBoundingClientRect()
+          return {
+            x: (a.left - b.left) / SCALE,
+            y: (a.top - b.top) / SCALE,
+            w: a.width / SCALE,
+            h: a.height / SCALE
+          }
+        }
+
+        /* ── node (after visual-effect's EffectNode) ── */
+        function makeNode(name, sub, opts = {}) {
+          const root = el("div", "ve" + (opts.h ? " h" : ""))
+          const bubble = el("div", "ve-bubble")
+          bubble.hidden = true
+          const box = el("div", "ve-box"),
+            shine = el("div", "ve-shine"),
+            content = el("div", "ve-content")
+          box.append(shine, content)
+          const label = el("div", "ve-label"),
+            nm = el("span", "ve-name", name),
+            sb = el("span", "ve-sub", sub || ""),
+            time = el("span", "ve-time")
+          label.append(nm)
+          if (sub != null) label.append(sb)
+          label.append(time)
+          root.append(bubble, box, label)
+          let raf = 0,
+            t0 = 0,
+            bt = 0
+          const stopTimer = () => {
+            cancelAnimationFrame(raf)
+            raf = 0
+          }
+          const tick = () => {
+            time.textContent = fmt(((performance.now() - t0) / 1000) * 240)
+            raf = requestAnimationFrame(tick)
+          }
+          const pop = (n) => {
+            if (!reduce && n)
+              n.animate(
+                [
+                  { transform: "scale(.5)", opacity: 0, filter: "blur(8px)" },
+                  { transform: "scale(1)", opacity: 1, filter: "blur(0)" }
+                ],
+                { duration: 460, easing: "cubic-bezier(.34,1.56,.64,1)" }
+              )
+          }
+          const icon = (k) => {
+            content.innerHTML = `<span class="ve-icon">${ICONS[k]}</span>`
+            pop(content.firstChild)
+          }
+          const width = (w) => {
+            box.style.width = `${w}px`
+          }
+          const hideBubble = () => {
+            clearTimeout(bt)
+            bubble.hidden = true
+          }
+          const showBubble = (text, kind, ms) => {
+            clearTimeout(bt)
+            bubble.className = `ve-bubble ${kind}`
+            bubble.textContent = text
+            bubble.hidden = false
+            if (!opts.h) {
+              bubble.style.left = "0px"
+              bubble.style.setProperty("--tip", "42px")
+              const card = root.closest(".card")
+              if (card) {
+                const cr = card.getBoundingClientRect(),
+                  r = bubble.getBoundingClientRect()
+                const over = (r.right - (cr.right - 16 * SCALE)) / SCALE
+                if (over > 0) {
+                  bubble.style.left = `${-over}px`
+                  bubble.style.setProperty("--tip", `${42 + over}px`)
+                }
+              }
+            }
+            if (!reduce)
+              bubble.animate(
+                [
+                  { opacity: 0, scale: ".9" },
+                  { opacity: 1, scale: "1" }
+                ],
+                { duration: 260, easing: "cubic-bezier(.34,1.56,.64,1)" }
+              )
+            if (ms)
+              bt = setTimeout(
+                () => {
+                  bubble.hidden = true
+                },
+                ms * SPEED + (reduce ? 0 : 0)
+              )
+          }
+          const shake = () => {
+            if (!reduce)
+              box.animate(
+                [0, 8, -8, 6, -6, 3, 0].map((x, i) => ({
+                  transform: `translateX(${x}px) rotate(${i % 2 ? 4 : -4}deg)`
+                })),
+                { duration: 480, easing: "ease-out" }
+              )
+          }
+          const api = {
+            root,
+            box,
+            idle() {
+              stopTimer()
+              hideBubble()
+              time.textContent = ""
+              box.dataset.state = "idle"
+              width(84)
+              icon("star")
+            },
+            run() {
+              hideBubble()
+              box.dataset.state = "running"
+              width(84)
+              content.innerHTML = ""
+              t0 = performance.now()
+              stopTimer()
+              if (!reduce) tick()
+            },
+            done(text) {
+              stopTimer()
+              hideBubble()
+              time.textContent = ""
+              box.dataset.state = "done"
+              const s = el("span", null, text)
+              content.innerHTML = ""
+              content.append(s)
+              width(Math.max(84, s.scrollWidth + 40))
+              pop(s)
+            },
+            fail(msg) {
+              stopTimer()
+              time.textContent = ""
+              box.dataset.state = "failed"
+              icon("fail")
+              shake()
+              showBubble(msg, "fail")
+            },
+            wait(msg) {
+              stopTimer()
+              time.textContent = ""
+              box.dataset.state = "human"
+              width(84)
+              icon("human")
+              showBubble(msg, "human")
+            },
+            interrupt(msg) {
+              stopTimer()
+              time.textContent = ""
+              box.dataset.state = "interrupted"
+              icon("pause")
+              shake()
+              showBubble(msg, "interrupted")
+            },
+            note(msg, ms = 1800) {
+              showBubble(msg, "note", ms)
+            },
+            hide: hideBubble,
+            flash() {
+              if (!reduce)
+                box.animate([{ filter: "brightness(2)" }, { filter: "brightness(1)" }], {
+                  duration: 560
+                })
+            },
+            label(t) {
+              nm.textContent = t
+            },
+            sublabel(t) {
+              sb.textContent = t
+            }
+          }
+          api.idle()
+          return api
+        }
+
+        /* ── simulated presenter cursor ── */
+        const cursor = $("#cursor")
+        let cursorPos = { x: 1500, y: 900 }
+        async function clickOn(btn, c) {
+          const r = rel(btn, stage)
+          const tx = r.x + r.w * 0.6,
+            ty = r.y + r.h * 0.62
+          if (!reduce) {
+            cursor.style.transition = "none"
+            cursor.style.transform = `translate(${cursorPos.x}px,${cursorPos.y}px)`
+            cursor.classList.add("on")
+            await c.sleep(60)
+            cursor.style.transition = "transform .75s cubic-bezier(.5,0,.2,1), opacity .3s"
+            cursor.style.transform = `translate(${tx}px,${ty}px)`
+            await c.sleep(800)
+            cursor.classList.remove("click")
+            void cursor.offsetWidth
+            cursor.classList.add("click")
+          }
+          cursorPos = { x: tx, y: ty }
+          btn.classList.add("pressed")
+          await c.sleep(220)
+          btn.classList.remove("pressed")
+          if (!reduce) setTimeout(() => cursor.classList.remove("on"), 700)
+        }
+
+        /* ── run context per slide ── */
+        function makeRun(slide, scenario) {
+          let gen = 0
+          const nodes = []
+          const c = {
+            root: slide,
+            node(name, sub, opts) {
+              const n = makeNode(name, sub, opts)
+              nodes.push(n)
+              return n
+            },
+            arrow() {
+              return el("div", "arrow", ARROW)
+            },
+            chain(parent, list) {
+              list.forEach((n, i) => {
+                if (i) parent.append(c.arrow())
+                parent.append(n.root)
+              })
+            },
+            sleep(ms) {
+              const g = gen
+              return new Promise((res, rej) =>
+                setTimeout(() => (g === gen ? res() : rej(Cancel)), ms * SPEED)
+              )
+            },
+            check() {},
+            async press(btn, waitMs = 1600) {
+              const g = gen
+              btn.disabled = false
+              btn.classList.add("ready")
+              await c.sleep(waitMs)
+              await clickOn(btn, c)
+              if (g !== gen) throw Cancel
+              btn.disabled = true
+              btn.classList.remove("ready")
+              btn.classList.add("used")
+            },
+            art(file, note, list) {
+              list = list || $("[data-arts]", slide)
+              if (!list) return
+              const empty = $(".empty", list)
+              if (empty) empty.remove()
+              let li = [...list.children].find((x) => x.dataset.file === file)
+              if (!li) {
+                li = el("li")
+                li.dataset.file = file
+                list.append(li)
+              }
+              li.innerHTML = `<span class="f">${file}</span><span class="n">${note}</span>`
+              li.classList.remove("fresh")
+              void li.offsetWidth
+              li.classList.add("fresh")
+            },
+            reset() {
+              gen++
+              nodes.forEach((n) => n.idle())
+              $$("[data-approve],[data-back],[data-rerun]", slide).forEach((b) => {
+                b.disabled = true
+                b.classList.remove("ready", "pressed", "used")
+              })
+              $$("[data-arts]", slide).forEach(
+                (l) => (l.innerHTML = '<li class="empty">Nothing yet.</li>')
+              )
+              cursor.classList.remove("on")
+              scenario.reset && scenario.reset(c)
+            }
+          }
+          scenario.build && scenario.build(c)
+          c.reset()
+          return {
+            async play() {
+              c.reset()
+              slide.dataset.settled = "0"
+              const g = gen
+              try {
+                await c.sleep(scenario.delay ?? 900)
+                await scenario.run(c)
+              } catch (e) {
+                if (e !== Cancel) console.error(e)
+              }
+              if (g === gen) slide.dataset.settled = "1"
+            },
+            stop() {
+              c.reset()
+              slide.dataset.settled = "0"
+            }
+          }
+        }
+
+        /* ── scenarios ── */
+        const S = {}
+
+        S[1] = {
+          delay: 500,
+          reset(c) {
+            $(".quote .t", c.root).textContent = ""
+          },
+          async run(c) {
+            const q = $(".quote", c.root),
+              t = $(".t", q),
+              txt = q.dataset.type
+            if (reduce) {
+              t.textContent = txt
+              return
+            }
+            for (let i = 1; i <= txt.length; i++) {
+              t.textContent = txt.slice(0, i)
+              await c.sleep(txt[i - 1] === "," ? 260 : 34)
+            }
+          }
+        }
+
+        S[2] = {
+          build(c) {
+            const [a, b] = $$("[data-row]", c.root)
+            this.a = [
+              c.node("task", "from a spec"),
+              c.node("agent", "coder"),
+              c.node("someone checks", "later")
+            ]
+            c.chain(a, this.a)
+            this.b = [1, 2, 3, 4, 5].map((i) => c.node(`step ${i}`))
+            c.chain(b, this.b)
+            this.fill = $("[data-fill]", c.root)
+            this.pct = $("[data-pct]", c.root)
+          },
+          reset() {
+            if (this.fill) {
+              this.fill.style.width = "100%"
+              this.fill.classList.remove("low")
+              this.pct.textContent = "clear"
+            }
+          },
+          async run(c) {
+            const left = async () => {
+              const [task, agent, chk] = this.a
+              task.done("spec")
+              await c.sleep(500)
+              agent.run()
+              await c.sleep(1700)
+              agent.done("done ✓")
+              agent.note("All done. Everything works!", 2200)
+              await c.sleep(2300)
+              chk.run()
+              await c.sleep(1200)
+              chk.fail("It wasn't: the tests never ran")
+            }
+            const right = async () => {
+              await c.sleep(400)
+              const words = ["clear", "clear", "fuzzy", "fading", "fading", "gone"]
+              for (let i = 0; i < 5; i++) {
+                const n = this.b[i]
+                n.run()
+                await c.sleep(900)
+                this.fill.style.width = `${100 - (i + 1) * 18}%`
+                this.pct.textContent = words[i + 1]
+                if (i >= 2) this.fill.classList.add("low")
+                if (i < 4) n.done("✓")
+                else n.fail("…what was the goal again?")
+              }
+            }
+            await Promise.all([left(), right()])
+          }
+        }
+
+        S[3] = {
+          delay: 600,
+          lines: [
+            '<span class="k">workflow</span> story:',
+            '  plan     <span class="c"># an agent drafts plan.md</span>',
+            '  <span class="s">approve</span>  <span class="c"># a person says yes</span>',
+            '  build    <span class="c"># seat: writes code</span>',
+            '  check    <span class="c"># your build, your tests</span>',
+            '  review   <span class="c"># not accepted → revision</span>',
+            '  commit   <span class="c"># only reviewed work</span>'
+          ],
+          build(c) {
+            this.code = $("[data-code]", c.root)
+            this.code.innerHTML = this.lines.map((l) => `<div class="ln">${l}</div>`).join("")
+            this.seat = $('[data-seat="code"]', c.root)
+          },
+          reset() {
+            $$(".ln", this.code).forEach((l) => l.classList.remove("on"))
+            this.seat.textContent = "Claude"
+          },
+          async run(c) {
+            for (const l of $$(".ln", this.code)) {
+              l.classList.add("on")
+              await c.sleep(230)
+            }
+            await c.sleep(600)
+            for (const who of ["Codex", "Gemini", "local model", "Claude"]) {
+              this.seat.textContent = who
+              this.seat.classList.remove("swap")
+              void this.seat.offsetWidth
+              this.seat.classList.add("swap")
+              await c.sleep(1300)
+            }
+          }
+        }
+
+        S[4] = {
+          build(c) {
+            this.row = $("[data-row]", c.root)
+            this.viz = this.row.parentElement
+            this.n = ["plan", "code", "checks", "review", "commit"].map((k) => c.node(k))
+            c.chain(this.row, this.n)
+            this.svg = $("[data-arc]", c.root)
+            this.path = $("path", this.svg)
+            this.text = $("text", this.svg)
+            this.svg.insertAdjacentHTML(
+              "afterbegin",
+              '<defs><marker id="ah" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#f87171"/></marker></defs>'
+            )
+            this.path.setAttribute("marker-end", "url(#ah)")
+          },
+          reset() {
+            this.path.classList.remove("on")
+            this.text.classList.remove("on")
+          },
+          arc() {
+            const a = rel(this.n[3].box, this.viz),
+              b = rel(this.n[1].box, this.viz),
+              lab = rel(this.n[3].root, this.viz)
+            const y = lab.y + lab.h + 14,
+              x1 = a.x + a.w / 2,
+              x2 = b.x + b.w / 2
+            this.path.setAttribute(
+              "d",
+              `M ${x1} ${y} C ${x1} ${y + 70}, ${x2} ${y + 70}, ${x2} ${y + 4}`
+            )
+            this.text.setAttribute("x", (x1 + x2) / 2 - 60)
+            this.text.setAttribute("y", y + 82)
+            this.text.textContent = "back as a revision"
+            this.path.classList.add("on")
+            this.text.classList.add("on")
+          },
+          async run(c) {
+            const [plan, code, checks, review, commit] = this.n
+            plan.run()
+            await c.sleep(1000)
+            plan.done("3 tasks")
+            c.art("plan.md", "three tasks, in order")
+            code.run()
+            await c.sleep(1300)
+            code.done("+84 −12")
+            checks.run()
+            await c.sleep(900)
+            checks.done("4/4 ✓")
+            review.run()
+            await c.sleep(1100)
+            review.fail("No test for an empty statement")
+            c.art("findings.md", "round 1: one issue, sent back as a revision")
+            this.arc()
+            await c.sleep(2000)
+            checks.idle()
+            review.idle()
+            code.run()
+            code.note("Revision: add the missing test", 1600)
+            await c.sleep(1300)
+            code.done("+97 −12")
+            this.path.classList.remove("on")
+            this.text.classList.remove("on")
+            checks.run()
+            await c.sleep(800)
+            checks.done("5/5 ✓")
+            review.run()
+            await c.sleep(1000)
+            review.done("clean")
+            c.art("findings.md", "round 2: cleared")
+            commit.run()
+            await c.sleep(700)
+            commit.done("a1f3c9e")
+            c.art("git commit", "one commit per reviewed task")
+          }
+        }
+
+        S[5] = {
+          build(c) {
+            this.n = [c.node("draft plan"), c.node("you"), c.node("build")]
+            c.chain($("[data-row]", c.root), this.n)
+            this.yes = $("[data-approve]", c.root)
+            this.no = $("[data-back]", c.root)
+          },
+          async run(c) {
+            const [draft, you, build] = this.n
+            draft.run()
+            await c.sleep(1200)
+            draft.done("8 stories")
+            c.art("plan.md", "8 stories, who owns which files, in what order")
+            you.wait("Read the plan, then decide")
+            this.yes.disabled = false
+            this.yes.classList.add("ready")
+            await c.press(this.no, 1800)
+            this.yes.disabled = true
+            this.yes.classList.remove("ready")
+            you.idle()
+            draft.run()
+            draft.note("Revising, your edits stay", 1500)
+            await c.sleep(1400)
+            draft.done("7 stories")
+            c.art("plan.md", "revision 2: your edits kept, one story merged into another")
+            you.wait("Read the plan, then decide")
+            await c.press(this.yes, 1700)
+            you.done("approved")
+            c.art("plan.md ✓", "approved as written")
+            build.run()
+            await c.sleep(1600)
+            build.done("7/7 merged")
+          }
+        }
+
+        S[6] = {
+          build(c) {
+            const dag = $("[data-dag]", c.root)
+            const h = { h: true }
+            this.s = [
+              c.node("story 1", "owns model/", h),
+              c.node("story 2", "owns api/", h),
+              c.node("story 3", "owns statements/", h),
+              c.node("story 4", "owns ui/", h),
+              c.node("story 5", "after 2–4", h)
+            ]
+            this.epic = c.node("epic", "one branch", h)
+            const lanes = el("div", "lanes")
+            lanes.append(el("div", "lanes-cap", "in parallel · each in its own copy of the repo"))
+            this.s.slice(1, 4).forEach((n) => lanes.append(n.root))
+            dag.append(
+              this.s[0].root,
+              c.arrow(),
+              lanes,
+              c.arrow(),
+              this.s[4].root,
+              c.arrow(),
+              this.epic.root
+            )
+          },
+          async run(c) {
+            const [s1, s2, s3, s4, s5] = this.s,
+              epic = this.epic
+            let merged = 0
+            const merge = (n) => {
+              merged++
+              n.done("merged")
+              c.art("epic branch", `${merged} of 5 stories merged`)
+            }
+            c.art("plan.md", "five stories, their files and dependencies")
+            epic.run()
+            s1.run()
+            await c.sleep(1200)
+            merge(s1)
+            await Promise.all([
+              (async () => {
+                s2.run()
+                await c.sleep(1700)
+                merge(s2)
+              })(),
+              (async () => {
+                s3.run()
+                await c.sleep(1100)
+                s3.fail("Judge: totals not covered")
+                c.art("story-3 findings", "judge round 1: one gap, revision added")
+                await c.sleep(1700)
+                s3.run()
+                await c.sleep(1100)
+                merge(s3)
+                c.art("story-3 findings", "judge round 1: one gap · round 2: cleared")
+              })(),
+              (async () => {
+                s4.run()
+                await c.sleep(2100)
+                merge(s4)
+              })()
+            ])
+            s5.run()
+            await c.sleep(1300)
+            merge(s5)
+            epic.done("5/5 merged")
+            c.art("report.md", "what ran, where time went, what it cost")
+          }
+        }
+
+        S[7] = {
+          build(c) {
+            this.t = [1, 2, 3, 4, 5].map((i) => c.node(`task ${i}`))
+            c.chain($("[data-row]", c.root), this.t)
+            this.again = $("[data-rerun]", c.root)
+            this.pf = $("[data-pfile]", c.root)
+          },
+          reset() {
+            this.file(["", "", "", "", ""], null)
+          },
+          file(st, extra, fresh = -1) {
+            const L = ['<div class="ln c"># progress.md</div>']
+            st.forEach((s, i) => {
+              const mark =
+                s === "x"
+                  ? '<span class="x">[x]</span>'
+                  : s === "u"
+                    ? '<span class="u">[~]</span>'
+                    : '<span class="c">[ ]</span>'
+              const note =
+                s === "x"
+                  ? '<span class="x">committed</span>'
+                  : s === "u"
+                    ? '<span class="u">unfinished</span>'
+                    : ""
+              L.push(
+                `<div class="ln${i === fresh ? " fresh" : ""}">${mark} task ${i + 1}   ${note}</div>`
+              )
+            })
+            if (extra) L.push(`<div class="ln fresh c">${extra}</div>`)
+            this.pf.innerHTML = L.join("")
+          },
+          async run(c) {
+            const t = this.t,
+              st = ["", "", "", "", ""]
+            for (let i = 0; i < 2; i++) {
+              t[i].run()
+              await c.sleep(900)
+              t[i].done("✓")
+              st[i] = "x"
+              this.file(st, null, i)
+            }
+            t[2].run()
+            await c.sleep(1100)
+            t[2].interrupt("The agent went offline")
+            st[2] = "u"
+            this.file(st, "# run stopped: agent offline", 2)
+            await c.press(this.again, 1800)
+            t[2].hide()
+            this.file(st, "# rerun: read this file, keep 1–2, resume at 3")
+            t[0].flash()
+            t[0].note("Already done, kept", 1300)
+            await c.sleep(250)
+            t[1].flash()
+            await c.sleep(600)
+            for (let i = 2; i < 5; i++) {
+              t[i].run()
+              await c.sleep(950)
+              t[i].done("✓")
+              st[i] = "x"
+              this.file(st, "# rerun: resumed at task 3", i)
+            }
+          }
+        }
+
+        S[8] = {
+          coders: ["Claude", "Codex", "Gemini", "local model"],
+          pace: { Claude: 1, Codex: 0.9, Gemini: 1.1, "local model": 1.5 },
+          build(c) {
+            this.n = [
+              c.node("plan", "planner"),
+              c.node("code", "Claude"),
+              c.node("checks", "your build"),
+              c.node("review", "reviewer"),
+              c.node("judge", "judge")
+            ]
+            c.chain($("[data-row]", c.root), this.n)
+            this.seg = $$("[data-seg] span", c.root)
+            this.v = $("[data-verdicts]", c.root)
+            this.v.innerHTML = this.coders
+              .map(
+                (k) =>
+                  `<div class="verdict"><p class="n">${k === "local model" ? "Local model" : k}</p><p class="m">same plan · checks · rubric</p></div>`
+              )
+              .join("")
+          },
+          reset() {
+            $$(".verdict", this.v).forEach((x) => x.classList.remove("on"))
+            this.seg.forEach((s, i) => s.classList.toggle("on", i === 0))
+            this.n[1].sublabel("Claude")
+          },
+          async run(c) {
+            const [plan, code, checks, review, judge] = this.n
+            for (let k = 0; k < this.coders.length; k++) {
+              const who = this.coders[k],
+                p = this.pace[who]
+              this.seg.forEach((s, i) => s.classList.toggle("on", i === k))
+              code.sublabel(who)
+              if (k) {
+                this.n.forEach((n) => n.idle())
+                code.flash()
+                await c.sleep(450)
+              }
+              plan.run()
+              await c.sleep(600)
+              plan.done("4 tasks")
+              code.run()
+              await c.sleep(1000 * p)
+              code.done(`by ${who}`)
+              checks.run()
+              await c.sleep(500)
+              checks.done("✓")
+              review.run()
+              await c.sleep(600)
+              review.done("clean")
+              judge.run()
+              await c.sleep(500)
+              judge.done("passed")
+              $$(".verdict", this.v)[k].classList.add("on")
+              await c.sleep(900)
+            }
+          }
+        }
+
+        S[9] = {
+          build(c) {
+            const row = $("[data-row]", c.root)
+            const mk = (cap, list) => {
+              const s = el("div", "side")
+              const r = el("div", "row")
+              c.chain(r, list)
+              s.append(el("span", "side-cap", cap), r)
+              return s
+            }
+            this.l = [
+              c.node("survey"),
+              c.node("extract", "rules · scenarios"),
+              c.node("you", "approve")
+            ]
+            this.t = [
+              c.node("seed"),
+              c.node("implement"),
+              c.node("verify", "replay"),
+              c.node("review")
+            ]
+            this.wall = el("div", "wall", "<span>clean room</span>")
+            row.append(mk("legacy side", this.l), this.wall, mk("new side", this.t))
+            this.yes = $("[data-approve]", c.root)
+          },
+          reset() {
+            this.wall.classList.remove("pulse")
+          },
+          async run(c) {
+            const [survey, extract, you] = this.l,
+              [seed, impl, verify, review] = this.t
+            survey.run()
+            await c.sleep(1100)
+            survey.done("inventory")
+            extract.run()
+            await c.sleep(1400)
+            extract.done("spec")
+            extract.note("Each rule traced to its source line", 1800)
+            await c.sleep(600)
+            you.wait("Approve the spec to cross the wall")
+            await c.press(this.yes, 1600)
+            you.done("approved")
+            this.wall.classList.remove("pulse")
+            void this.wall.offsetWidth
+            this.wall.classList.add("pulse")
+            seed.run()
+            await c.sleep(800)
+            seed.done("scaffold")
+            impl.run()
+            impl.note("Pattern cards: COBOL idioms → Java", 1900)
+            await c.sleep(1800)
+            impl.done("built")
+            verify.run()
+            await c.sleep(1300)
+            verify.done("identical ✓")
+            verify.note("Recorded behaviour replayed", 2000)
+            review.run()
+            await c.sleep(1000)
+            review.done("lessons → kit")
+          }
+        }
+
+        S[10] = {
+          delay: 700,
+          build(c) {
+            this.m = $("[data-morph]", c.root)
+            this.hf = $("[data-hfill]", c.root)
+            this.ff = $("[data-ffill]", c.root)
+            this.fv = $("[data-fval]", c.root)
+          },
+          reset() {
+            this.m.classList.remove("struck")
+            for (const f of [this.hf, this.ff]) {
+              f.style.transition = "none"
+              f.style.width = "0"
+            }
+            this.fv.textContent = "0 h 00 m"
+          },
+          async run(c) {
+            this.m.classList.add("struck")
+            await c.sleep(1100)
+            const dur = reduce ? 0 : 1
+            this.hf.style.transition = `width ${4.2 * dur}s cubic-bezier(.3,.1,.3,1)`
+            this.hf.style.width = "100%"
+            this.ff.style.transition = `width ${1.6 * dur}s cubic-bezier(.2,.8,.2,1)`
+            this.ff.style.width = "6%"
+            const steps = 24
+            for (let i = 1; i <= steps; i++) {
+              const mins = Math.round((120 * i) / steps)
+              this.fv.textContent = `${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")} m`
+              await c.sleep(1600 / steps)
+            }
+            this.fv.textContent = "≈ 2 h ✓"
+            await c.sleep(2800)
+          }
+        }
+
+        const runs = slides.map((s, i) => (S[i + 1] ? makeRun(s, S[i + 1]) : null))
+
+        /* ── starfield with parallax ── */
+        const cv = $("#stars"),
+          ctx = cv.getContext("2d"),
+          neb = $(".nebula")
+        let stars = [],
+          W = 0,
+          H = 0,
+          off = 0,
+          target = 0,
+          last = 0
+        function seed() {
+          const dpr = Math.min(window.devicePixelRatio || 1, 2)
+          W = cv.width = Math.floor(innerWidth * dpr)
+          H = cv.height = Math.floor(innerHeight * dpr)
+          let r = 1337
+          const rnd = () => (r = (r * 16807) % 2147483647) / 2147483647
+          stars = Array.from({ length: Math.round((innerWidth * innerHeight) / 5200) }, () => {
+            const z = rnd() ** 2 * 0.9 + 0.1
+            return {
+              x: rnd() * W,
+              y: rnd() * H,
+              z,
+              r: (0.4 + z * 1.4) * dpr,
+              p: rnd() * 6.28,
+              g: rnd() < 0.12
+            }
+          })
+        }
+        function draw(t) {
+          ctx.clearRect(0, 0, W, H)
+          for (const s of stars) {
+            let x = (s.x - off * s.z * 3) % W
+            if (x < 0) x += W
+            const tw = reduce ? 0.8 : 0.55 + 0.45 * Math.sin(t / 900 + s.p)
+            ctx.globalAlpha = (0.25 + s.z * 0.75) * tw
+            ctx.fillStyle = s.g ? "#9ff5b8" : "#e8eef7"
+            ctx.beginPath()
+            ctx.arc(x, s.y, s.r, 0, 6.283)
+            ctx.fill()
+          }
+          ctx.globalAlpha = 1
+        }
+        function loop(t) {
+          off += (target - off) * 0.05
+          draw(t)
+          last = requestAnimationFrame(loop)
+        }
+        seed()
+        if (reduce) draw(0)
+        else requestAnimationFrame(loop)
+
+        /* ── deck ── */
+        const prog = $("#progress"),
+          num = $("#num"),
+          notes = $("#notes"),
+          notesBody = $("#notes-body"),
+          notesH = $("#notes-h")
+        let cur = -1
+        function fit() {
+          SCALE = Math.min(innerWidth / 1920, innerHeight / 1080)
+          stage.style.transform = `translate(${-960 * SCALE}px,${-540 * SCALE}px) scale(${SCALE})`
+        }
+        function go(i, push = true) {
+          i = Math.max(0, Math.min(N - 1, i))
+          if (i === cur) return
+          const prev = cur
+          if (prev >= 0 && runs[prev]) runs[prev].stop()
+          slides.forEach((s, k) => {
+            s.classList.toggle("active", k === i)
+            s.classList.toggle("prev", k < i)
+          })
+          cur = i
+          prog.style.width = `${((i + 1) / N) * 100}%`
+          num.textContent = `${String(i + 1).padStart(2, "0")} / ${N}`
+          const n = $("aside.notes", slides[i])
+          notesH.textContent = `Notes · ${i + 1} / ${N} · ${slides[i].dataset.title}`
+          notesBody.innerHTML = n ? n.innerHTML : ""
+          document.title = `Marvin · ${i + 1}. ${slides[i].dataset.title}`
+          if (push) history.replaceState(null, "", `#${i + 1}`)
+          target = i * 120 * (window.devicePixelRatio || 1)
+          if (reduce) {
+            off = target
+            draw(0)
+          }
+          neb.style.transform = `translateX(${-i * 1.2}%)`
+          if (runs[i]) runs[i].play()
+          else slides[i].dataset.settled = "1"
+        }
+        const next = () => go(cur + 1),
+          prevS = () => go(cur - 1)
+        const fromHash = () => {
+          const k = parseInt(location.hash.slice(1), 10)
+          return Number.isFinite(k) ? k - 1 : 0
+        }
+        function fullscreen() {
+          if (!document.fullscreenElement)
+            document.documentElement.requestFullscreen?.().catch(() => {})
+          else document.exitFullscreen?.()
+        }
+        document.addEventListener("keydown", (e) => {
+          if (e.metaKey || e.ctrlKey || e.altKey) return
+          const k = e.key
+          if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(k)) {
+            e.preventDefault()
+            next()
+          } else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(k)) {
+            e.preventDefault()
+            prevS()
+          } else if (k === "Home") go(0)
+          else if (k === "End") go(N - 1)
+          else if (k === "f" || k === "F") fullscreen()
+          else if (k === "n" || k === "N") notes.classList.toggle("open")
+          else if (k === "Escape") notes.classList.remove("open")
+        })
+        $$(".chrome [data-nav]").forEach((b) =>
+          b.addEventListener("click", (e) => {
+            e.stopPropagation()
+            go(cur + Number(b.dataset.nav))
+          })
+        )
+        $("#viewport").addEventListener("click", (e) => {
+          if (e.target.closest("button,a,#notes")) return
+          if (e.clientX < innerWidth / 3) prevS()
+          else next()
+        })
+        let tx = null,
+          ty = null
+        addEventListener(
+          "touchstart",
+          (e) => {
+            tx = e.touches[0].clientX
+            ty = e.touches[0].clientY
+          },
+          { passive: true }
+        )
+        addEventListener(
+          "touchend",
+          (e) => {
+            if (tx == null) return
+            const dx = e.changedTouches[0].clientX - tx,
+              dy = e.changedTouches[0].clientY - ty
+            if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) {
+              dx < 0 ? next() : prevS()
+            }
+            tx = null
+          },
+          { passive: true }
+        )
+        addEventListener("hashchange", () => go(fromHash(), false))
+        addEventListener("resize", () => {
+          fit()
+          seed()
+          if (reduce) draw(0)
+        })
+        fit()
+        go(fromHash(), false)
+        if (cur === 0) {
+          const h = $("#hint")
+          h.classList.add("show")
+          setTimeout(() => h.classList.remove("show"), 4500)
+        }
+        window.__deck = {
+          go: (i) => go(i - 1),
+          get current() {
+            return cur + 1
+          },
+          count: N
+        }
+      })()
+    </script>
+  </body>
 </html>
