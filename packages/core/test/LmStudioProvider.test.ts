@@ -223,7 +223,7 @@ describe("LmStudioProvider", () => {
     })
   )
 
-  it.effect("rejects missing base URL and unsupported tools", () =>
+  it.effect("rejects a missing base URL", () =>
     Effect.gen(function* () {
       const provider = makeLmStudioProvider(
         LlmConfig.make({
@@ -236,10 +236,8 @@ describe("LmStudioProvider", () => {
       )
 
       const configError = yield* Effect.flip(Stream.runCollect(provider.executeStream("test")))
-      const toolsError = yield* Effect.flip(provider.executeWithTools("test", []))
 
       assert.strictEqual(configError._tag, "ConfigError")
-      assert.strictEqual(toolsError._tag, "InvalidRequestError")
     })
   )
 })

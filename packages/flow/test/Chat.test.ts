@@ -26,7 +26,6 @@ const recordingService = (
         Effect.as(LlmChunk.make({ delta: reply, finishReason: "stop" }))
       )
     ),
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,
@@ -198,7 +197,6 @@ describe("Chat usage events", () => {
             : {})
         })
       ),
-    executeWithTools: (_prompt, _tools) => Effect.fail(unused),
     executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
     executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
     scoreLabels: unsupportedScoreLabels,
@@ -278,7 +276,6 @@ describe("Chat stall guard (ADR 0027)", () => {
   const streaming = (chunks: ReadonlyArray<LlmChunk>): LlmServiceShape => ({
     executeStream: (_prompt) => Stream.empty,
     executeStreamWithHistory: (_messages) => Stream.fromIterable(chunks),
-    executeWithTools: (_prompt, _tools) => Effect.fail(unused),
     executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
     executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
     scoreLabels: unsupportedScoreLabels,

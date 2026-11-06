@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type * as Stream from "effect/Stream"
 import { CliSandbox } from "./ConnectorConfig.ts"
-import { InvalidRequestError, type LlmError } from "./Errors.ts"
+import type { LlmError } from "./Errors.ts"
 import { verbalizedScoreLabels } from "./LabelScoring.ts"
 import type { LlmServiceShape, StructuredResult } from "./LlmService.ts"
 import {
@@ -16,9 +16,7 @@ import {
   type InteractionSupport,
   type JsonSchema,
   type LlmChunk,
-  type Message,
-  type ToolCallResponse,
-  type ToolDefinition
+  type Message
 } from "./Models.ts"
 import type { ProcessExecutorShape, ProcessResult } from "./ProcessExecutor.ts"
 import { parseFromText, withSchemaHint } from "./StructuredOutput.ts"
@@ -77,10 +75,6 @@ export interface ApiConnectorPrimitives {
   readonly executeStreamWithHistory: (
     messages: ReadonlyArray<Message>
   ) => Stream.Stream<LlmChunk, LlmError>
-  readonly executeWithTools: (
-    prompt: string,
-    tools: ReadonlyArray<ToolDefinition>
-  ) => Effect.Effect<ToolCallResponse, LlmError>
   readonly executeStructuredWithUsage: <A, E, RD, RE>(
     prompt: string,
     schema: Schema.ConstraintCodec<A, E, RD, RE>,
@@ -204,17 +198,6 @@ export interface CliConnectorPrimitives {
   readonly capabilities?: ConnectorCapabilities
 }
 
-const unsupportedTools = (
-  id: ConnectorId,
-  _prompt: string,
-  _tools: ReadonlyArray<ToolDefinition>
-): Effect.Effect<ToolCallResponse, LlmError> =>
-  Effect.fail(
-    InvalidRequestError.make({
-      message: `CLI connector ${id.value} does not support tool calling`
-    })
-  )
-
 export const makeCliConnector = (primitives: CliConnectorPrimitives): CliConnectorShape => {
   const executeStructured = <A, E, RD, RE>(
     prompt: string,
@@ -258,7 +241,6 @@ export const makeCliConnector = (primitives: CliConnectorPrimitives): CliConnect
     isAvailable,
     executeStream: primitives.completeStream,
     executeStreamWithHistory: (messages) => primitives.completeStream(flattenHistory(messages)),
-    executeWithTools: (prompt, tools) => unsupportedTools(primitives.id, prompt, tools),
     executeStructured,
     executeStructuredWithUsage,
     scoreLabels: verbalizedScoreLabels(executeStructuredWithUsage)

@@ -11,7 +11,6 @@ import {
   HealthStatus,
   LlmChunk,
   TokenUsage,
-  ToolCallResponse,
   type JsonSchema,
   type LlmConfig,
   type Message
@@ -307,14 +306,6 @@ export const makeMockProvider = (config: LlmConfig): ApiConnectorShape => {
     ),
     executeStream,
     executeStreamWithHistory: (messages) => executeStream(lastUserPrompt(messages)),
-    executeWithTools: (_prompt) =>
-      Effect.succeed(
-        ToolCallResponse.make({
-          content: mockResponse(),
-          toolCalls: [],
-          finishReason: "stop"
-        })
-      ),
     executeStructured: <A, E, RD, RE>(
       prompt: string,
       schema: Schema.ConstraintCodec<A, E, RD, RE>,

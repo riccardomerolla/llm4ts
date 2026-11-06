@@ -419,7 +419,6 @@ const seatFor =
     const seat: RosterSeat = {
       executeStream: answer,
       executeStreamWithHistory: (messages) => answer(messages.at(-1)?.content ?? ""),
-      executeWithTools: () => Effect.fail(unused),
       executeStructured: () => Effect.fail(unused),
       executeStructuredWithUsage: () => Effect.fail(unused),
       scoreLabels: unsupportedScoreLabels,

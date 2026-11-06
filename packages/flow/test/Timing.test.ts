@@ -24,7 +24,6 @@ const chunk = (delta: string, metadata: Record<string, string> = {}) =>
 const serviceOf = (overrides: Partial<LlmServiceShape>): LlmServiceShape => ({
   executeStream: (_prompt) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,

@@ -185,18 +185,3 @@ export const makeRecordingHttpClient = Effect.fn("@llm4ts/core/HttpClient.makeRe
     }
   }
 )
-
-export const httpGet = (
-  url: string,
-  headers: Readonly<Record<string, string>> = emptyHeaders,
-  timeout: Duration.Duration
-): Effect.Effect<string, LlmError, HttpClient> =>
-  Effect.flatMap(HttpClient, (client) => client.get(url, headers, timeout))
-
-export const httpPostJson = (
-  url: string,
-  body: string,
-  headers: Readonly<Record<string, string>> = emptyHeaders,
-  timeout: Duration.Duration
-): Effect.Effect<string, LlmError, HttpClient> =>
-  Effect.flatMap(HttpClient, (client) => client.postJson(url, body, headers, timeout))

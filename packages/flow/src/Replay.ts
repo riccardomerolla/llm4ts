@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { InvalidRequestError, ParseError, ProviderError } from "@llm4ts/core/Errors"
+import { ParseError, ProviderError } from "@llm4ts/core/Errors"
 import { verbalizedScoreLabels } from "@llm4ts/core/LabelScoring"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
@@ -233,12 +233,6 @@ export const makeReplayConnector = Effect.fn("@llm4ts/flow/Replay.makeConnector"
   return {
     executeStream: (_prompt) => next,
     executeStreamWithHistory: (_messages) => next,
-    executeWithTools: (_prompt, _tools) =>
-      Effect.fail(
-        InvalidRequestError.make({
-          message: "replay does not support tool calling"
-        })
-      ),
     executeStructured: <A, E, RD, RE>(
       _prompt: string,
       schema: Schema.ConstraintCodec<A, E, RD, RE>

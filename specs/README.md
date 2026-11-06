@@ -5,9 +5,8 @@ llm4ts. This directory is the work queue; the canonical engineering
 documentation lives elsewhere and always takes precedence:
 
 - `CLAUDE.md` — non-negotiable rules and the verification chain
-- `plan.md` — scope, package boundaries, pinned baselines, delivery phases
-- `docs/` — architecture, API, configuration, provider capabilities, parity
-  ledger, ADRs, and the CSP contracts
+- `docs/` — architecture, API, configuration, provider capabilities, and the
+  ADRs (`docs/adr/`), which are the living design record
 
 ## Layout
 
@@ -21,8 +20,8 @@ documentation lives elsewhere and always takes precedence:
 
 - One spec per file, named `kebab-case.md`, with a task checklist agents can
   tick off (`- [ ]` / `- [x]`) as work lands.
-- Specs describe **what** and **why**, cite the relevant contracts
-  (`docs/csp/*`, `docs/parity.md`) and seams to extend, and leave **how** to
+- Specs describe **what** and **why**, cite the relevant ADRs
+  (`docs/adr/*`) and seams to extend, and leave **how** to
   the implementer within the CLAUDE.md rules.
 - Specs are read-only for agents (ADR 0004): checkbox state is written only
   by deterministic harness code, design decisions land in `docs/adr/`, and

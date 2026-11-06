@@ -35,8 +35,6 @@ const apiConnector = (
   isAvailable: Effect.succeed(available),
   executeStream: (_prompt) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
-  executeWithTools: (_prompt, _tools) =>
-    Effect.fail(InvalidRequestError.make({ message: "not implemented" })),
   executeStructured: (_prompt, _schema, _jsonSchema) =>
     Effect.fail(InvalidRequestError.make({ message: "not implemented" })),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) =>
@@ -92,13 +90,11 @@ describe("Connector", () => {
         Schema.Struct({ value: Schema.Number }),
         {}
       )
-      const toolError = yield* Effect.flip(connector.executeWithTools("hello", []))
 
       assert.strictEqual(connector.kind, "Cli")
       assert.isTrue(connector.capabilities.interactiveSessions)
       assert.strictEqual(history[0]?.delta, "**User:** Hello\n\n**Assistant:** Hi")
       assert.deepStrictEqual(structured, { value: 42 })
-      assert.strictEqual(toolError._tag, "InvalidRequestError")
     })
   )
 })

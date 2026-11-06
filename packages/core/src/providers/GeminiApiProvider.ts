@@ -10,25 +10,18 @@ import {
   ConnectorIds,
   LlmChunk,
   TokenUsage,
-  ToolCall,
-  ToolCallResponse,
   type JsonSchema,
   type LlmConfig,
-  type Message,
-  type ToolDefinition
+  type Message
 } from "../Models.ts"
 import { collect } from "../Streaming.ts"
 import { parseFromText } from "../StructuredOutput.ts"
 import {
   GeminiContent,
-  GeminiFunctionDeclaration,
   GeminiGenerateContentRequest,
-  GeminiGenerateContentRequestWithTools,
   GeminiGenerateContentResponse,
-  GeminiGenerateContentResponseFull,
   GeminiGenerationConfig,
-  GeminiPart,
-  GeminiToolDef
+  GeminiPart
 } from "./GeminiModels.ts"
 
 interface GeminiRequiredConfig {
@@ -75,25 +68,6 @@ export const buildGeminiRequest = (
         })
   })
 
-export const buildGeminiToolRequest = (
-  prompt: string,
-  tools: ReadonlyArray<ToolDefinition>
-): GeminiGenerateContentRequestWithTools =>
-  GeminiGenerateContentRequestWithTools.make({
-    contents: promptContents(prompt),
-    tools: [
-      GeminiToolDef.make({
-        functionDeclarations: tools.map((tool) =>
-          GeminiFunctionDeclaration.make({
-            name: tool.name,
-            description: tool.description,
-            parameters: tool.parameters
-          })
-        )
-      })
-    ]
-  })
-
 const decodeResponse = (
   raw: string,
   context: string
@@ -102,18 +76,6 @@ const decodeResponse = (
     Effect.mapError((error) =>
       ParseError.make({
         message: `${context}: ${String(error)}`,
-        raw
-      })
-    )
-  )
-
-const decodeToolResponse = (
-  raw: string
-): Effect.Effect<GeminiGenerateContentResponseFull, ParseError> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(GeminiGenerateContentResponseFull))(raw).pipe(
-    Effect.mapError((error) =>
-      ParseError.make({
-        message: `Failed to decode Gemini tool response: ${String(error)}`,
         raw
       })
     )
@@ -274,48 +236,6 @@ export const makeGeminiApiProvider = (
       return result
     })
 
-  const executeWithTools = (
-    prompt: string,
-    tools: ReadonlyArray<ToolDefinition>
-  ): Effect.Effect<ToolCallResponse, LlmError> =>
-    Effect.gen(function* () {
-      const { apiKey, baseUrl } = yield* requiredConfig
-      const raw = yield* httpClient.postJson(
-        endpoint(baseUrl, "generateContent"),
-        JSON.stringify(buildGeminiToolRequest(prompt, tools)),
-        headers(apiKey),
-        config.timeout
-      )
-      const response = yield* decodeToolResponse(raw)
-      const candidate = response.candidates[0]
-      if (candidate === undefined) {
-        return yield* Effect.fail(
-          ParseError.make({
-            message: "Gemini tool response has no candidates",
-            raw
-          })
-        )
-      }
-      const calls = candidate.content.parts.flatMap((part) =>
-        part.functionCall === undefined ? [] : [part.functionCall]
-      )
-      const text = candidate.content.parts
-        .map((part) => part.text)
-        .find((part) => part !== undefined && part !== null)
-
-      return ToolCallResponse.make({
-        toolCalls: calls.map((call, index) =>
-          ToolCall.make({
-            id: `gemini_call_${index}`,
-            name: call.name,
-            arguments: JSON.stringify(call.args) ?? "{}"
-          })
-        ),
-        finishReason: candidate.finishReason ?? "STOP",
-        ...(text === undefined || text === null ? {} : { content: text })
-      })
-    })
-
   const executeStream = (prompt: string): Stream.Stream<LlmChunk, LlmError> =>
     executeStreamWithContents(promptContents(prompt))
 
@@ -330,7 +250,6 @@ export const makeGeminiApiProvider = (
     id: ConnectorIds.GeminiApi,
     executeStream,
     executeStreamWithHistory: (messages) => executeStreamWithContents(geminiContents(messages)),
-    executeWithTools,
     executeStructuredWithUsage,
     isAvailable
   })

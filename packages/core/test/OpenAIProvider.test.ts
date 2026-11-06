@@ -5,11 +5,8 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { ProviderError } from "@llm4ts/core/Errors"
 import { makeHttpClient, makeRecordingHttpClient, type HttpRequest } from "@llm4ts/core/HttpClient"
-import { LlmConfig, Message, ToolDefinition, type JsonSchema } from "@llm4ts/core/Models"
-import {
-  OpenAIChatCompletionRequest,
-  OpenAIChatCompletionRequestWithTools
-} from "@llm4ts/core/providers/OpenAIModels"
+import { LlmConfig, Message, type JsonSchema } from "@llm4ts/core/Models"
+import { OpenAIChatCompletionRequest } from "@llm4ts/core/providers/OpenAIModels"
 import {
   buildOpenAIChatRequest,
   makeOpenAIProvider,
@@ -84,13 +81,6 @@ const decodeChatRequest = (
   request: HttpRequest
 ): Effect.Effect<OpenAIChatCompletionRequest, unknown> =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAIChatCompletionRequest))(request.body ?? "")
-
-const decodeToolRequest = (
-  request: HttpRequest
-): Effect.Effect<OpenAIChatCompletionRequestWithTools, unknown> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAIChatCompletionRequestWithTools))(
-    request.body ?? ""
-  )
 
 const responseSchema = Schema.Struct({
   answer: Schema.Int
@@ -247,63 +237,6 @@ describe("OpenAIProvider", () => {
         assert.strictEqual(body.response_format?.type, "json_schema")
         assert.strictEqual(body.response_format?.json_schema?.name, "response")
         assert.deepStrictEqual(body.response_format?.json_schema?.schema, responseJsonSchema)
-      }
-    })
-  )
-
-  it.effect("maps OpenAI function calls to the neutral tool response", () =>
-    Effect.gen(function* () {
-      const recording = yield* makeRecordingHttpClient(() =>
-        Effect.succeed(
-          JSON.stringify({
-            id: "test-id",
-            choices: [
-              {
-                index: 0,
-                message: {
-                  role: "assistant",
-                  content: null,
-                  tool_calls: [
-                    {
-                      id: "call_1",
-                      type: "function",
-                      function: {
-                        name: "get_time",
-                        arguments: "{}"
-                      }
-                    }
-                  ]
-                },
-                finish_reason: "tool_calls"
-              }
-            ],
-            model: "gpt-4o"
-          })
-        )
-      )
-      const provider = makeOpenAIProvider(config(), recording.client)
-      const tool = ToolDefinition.make({
-        name: "get_time",
-        description: "Returns the current time",
-        parameters: {
-          type: "object",
-          properties: {},
-          required: []
-        }
-      })
-
-      const response = yield* provider.executeWithTools("what time is it?", [tool])
-      const requests = yield* recording.recorded
-      const request = requests[0]
-
-      assert.strictEqual(response.toolCalls.length, 1)
-      assert.strictEqual(response.toolCalls[0]?.id, "call_1")
-      assert.strictEqual(response.toolCalls[0]?.name, "get_time")
-      assert.strictEqual(response.finishReason, "tool_calls")
-      if (request !== undefined) {
-        const body = yield* decodeToolRequest(request)
-        assert.strictEqual(body.tools[0]?.type, "function")
-        assert.strictEqual(body.tools[0]?.function.name, "get_time")
       }
     })
   )

@@ -194,7 +194,6 @@ export const makeEstimatedUsageMeter = Effect.fn("@llm4ts/flow/EstimatedUsage.ma
         options,
         record
       ),
-    executeWithTools: (prompt, tools) => service.executeWithTools(prompt, tools),
     executeStructured: (prompt, schema, jsonSchema) =>
       service
         .executeStructured(prompt, schema, jsonSchema)

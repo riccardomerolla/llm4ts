@@ -5,8 +5,8 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { ProviderError } from "@llm4ts/core/Errors"
 import { makeHttpClient, makeRecordingHttpClient, type HttpRequest } from "@llm4ts/core/HttpClient"
-import { LlmConfig, Message, ToolDefinition, type JsonSchema } from "@llm4ts/core/Models"
-import { AnthropicRequest, AnthropicRequestWithTools } from "@llm4ts/core/providers/AnthropicModels"
+import { LlmConfig, Message, type JsonSchema } from "@llm4ts/core/Models"
+import { AnthropicRequest } from "@llm4ts/core/providers/AnthropicModels"
 import { anthropicHistory, makeAnthropicProvider } from "@llm4ts/core/providers/AnthropicProvider"
 import { collect } from "@llm4ts/core/Streaming"
 
@@ -39,11 +39,6 @@ const textOf = (content: string | ReadonlyArray<{ readonly text: string }> | und
 
 const decodeRequest = (request: HttpRequest): Effect.Effect<AnthropicRequest, unknown> =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(AnthropicRequest))(request.body ?? "")
-
-const decodeToolRequest = (
-  request: HttpRequest
-): Effect.Effect<AnthropicRequestWithTools, unknown> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(AnthropicRequestWithTools))(request.body ?? "")
 
 const answerSchema = Schema.Struct({
   answer: Schema.Int
@@ -165,57 +160,6 @@ describe("AnthropicProvider", () => {
         const body = yield* decodeRequest(request)
         assert.match(textOf(body.messages[0]?.content), /valid JSON/)
         assert.isFalse(body.stream)
-      }
-    })
-  )
-
-  it.effect("maps tool_use blocks to neutral tool calls", () =>
-    Effect.gen(function* () {
-      const recording = yield* makeRecordingHttpClient(() =>
-        Effect.succeed(
-          JSON.stringify({
-            id: "msg_1",
-            content: [
-              {
-                type: "tool_use",
-                id: "toolu_1",
-                name: "get_weather",
-                input: {
-                  location: "Rome"
-                }
-              }
-            ],
-            stop_reason: "tool_use"
-          })
-        )
-      )
-      const provider = makeAnthropicProvider(providerConfig(), recording.client)
-      const tool = ToolDefinition.make({
-        name: "get_weather",
-        description: "Get weather for a location",
-        parameters: {
-          type: "object",
-          properties: {
-            location: {
-              type: "string"
-            }
-          },
-          required: ["location"]
-        }
-      })
-
-      const response = yield* provider.executeWithTools("weather in Rome", [tool])
-      const requests = yield* recording.recorded
-      const request = requests[0]
-
-      assert.strictEqual(response.toolCalls[0]?.id, "toolu_1")
-      assert.strictEqual(response.toolCalls[0]?.name, "get_weather")
-      assert.strictEqual(response.toolCalls[0]?.arguments, '{"location":"Rome"}')
-      assert.strictEqual(response.finishReason, "tool_use")
-      if (request !== undefined) {
-        const body = yield* decodeToolRequest(request)
-        assert.strictEqual(body.tools[0]?.input_schema.type, "object")
-        assert.deepStrictEqual(body.tools[0]?.input_schema.properties, tool.parameters)
       }
     })
   )

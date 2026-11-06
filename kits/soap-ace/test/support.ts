@@ -41,7 +41,6 @@ const unused = InvalidRequestError.make({ message: "unused" })
 export const replyingService = (reply: string): LlmServiceShape => ({
   executeStream: () => Stream.empty,
   executeStreamWithHistory: () => Stream.empty,
-  executeWithTools: () => Effect.fail(unused),
   executeStructured: (_prompt, schema, jsonSchema) => parseFromText(reply, schema, jsonSchema),
   executeStructuredWithUsage: () => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,

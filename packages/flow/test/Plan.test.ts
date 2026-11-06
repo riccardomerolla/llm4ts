@@ -10,7 +10,6 @@ import {
   taskGraph,
   hasParallelTasks
 } from "@llm4ts/flow/Plan"
-import { llm4tsDirectory, repoId } from "@llm4ts/flow/WorkspaceLayout"
 
 describe("Plan", () => {
   it.effect("renders and parses mixed task state and a codebase brief", () =>
@@ -59,14 +58,9 @@ describe("Plan", () => {
     })
   )
 
-  it("derives deterministic plan paths and collision-safe workspace namespaces", () => {
+  it("derives deterministic plan paths", () => {
     assert.strictEqual(defaultPlanPath("same"), defaultPlanPath("same"))
     assert.notStrictEqual(defaultPlanPath("same"), defaultPlanPath("different"))
-    assert.strictEqual(repoId("/control", "/control"), undefined)
-    assert.match(repoId("/control", "/a/calc") ?? "", /^calc-/)
-    assert.notStrictEqual(repoId("/control", "/a/calc"), repoId("/control", "/b/calc"))
-    assert.strictEqual(llm4tsDirectory("/control", "/control"), "/control/.llm4ts")
-    assert.match(llm4tsDirectory("/control", "/projects/calc"), /^\/control\/\.llm4ts\/calc-/)
   })
 })
 

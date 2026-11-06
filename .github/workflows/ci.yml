@@ -30,6 +30,7 @@ jobs:
           pnpm typecheck
           pnpm lint
           pnpm format:check
+          pnpm unused
           pnpm test
 
       - name: Build

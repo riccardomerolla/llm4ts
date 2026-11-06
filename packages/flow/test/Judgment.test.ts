@@ -40,7 +40,6 @@ const reasoningReplying = (reply: unknown, calls?: Ref.Ref<number>): LlmServiceS
   return {
     executeStream: () => Stream.empty,
     executeStreamWithHistory: () => Stream.empty,
-    executeWithTools: () => Effect.fail(unused),
     executeStructured: (_prompt, schema, _jsonSchema: JsonSchema) => answer(schema),
     executeStructuredWithUsage: (_prompt, schema) =>
       answer(schema).pipe(Effect.map((value) => [value, undefined, undefined] as const)),

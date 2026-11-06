@@ -10,9 +10,7 @@ export list; the following modules are the main entry points.
 - `@llm4ts/core/LlmService`: backend-neutral LLM service.
 - `@llm4ts/core/ConnectorConfig` and `ConnectorRegistry`: connector selection.
 - `@llm4ts/core/providers/*`: API and CLI connector implementations.
-- `@llm4ts/core/Streaming`: collection, progress, timeout, buffering, fallback,
-  and SSE helpers.
-- `@llm4ts/core/tools/*`: tool declarations, registry, and bounded tool loop.
+- `@llm4ts/core/Streaming`: collection, progress, and timeout helpers.
 - `@llm4ts/core/eval/*`: checks, judges, evaluators, and suites.
   `judgeWithJudgment(judgment, dimensions)` is the rubric judge over the
   Judgment service: one Score question per dimension.
@@ -37,11 +35,10 @@ export list; the following modules are the main entry points.
   prompt prefix; `verbalizedScoreLabelSequence` derives it from structured
   output when a backend has no native read. `mlx-lm` answers it from token
   log-probabilities in one forward pass.
-- `@llm4ts/core/observability/*` (`Tracing`, `Metrics`, `MeteredLlmService`,
-  `StructuredLogger` are **deprecated** since 2.30.0, ADR 0026 — runs export
-  OpenTelemetry through `@llm4ts/runner/Otel` instead; `Redaction` and
-  `StreamRecorder` stay): metrics, tracing, recording, logging,
-  redaction.
+- `@llm4ts/core/observability/*`: `Redaction` and `StreamRecorder`. Runs
+  export OpenTelemetry through `@llm4ts/runner/Otel` (ADR 0026); the
+  `Tracing`, `Metrics`, `MeteredLlmService` and `StructuredLogger` modules
+  it replaced were removed in 3.0.0.
 
 ## Flow
 
@@ -67,7 +64,7 @@ export list; the following modules are the main entry points.
   agents.
 - `@llm4ts/flow/Plan`, `Planner`, `PlanExecution`, and `Persistence`: structured
   planning and resumable work.
-- `@llm4ts/flow/Workspace*`: contained filesystem access and workspace tools.
+- `@llm4ts/flow/Workspace`: contained filesystem access.
 - `@llm4ts/flow/GitTool`, `GitHubTool`, and `AzureDevOpsTool`: audited repository
   and forge boundaries. `GitTool.diffVsBaseScoped(base, paths)` is the
   path-scoped diff primitive: empty paths yield `""` (never the whole diff),

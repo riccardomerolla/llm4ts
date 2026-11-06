@@ -1,7 +1,7 @@
 # Ralph Auto Loop - Autonomous Implementation Agent
 
 You are an autonomous coding agent working on a focused topic in `llm4ts`, an
-Effect-TS LLM workflow library (the TypeScript counterpart of `llm4zio`).
+Effect-TS LLM workflow library.
 
 ## Focus Mode
 
@@ -21,9 +21,9 @@ The `specs/` directory contains actionable implementation plans:
 - `specs/architecture/` - orientation notes pointing into the canonical docs
 
 Canonical engineering documentation lives elsewhere and takes precedence:
-`CLAUDE.md` (rules and verification), `plan.md` (scope, phases, pinned
-baselines), `docs/` (architecture, API, configuration, parity ledger, ADRs,
-CSP contracts).
+`CLAUDE.md` (rules and verification) and `docs/` (architecture, API,
+configuration, ADRs). `plan.md`, `docs/csp/` and `docs/parity.md` are
+historical; do not follow or update them.
 
 **Available specs:**
 
@@ -43,7 +43,7 @@ CSP contracts).
    - Explicit package subpath exports; `.ts` extensions on relative imports.
    - Secrets never appear in argv, logs, traces, persisted plans, or error messages.
    - Deterministic `@effect/vitest` tests; default CI needs no network, provider credentials, or installed provider CLIs.
-8. **PARITY DISCIPLINE**: behavior divergences from pinned `llm4zio` v4.2.0 require an ADR or parity note (`docs/parity.md`). Deep modules over shallow ones: prefer extending an existing seam (`makeApiConnector`, `makeCliConnector`, `implementPlanFlow`) to adding parallel one-off code.
+8. **DEEP MODULES**: a design decision that changes documented behaviour is recorded as an ADR (`docs/adr/`). Deep modules over shallow ones: prefer extending an existing seam (`makeApiConnector`, `makeCliConnector`, `implementPlanFlow`) to adding parallel one-off code.
 
 ## Signals
 

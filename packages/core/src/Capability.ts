@@ -71,9 +71,6 @@ const levelRank = (level: GrantLevel): number => {
 const minLevel = (first: GrantLevel, second: GrantLevel): GrantLevel =>
   levelRank(first) <= levelRank(second) ? first : second
 
-const maxLevel = (first: GrantLevel, second: GrantLevel): GrantLevel =>
-  levelRank(first) >= levelRank(second) ? first : second
-
 export class ExecDenied extends Schema.TaggedClass<ExecDenied>()("Denied", {}) {}
 export class ExecAllow extends Schema.TaggedClass<ExecAllow>()("Allow", {
   commands: Schema.ReadonlySet(Schema.String)
@@ -102,19 +99,6 @@ const intersectExec = (first: ExecGrant, second: ExecGrant): ExecGrant => {
     return first
   }
   return allowExec([...first.commands].filter((command) => second.commands.has(command)))
-}
-
-const unionExec = (first: ExecGrant, second: ExecGrant): ExecGrant => {
-  if (first._tag === "All" || second._tag === "All") {
-    return ExecGrants.All
-  }
-  if (first._tag === "Denied") {
-    return second
-  }
-  if (second._tag === "Denied") {
-    return first
-  }
-  return allowExec(new Set([...first.commands, ...second.commands]))
 }
 
 export class Grants extends Schema.Class<Grants>("Grants")({
@@ -162,18 +146,6 @@ export const intersectGrants = (first: Grants, second: Grants): Grants =>
     coder: first.coder && second.coder,
     reasoning: first.reasoning && second.reasoning,
     declassify: first.declassify && second.declassify
-  })
-
-export const unionGrants = (first: Grants, second: Grants): Grants =>
-  new Grants({
-    git: maxLevel(first.git, second.git),
-    gh: maxLevel(first.gh, second.gh),
-    ado: maxLevel(first.ado, second.ado),
-    basecamp: maxLevel(first.basecamp, second.basecamp),
-    exec: unionExec(first.exec, second.exec),
-    coder: first.coder || second.coder,
-    reasoning: first.reasoning || second.reasoning,
-    declassify: first.declassify || second.declassify
   })
 
 const execAllows = (grant: ExecGrant, command: string): boolean => {
@@ -230,25 +202,3 @@ export const restricted =
     Effect.flatMap(CurrentGrants, (current) =>
       Effect.provideService(effect, CurrentGrants, intersectGrants(current, grants))
     )
-
-export class CapabilityDenied extends Schema.TaggedError<CapabilityDenied>()("CapabilityDenied", {
-  required: Schema.Array(Capability),
-  granted: Grants
-}) {
-  get message(): string {
-    const names = this.required.map((capability) =>
-      capability._tag === "Exec" ? `Exec(${capability.command})` : capability._tag
-    )
-    return `missing required capabilities: ${names.join(", ")}`
-  }
-}
-
-export const requireCapabilities =
-  (required: ReadonlyArray<Capability>) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | CapabilityDenied, R> =>
-    Effect.flatMap(CurrentGrants, (granted): Effect.Effect<A, E | CapabilityDenied, R> => {
-      const missing = required.filter((capability) => !allows(granted, capability))
-      return missing.length === 0
-        ? effect
-        : Effect.fail(new CapabilityDenied({ required: missing, granted }))
-    })

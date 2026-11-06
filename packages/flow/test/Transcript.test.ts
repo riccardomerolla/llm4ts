@@ -25,7 +25,6 @@ const replying: LlmServiceShape = {
       toolResultChunk("t1", { failed: true, output: "FAIL a.test.ts\n".repeat(1_000) }),
       LlmChunk.make({ delta: "done." })
     ),
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,

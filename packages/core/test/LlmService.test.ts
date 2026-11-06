@@ -5,7 +5,7 @@ import type * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { InvalidRequestError } from "@llm4ts/core/Errors"
 import { LlmService } from "@llm4ts/core/LlmService"
-import { LlmChunk, Message, ToolCallResponse, type JsonSchema } from "@llm4ts/core/Models"
+import { LlmChunk, Message, type JsonSchema } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 
@@ -17,14 +17,6 @@ const mockService = LlmService.of({
     ),
   executeStreamWithHistory: (_messages) =>
     Stream.make(new LlmChunk({ delta: "Stream response", finishReason: "stop" })),
-  executeWithTools: (_prompt, _tools) =>
-    Effect.succeed(
-      new ToolCallResponse({
-        content: "No tools needed",
-        toolCalls: [],
-        finishReason: "stop"
-      })
-    ),
   executeStructured: <A, E, RD, RE>(
     _prompt: string,
     _schema: Schema.ConstraintCodec<A, E, RD, RE>,
@@ -82,13 +74,11 @@ layer(MockLlmService)("LlmService tag", (it) => {
     })
   )
 
-  it.effect("supports tools and availability through the tag", () =>
+  it.effect("reports availability through the tag", () =>
     Effect.gen(function* () {
       const service = yield* LlmService
-      const response = yield* service.executeWithTools("test", [])
       const available = yield* service.isAvailable
 
-      assert.strictEqual(response.content, "No tools needed")
       assert.isTrue(available)
     })
   )

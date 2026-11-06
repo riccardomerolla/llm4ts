@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
-import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import {
   Capabilities,
@@ -13,9 +12,7 @@ import {
   currentGrants,
   intersectGrants,
   noneGrants,
-  restricted,
-  requireCapabilities,
-  unionGrants
+  restricted
 } from "@llm4ts/core/Capability"
 
 const gitReadOnly = new Grants({
@@ -55,7 +52,6 @@ describe("Grants algebra", () => {
     assert.isTrue(allows(write, Capabilities.BasecampRead))
     assert.isTrue(allows(write, Capabilities.BasecampWrite))
     assert.strictEqual(intersectGrants(write, read).basecamp, "Read")
-    assert.strictEqual(unionGrants(read, write).basecamp, "Write")
   })
 
   it.effect("decodes persisted grants missing the basecamp field as None", () =>
@@ -124,30 +120,6 @@ describe("Grants algebra", () => {
     assert.deepStrictEqual(intersectGrants(first, second), intersectGrants(second, first))
   })
 
-  it("unions pointwise to combine witness powers", () => {
-    const first = new Grants({
-      ...noneGrants,
-      git: "Read",
-      exec: allowExec(["ls"]),
-      coder: true
-    })
-    const second = new Grants({
-      ...noneGrants,
-      git: "Push",
-      gh: "Read",
-      exec: allowExec(["cat"])
-    })
-    const union = unionGrants(first, second)
-
-    assert.strictEqual(union.git, "Push")
-    assert.strictEqual(union.gh, "Read")
-    assert.deepStrictEqual(union.exec, allowExec(["ls", "cat"]))
-    assert.isTrue(union.coder)
-    assert.isFalse(union.declassify)
-    assert.deepStrictEqual(unionGrants(noneGrants, first), first)
-    assert.deepStrictEqual(unionGrants(first, allGrants), allGrants)
-  })
-
   it.effect("round-trips grants and value-carrying capabilities", () =>
     Effect.gen(function* () {
       const grants = new Grants({
@@ -207,20 +179,5 @@ describe("ambient grants", () => {
         assert.deepStrictEqual(parent, gitReadOnly)
       })
     )
-  )
-
-  it.effect("fails before running an effect when a capability is missing", () =>
-    Effect.gen(function* () {
-      const runs = yield* Ref.make(0)
-      const guarded = requireCapabilities([Capabilities.GitPush])(
-        Ref.update(runs, (count) => count + 1)
-      )
-      const error = yield* Effect.flip(restricted(noneGrants)(guarded))
-      const count = yield* Ref.get(runs)
-
-      assert.strictEqual(error._tag, "CapabilityDenied")
-      assert.match(error.message, /GitPush/)
-      assert.strictEqual(count, 0)
-    })
   )
 })

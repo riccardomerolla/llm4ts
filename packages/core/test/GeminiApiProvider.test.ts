@@ -4,11 +4,8 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { makeHttpClient, makeRecordingHttpClient, type HttpRequest } from "@llm4ts/core/HttpClient"
-import { LlmConfig, Message, ToolDefinition, type JsonSchema } from "@llm4ts/core/Models"
-import {
-  GeminiGenerateContentRequest,
-  GeminiGenerateContentRequestWithTools
-} from "@llm4ts/core/providers/GeminiModels"
+import { LlmConfig, Message, type JsonSchema } from "@llm4ts/core/Models"
+import { GeminiGenerateContentRequest } from "@llm4ts/core/providers/GeminiModels"
 import { geminiContents, makeGeminiApiProvider } from "@llm4ts/core/providers/GeminiApiProvider"
 import { collect } from "@llm4ts/core/Streaming"
 
@@ -29,13 +26,6 @@ const decodeRequest = (
   request: HttpRequest
 ): Effect.Effect<GeminiGenerateContentRequest, unknown> =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(GeminiGenerateContentRequest))(
-    request.body ?? ""
-  )
-
-const decodeToolRequest = (
-  request: HttpRequest
-): Effect.Effect<GeminiGenerateContentRequestWithTools, unknown> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(GeminiGenerateContentRequestWithTools))(
     request.body ?? ""
   )
 
@@ -183,60 +173,6 @@ describe("GeminiApiProvider", () => {
     })
   )
 
-  it.effect("maps Gemini function calls to stable neutral IDs", () =>
-    Effect.gen(function* () {
-      const recording = yield* makeRecordingHttpClient(() =>
-        Effect.succeed(
-          JSON.stringify({
-            candidates: [
-              {
-                content: {
-                  parts: [
-                    {
-                      functionCall: {
-                        name: "search",
-                        args: {
-                          query: "Scala"
-                        }
-                      }
-                    }
-                  ]
-                },
-                finishReason: "STOP"
-              }
-            ]
-          })
-        )
-      )
-      const provider = makeGeminiApiProvider(config(), recording.client)
-      const tool = ToolDefinition.make({
-        name: "search",
-        description: "Web search",
-        parameters: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string"
-            }
-          },
-          required: ["query"]
-        }
-      })
-
-      const response = yield* provider.executeWithTools("search", [tool])
-      const requests = yield* recording.recorded
-      const request = requests[0]
-
-      assert.strictEqual(response.toolCalls[0]?.id, "gemini_call_0")
-      assert.strictEqual(response.toolCalls[0]?.name, "search")
-      assert.match(response.toolCalls[0]?.arguments ?? "", /Scala/)
-      if (request !== undefined) {
-        const body = yield* decodeToolRequest(request)
-        assert.strictEqual(body.tools[0]?.functionDeclarations[0]?.name, "search")
-      }
-    })
-  )
-
   it.effect("treats a safety-filtered stream response as an empty chunk stream", () =>
     Effect.gen(function* () {
       const client = makeHttpClient({
@@ -255,20 +191,6 @@ describe("GeminiApiProvider", () => {
       const response = yield* collect(provider.executeStream("blocked prompt"))
 
       assert.strictEqual(response.content, "")
-    })
-  )
-
-  it.effect("fails tool calls when Gemini returns no candidate", () =>
-    Effect.gen(function* () {
-      const client = makeHttpClient({
-        postJson: () => Effect.succeed("{}")
-      })
-      const provider = makeGeminiApiProvider(config(), client)
-
-      const error = yield* Effect.flip(provider.executeWithTools("test", []))
-
-      assert.strictEqual(error._tag, "ParseError")
-      assert.match(error.message, /no candidates/)
     })
   )
 })

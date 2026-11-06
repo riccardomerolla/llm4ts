@@ -15,7 +15,6 @@ describe("summarisePr", () => {
       const service: LlmServiceShape = {
         executeStream: (_prompt) => Stream.empty,
         executeStreamWithHistory: (_messages) => Stream.empty,
-        executeWithTools: (_prompt, _tools) => Effect.fail(unused),
         executeStructured: (_prompt, schema, _jsonSchema) =>
           Schema.decodeUnknownEffect(schema)({
             title: "Fix off-by-one",

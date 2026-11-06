@@ -10,27 +10,20 @@ import {
   ConnectorCapabilities,
   ConnectorIds,
   LlmChunk,
-  ToolCall,
-  ToolCallResponse,
   type JsonSchema,
   type LlmConfig,
   type Message,
-  type MessageRole,
-  type ToolDefinition
+  type MessageRole
 } from "../Models.ts"
 import { parseFromText } from "../StructuredOutput.ts"
 import { effortWord } from "./CliSupport.ts"
 import {
   OpenAIChatChunk,
   OpenAIChatCompletionRequest,
-  OpenAIChatCompletionRequestWithTools,
   OpenAIChatCompletionResponse,
-  OpenAIChatCompletionResponseWithTools,
   OpenAIChatMessage,
-  OpenAIFunction,
   OpenAIJsonSchemaSpec,
-  OpenAIResponseFormat,
-  OpenAITool
+  OpenAIResponseFormat
 } from "./OpenAIModels.ts"
 
 const emptyHeaders: Readonly<Record<string, string>> = Object.freeze({})
@@ -80,33 +73,6 @@ export const buildOpenAIChatRequest = (
     ...(config.effort === undefined ? {} : { reasoning_effort: effortWord(config.effort, "xhigh") })
   })
 
-export const buildOpenAIToolRequest = (
-  config: LlmConfig,
-  prompt: string,
-  tools: ReadonlyArray<ToolDefinition>
-): OpenAIChatCompletionRequestWithTools =>
-  OpenAIChatCompletionRequestWithTools.make({
-    model: config.model,
-    messages: [
-      OpenAIChatMessage.make({
-        role: "user",
-        content: prompt
-      })
-    ],
-    tools: tools.map((tool) =>
-      OpenAITool.make({
-        function: OpenAIFunction.make({
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters
-        })
-      })
-    ),
-    temperature: config.temperature ?? 0.7,
-    stream: false,
-    ...(config.maxTokens === undefined ? {} : { max_tokens: config.maxTokens })
-  })
-
 const decodeCompletionResponse = (
   raw: string
 ): Effect.Effect<OpenAIChatCompletionResponse, ParseError> =>
@@ -114,18 +80,6 @@ const decodeCompletionResponse = (
     Effect.mapError((error) =>
       ParseError.make({
         message: `Failed to decode OpenAI response: ${String(error)}`,
-        raw
-      })
-    )
-  )
-
-const decodeToolResponse = (
-  raw: string
-): Effect.Effect<OpenAIChatCompletionResponseWithTools, ParseError> =>
-  schemaDecode.tools(raw).pipe(
-    Effect.mapError((error) =>
-      ParseError.make({
-        message: `Failed to decode OpenAI tool response: ${String(error)}`,
         raw
       })
     )
@@ -143,7 +97,6 @@ const decodeStreamChunk = (raw: string): Effect.Effect<OpenAIChatChunk, ParseErr
 
 const schemaDecode = {
   completion: Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAIChatCompletionResponse)),
-  tools: Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAIChatCompletionResponseWithTools)),
   chunk: Schema.decodeUnknownEffect(Schema.fromJsonString(OpenAIChatChunk))
 }
 
@@ -270,39 +223,6 @@ export const makeOpenAIProvider = (
       return result
     })
 
-  const executeWithTools = (
-    prompt: string,
-    tools: ReadonlyArray<ToolDefinition>
-  ): Effect.Effect<ToolCallResponse, LlmError> =>
-    Effect.gen(function* () {
-      const { baseUrl } = yield* requiredConfig
-      const request = buildOpenAIToolRequest(config, prompt, tools)
-      const raw = yield* httpClient.postJson(
-        `${baseUrl}/chat/completions`,
-        JSON.stringify(request),
-        authHeaders(),
-        config.timeout
-      )
-      const response = yield* decodeToolResponse(raw)
-      const choice = response.choices[0]
-      const toolCalls =
-        choice?.message?.tool_calls.map((toolCall) =>
-          ToolCall.make({
-            id: toolCall.id,
-            name: toolCall.function.name,
-            arguments: toolCall.function.arguments
-          })
-        ) ?? []
-      const content = choice?.message?.content ?? undefined
-      const finishReason = choice?.finish_reason ?? "stop"
-
-      return ToolCallResponse.make({
-        toolCalls,
-        finishReason,
-        ...(content === undefined || content === null ? {} : { content })
-      })
-    })
-
   // Parity with llm4zio v4.2.0 OpenAIProvider.isAvailable (`catchAll(_ => ZIO.succeed(true))`):
   // a configured baseUrl counts as available even when the /models probe fails.
   const isAvailable: Effect.Effect<boolean> =
@@ -327,7 +247,6 @@ export const makeOpenAIProvider = (
         })
       ]),
     executeStreamWithHistory: (messages) => executeStreamRequest(openAIHistoryMessages(messages)),
-    executeWithTools,
     executeStructuredWithUsage,
     isAvailable,
     capabilities: ConnectorCapabilities.make({ readOnlyEnforcement: "enforced", effort: "mapped" })

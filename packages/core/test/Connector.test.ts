@@ -23,7 +23,6 @@ import {
   HealthStatus,
   LlmChunk,
   Message,
-  ToolCallResponse,
   TokenUsage,
   type JsonSchema
 } from "@llm4ts/core/Models"
@@ -52,7 +51,6 @@ const primitives: ApiConnectorPrimitives = {
   id: ConnectorIds.Mock,
   executeStream: () => Stream.empty,
   executeStreamWithHistory: () => Stream.empty,
-  executeWithTools: () => Effect.succeed(ToolCallResponse.make({ finishReason: "stop" })),
   executeStructuredWithUsage: <A, E, RD, RE>(
     _prompt: string,
     schema: Schema.ConstraintCodec<A, E, RD, RE>,
@@ -425,17 +423,6 @@ describe("makeCliConnector", () => {
       )
 
       assert.strictEqual(error._tag, "ParseError")
-    })
-  )
-
-  it.effect("rejects tool calling with a typed error naming the connector", () =>
-    Effect.gen(function* () {
-      const connector = makeCliConnector(cliPrimitives)
-      const error = yield* Effect.flip(connector.executeWithTools("prompt", []))
-
-      assert.strictEqual(error._tag, "InvalidRequestError")
-      assert.include(error.message, "cursor")
-      assert.include(error.message, "does not support tool calling")
     })
   )
 })

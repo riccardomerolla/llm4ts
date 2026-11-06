@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/js",
-  "version": "2.54.1",
+  "version": "3.0.0",
   "description": "Promise and exception facade for llm4ts",
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,6 @@
   "exports": {
     ".": "./dist/Client.js",
     "./Client": "./dist/Client.js",
-    "./Package": "./dist/Package.js",
     "./package.json": "./package.json"
   },
   "scripts": {

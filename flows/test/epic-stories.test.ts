@@ -138,7 +138,6 @@ const replying = (reply: string): LlmServiceShape => ({
   executeStream: () => Stream.make(LlmChunk.make({ delta: reply, finishReason: "stop" })),
   executeStreamWithHistory: () =>
     Stream.make(LlmChunk.make({ delta: reply, finishReason: "stop" })),
-  executeWithTools: () => Effect.fail(unused),
   executeStructured: () => Effect.fail(unused),
   executeStructuredWithUsage: () => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,
@@ -149,7 +148,6 @@ const replying = (reply: string): LlmServiceShape => ({
 const structured = (value: unknown): LlmServiceShape => ({
   executeStream: () => Stream.empty,
   executeStreamWithHistory: () => Stream.empty,
-  executeWithTools: () => Effect.fail(unused),
   executeStructured: (_prompt, schema) =>
     Schema.decodeUnknownEffect(schema)(value).pipe(Effect.orDie),
   executeStructuredWithUsage: (_prompt, schema) =>

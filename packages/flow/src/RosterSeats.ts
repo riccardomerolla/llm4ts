@@ -93,8 +93,6 @@ const serviceOver = (runner: SeatRunner): LlmServiceShape => ({
     runner.stream((seat, note) => seat.executeStream(withNote(note, prompt))),
   executeStreamWithHistory: (messages) =>
     runner.stream((seat, note) => seat.executeStreamWithHistory(withNoteOnLast(note, messages))),
-  executeWithTools: (prompt, tools) =>
-    runner.run((seat, note) => seat.executeWithTools(withNote(note, prompt), tools)),
   executeStructured: (prompt, schema, jsonSchema) =>
     runner.run((seat, note) => seat.executeStructured(withNote(note, prompt), schema, jsonSchema)),
   executeStructuredWithUsage: (prompt, schema, jsonSchema) =>

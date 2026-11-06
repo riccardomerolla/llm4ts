@@ -4,15 +4,7 @@ import type * as Stream from "effect/Stream"
 import type * as Schema from "effect/Schema"
 import type * as Result from "effect/Result"
 import type { LlmError, ParseError } from "./Errors.ts"
-import type {
-  JsonSchema,
-  LabelDistribution,
-  LlmChunk,
-  Message,
-  TokenUsage,
-  ToolCallResponse,
-  ToolDefinition
-} from "./Models.ts"
+import type { JsonSchema, LabelDistribution, LlmChunk, Message, TokenUsage } from "./Models.ts"
 
 export type StructuredResult<A> = readonly [
   value: A,
@@ -25,10 +17,6 @@ export interface LlmServiceShape {
   readonly executeStreamWithHistory: (
     messages: ReadonlyArray<Message>
   ) => Stream.Stream<LlmChunk, LlmError>
-  readonly executeWithTools: (
-    prompt: string,
-    tools: ReadonlyArray<ToolDefinition>
-  ) => Effect.Effect<ToolCallResponse, LlmError>
   readonly executeStructured: <A, E, RD, RE>(
     prompt: string,
     schema: Schema.ConstraintCodec<A, E, RD, RE>,

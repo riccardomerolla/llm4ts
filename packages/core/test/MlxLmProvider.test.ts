@@ -170,12 +170,10 @@ describe("MlxLmProvider", () => {
     })
   )
 
-  it.effect("rejects tools, probes /v1/models, and needs a base URL", () =>
+  it.effect("probes /v1/models and needs a base URL", () =>
     Effect.gen(function* () {
       const recording = yield* makeRecordingHttpClient(() => Effect.succeed('{"data":[]}'))
       const provider = makeMlxLmProvider(config, recording.client)
-      const tools = yield* Effect.flip(provider.executeWithTools("x", []))
-      assert.strictEqual(tools._tag, "InvalidRequestError")
       assert.isTrue(yield* provider.isAvailable)
       const [probe] = yield* recording.recorded
       assert.strictEqual(probe?.url, "http://mlx.test:8080/v1/models")

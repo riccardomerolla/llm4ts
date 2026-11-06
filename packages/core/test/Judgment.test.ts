@@ -56,7 +56,6 @@ const makeLabelFake = (
     service: {
       executeStream: () => Stream.empty,
       executeStreamWithHistory: () => Stream.empty,
-      executeWithTools: () => Effect.fail(unused),
       executeStructured: () => Effect.fail(unused),
       executeStructuredWithUsage: <A, E, RD, RE>(
         _prompt: string,

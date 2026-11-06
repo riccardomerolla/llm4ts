@@ -1,5 +1,58 @@
 # Changelog
 
+## 3.0.0
+
+### Breaking
+
+A removal release: code that shipped but that no flow, kit or CLI path
+reached. Nothing a run does changes. An import of a removed subpath now
+fails to resolve; there is no replacement unless one is named.
+
+- **The model tool-calling loop is gone.** `@llm4ts/core/tools/Tool`,
+  `tools/ToolRegistry` and `tools/ToolCallingExecutor` (`makeTool`,
+  `toolFromMethodSignature`, the `toolsTo*` converters, `ToolSandbox`,
+  `makeToolRegistry`, `runToolCallingLoop`) and
+  `@llm4ts/flow/WorkspaceTools` are removed. Tool calling belongs to the
+  coding agents llm4ts drives, not to llm4ts.
+- **`executeWithTools` is removed from `LlmServiceShape`** and from every
+  connector and wrapper, with `ToolCall`, `ToolCallResponse` and
+  `ToolDefinition` in `@llm4ts/core/Models`, the
+  `buildOpenAIToolRequest` / `buildAnthropicToolRequest` /
+  `buildGeminiToolRequest` helpers, and the tool wire models in
+  `OpenAIModels`, `AnthropicModels` and `GeminiModels`. Migration for an
+  implementer of `LlmServiceShape`: delete the member.
+- **The observability modules deprecated in 2.30.0 are removed**, as
+  ADR 0026 said they would be: `@llm4ts/core/observability/Metrics`,
+  `MeteredLlmService`, `Tracing` and `StructuredLogger`. Runs export
+  OpenTelemetry through `@llm4ts/runner/Otel`. `Redaction` and
+  `StreamRecorder` stay.
+- **The OpenCode HTTP provider is removed**:
+  `@llm4ts/core/providers/OpenCodeProvider` and `OpenCodeModels`. It was
+  never wired into the connector factory. The `opencode` CLI connector
+  (`providers/OpenCodeCliConnector`) is unchanged.
+- **Unused modules are removed**: `@llm4ts/core/ContextManagement`,
+  `Conversation` and `RateLimiter`; `@llm4ts/flow/WorkspaceLayout`;
+  `@llm4ts/runner/CoderPolicy` and `NodeRuntime`; `@llm4ts/js/Package`.
+- **Unused exports in live modules are removed**: from
+  `@llm4ts/core/Streaming`, `parsePartialJson`, `cancellable`,
+  `withSnapshots`, `toSSE`, `fromSSE`, `withHeartbeat` and `parallelStream`
+  (`collect`, `collectAny`, `trackProgress` and `withTimeout` stay); from
+  `ConnectorRegistry`, `resolveConnector`, `resolveApiConnector` and
+  `resolveCliConnector`; from `HttpClient`, `httpGet` and `httpPostJson`;
+  from `Capability`, `unionGrants`, `requireCapabilities` and the
+  `CapabilityDenied` error only it raised.
+
+### Housekeeping
+
+- **`pnpm unused`**, now part of CI: fails when a module under
+  `packages/*/src` is imported by no production file, unless
+  `scripts/unused-modules.mjs` lists it with the reason it stays.
+- **Parity with `llm4zio` is retired as a rule.** It was the first
+  milestone, not a standing constraint. `CLAUDE.md` and the Ralph prompt no
+  longer ask for it; `plan.md`, `docs/csp/`, `docs/CSP_STATUS.md` and
+  `docs/parity.md` are marked historical, frozen at 2.54.1. The ADRs are the
+  living design record.
+
 ## 2.54.1
 
 - **`taskforce`: commands and file names, tightened.** A brief the owner

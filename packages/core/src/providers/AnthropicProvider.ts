@@ -12,28 +12,20 @@ import {
   ConnectorIds,
   LlmChunk,
   TokenUsage,
-  ToolCall,
-  ToolCallResponse,
   type JsonSchema,
   type LlmConfig,
-  type Message,
-  type ToolDefinition
+  type Message
 } from "../Models.ts"
 import { collect } from "../Streaming.ts"
 import { parseFromText } from "../StructuredOutput.ts"
-import type { AnthropicContentBlockFull } from "./AnthropicModels.ts"
 import {
   AnthropicCacheControl,
   AnthropicMessage,
   AnthropicOutputConfig,
   AnthropicRequest,
-  AnthropicRequestWithTools,
   AnthropicResponse,
-  AnthropicResponseWithTools,
   AnthropicStreamChunk,
   AnthropicTextBlock,
-  AnthropicTool,
-  AnthropicToolInputSchema,
   AnthropicUsage
 } from "./AnthropicModels.ts"
 
@@ -49,16 +41,6 @@ const decodeResponse = (raw: string): Effect.Effect<AnthropicResponse, ParseErro
     Effect.mapError((error) =>
       ParseError.make({
         message: `Failed to decode Anthropic response: ${String(error)}`,
-        raw
-      })
-    )
-  )
-
-const decodeToolResponse = (raw: string): Effect.Effect<AnthropicResponseWithTools, ParseError> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(AnthropicResponseWithTools))(raw).pipe(
-    Effect.mapError((error) =>
-      ParseError.make({
-        message: `Failed to decode Anthropic tool response: ${String(error)}`,
         raw
       })
     )
@@ -162,36 +144,6 @@ export const anthropicTokenUsage = (usage: AnthropicUsage): TokenUsage => {
   })
 }
 
-export const buildAnthropicToolRequest = (
-  config: LlmConfig,
-  prompt: string,
-  tools: ReadonlyArray<ToolDefinition>
-): AnthropicRequestWithTools =>
-  AnthropicRequestWithTools.make({
-    model: config.model,
-    max_tokens: config.maxTokens ?? 4096,
-    messages: [
-      AnthropicMessage.make({
-        role: "user",
-        content: prompt
-      })
-    ],
-    tools: tools.map((tool) =>
-      AnthropicTool.make({
-        name: tool.name,
-        description: tool.description,
-        input_schema: AnthropicToolInputSchema.make({
-          type: "object",
-          properties: tool.parameters
-        })
-      })
-    ),
-    ...(config.temperature === undefined ? {} : { temperature: config.temperature }),
-    ...(config.effort === undefined
-      ? {}
-      : { output_config: AnthropicOutputConfig.make({ effort: config.effort }) })
-  })
-
 const contentFromResponse = (
   response: AnthropicResponse,
   raw: string
@@ -206,8 +158,6 @@ const contentFromResponse = (
       )
     : Effect.succeed(content)
 }
-
-const jsonString = (value: typeof Schema.Json.Type): string => JSON.stringify(value) ?? "{}"
 
 export const makeAnthropicProvider = (
   config: LlmConfig,
@@ -352,41 +302,6 @@ export const makeAnthropicProvider = (
       return result
     })
 
-  const executeWithTools = (
-    prompt: string,
-    tools: ReadonlyArray<ToolDefinition>
-  ): Effect.Effect<ToolCallResponse, LlmError> =>
-    Effect.gen(function* () {
-      const { apiKey, baseUrl } = yield* requiredConfig
-      const request = buildAnthropicToolRequest(config, prompt, tools)
-      const raw = yield* httpClient.postJson(
-        `${baseUrl}/messages`,
-        JSON.stringify(request),
-        authHeaders(apiKey),
-        config.timeout
-      )
-      const response = yield* decodeToolResponse(raw)
-      const toolCalls = response.content
-        .filter((block) => block.type === "tool_use")
-        .map((block) =>
-          ToolCall.make({
-            id: block.id ?? "",
-            name: block.name ?? "",
-            arguments: block.input === undefined ? "{}" : jsonString(block.input)
-          })
-        )
-      const content = response.content.find(
-        (block): block is AnthropicContentBlockFull =>
-          block.type === "text" && block.text !== undefined && block.text !== null
-      )?.text
-
-      return ToolCallResponse.make({
-        toolCalls,
-        finishReason: response.stop_reason ?? "stop",
-        ...(content === undefined || content === null ? {} : { content })
-      })
-    })
-
   const executeStream = (prompt: string): Stream.Stream<LlmChunk, LlmError> =>
     executeStreamRequest([
       AnthropicMessage.make({
@@ -409,7 +324,6 @@ export const makeAnthropicProvider = (
       const history = anthropicHistory(messages)
       return executeStreamRequest(history.messages, history.system)
     },
-    executeWithTools,
     executeStructuredWithUsage,
     isAvailable,
     capabilities: ConnectorCapabilities.make({ readOnlyEnforcement: "enforced", effort: "mapped" })

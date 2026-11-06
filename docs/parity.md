@@ -1,5 +1,9 @@
 # Source Parity Ledger
 
+> **Historical.** Frozen at 2.54.1. Parity with `llm4zio` was the initial
+> milestone and is no longer maintained. The ADRs in `docs/adr/` are the
+> living design record; do not update this document.
+
 This ledger tracks the Effect-TS implementation against the owned `llm4zio`
 reference release.
 

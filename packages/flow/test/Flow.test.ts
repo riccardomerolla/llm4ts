@@ -42,7 +42,6 @@ const coderService = (asked: Ref.Ref<ReadonlyArray<string>>): LlmServiceShape =>
         Effect.as(Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })))
       )
     ),
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,
@@ -57,7 +56,6 @@ const structuredService = (
   executeStream: (_prompt) => Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })),
   executeStreamWithHistory: (_messages) =>
     Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })),
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, schema, _jsonSchema) =>
     Schema.decodeUnknownEffect(schema)(value).pipe(Effect.orDie),
   executeStructuredWithUsage: (_prompt, schema, _jsonSchema) =>
@@ -79,7 +77,6 @@ const historyTrackingCoderService = (
         Effect.as(Stream.make(LlmChunk.make({ delta: "done", finishReason: "stop" })))
       )
     ),
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,
@@ -97,7 +94,6 @@ const messageSnapshotCoderService = (
         Effect.as(Stream.make(LlmChunk.make({ delta: reply, finishReason: "stop" })))
       )
     ),
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,
@@ -107,7 +103,6 @@ const messageSnapshotCoderService = (
 const cleanReviewer: LlmServiceShape = {
   executeStream: (_prompt) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, schema, _jsonSchema) =>
     Schema.decodeUnknownEffect(schema)({ issues: [], summary: "clean" }).pipe(Effect.orDie),
   // The review path asks for usage; this backend reports none.
@@ -136,7 +131,6 @@ const dirtyOnceReviewer = (spent: Ref.Ref<boolean>): LlmServiceShape => {
   return {
     executeStream: (_prompt) => Stream.empty,
     executeStreamWithHistory: (_messages) => Stream.empty,
-    executeWithTools: (_prompt, _tools) => Effect.fail(unused),
     executeStructured: (_prompt, schema, _jsonSchema) => next(schema),
     executeStructuredWithUsage: (_prompt, schema, _jsonSchema) =>
       next(schema).pipe(Effect.map((value) => [value, undefined, undefined] as const)),

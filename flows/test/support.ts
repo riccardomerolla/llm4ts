@@ -25,7 +25,6 @@ export const replying = (reply: string): LlmServiceShape => ({
   executeStream: () => Stream.make(LlmChunk.make({ delta: reply, finishReason: "stop" })),
   executeStreamWithHistory: () =>
     Stream.make(LlmChunk.make({ delta: reply, finishReason: "stop" })),
-  executeWithTools: () => Effect.fail(unused),
   executeStructured: () => Effect.fail(unused),
   executeStructuredWithUsage: () => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,
@@ -117,7 +116,6 @@ export const scripted = (replies: ReadonlyArray<unknown>) =>
     const service: LlmServiceShape = {
       executeStream: () => Stream.empty,
       executeStreamWithHistory: () => Stream.empty,
-      executeWithTools: () => Effect.fail(unused),
       executeStructured: (prompt, schema) => next(prompt, schema),
       executeStructuredWithUsage: (prompt, schema) =>
         Effect.map(next(prompt, schema), (decoded) => [decoded, undefined, undefined] as const),

@@ -63,7 +63,6 @@ const coder = (onAsk: (prompt: string) => Effect.Effect<void>): LlmServiceShape 
   return {
     executeStream: answer,
     executeStreamWithHistory: (messages) => answer(messages.at(-1)?.content ?? ""),
-    executeWithTools: () => Effect.fail(unused),
     executeStructured: () => Effect.fail(unused),
     executeStructuredWithUsage: () => Effect.fail(unused),
     scoreLabels: unsupportedScoreLabels,

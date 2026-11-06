@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
-import { ConfigError, InvalidRequestError, ParseError, type LlmError } from "../Errors.ts"
+import { ConfigError, ParseError, type LlmError } from "../Errors.ts"
 import type { HttpClientShape } from "../HttpClient.ts"
 import { normalizeLabelProbabilities } from "../LabelScoring.ts"
 import type { LabelSequence, StructuredResult } from "../LlmService.ts"
@@ -346,8 +346,6 @@ export const makeMlxLmProvider = (
     executeStream: (prompt) =>
       streamRequest([OpenAIChatMessage.make({ role: "user", content: prompt })]),
     executeStreamWithHistory: (messages) => streamRequest(openAIHistoryMessages(messages)),
-    executeWithTools: () =>
-      Effect.fail(InvalidRequestError.make({ message: "mlx-lm does not support tool calling" })),
     executeStructuredWithUsage,
     scoreLabels,
     scoreLabelSequence,

@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { InvalidRequestError, ParseError } from "@llm4ts/core/Errors"
+import { ParseError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LlmChunk, TokenUsage } from "@llm4ts/core/Models"
 import { makeChat } from "@llm4ts/flow/Chat"
@@ -45,8 +45,6 @@ import { attr, kindAttribute } from "@llm4ts/flow/Spans"
 import { recordingTracer } from "./support/RecordingTracer.ts"
 import { callPurpose } from "@llm4ts/flow/Timing"
 
-const unused = InvalidRequestError.make({ message: "unused" })
-
 const reviewerService = (
   values: Ref.Ref<ReadonlyArray<unknown>>,
   calls: Ref.Ref<number>,
@@ -66,7 +64,6 @@ const reviewerService = (
   return {
     executeStream: (_prompt) => Stream.empty,
     executeStreamWithHistory: (_messages) => Stream.empty,
-    executeWithTools: (_prompt, _tools) => Effect.fail(unused),
     executeStructured: (_prompt, schema, _jsonSchema) => next(schema),
     // The review path asks for usage; a connector that reports none still
     // has to review, so the default fake leaves it undefined.

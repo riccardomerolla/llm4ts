@@ -1,10 +1,11 @@
 # llm4ts
 
 Effect-native, agent-agnostic engineering workflows with explicit review and modernization artifacts. Effect-TS: typed connectors for API
-providers and CLI coding agents, streaming, structured output, tools, plans
+providers and CLI coding agents, streaming, structured output, plans
 and review loops, repository automation, trace replay, and a Node runner.
-`llm4ts` is the TypeScript implementation of
-[`llm4zio`](https://github.com/riccardomerolla/llm4zio).
+`llm4ts` began as the TypeScript implementation of
+[`llm4zio`](https://github.com/riccardomerolla/llm4zio) and has since gone
+its own way.
 
 The whole library climbs one ladder, and so does this README: each step
 below is the first screen of a chapter in the
@@ -185,7 +186,7 @@ by copying a skill directory.
 | `@llm4ts/shell`  | `llm4ts` CLI and menu over discovered flows and kits        |
 | `@llm4ts/runner` | Node runner; its root export is the flow author's barrel    |
 | `@llm4ts/flow`   | Plans, events, persistence, repositories, review, packs     |
-| `@llm4ts/core`   | Models, connectors, providers, tools, eval, observability   |
+| `@llm4ts/core`   | Models, connectors, providers, eval, judgments, redaction   |
 | `@llm4ts/js`     | Promise-based client for calling an LLM from any JS program |
 
 ## Configuration
@@ -240,8 +241,9 @@ the packed tarballs, and publishes with provenance.
 - [Migration from llm4zio](docs/migration-from-llm4zio.md)
 - [Kits](kits/README.md), [flows](flows/README.md), [examples](examples/README.md)
 
-Internal engineering references: [source parity ledger](docs/parity.md),
-[architecture decision records](docs/adr/),
+Internal engineering reference:
+[architecture decision records](docs/adr/). Historical, frozen at 2.54.1:
+[source parity ledger](docs/parity.md),
 [Clean Specification Pack](docs/csp/00-overview.md), [plan](plan.md).
 
 ## Status
@@ -250,7 +252,7 @@ Internal engineering references: [source parity ledger](docs/parity.md),
 holds stable and for the four renames 2.0 made: the package subpath exports, the `@llm4ts/runner` root
 barrel, the flow and kit layouts and their three discovery tiers, the pack
 manifest, and the `LLM4TS_*` environment. Importing package-private files is
-unsupported. The implementation tracks the owned `llm4zio` v4.3.0 behaviour
-and uses Effect 4 (release-candidate line, pinned exactly).
+unsupported. 3.0 removed modules no run reached and changed nothing a run
+does. The implementation uses Effect 4 (4.0.0, pinned exactly).
 
 Licensed under MIT.

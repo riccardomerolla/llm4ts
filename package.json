@@ -21,6 +21,7 @@
     "test:verbose": "vitest run --reporter verbose",
     "judgment:replay": "tsx tools/judgment/replay-review.ts",
     "typecheck": "tsc -b tsconfig.json --pretty false",
+    "unused": "node scripts/unused-modules.mjs",
     "version:set": "node scripts/set-version.mjs",
     "judgment:label": "tsx tools/judgment/label.ts",
     "judgment:eval": "tsx tools/judgment/eval.ts"

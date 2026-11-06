@@ -140,22 +140,6 @@ describe("OllamaProvider", () => {
     })
   )
 
-  it.effect("rejects tool calling with a typed request error", () =>
-    Effect.gen(function* () {
-      const provider = makeOllamaProvider(
-        config,
-        makeHttpClient({
-          postJson: () => Effect.succeed("{}")
-        })
-      )
-
-      const error = yield* Effect.flip(provider.executeWithTools("test", []))
-
-      assert.strictEqual(error._tag, "InvalidRequestError")
-      assert.match(error.message, /does not support tool calling/)
-    })
-  )
-
   it.effect("checks the tags endpoint and reports transport failure", () =>
     Effect.gen(function* () {
       const available = makeOllamaProvider(

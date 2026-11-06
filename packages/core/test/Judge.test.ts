@@ -19,7 +19,6 @@ const stub = (
 ): LlmServiceShape => ({
   executeStream: (_prompt) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (text, schema, _jsonSchema) =>
     Ref.set(prompt, text).pipe(
       Effect.andThen(

@@ -101,7 +101,6 @@ describe("LabelScoring", () => {
         id: ConnectorIds.Mock,
         executeStream: () => Stream.empty,
         executeStreamWithHistory: () => Stream.empty,
-        executeWithTools: () => Effect.fail(unused),
         executeStructuredWithUsage: structuredReplying({
           label: "no",
           probabilities: { yes: 0.1, no: 0.9 }
@@ -120,7 +119,6 @@ describe("LabelScoring", () => {
         id: ConnectorIds.Mock,
         executeStream: () => Stream.empty,
         executeStreamWithHistory: () => Stream.empty,
-        executeWithTools: () => Effect.fail(unused),
         executeStructuredWithUsage: () => Effect.fail(unused),
         scoreLabels: (_prompt, labels) =>
           normalizeLabelProbabilities(labels, { [labels[0] ?? ""]: 1 }, "logprobs"),

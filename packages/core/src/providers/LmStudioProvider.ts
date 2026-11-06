@@ -3,7 +3,7 @@ import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
-import { ConfigError, InvalidRequestError, ParseError, type LlmError } from "../Errors.ts"
+import { ConfigError, ParseError, type LlmError } from "../Errors.ts"
 import type { HttpClientShape } from "../HttpClient.ts"
 import type { StructuredResult } from "../LlmService.ts"
 import {
@@ -264,12 +264,6 @@ export const makeLmStudioProvider = (
         })
       ]),
     executeStreamWithHistory: (messages) => streamRequest(lmStudioHistory(messages)),
-    executeWithTools: () =>
-      Effect.fail(
-        InvalidRequestError.make({
-          message: "LmStudio provider does not yet support tool calling in this implementation"
-        })
-      ),
     executeStructuredWithUsage,
     isAvailable
   })

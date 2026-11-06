@@ -426,8 +426,6 @@ export const makeTransientRetry = Effect.fn("@llm4ts/flow/TransientRetry.make")(
       retryStream(underlying.executeStream(prompt), "stream", options, events),
     executeStreamWithHistory: (messages) =>
       retryStream(underlying.executeStreamWithHistory(messages), "stream", options, events),
-    executeWithTools: (prompt, tools) =>
-      retryEffect(underlying.executeWithTools(prompt, tools), "tools", options, events),
     executeStructured: (prompt, schema, jsonSchema) =>
       retryStructured(
         prompt,

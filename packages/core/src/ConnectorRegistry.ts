@@ -170,18 +170,3 @@ export const makeConnectorRegistry = (
     healthCheckAll
   }
 }
-
-export const resolveConnector = (
-  config: ConnectorConfig
-): Effect.Effect<ConnectorShape, LlmError, ConnectorRegistry> =>
-  Effect.flatMap(ConnectorRegistry, (registry) => registry.resolve(config))
-
-export const resolveApiConnector = (
-  config: ApiConnectorConfig
-): Effect.Effect<ApiConnectorShape, LlmError, ConnectorRegistry> =>
-  Effect.flatMap(ConnectorRegistry, (registry) => registry.resolveApi(config))
-
-export const resolveCliConnector = (
-  config: CliConnectorConfig
-): Effect.Effect<CliConnectorShape, LlmError, ConnectorRegistry> =>
-  Effect.flatMap(ConnectorRegistry, (registry) => registry.resolveCli(config))

@@ -230,7 +230,6 @@ export const transcriptSeat = (
       const { input, extra } = chatInput(messages)
       return recorded(opened(input, extra), service.executeStreamWithHistory(messages))
     },
-    executeWithTools: (prompt, tools) => once(prompt, service.executeWithTools(prompt, tools)),
     executeStructured: (prompt, schema, jsonSchema) =>
       once(prompt, service.executeStructured(prompt, schema, jsonSchema)),
     executeStructuredWithUsage: (prompt, schema, jsonSchema) =>

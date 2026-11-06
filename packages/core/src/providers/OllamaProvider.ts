@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { makeApiConnector, type ApiConnectorShape } from "../Connector.ts"
-import { ConfigError, InvalidRequestError, ParseError, type LlmError } from "../Errors.ts"
+import { ConfigError, ParseError, type LlmError } from "../Errors.ts"
 import type { HttpClientShape } from "../HttpClient.ts"
 import type { StructuredResult } from "../LlmService.ts"
 import {
@@ -224,12 +224,6 @@ export const makeOllamaProvider = (
     id: ConnectorIds.Ollama,
     executeStream: (prompt) => generateStream(prompt),
     executeStreamWithHistory: (messages) => chatStream(ollamaHistory(messages)),
-    executeWithTools: () =>
-      Effect.fail(
-        InvalidRequestError.make({
-          message: "Ollama provider does not support tool calling"
-        })
-      ),
     executeStructuredWithUsage,
     isAvailable
   })

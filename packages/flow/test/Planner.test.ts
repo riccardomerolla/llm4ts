@@ -15,7 +15,6 @@ const unused = InvalidRequestError.make({ message: "unused" })
 const structuredService = (value: unknown, prompt: Ref.Ref<string>): LlmServiceShape => ({
   executeStream: (_text) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
-  executeWithTools: (_text, _tools) => Effect.fail(unused),
   executeStructured: (text, schema, _jsonSchema) =>
     Ref.set(prompt, text).pipe(
       Effect.andThen(Schema.decodeUnknownEffect(schema)(value).pipe(Effect.orDie))

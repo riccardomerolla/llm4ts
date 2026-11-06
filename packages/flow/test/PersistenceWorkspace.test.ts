@@ -11,7 +11,6 @@ import {
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
 import { makeMemoryWorkspace } from "@llm4ts/flow/Workspace"
-import { workspaceTools } from "@llm4ts/flow/WorkspaceTools"
 
 describe("atomic plain-file and versioned persistence", () => {
   it.effect("saves, loads, resumes, and removes canonical Markdown plans", () =>
@@ -125,39 +124,6 @@ describe("in-memory bounded workspace", () => {
       assert.strictEqual(traversal._tag, "WorkspacePath")
       assert.strictEqual(oversize._tag, "WorkspaceLimit")
       assert.strictEqual(overflow._tag, "WorkspaceLimit")
-    })
-  )
-
-  it.effect("exposes bounded workspace operations as catalog-ready tools", () =>
-    Effect.gen(function* () {
-      const workspace = yield* makeMemoryWorkspace()
-      const tools = workspaceTools(workspace)
-      const write = tools.find((tool) => tool.name === "workspace_write")
-      const read = tools.find((tool) => tool.name === "workspace_read")
-      const validate = tools.find((tool) => tool.name === "workspace_validate_json")
-
-      assert.isDefined(write)
-      assert.isDefined(read)
-      assert.isDefined(validate)
-      if (write !== undefined && read !== undefined && validate !== undefined) {
-        yield* write.execute({
-          path: "data.json",
-          contents: '{"ok":true}'
-        })
-        assert.strictEqual(yield* read.execute({ path: "data.json" }), '{"ok":true}')
-        assert.deepStrictEqual(yield* validate.execute({ path: "data.json" }), { valid: true })
-      }
-      assert.deepStrictEqual(
-        tools.map((tool) => tool.name),
-        [
-          "workspace_read",
-          "workspace_write",
-          "workspace_append",
-          "workspace_discover",
-          "workspace_search",
-          "workspace_validate_json"
-        ]
-      )
     })
   )
 })

@@ -1,5 +1,4 @@
 import * as Schema from "effect/Schema"
-import { JsonSchema } from "../Models.ts"
 
 /** A prompt-cache breakpoint (ADR 0029): the prefix up to this block is cached. */
 export class AnthropicCacheControl extends Schema.Class<AnthropicCacheControl>(
@@ -53,52 +52,6 @@ export class AnthropicUsage extends Schema.Class<AnthropicUsage>("AnthropicUsage
 export class AnthropicResponse extends Schema.Class<AnthropicResponse>("AnthropicResponse")({
   id: Schema.optionalKey(Schema.String),
   content: Schema.Array(AnthropicContentBlock),
-  model: Schema.optionalKey(Schema.String),
-  usage: Schema.optionalKey(AnthropicUsage),
-  stop_reason: Schema.optionalKey(Schema.NullOr(Schema.String))
-}) {}
-
-export class AnthropicToolInputSchema extends Schema.Class<AnthropicToolInputSchema>(
-  "AnthropicToolInputSchema"
-)({
-  type: Schema.String,
-  properties: JsonSchema,
-  required: Schema.optionalKey(Schema.Array(Schema.String))
-}) {}
-
-export class AnthropicTool extends Schema.Class<AnthropicTool>("AnthropicTool")({
-  name: Schema.String,
-  description: Schema.String,
-  input_schema: AnthropicToolInputSchema
-}) {}
-
-export class AnthropicContentBlockFull extends Schema.Class<AnthropicContentBlockFull>(
-  "AnthropicContentBlockFull"
-)({
-  type: Schema.String,
-  text: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  id: Schema.optionalKey(Schema.String),
-  name: Schema.optionalKey(Schema.String),
-  input: Schema.optionalKey(Schema.Json)
-}) {}
-
-export class AnthropicRequestWithTools extends Schema.Class<AnthropicRequestWithTools>(
-  "AnthropicRequestWithTools"
-)({
-  model: Schema.String,
-  max_tokens: Schema.Int,
-  messages: Schema.Array(AnthropicMessage),
-  tools: Schema.Array(AnthropicTool),
-  temperature: Schema.optionalKey(Schema.Number),
-  system: Schema.optionalKey(Schema.Union([Schema.String, Schema.Array(AnthropicTextBlock)])),
-  output_config: Schema.optionalKey(AnthropicOutputConfig)
-}) {}
-
-export class AnthropicResponseWithTools extends Schema.Class<AnthropicResponseWithTools>(
-  "AnthropicResponseWithTools"
-)({
-  id: Schema.optionalKey(Schema.String),
-  content: Schema.Array(AnthropicContentBlockFull),
   model: Schema.optionalKey(Schema.String),
   usage: Schema.optionalKey(AnthropicUsage),
   stop_reason: Schema.optionalKey(Schema.NullOr(Schema.String))

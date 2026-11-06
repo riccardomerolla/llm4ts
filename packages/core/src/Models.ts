@@ -223,30 +223,8 @@ export const withConfigDefaults = (config: LlmConfig): LlmConfig => {
   return baseUrl === undefined ? config : new LlmConfig({ ...config, baseUrl })
 }
 
-export class ToolCall extends Schema.Class<ToolCall>("ToolCall")({
-  id: Schema.String,
-  name: Schema.String,
-  arguments: Schema.String
-}) {}
-
-const emptyToolCalls: ReadonlyArray<ToolCall> = Object.freeze([])
-
-export class ToolCallResponse extends Schema.Class<ToolCallResponse>("ToolCallResponse")({
-  content: Schema.optionalKey(Schema.String),
-  toolCalls: Schema.Array(ToolCall).pipe(
-    Schema.withConstructorDefault(Effect.succeed(emptyToolCalls))
-  ),
-  finishReason: Schema.String
-}) {}
-
 export const JsonSchema = Schema.Record(Schema.String, Schema.Json)
 export type JsonSchema = typeof JsonSchema.Type
-
-export class ToolDefinition extends Schema.Class<ToolDefinition>("ToolDefinition")({
-  name: Schema.String,
-  description: Schema.String,
-  parameters: JsonSchema
-}) {}
 
 export const Availability = Schema.Literals(["Healthy", "Degraded", "Unhealthy", "Unknown"])
 export type Availability = typeof Availability.Type

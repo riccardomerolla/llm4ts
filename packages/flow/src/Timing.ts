@@ -466,16 +466,6 @@ export const timedSeat = (
       timedStream(events, label, options, prompt(text), service.executeStream(text)),
     executeStreamWithHistory: (messages) =>
       timedStream(events, label, options, messages, service.executeStreamWithHistory(messages)),
-    executeWithTools: (text, tools) =>
-      tracedEffect(
-        events,
-        label,
-        options,
-        text,
-        service.executeWithTools(text, tools),
-        model,
-        nothing
-      ),
     executeStructured: (text, schema, jsonSchema) =>
       tracedEffect(
         events,

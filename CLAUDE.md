@@ -1,15 +1,19 @@
 # llm4ts Engineering Guide
 
-`llm4ts` is the Effect-TS counterpart of the owned `llm4zio` library.
+`llm4ts` is an Effect-TS library for agent-agnostic engineering workflows. It
+began as a port of `llm4zio`; parity with it is no longer a goal.
 
 ## Start Here
 
-1. Read `plan.md` for scope, package boundaries, pinned revisions, and delivery
-   phases.
-2. Read the relevant contract in `docs/csp/`.
-3. Inspect the pinned `llm4zio` source and tests when implementing parity.
-4. For Effect work, consult `.repos/effect` and the repository Effect skill
+1. Read the ADRs in `docs/adr/` that cover the area you are changing. They are
+   the living design record.
+2. Read `docs/architecture.md` and `docs/api.md` for package boundaries and
+   the public surface.
+3. For Effect work, consult `.repos/effect` and the repository Effect skill
    before coding.
+
+`plan.md`, `docs/csp/`, `docs/CSP_STATUS.md` and `docs/parity.md` are
+historical, frozen at 2.54.1. Do not follow or update them.
 
 ## Package Graph
 
@@ -54,8 +58,8 @@ Extend the existing seams instead of writing one-off variants:
 - Tests use the in-src fakes (core: process/HTTP/temp-file fakes; flow:
   `makeMemoryPlainFileStore`, `makeMemoryWorkspace`)
 
-Behavior divergences from pinned `llm4zio` v4.2.0 require an ADR
-(`docs/adr/`) or a `docs/parity.md` note.
+A design decision that changes documented behaviour is recorded as an ADR
+(`docs/adr/`).
 
 ## Verification
 
@@ -65,8 +69,13 @@ Run:
 pnpm typecheck
 pnpm lint
 pnpm format:check
+pnpm unused
 pnpm test
 ```
+
+`pnpm unused` fails when a module under `packages/*/src` has no production
+importer; remove it, use it, or list it in `scripts/unused-modules.mjs` with
+the reason it stays.
 
 `pnpm build && node scripts/pack-smoke.mjs` additionally verifies the
 published artifacts resolve for an external consumer.

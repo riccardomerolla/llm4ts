@@ -66,7 +66,6 @@ const red = (title: string): ReviewResult =>
 const reasoner: LlmServiceShape = {
   executeStream: (_prompt) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: <A, E, RD, RE>(
     _prompt: string,
     schema: Schema.ConstraintCodec<A, E, RD, RE>
@@ -81,7 +80,6 @@ const coder = (reply: string): LlmServiceShape => ({
   executeStream: (_prompt) => Stream.make(LlmChunk.make({ delta: reply, finishReason: "stop" })),
   executeStreamWithHistory: (_messages) =>
     Stream.make(LlmChunk.make({ delta: reply, finishReason: "stop" })),
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) => Effect.fail(unused),
   scoreLabels: unsupportedScoreLabels,
@@ -111,7 +109,6 @@ const scriptedCoder = (
 const cleanReviewer: LlmServiceShape = {
   executeStream: (_prompt) => Stream.empty,
   executeStreamWithHistory: (_messages) => Stream.empty,
-  executeWithTools: (_prompt, _tools) => Effect.fail(unused),
   executeStructured: (_prompt, schema, _jsonSchema) =>
     Schema.decodeUnknownEffect(schema)({ issues: [], summary: "clean" }).pipe(Effect.orDie),
   executeStructuredWithUsage: (_prompt, schema, _jsonSchema) =>

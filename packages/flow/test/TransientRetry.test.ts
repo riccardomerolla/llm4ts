@@ -63,8 +63,6 @@ const makeCountingService = (
             )
           )
         ),
-      executeWithTools: (_prompt, _tools) =>
-        Effect.fail(InvalidRequestError.make({ message: "not used" })),
       executeStructured: (_prompt, _schema, _jsonSchema) =>
         Effect.fail(InvalidRequestError.make({ message: "not used" })),
       executeStructuredWithUsage: (_prompt, _schema, _jsonSchema) =>
@@ -253,8 +251,6 @@ describe("TransientRetry", () => {
           executeStream: (_prompt) => Stream.fail(InvalidRequestError.make({ message: "unused" })),
           executeStreamWithHistory: (_messages) =>
             Stream.fail(InvalidRequestError.make({ message: "unused" })),
-          executeWithTools: (_prompt, _tools) =>
-            Effect.fail(InvalidRequestError.make({ message: "unused" })),
           executeStructured: (prompt, schema, _jsonSchema) => attempt(prompt, schema),
           executeStructuredWithUsage: (prompt, schema, _jsonSchema) =>
             attempt(prompt, schema).pipe(Effect.map((value) => [value, undefined, undefined])),

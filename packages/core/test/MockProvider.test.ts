@@ -82,13 +82,10 @@ describe("MockProvider", () => {
     })
   )
 
-  it.effect("returns deterministic tool-free and structured responses", () =>
+  it.effect("returns deterministic structured responses", () =>
     Effect.gen(function* () {
-      const tools = yield* provider.executeWithTools("test", [])
       const structured = yield* provider.executeStructured("test", resultSchema, resultJsonSchema)
 
-      assert.strictEqual(tools.content, mockResponse())
-      assert.deepStrictEqual(tools.toolCalls, [])
       assert.deepStrictEqual(structured, {
         result: "mock structured response"
       })

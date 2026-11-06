@@ -6,7 +6,6 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { InvalidRequestError } from "@llm4ts/core/Errors"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { ConnectorCapabilities, LlmChunk } from "@llm4ts/core/Models"
@@ -43,8 +42,6 @@ import {
 } from "../lib/epic-mvp.ts"
 import type { EpicUnitContext } from "../lib/epic-stories.ts"
 import { loadRosterDocument } from "@llm4ts/runner/ExecutorRoster"
-
-const unused = InvalidRequestError.make({ message: "unused in test" })
 const unusedFlow: Effect.Effect<never, FlowError> = Effect.fail(
   FlowAborted.make({ message: "unused in test" })
 )
@@ -61,7 +58,6 @@ const seat = (value: unknown, turns?: Ref.Ref<ReadonlyArray<string>>): LlmServic
   return {
     executeStream: answer,
     executeStreamWithHistory: (messages) => answer(messages.at(-1)?.content ?? ""),
-    executeWithTools: () => Effect.fail(unused),
     executeStructured: (_prompt, schema) =>
       Schema.decodeUnknownEffect(schema)(value).pipe(Effect.orDie),
     executeStructuredWithUsage: (_prompt, schema) =>

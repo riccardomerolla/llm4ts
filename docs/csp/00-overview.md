@@ -1,5 +1,9 @@
 # Clean Specification Pack: Rust LLM Flow Library
 
+> **Historical.** Frozen at 2.54.1. Parity with `llm4zio` was the initial
+> milestone and is no longer maintained. The ADRs in `docs/adr/` are the
+> living design record; do not update this document.
+
 ## Purpose
 
 This pack describes a Rust implementation of an LLM orchestration library for software-development automation. The library exposes a reusable async LLM client abstraction, backend connectors for API and CLI providers, a tool-calling layer, observability hooks, and a flow runner for agentic development workflows such as plan, implement, review, commit, push, and pull-request creation.

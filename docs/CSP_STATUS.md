@@ -1,5 +1,9 @@
 # CSP implementation status
 
+> **Historical.** Frozen at 2.54.1. Parity with `llm4zio` was the initial
+> milestone and is no longer maintained. The ADRs in `docs/adr/` are the
+> living design record; do not update this document.
+
 This status applies to the Effect-TS workspace. The repository owner authorized
 the permissive clean-room strategy: the CSP remains the architectural contract,
 and the owned `llm4zio` v4.2.0 source and tests may be consulted to refine

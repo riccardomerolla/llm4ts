@@ -1,7 +1,7 @@
 # @llm4ts/core
 
 Effect-native LLM contracts: backend-neutral messages, responses, streaming
-chunks, usage, health, structured output, tools, evaluation, and the connector
+chunks, usage, health, structured output, evaluation, and the connector
 registry. This is the foundation package of [llm4ts](https://github.com/riccardomerolla/llm4ts).
 
 ## Install
