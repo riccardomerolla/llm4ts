@@ -64,6 +64,17 @@ export const soapCall = defineTool({
       const context = yield* ToolContext
       const live = yield* SoapTransport
       const fail = (message: string) => new ToolError({ tool: name, message })
+      // Each name becomes a path segment under .llm4ts/soap/: one plain word each.
+      for (const [field, value] of [
+        ["service", input.service],
+        ["operation", input.operation],
+        ["request", input.request],
+        ["env", input.env ?? "dev"]
+      ] as const) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u.test(value) || value.includes("..")) {
+          return yield* fail(`--${field} '${value}' is not a plain name`)
+        }
+      }
       const workspace = yield* makeNodeWorkspace(context.projectRoot).pipe(
         Effect.mapError((error) => fail(error.message))
       )

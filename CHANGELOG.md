@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.2.1
+
+- **Endpoint tools, hardened** (from the security review of 3.2.0).
+  `http-call` refuses a `--path` that carries a scheme, starts with `//` or
+  a backslash, or resolves outside the endpoint's origin, so the profile's
+  credentials never travel to another host; the body is redacted before it
+  is cut to the preview, and the redaction list covers the raw token, and
+  for Basic the decoded `user:password`, the password and the user. A
+  named endpoint's `--env` must be `dev`, `test` or `uat`; `soap-call`'s
+  `--service`, `--operation` and `--request` must be plain names, since
+  each becomes a path segment.
+
 ## 3.2.0
 
 - **Endpoint tools (ADR 0048, second half).** `Transport` and `Auth` move

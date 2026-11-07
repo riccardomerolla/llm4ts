@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type { PlainFileStoreShape } from "../Persistence.ts"
 import type { AuthProfile, AuthProfileError } from "./Auth.ts"
-import { decodeAuthProfile, profileFileName } from "./Auth.ts"
+import { Environment, decodeAuthProfile, profileFileName } from "./Auth.ts"
 
 /**
  * Named endpoints (ADR 0048, 3.2): `<project>/.llm4ts/endpoints/<name>/auth.json`,
@@ -33,6 +33,12 @@ export const loadEndpointProfile = (
   Effect.gen(function* () {
     if (!endpointNamePattern.test(name)) {
       return yield* new EndpointError({ endpoint: name, message: "not an endpoint name" })
+    }
+    if (env !== undefined && !Schema.is(Environment)(env)) {
+      return yield* new EndpointError({
+        endpoint: name,
+        message: `env must be one of ${Environment.literals.join(", ")}, got '${env}'`
+      })
     }
     const path = endpointProfilePath(projectRoot, name, env)
     const text = yield* files

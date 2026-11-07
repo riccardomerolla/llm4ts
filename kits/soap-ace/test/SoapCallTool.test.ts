@@ -82,6 +82,12 @@ describe("soap-call kit tool", () => {
         assert.strictEqual(mutating.status, 1, mutating.stdout + mutating.stderr)
         const refused = decode(mutating.stdout.trim())
         assert.match(refused.issues[0]?.detail ?? "", /^refused: /)
+        const traversal = run(
+          project,
+          JSON.stringify({ service: "../etc", operation: "cercaConti", request: "probe" })
+        )
+        assert.strictEqual(traversal.status, 2)
+        assert.match(traversal.stdout, /--service '\.\.\/etc' is not a plain name/)
         const unknown = run(
           project,
           JSON.stringify({ service: "Nope", operation: "x", request: "y" })

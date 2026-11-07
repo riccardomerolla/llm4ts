@@ -332,6 +332,58 @@ describe("http-call", () => {
       )
       const bad = yield* Effect.flip(services(httpCall.execute({ endpoint: "../x" })))
       assert.match(bad.message, /not an endpoint name/)
+      const env = yield* Effect.flip(services(httpCall.execute({ endpoint: "bank", env: "../.." })))
+      assert.match(env.message, /env must be one of dev, test, uat/)
+    })
+  )
+
+  it.effect("keeps every call inside the endpoint's origin and redacts raw Basic secrets", () =>
+    Effect.gen(function* () {
+      const basic = JSON.stringify({
+        environment: "test",
+        endpoint: "https://api.test/v1/",
+        call: { auth: { scheme: "basic", user: "svc", password: "env:SVC_PASS" } }
+      })
+      const files = yield* withFiles({ "/project/.llm4ts/endpoints/bank/auth.test.json": basic })
+      const fake = yield* makeFakeSoapTransport(() =>
+        Effect.succeed({
+          status: 200,
+          headers: {},
+          body: new TextEncoder().encode(
+            '{"user":"svc","password":"hunter22","pair":"svc:hunter22"}'
+          ),
+          elapsedMs: 1
+        })
+      )
+      const services = <A, E>(effect: Effect.Effect<A, E, ToolServices>) =>
+        effect.pipe(
+          Effect.provideService(PlainFileStore, files),
+          Effect.provideService(ToolContext, {
+            projectRoot: "/project",
+            environment: { SVC_PASS: "hunter22" }
+          }),
+          Effect.provideService(SoapTransport, fake.transport)
+        )
+      for (const path of [
+        "https://evil.test/x",
+        "//evil.test/x",
+        "\\\\evil.test",
+        "https://api.test:8443/"
+      ]) {
+        const refused = yield* Effect.flip(
+          services(httpCall.execute({ endpoint: "bank", env: "test", path }))
+        )
+        assert.match(refused.message, /not another URL|leaves https:\/\/api\.test/, path)
+      }
+      assert.strictEqual(yield* Effect.map(fake.requests, (all) => all.length), 0)
+      const ok = yield* services(
+        httpCall.execute({ endpoint: "bank", env: "test", path: "../other" })
+      )
+      assert.isTrue(ok.ok)
+      const text = JSON.stringify(ok.data)
+      assert.notInclude(text, "hunter22")
+      assert.notInclude(text, "svc:")
+      assert.include(text, "[REDACTED]")
     })
   )
 })

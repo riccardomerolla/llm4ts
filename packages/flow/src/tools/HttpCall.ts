@@ -22,6 +22,27 @@ const Input = Schema.Struct({
 const previewChars = 2_000
 
 /**
+ * Every form a header secret can take in a body: the header value, the
+ * token after its scheme word, and for Basic the decoded `user:password`,
+ * the password and the user on their own.
+ */
+const secretForms = (headerValues: ReadonlyArray<string>): ReadonlyArray<string> =>
+  headerValues.flatMap((value) => {
+    const forms = [value]
+    const match = /^(\S+)\s+(.+)$/u.exec(value)
+    if (match?.[2] !== undefined) {
+      forms.push(match[2])
+      if (match[1]?.toLowerCase() === "basic") {
+        const decoded = Buffer.from(match[2], "base64").toString("utf8")
+        const colon = decoded.indexOf(":")
+        forms.push(decoded)
+        if (colon > 0) forms.push(decoded.slice(colon + 1), decoded.slice(0, colon))
+      }
+    }
+    return forms.filter((form) => form.length >= 4)
+  })
+
+/**
  * A GET against a named endpoint (ADR 0048): the profile supplies the base
  * URL, auth, TLS and proxy; the tool adds a path, checks the status and
  * returns a redacted preview of the body. Read-and-probe only: no other
@@ -69,10 +90,23 @@ export const httpCall = defineTool({
       if (profile.endpoint === undefined) {
         return yield* fail(`endpoint ${input.endpoint} has no "endpoint" URL in its profile`)
       }
-      const url = yield* Effect.try({
-        try: () => new URL(input.path, profile.endpoint).toString(),
+      // The path may only move within the endpoint's origin: a scheme, a
+      // protocol-relative `//host` or a backslash would send the profile's
+      // credentials elsewhere.
+      if (/^[a-z][a-z0-9+.-]*:/iu.test(input.path) || /^[/\\]{2}/u.test(input.path)) {
+        return yield* fail(`path '${input.path}' must be relative to the endpoint, not another URL`)
+      }
+      const base = new URL(profile.endpoint)
+      const resolved = yield* Effect.try({
+        try: () => new URL(input.path, base),
         catch: () => fail(`cannot resolve path '${input.path}' against ${profile.endpoint}`)
       })
+      if (resolved.origin !== base.origin || resolved.username !== "" || resolved.password !== "") {
+        return yield* fail(
+          `path '${input.path}' leaves ${base.origin}; a tool may only probe the endpoint it was given`
+        )
+      }
+      const url = resolved.toString()
       const side = yield* resolveSide(
         nodeSecretSource(context.environment),
         profile.call ?? profile.fetch
@@ -93,9 +127,11 @@ export const httpCall = defineTool({
         .pipe(
           Effect.mapError((error) => fail(`${displayUrl(url)}: ${error.reason}: ${error.detail}`))
         )
-      const secrets = side.headers.map(([, value]) => Redacted.value(value))
+      const secrets = secretForms(side.headers.map(([, value]) => Redacted.value(value)))
       const body = new TextDecoder("utf8", { fatal: false }).decode(response.body)
-      const preview = redactText(body.slice(0, previewChars), { secrets })
+      // Redact the whole body first, so a secret cut by the preview boundary
+      // cannot leak half of itself.
+      const preview = redactText(body, { secrets }).slice(0, previewChars)
       const expected =
         input.expect > 0
           ? response.status === input.expect
