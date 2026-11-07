@@ -1088,4 +1088,10 @@ export const runShellCommand = (
   // declared parser would reject; it is routed on the raw arguments (ADR 0048).
   argv[0] === "tool" && argv[1] === "run" && argv[2] !== undefined && !argv[2].startsWith("-")
     ? runToolRun(argv[2], argv.slice(3))
-    : Command.runWith(shellCommand, { version: packageVersion })(argv)
+    : // `llm4ts tool <name> …` is `run` left out, the form the brief quotes.
+      argv[0] === "tool" &&
+        argv[1] !== undefined &&
+        !argv[1].startsWith("-") &&
+        !["list", "describe", "run"].includes(argv[1])
+      ? runToolRun(argv[1], argv.slice(2))
+      : Command.runWith(shellCommand, { version: packageVersion })(argv)

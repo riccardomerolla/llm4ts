@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.2.2
+
+- **`llm4ts tool <name> …` works without `run`**, the form the brief
+  quotes to a coder and `tool list` prints for presets; 3.2.1 accepted only
+  `llm4ts tool run <name>`.
+
 ## 3.2.1
 
 - **Endpoint tools, hardened** (from the security review of 3.2.0).

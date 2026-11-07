@@ -617,6 +617,15 @@ describe("the tool command", () => {
         assert.strictEqual(bad.code, 1)
         assert.match(bad.output, /^FAIL json-validate: 1 issue/)
         assert.include(bad.output, "$.id: expected string, found")
+        const short = yield* runTool([
+          "json-validate",
+          "--schema",
+          join(base, "schema.json"),
+          "--document",
+          join(base, "good.json")
+        ])
+        assert.strictEqual(short.code, 0, String(short.exit))
+        assert.include(short.output, '"ok":true')
         const usage = yield* runTool(["run", "json-validate", "--nope"])
         assert.strictEqual(usage.exit._tag, "Failure")
         assert.include(String(usage.exit), "unknown argument '--nope'")
