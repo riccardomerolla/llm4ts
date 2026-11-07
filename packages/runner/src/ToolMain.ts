@@ -1,6 +1,8 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { ToolReport, ToolSpec, specOf, type ToolShape } from "@llm4ts/flow/tools/Tool"
+import * as Layer from "effect/Layer"
+import { SoapTransport, makeNodeSoapTransport } from "@llm4ts/flow/endpoint/Transport"
+import { ToolContext, ToolReport, ToolSpec, specOf, type ToolShape } from "@llm4ts/flow/tools/Tool"
 import { NodePlainFileStoreLive } from "./NodePlainFileStore.ts"
 
 /**
@@ -9,7 +11,9 @@ import { NodePlainFileStoreLive } from "./NodePlainFileStore.ts"
  * `--describe` prints the `ToolSpec`; otherwise the parsed arguments arrive
  * as one JSON object on stdin and the `ToolReport` goes out on stdout. Exit
  * 0 when the report is ok, 1 when it carries issues, 2 when the tool could
- * not run (the error is JSON on stdout too, `{"error": …}`).
+ * not run (the error is JSON on stdout too, `{"error": …}`). `--project
+ * <root>` names the project the tool runs for (default: the current
+ * directory); secrets resolve from this process's environment.
  */
 export const runToolMain = (tool: ToolShape): void => {
   if (process.argv.includes("--describe")) {
@@ -31,9 +35,20 @@ export const runToolMain = (tool: ToolShape): void => {
       process.exitCode = 2
       return
     }
+    const projectFlag = process.argv.indexOf("--project")
+    const projectRoot =
+      projectFlag >= 0 && process.argv[projectFlag + 1] !== undefined
+        ? process.argv[projectFlag + 1]
+        : process.cwd()
     return Effect.runPromise(
       tool.execute(values).pipe(
-        Effect.provide(NodePlainFileStoreLive),
+        Effect.provide(
+          Layer.mergeAll(
+            NodePlainFileStoreLive,
+            Layer.succeed(ToolContext)({ projectRoot, environment: process.env }),
+            Layer.succeed(SoapTransport)(makeNodeSoapTransport())
+          )
+        ),
         Effect.match({
           onFailure: (error) => {
             process.stdout.write(`${JSON.stringify({ error: error.message })}\n`)

@@ -19,6 +19,17 @@ export list; the following modules are the main entry points.
   worktree's project through git and writes the brief paragraph;
   `@llm4ts/runner/ToolMain` is the main of a kit tool file. The CLI is
   `llm4ts tool list | describe <name> | run <name> [--flag value]`.
+  `HttpCall` (3.2) GETs a path of a named endpoint; `ToolContext` gives a
+  tool its project root and environment.
+- `@llm4ts/flow/endpoint/*` (3.2, ADR 0048; promoted from the soap-ace kit,
+  ADR 0024): `Auth` is the endpoint profile — `auth.json` or
+  `auth.<env>.json` with `environment`, `endpoint`, `call`/`fetch` sides
+  (auth, tls, proxy), WS-Security and STS for SOAP, `mutating` — with
+  `env:NAME` / `file:path` secret references resolved to `Redacted` values;
+  `Transport` is the `SoapTransport` service (`send`, `peerChain`) with the
+  Node implementation (`node:https`, HTTP CONNECT proxies, CA material added
+  to the system roots) and a fake; `Endpoints` loads a named endpoint from
+  `<project>/.llm4ts/endpoints/<name>/`.
 - `@llm4ts/core/eval/*`: checks, judges, evaluators, and suites.
   `judgeWithJudgment(judgment, dimensions)` is the rubric judge over the
   Judgment service: one Score question per dimension.

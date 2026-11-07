@@ -61,3 +61,18 @@ captures real units, and `llm4ts kits` shows it. Chapter 5 of the
 [getting started guide](../docs/guide/05-your-first-pack.md) walks through
 the manifest; [`kits/test/packs.test.ts`](test/packs.test.ts) states what
 the flows require of a shipped pack.
+
+### Tools
+
+A kit may ship tools (ADR 0048): one file per tool under `tools/`, run by
+`llm4ts tool <name>` as a Node child. The file builds the tool with
+`defineTool` from `@llm4ts/flow/tools/Tool` — a name, a one-line purpose,
+the argument table, an input `Schema` and an Effect `run` that reads files
+through `PlainFileStore`, learns the project from `ToolContext`, and may call
+a named endpoint through `SoapTransport` — and ends with
+`runToolMain(tool)` from `@llm4ts/runner/ToolMain`. The soap-ace kit's
+[`tools/xml-validate.ts`](soap-ace/tools/xml-validate.ts) and
+[`tools/soap-call.ts`](soap-ace/tools/soap-call.ts) are the models. A pack
+then names presets over it in `## Tools`, and every story's brief quotes
+them. Tools are discovered through the same three tiers as flows, so a tool
+in `.llm4ts/kits/<name>/tools/` shadows a built-in of the same name.

@@ -1,8 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { PlainFileStore, makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import { SoapTransport, makeFakeSoapTransport } from "@llm4ts/flow/endpoint/Transport"
+import {
+  PlainFileStore,
+  makeMemoryPlainFileStore,
+  type PlainFileStoreShape
+} from "@llm4ts/flow/Persistence"
 import { builtinTool, builtinTools } from "@llm4ts/flow/tools/Builtin"
 import { diff } from "@llm4ts/flow/tools/Diff"
+import { httpCall } from "@llm4ts/flow/tools/HttpCall"
 import { jsonValidate } from "@llm4ts/flow/tools/JsonValidate"
 import {
   ToolReport,
@@ -11,11 +17,32 @@ import {
   renderReport,
   renderSpec,
   renderUsage,
-  specOf
+  specOf,
+  ToolContext,
+  type ToolContextShape,
+  type ToolServices
 } from "@llm4ts/flow/tools/Tool"
 
 const withFiles = (files: Readonly<Record<string, string>>) =>
   Effect.map(makeMemoryPlainFileStore(files), (memory) => memory.store)
+
+const context: ToolContextShape = { projectRoot: "/project", environment: {} }
+
+/** Runs a tool with memory files, a fixed context and a transport that answers 404. */
+const provided = <A, E>(
+  effect: Effect.Effect<A, E, ToolServices>,
+  files: PlainFileStoreShape
+): Effect.Effect<A, E> =>
+  Effect.gen(function* () {
+    const fake = yield* makeFakeSoapTransport(() =>
+      Effect.succeed({ status: 404, headers: {}, body: new Uint8Array(), elapsedMs: 1 })
+    )
+    return yield* effect.pipe(
+      Effect.provideService(PlainFileStore, files),
+      Effect.provideService(ToolContext, context),
+      Effect.provideService(SoapTransport, fake.transport)
+    )
+  })
 
 describe("tool contract", () => {
   const spec = specOf(diff)
@@ -111,7 +138,7 @@ describe("tool contract", () => {
   it("lists the built-in tools by name", () => {
     assert.deepStrictEqual(
       builtinTools.map((tool) => tool.name),
-      ["json-validate", "diff"]
+      ["json-validate", "diff", "http-call"]
     )
     assert.strictEqual(builtinTool("diff")?.name, "diff")
     assert.isUndefined(builtinTool("nope"))
@@ -152,12 +179,12 @@ describe("json-validate", () => {
       })
       const good = yield* jsonValidate
         .execute({ document: "good.json", schema: "schema.json" })
-        .pipe(Effect.provideService(PlainFileStore, files))
+        .pipe((effect) => provided(effect, files))
       assert.isTrue(good.ok)
       assert.strictEqual(good.summary, "good.json is valid against schema.json")
       const bad = yield* jsonValidate
         .execute({ document: "bad.json", schema: "schema.json" })
-        .pipe(Effect.provideService(PlainFileStore, files))
+        .pipe((effect) => provided(effect, files))
       assert.isFalse(bad.ok)
       const details = bad.issues.map((issue) => `${issue.path}: ${issue.detail}`)
       assert.isTrue(details.some((line) => /missing required property "id"/.test(line)))
@@ -175,13 +202,13 @@ describe("json-validate", () => {
       })
       const report = yield* jsonValidate
         .execute({ document: "money.json", openapi: "openapi.json", component: "Money" })
-        .pipe(Effect.provideService(PlainFileStore, files))
+        .pipe((effect) => provided(effect, files))
       assert.isFalse(report.ok)
       assert.strictEqual(report.issues[0]?.path, "$.amount")
       const unknown = yield* Effect.flip(
         jsonValidate
           .execute({ document: "money.json", openapi: "openapi.json", component: "Nope" })
-          .pipe(Effect.provideService(PlainFileStore, files))
+          .pipe((effect) => provided(effect, files))
       )
       assert.match(unknown.message, /no component schema 'Nope'; known: Amount, Money/)
     })
@@ -193,19 +220,17 @@ describe("json-validate", () => {
       const missing = yield* Effect.flip(
         jsonValidate
           .execute({ document: "absent.json", schema: "schema.json" })
-          .pipe(Effect.provideService(PlainFileStore, files))
+          .pipe((effect) => provided(effect, files))
       )
       assert.strictEqual(missing.message, "no such file: absent.json")
       const broken = yield* Effect.flip(
         jsonValidate
           .execute({ document: "broken.json", schema: "schema.json" })
-          .pipe(Effect.provideService(PlainFileStore, files))
+          .pipe((effect) => provided(effect, files))
       )
       assert.match(broken.message, /broken\.json is not valid JSON/)
       const none = yield* Effect.flip(
-        jsonValidate
-          .execute({ document: "schema.json" })
-          .pipe(Effect.provideService(PlainFileStore, files))
+        jsonValidate.execute({ document: "schema.json" }).pipe((effect) => provided(effect, files))
       )
       assert.match(none.message, /give --schema <file> or --openapi/)
     })
@@ -226,7 +251,7 @@ describe("diff tool", () => {
           ordering: "ordered",
           ignore: ""
         })
-        .pipe(Effect.provideService(PlainFileStore, files))
+        .pipe((effect) => provided(effect, files))
       assert.isFalse(ordered.ok)
       const perKey = yield* diff
         .execute({
@@ -235,7 +260,7 @@ describe("diff tool", () => {
           ordering: "per-key",
           ignore: "meta.requestId"
         })
-        .pipe(Effect.provideService(PlainFileStore, files))
+        .pipe((effect) => provided(effect, files))
       assert.strictEqual(perKey.issues.length, 1)
       assert.strictEqual(perKey.issues[0]?.path, "$.items[id=1].v")
       assert.match(perKey.issues[0]?.detail ?? "", /^changed: /)
@@ -246,9 +271,67 @@ describe("diff tool", () => {
           ordering: "ordered",
           ignore: ""
         })
-        .pipe(Effect.provideService(PlainFileStore, files))
+        .pipe((effect) => provided(effect, files))
       assert.isTrue(same.ok)
       assert.strictEqual(same.summary, "expected.json matches expected.json")
+    })
+  )
+})
+
+describe("http-call", () => {
+  const profile = JSON.stringify({
+    environment: "test",
+    endpoint: "https://api.test/v1/",
+    call: { auth: { scheme: "bearer", token: "env:BANK_TOKEN" } }
+  })
+
+  it.effect("GETs a path of a named endpoint with the profile's auth and redacts the body", () =>
+    Effect.gen(function* () {
+      const files = yield* withFiles({ "/project/.llm4ts/endpoints/bank/auth.test.json": profile })
+      const fake = yield* makeFakeSoapTransport((request) =>
+        Effect.succeed({
+          status: request.url.endsWith("/missing") ? 404 : 200,
+          headers: { "content-type": "application/json" },
+          body: new TextEncoder().encode('{"ok":true,"echo":"Bearer s3cret-token"}'),
+          elapsedMs: 7
+        })
+      )
+      const services = <A, E>(effect: Effect.Effect<A, E, ToolServices>) =>
+        effect.pipe(
+          Effect.provideService(PlainFileStore, files),
+          Effect.provideService(ToolContext, {
+            projectRoot: "/project",
+            environment: { BANK_TOKEN: "s3cret-token" }
+          }),
+          Effect.provideService(SoapTransport, fake.transport)
+        )
+      const ok = yield* services(
+        httpCall.execute({ endpoint: "bank", env: "test", path: "accounts?page=1" })
+      )
+      assert.isTrue(ok.ok)
+      assert.strictEqual(ok.summary, "https://api.test/v1/accounts answered 200 in 7 ms")
+      const data = ok.data
+      assert.isTrue(typeof data === "object" && data !== null && "bodyPreview" in data)
+      assert.notInclude(JSON.stringify(data), "s3cret-token")
+      assert.include(JSON.stringify(data), "[REDACTED]")
+      const [request] = yield* fake.requests
+      assert.strictEqual(request?.url, "https://api.test/v1/accounts?page=1")
+      assert.strictEqual(request?.method, "GET")
+      assert.strictEqual(request?.secretHeaders[0]?.[0], "authorization")
+      const missing = yield* services(
+        httpCall.execute({ endpoint: "bank", env: "test", path: "missing", expect: 200 })
+      )
+      assert.isFalse(missing.ok)
+      assert.match(missing.issues[0]?.detail ?? "", /expected status 200, got 404/)
+      const unknown = yield* Effect.flip(
+        services(httpCall.execute({ endpoint: "nope", env: "test" }))
+      )
+      assert.match(
+        unknown.message,
+        /no profile at \/project\/\.llm4ts\/endpoints\/nope\/auth\.test\.json/
+      )
+      const bad = yield* Effect.flip(services(httpCall.execute({ endpoint: "../x" })))
+      assert.match(bad.message, /not an endpoint name/)
     })
   )
 })

@@ -1,5 +1,7 @@
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import type { SoapTransport } from "../endpoint/Transport.ts"
 import { PlainFileStore } from "../Persistence.ts"
 
 /**
@@ -41,8 +43,23 @@ export interface ToolArg {
   readonly default?: string
 }
 
-/** The services a tool may use: file reads, nothing else in 3.1. */
-export type ToolServices = PlainFileStore
+export interface ToolContextShape {
+  /** The project the tool runs for: the main checkout of a worktree (`.llm4ts/` lives here). */
+  readonly projectRoot: string
+  /** The process environment, for `env:NAME` secret references; never printed. */
+  readonly environment: Readonly<Record<string, string | undefined>>
+}
+
+/** Where a tool runs: provided by the CLI, or by `runToolMain` from its arguments. */
+export class ToolContext extends Context.Service<ToolContext, ToolContextShape>()(
+  "@llm4ts/flow/tools/ToolContext"
+) {}
+
+/**
+ * The services a tool may use: file reads, its context, and the endpoint
+ * transport (3.2, ADR 0048) — nothing else.
+ */
+export type ToolServices = PlainFileStore | ToolContext | SoapTransport
 
 /** A tool with its input type erased: what a catalog holds and the CLI runs. */
 export interface ToolShape {
@@ -70,8 +87,27 @@ export interface ToolDefinition<I> {
 
 export const defineTool = <I>(definition: ToolDefinition<I>): Tool<I> => ({
   ...definition,
-  execute: (values) => Effect.flatMap(decodeToolInput(definition, values), definition.run)
+  execute: (values) =>
+    withArgDefaults(definition, values).pipe(
+      Effect.flatMap((complete) => decodeToolInput(definition, complete)),
+      Effect.flatMap(definition.run)
+    )
 })
+
+/** The argument table's defaults, coerced by kind, under every key the caller left out. */
+const withArgDefaults = (
+  tool: Pick<ToolShape, "name" | "args">,
+  values: Record<string, unknown>
+): Effect.Effect<Record<string, unknown>, ToolArgsError> =>
+  Effect.gen(function* () {
+    const complete: Record<string, unknown> = { ...values }
+    for (const [name, arg] of Object.entries(tool.args)) {
+      if (arg.default !== undefined && !(name in complete)) {
+        complete[name] = yield* coerce(tool.name, name, arg.kind, arg.default)
+      }
+    }
+    return complete
+  })
 
 /** The spec the CLI prints for `describe` and the brief quotes per preset. */
 export class ToolSpec extends Schema.Class<ToolSpec>("ToolSpec")({

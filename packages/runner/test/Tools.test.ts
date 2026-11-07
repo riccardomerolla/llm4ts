@@ -48,7 +48,7 @@ describe("tool catalog", () => {
       ])
       assert.deepStrictEqual(
         entries.map((entry) => `${entry.name}:${entry._tag}`),
-        ["diff:kit", "json-validate:builtin", "xml-validate:kit"]
+        ["diff:kit", "http-call:builtin", "json-validate:builtin", "xml-validate:kit"]
       )
       const xml = findEntry(entries, "xml-validate")
       assert.isTrue(xml?._tag === "kit" && xml.kit.tier === "project")

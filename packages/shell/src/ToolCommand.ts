@@ -24,6 +24,9 @@ import {
   type DiscoveredKit,
   type KitTierPaths
 } from "@llm4ts/runner/Kits"
+import * as Layer from "effect/Layer"
+import { SoapTransport, makeNodeSoapTransport } from "@llm4ts/flow/endpoint/Transport"
+import { ToolContext } from "@llm4ts/flow/tools/Tool"
 import { NodePlainFileStoreLive } from "@llm4ts/runner/NodePlainFileStore"
 import { openPack } from "@llm4ts/runner/Packs"
 import { ChildToolOutput } from "@llm4ts/runner/ToolMain"
@@ -156,14 +159,26 @@ const specFor = (entry: CatalogEntry): Effect.Effect<ToolSpec, ToolChildError> =
         decodeChildJson(ToolSpec, entry.name, output)
       )
 
+const toolLayer = (projectRoot: string) =>
+  Layer.mergeAll(
+    NodePlainFileStoreLive,
+    Layer.succeed(ToolContext)({ projectRoot, environment: process.env }),
+    Layer.succeed(SoapTransport)(makeNodeSoapTransport())
+  )
+
 const execute = (
   entry: CatalogEntry,
-  values: Record<string, unknown>
+  values: Record<string, unknown>,
+  projectRoot: string
 ): Effect.Effect<ToolReport, ToolError | ToolArgsError | ToolChildError> =>
   entry._tag === "builtin"
-    ? entry.tool.execute(values).pipe(Effect.provide(NodePlainFileStoreLive))
+    ? entry.tool.execute(values).pipe(Effect.provide(toolLayer(projectRoot)))
     : Effect.gen(function* () {
-        const output = yield* runChild(entry.file, [], JSON.stringify(values))
+        const output = yield* runChild(
+          entry.file,
+          ["--project", projectRoot],
+          JSON.stringify(values)
+        )
         const decoded = yield* decodeChildJson(ChildToolOutput, entry.name, output)
         return "error" in decoded
           ? yield* new ToolError({ tool: entry.name, message: decoded.error })
@@ -274,6 +289,7 @@ export const runToolRun = (
       } else if (token.startsWith("--pack=")) pack = token.slice("--pack=".length)
       else rest.push(token)
     }
+    const projectRoot = projectRootOf(process.cwd())
     const catalog = yield* loadCatalog(pack)
     const resolved = yield* resolvePreset(catalog, name, rest)
     const entry = resolved?.entry ?? findEntry(catalog.entries, name)
@@ -284,7 +300,7 @@ export const runToolRun = (
     }
     const spec = yield* specFor(entry)
     const values = yield* parseToolArgs(spec, resolved?.argv ?? rest)
-    const report = capReport(yield* execute(entry, values), all)
+    const report = capReport(yield* execute(entry, values, projectRoot), all)
     yield* Console.log(
       text ? renderReport(report) : JSON.stringify(Schema.encodeSync(ToolReport)(report))
     )

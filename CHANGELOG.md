@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.2.0
+
+- **Endpoint tools (ADR 0048, second half).** `Transport` and `Auth` move
+  from the soap-ace kit into `@llm4ts/flow/endpoint/*` (the kit re-exports
+  them, so kit imports still resolve); a named endpoint is
+  `<project>/.llm4ts/endpoints/<name>/auth.json` or `auth.<env>.json` in the
+  same profile shape (`endpoint` URL, `call` side with auth, TLS and proxy;
+  secrets as `env:NAME` / `file:path` references, never literals).
+  `http-call --endpoint <name> [--env test] [--path accounts] [--expect 200]`
+  GETs a path and reports the status with a redacted body preview; it sends
+  no other method and no body. `soap-call --service <name> --operation <op>
+--request <sample>` (soap-ace kit) runs one prepared sample request
+  through the same call policy as `soap-sample`: unclassified and mutating
+  operations are refused, the request is validated first, the exchange is
+  masked and written beside the sample; `LLM4TS_SOAP_STUB` answers from
+  recorded responses. Tools receive a `ToolContext` (project root,
+  environment) and the `SoapTransport`; a kit tool child gets
+  `--project <root>` from the CLI. Kit tools under `kits/<kit>/tools/` are
+  the documented place for a user's own tool code (kits/README.md).
+
 ## 3.1.0
 
 - **Tool catalog (ADR 0048).** `llm4ts tool list | describe <name> | run
