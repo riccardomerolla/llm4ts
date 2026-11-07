@@ -121,8 +121,10 @@ describe("tool catalog", () => {
     assert.include(brief ?? "", "run the\nproject's tool instead of writing a script")
     assert.include(
       brief ?? "",
-      "- `llm4ts tool validate-contract` (fixed: --openapi contracts/openapi.json --component Page) — Validate a JSON document"
+      "- `llm4ts tool validate-contract --document <path>` — Validate a JSON document"
     )
+    assert.notInclude(brief ?? "", "contracts/openapi.json")
+    assert.include(brief ?? "", "- `llm4ts tool broken …`")
     assert.isUndefined(toolBrief(catalog.presets, builtinSpecs(), { LLM4TS_TOOL_BRIEF: "off" }))
     const bare = toolBrief([], builtinSpecs(), {}) ?? ""
     assert.notInclude(bare, "presets")

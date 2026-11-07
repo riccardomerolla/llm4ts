@@ -211,6 +211,12 @@ describe("withToolActivity", () => {
 
   it("counts an ad-hoc script as script, before the other shell sorts", () => {
     const scripts: ReadonlyArray<string> = [
+      // the JSON tool input a harness sends, and a compound line (3.2.3)
+      '{"command":"node -e \'console.log(1)\'"}',
+      '{"command":"git diff -- a.json; cat -e a.json; node -e \'JSON.parse(1)\'"}',
+      "git status && python3 -I -c 'import json'",
+      "cat a.json | node -e 'x'",
+      '{"command":"node /private/tmp/claude-501/-private-tmp-claude-501--Users-riccardo-git-github-riccardomerolla-llm4ts-1bcc7aab-92ec-4128-8d5a-98a23bbe3917-scratchpad/check-acc-001.mjs"}',
       // an interpreter fed inline code
       "python3 -c 'import json; print(json.load(open(\"a.json\")))'",
       "python -c 'print(1)'",

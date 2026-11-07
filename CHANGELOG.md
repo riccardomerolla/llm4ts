@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.2.3
+
+- **`llm4ts profile` counts every ad-hoc script.** The classifier now reads
+  the shell command out of the harness's JSON tool input and the full
+  command rather than its 120-character summary, and a script counts
+  wherever it sits in a compound line (`git diff …; node -e …`) and with
+  interpreter flags before the inline code (`python3 -I -c`). Found on the
+  first local rehearsal, where a Haiku coder's `node -e` validators after a
+  `git diff` and a scratch `.mjs` under a long path were counted as other.
+- **The brief quotes a preset's remaining usage**, `llm4ts tool
+validate-contract --document <path>`, instead of its fixed arguments:
+  shown those, a Haiku coder repeated them and guessed the document flag.
+
 ## 3.2.2
 
 - **`llm4ts tool <name> …` works without `run`**, the form the brief

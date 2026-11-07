@@ -162,16 +162,53 @@ const shellTools = /^(bash|shell|run_shell_command|exec|command_execution)$/iu
  * test/build/install/git/explore sorting so `python3 - <<EOF` and a heredoc
  * into `scratch.test.ts` both count as script.
  */
+// A command may follow `;`, `&&` or `|` in a compound line: a validator run
+// after a `git diff` is still a script.
+const segmentStart = String.raw`(?:^|[;&|]\s*)`
+
 const scriptPatterns: ReadonlyArray<RegExp> = [
   // An interpreter run with inline code: `python3 -c …`, `node -e …`, `python3 -`.
-  /^(python3?|node|ruby|perl|php|deno|bun|tsx|ts-node)\s+(-c|-e|--eval|-p|-)(\s|$)/u,
+  new RegExp(
+    segmentStart +
+      String.raw`(python3?|node|ruby|perl|php|deno|bun|tsx|ts-node)\s+(?:-[A-Za-z]+\s+)*(-c|-e|--eval|-p|-)(\s|$)`,
+    "u"
+  ),
   // A heredoc: `<<EOF`, `<<-EOF`, `<<'EOF'`, `<<"EOF"` (not a `<<<` here-string).
   /(?<!<)<<(?!<)-?\s*(?:'[^']+'|"[^"]+"|\w+)/u,
   // A redirect into a script file: `cat > scratch.py`, `tee debug.js`.
   /(?:>>?|\btee(?:\s+-a)?)\s*\S+\.(?:py|js|mjs|cjs|ts|sh|rb)(?=\s|$)/u,
   // An interpreter run on a scratch file: `/tmp/x.py`, `scratch.js`, `tmp/debug.ts`.
-  /^(python3?|node|tsx|bun)\s+(\/tmp\/|.*\b(scratch|tmp|debug)[^\s]*\.(py|js|mjs|ts))/u
+  new RegExp(
+    segmentStart +
+      String.raw`(python3?|node|tsx|bun)\s+(\/tmp\/|\S*\b(scratch|tmp|debug)[^\s]*\.(py|js|mjs|ts))`,
+    "u"
+  )
 ]
+
+/**
+ * The shell command inside a harness's tool input: the `command` of a JSON
+ * object (Claude Code, Gemini CLI, codex all wrap it), else the text itself.
+ */
+export const commandOf = (args: string): string => {
+  const trimmed = args.trim()
+  if (!trimmed.startsWith("{")) {
+    return trimmed
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      for (const key of ["command", "cmd", "script"]) {
+        const value = Object.entries(parsed).find(([name]) => name === key)?.[1]
+        if (typeof value === "string") {
+          return value.trim()
+        }
+      }
+    }
+  } catch {
+    // not JSON: the text is the command
+  }
+  return trimmed
+}
 
 /**
  * What kind of work a coder's tool call is, for "where does the time go":
@@ -189,7 +226,9 @@ export const toolCategory = (tool: string, args: string): ToolCategory => {
     return exploreTools.test(tool) ? "explore" : "other"
   }
   // `cd <worktree> && …`: the command is what follows.
-  const command = args.replace(/^\s*cd\s+\S+\s*&&\s*/u, "").trim()
+  const command = commandOf(args)
+    .replace(/^\s*cd\s+\S+\s*&&\s*/u, "")
+    .trim()
   if (scriptPatterns.some((pattern) => pattern.test(command))) {
     return "script"
   }
@@ -341,7 +380,12 @@ export const withToolActivity = <R>(
                       {
                         id: toolIdOf(chunk),
                         tool: event.tool,
-                        category: toolCategory(event.tool, event.args),
+                        // The raw input, not the 120-char summary: a
+                        // validator at the end of a long line still counts.
+                        category: toolCategory(
+                          event.tool,
+                          chunk.metadata.tool_input ?? chunk.metadata.toolInput ?? event.args
+                        ),
                         at
                       }
                     ])

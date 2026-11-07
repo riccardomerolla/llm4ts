@@ -187,16 +187,37 @@ export const toolBrief = (
     "its arguments. Never write a Python or Node one-liner for a job a tool covers."
   ]
   if (presets.length > 0) {
-    lines.push("", "This pack's presets (run them by name from the worktree root):")
+    lines.push("", "This pack's presets — run exactly these from the worktree root, as shown:")
     for (const preset of presets) {
       const [toolName, ...rest] = preset.command
       const spec = toolName === undefined ? undefined : specs.get(toolName)
-      const fixed = rest.length === 0 ? "" : ` (fixed: ${rest.join(" ")})`
       const purpose = spec === undefined ? "" : ` — ${spec.purpose}`
-      lines.push(`- \`llm4ts tool ${preset.name}\`${fixed}${purpose}`)
+      lines.push(`- \`llm4ts tool ${presetUsage(preset.name, rest, spec)}\`${purpose}`)
     }
   }
   return lines.join("\n")
+}
+
+/**
+ * What a coder still has to supply after a preset's fixed arguments: the
+ * required ones as `--name <kind>`, the rest left to `describe`. The fixed
+ * arguments are not shown — a model shown them repeats them.
+ */
+export const presetUsage = (
+  name: string,
+  fixed: ReadonlyArray<string>,
+  spec: ToolSpec | undefined
+): string => {
+  if (spec === undefined) {
+    return `${name} …`
+  }
+  const given = new Set(
+    fixed.flatMap((token) => (token.startsWith("--") ? [token.slice(2).split("=")[0] ?? ""] : []))
+  )
+  const remaining = Object.entries(spec.args)
+    .filter(([argName, arg]) => arg.required === true && !given.has(argName))
+    .map(([argName, arg]) => `--${argName} <${arg.kind}>`)
+  return [name, ...remaining].join(" ")
 }
 
 /** Specs of the built-in tools, known without running anything. */
