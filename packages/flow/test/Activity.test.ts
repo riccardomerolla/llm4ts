@@ -209,6 +209,60 @@ describe("withToolActivity", () => {
     }
   })
 
+  it("counts an ad-hoc script as script, before the other shell sorts", () => {
+    const scripts: ReadonlyArray<string> = [
+      // an interpreter fed inline code
+      "python3 -c 'import json; print(json.load(open(\"a.json\")))'",
+      "python -c 'print(1)'",
+      "node -e \"console.log(require('./package.json').version)\"",
+      "node -p 'process.versions'",
+      "ruby -e 'puts 1'",
+      "perl -e 'print 1'",
+      "php -e 'echo 1;'",
+      "deno --eval 'console.log(1)'",
+      "bun -e 'console.log(1)'",
+      "tsx -e 'console.log(1)'",
+      "ts-node -e 'console.log(1)'",
+      "cd /wt/a && python3 -c 'print(1)'",
+      // a heredoc, even one that mentions a test
+      "python3 - <<EOF\nprint(1)\nEOF",
+      "cat <<-'EOF' > scratch.test.ts\nexpect(1)\nEOF",
+      'node <<"JS"\nconsole.log(1)\nJS',
+      // a redirect into a script file
+      "cat > scratch.py",
+      "cat >> tmp/debug.mjs",
+      "echo 'console.log(1)' > check.js",
+      "printf 'x' | tee probe.sh",
+      "tee -a scratch.rb",
+      // an interpreter run on a scratch file
+      "python3 /tmp/check.py",
+      "node /tmp/x.mjs",
+      "node scratch.js",
+      "python3 tmp/debug.py",
+      "tsx debug-ids.ts",
+      "bun scratch/run.ts"
+    ]
+    for (const command of scripts) {
+      assert.strictEqual(toolCategory("bash", command), "script", command)
+    }
+    const notScripts: ReadonlyArray<readonly [string, string]> = [
+      ["pnpm test", "test"],
+      ["git status", "git"],
+      ["python3 manage.py migrate", "other"],
+      ["node dist/cli.js", "other"],
+      ["python3 -m pytest tests/", "test"],
+      ["cat src/a.ts", "explore"],
+      ["cat <<< 'here string'", "explore"],
+      ["pnpm build > build.log", "build"],
+      ["node scripts/seed.mjs", "other"]
+    ]
+    for (const [command, category] of notScripts) {
+      assert.strictEqual(toolCategory("bash", command), category, command)
+    }
+    assert.strictEqual(toolCategory("read_file", "scratch.py"), "explore")
+    assert.strictEqual(toolCategory("write_file", "/tmp/check.py"), "edit")
+  })
+
   it.effect("puts the category on a tool's timing", () =>
     Effect.gen(function* () {
       const events = yield* makeCollectingFlowEvents

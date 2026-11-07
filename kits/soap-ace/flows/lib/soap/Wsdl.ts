@@ -710,6 +710,41 @@ const operations20 = (
  * Discover a SOAP service: read the WSDL at `location` (a path or URL) with
  * every document it imports, and return its typed catalog.
  */
+/**
+ * A catalog from a standalone XSD (imports and includes followed), with no
+ * endpoints or operations: what `xml-validate` checks a document against
+ * (ADR 0048). The root element's own namespace becomes the target namespace.
+ */
+export const readSchemaCatalog = (
+  location: string
+): Effect.Effect<WsdlCatalog, DocumentLoadError | XmlError | WsdlError, DocumentLoader> =>
+  Effect.gen(function* () {
+    const loader = yield* DocumentLoader
+    const rootLocation = isUrl(location) ? location : posix.normalize(location)
+    const discovery = new Discovery(loader)
+    const root = yield* discovery.load(rootLocation)
+    if (!is(root, XsdNamespace, "schema")) {
+      return yield* new WsdlError({
+        reason: "not-wsdl",
+        detail: `root element is {${root.name.namespace}}${root.name.local}, not xs:schema`,
+        location: safeLocation(rootLocation)
+      })
+    }
+    yield* discovery.schema(root, rootLocation, undefined)
+    const schemas = finishSchemas(discovery.schemas)
+    return new WsdlCatalog({
+      version: CatalogVersion,
+      wsdlVersion: "1.1",
+      targetNamespace: attribute(root, "targetNamespace") ?? "",
+      documents: discovery.documents,
+      endpoints: [],
+      operations: [],
+      elements: schemas.elements,
+      types: schemas.types,
+      openQuestions: [...schemas.questions, ...discovery.questions]
+    })
+  })
+
 export const readCatalog = (
   location: string
 ): Effect.Effect<WsdlCatalog, DocumentLoadError | XmlError | WsdlError, DocumentLoader> =>

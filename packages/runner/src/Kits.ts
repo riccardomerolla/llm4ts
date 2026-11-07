@@ -29,6 +29,8 @@ export interface DiscoveredKit {
   readonly packs: ReadonlyArray<string>
   /** Flow names: every `flows/<name>.ts|js` (not `lib/` or `test/`). */
   readonly flows: ReadonlyArray<string>
+  /** Tool names: every `tools/<name>.ts|js` (ADR 0048), run by `llm4ts tool`. */
+  readonly tools: ReadonlyArray<string>
   readonly shadows: ReadonlyArray<KitTier>
 }
 
@@ -118,7 +120,14 @@ const readKit = (
         .map((entry) => entry.replace(/\.(ts|js)$/, ""))
         .sort()
     : []
-  if (packs.length === 0 && flows.length === 0) {
+  const toolsDir = join(root, "tools")
+  const tools = isDirectory(toolsDir)
+    ? readdirSync(toolsDir)
+        .filter((entry) => entry.endsWith(".ts") || entry.endsWith(".js"))
+        .map((entry) => entry.replace(/\.(ts|js)$/, ""))
+        .sort()
+    : []
+  if (packs.length === 0 && flows.length === 0 && tools.length === 0) {
     return undefined
   }
   const readme = join(root, "README.md")
@@ -131,7 +140,8 @@ const readKit = (
     tier,
     ...(description === undefined ? {} : { description }),
     packs,
-    flows
+    flows,
+    tools
   }
 }
 

@@ -20,6 +20,12 @@ export class ComparisonPolicy extends Schema.Class<ComparisonPolicy>("Comparison
   ignore: Schema.ReadonlySet(Schema.String)
 }) {}
 
+export interface ToolPreset {
+  readonly name: string
+  /** The catalog tool, then its arguments, as written. */
+  readonly command: ReadonlyArray<string>
+}
+
 export interface Pack {
   readonly name: string
   readonly source: string
@@ -42,6 +48,12 @@ export interface Pack {
   // worktree) before its gates run; absent, the target needs no setup.
   // Optional so a hand-built Pack still type-checks.
   readonly setup?: ReadonlyArray<string>
+  /**
+   * `## Tools` presets (ADR 0048): `- name: tool --flag value`, a pack-level
+   * name over a catalog tool that a story sees as the same command every
+   * run (`llm4ts tool <name>`). Optional so a hand-built Pack still type-checks.
+   */
+  readonly tools?: ReadonlyArray<ToolPreset>
   readonly equivalence: ComparisonPolicy
   readonly judgeDimensions: ReadonlyArray<Dimension>
   readonly coverage: ReadonlyArray<CoverageRule>
@@ -295,6 +307,9 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
         ? "PerKey"
         : "Ordered"
   const gateList = gateEntries.map(([, command]) => command.split(/\s+/))
+  const tools = namedEntries(section(manifest.sections, "Tools")).map(
+    ([name, command]): ToolPreset => ({ name, command: command.split(/\s+/) })
+  )
   const gates = Object.fromEntries(
     gateEntries.map(([name, command]) => [name, command.split(/\s+/)])
   )
@@ -446,6 +461,7 @@ export const loadPack = Effect.fn("@llm4ts/flow/Pack.load")(function* (
     featuresDir: fields["features-dir"] ?? "features",
     gates,
     gateList,
+    ...(tools.length === 0 ? {} : { tools }),
     replay: fields.replay?.split(/\s+/),
     ...(fields.setup === undefined || fields.setup.trim().length === 0
       ? {}

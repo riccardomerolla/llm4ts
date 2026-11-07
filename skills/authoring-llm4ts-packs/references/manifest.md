@@ -22,6 +22,10 @@ as `key: value` lines until the first `## ` section.
 
 - `## Gates`: `- <name>: <command>` lines. Run after every implement/verify
   task; failures are fed back to the coder.
+- `## Tools` (ADR 0048): `- <name>: <tool> [--flag value …]` presets over
+  the tool catalog (`llm4ts tool list`). A story's brief quotes them, so a
+  coder runs `llm4ts tool <name>` instead of writing a script; a preset may
+  also be used as a gate (`- contract: llm4ts tool validate-contract`).
 - `## Judge`: `- <name> (0..<max>): <rubric>` lines. Extract scores each
   spec on every dimension.
 - `## Equivalence`: `- ordering: ordered | unordered | per-key` and

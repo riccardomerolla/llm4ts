@@ -65,11 +65,16 @@ export const Gap = Schema.Struct({
 })
 export type Gap = typeof Gap.Type
 
-/** The coder's tool calls by kind of work (build, install and git count as other). */
+/**
+ * The coder's tool calls by kind of work (build, install and git count as
+ * other). `script` is the ad-hoc Python/Node one-liners, heredocs and scratch
+ * files it improvised; profiles saved before it existed decode it as 0.
+ */
 export const ToolCalls = Schema.Struct({
   explore: Schema.Int,
   edit: Schema.Int,
   test: Schema.Int,
+  script: Schema.Int.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
   other: Schema.Int
 })
 export type ToolCalls = typeof ToolCalls.Type
@@ -146,7 +151,7 @@ export const ProfileReport = Schema.Struct({
   models: Schema.Array(ModelRow),
   gates: Schema.Array(GateRow),
   tools: Schema.Array(CountRow),
-  /** Coder tool time by kind of work: explore, edit, test, build, install, git, other. */
+  /** Coder tool time by kind of work: explore, edit, test, script, build, install, git, other. */
   toolCategories: Schema.Array(CountRow),
   waits: Schema.Array(CountRow),
   /** Timed on the run's events, in no story: the run's own planning, or a seat no story owns. */
@@ -184,7 +189,7 @@ interface Lane {
   tasks: number
   /** When the coder's first task began: setup and task planning come before it. */
   firstTask: number | undefined
-  toolCalls: { explore: number; edit: number; test: number; other: number }
+  toolCalls: { explore: number; edit: number; test: number; script: number; other: number }
   firstEdit: number | undefined
   exploreBeforeEdit: number
   unverifiedClaims: number
@@ -363,7 +368,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
             openTools: 0,
             tasks: 0,
             firstTask: undefined,
-            toolCalls: { explore: 0, edit: 0, test: 0, other: 0 },
+            toolCalls: { explore: 0, edit: 0, test: 0, script: 0, other: 0 },
             firstEdit: undefined,
             exploreBeforeEdit: 0,
             unverifiedClaims: 0,
@@ -397,7 +402,10 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
         lane?.timed.push({ at, event })
         if (lane !== undefined && event.kind === "tool" && event.category !== undefined) {
           const kind =
-            event.category === "explore" || event.category === "edit" || event.category === "test"
+            event.category === "explore" ||
+            event.category === "edit" ||
+            event.category === "test" ||
+            event.category === "script"
               ? event.category
               : "other"
           lane.toolCalls[kind] += 1
@@ -808,6 +816,15 @@ const findingsOf = (facts: {
         ]
       : []
   )
+  const improvised = facts.stories.flatMap((story) =>
+    story.toolCalls.script >= 3
+      ? [
+          {
+            text: `${story.id}: ${story.toolCalls.script} ad-hoc scripts — a pack tool preset (llm4ts tool) would make this repeatable`
+          }
+        ]
+      : []
+  )
   const growth = facts.stories.flatMap((story) =>
     story.turns.promptGrowth &&
     story.turns.firstPrompt !== undefined &&
@@ -819,7 +836,7 @@ const findingsOf = (facts: {
         ]
       : []
   )
-  return [...ranked, ...fabricated, ...growth]
+  return [...ranked, ...fabricated, ...improvised, ...growth]
 }
 
 const table = (
@@ -908,6 +925,7 @@ export const renderProfile = (report: ProfileReport): string => {
         story.toolCalls.explore +
           story.toolCalls.edit +
           story.toolCalls.test +
+          story.toolCalls.script +
           story.toolCalls.other ===
         0
     )
@@ -922,6 +940,7 @@ export const renderProfile = (report: ProfileReport): string => {
               "explore",
               "edit",
               "test",
+              "script",
               "other",
               "before 1st edit",
               "1st edit at"
@@ -932,6 +951,7 @@ export const renderProfile = (report: ProfileReport): string => {
               String(story.toolCalls.explore),
               String(story.toolCalls.edit),
               String(story.toolCalls.test),
+              String(story.toolCalls.script),
               String(story.toolCalls.other),
               story.firstEditMs === undefined ? "" : `${story.exploreBeforeEdit} explore`,
               story.firstEditMs === undefined ? "never" : duration(story.firstEditMs)
@@ -1091,6 +1111,7 @@ export const profileDelta = (before: ProfileReport, after: ProfileReport): Profi
       count("coder turns", (r) => sum(r.stories.map((s) => s.turns.count))),
       count("coder edits", (r) => sum(r.stories.map((s) => s.toolCalls.edit)), "none"),
       count("coder test runs", (r) => sum(r.stories.map((s) => s.toolCalls.test)), "none"),
+      count("coder scripts", (r) => sum(r.stories.map((s) => s.toolCalls.script))),
       count("reviewer calls", (r) => roleCalls(r, "reviewer")),
       count("judge calls", (r) => roleCalls(r, "judge")),
       count("gate runs", (r) => sum(r.gates.map((g) => g.runs))),

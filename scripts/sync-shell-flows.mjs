@@ -128,7 +128,8 @@ const kitNames = existsSync(kitsSourceDir)
           entry.isDirectory() &&
           !litter.has(entry.name) &&
           (existsSync(path.join(kitsSourceDir, entry.name, "packs")) ||
-            existsSync(path.join(kitsSourceDir, entry.name, "flows")))
+            existsSync(path.join(kitsSourceDir, entry.name, "flows")) ||
+            existsSync(path.join(kitsSourceDir, entry.name, "tools")))
       )
       .map((entry) => entry.name)
   : []
@@ -146,6 +147,10 @@ for (const kit of kitNames) {
   }
   if (existsSync(path.join(kitSource, "flows"))) {
     kitFlows += transpileTree(path.join(kitSource, "flows"), path.join(kitTarget, "flows"))
+  }
+  // Kit tools (ADR 0048) ship like kit flows: `llm4ts tool` runs them as children.
+  if (existsSync(path.join(kitSource, "tools"))) {
+    kitFlows += transpileTree(path.join(kitSource, "tools"), path.join(kitTarget, "tools"))
   }
 }
 console.log(

@@ -1,5 +1,31 @@
 # Changelog
 
+## 3.1.0
+
+- **Tool catalog (ADR 0048).** `llm4ts tool list | describe <name> | run
+<name> [--flag value]` is the one subcommand a coding agent runs inside a
+  task: a JSON report (`ok`, `summary`, `issues`, issues capped at 50 unless
+  `--all`), exit 1 on issues, 2 when the tool could not run, nothing written
+  into the worktree. From a worktree the project is found through `git
+rev-parse --git-common-dir`; no `LLM4TS_*` variable reaches it, as before.
+  Tools are `defineTool` modules (`@llm4ts/flow/tools/Tool`) with a typed
+  input and report; `json-validate` (a JSON Schema subset, or an OpenAPI
+  component with its `$ref`s) and `diff` (structural JSON compare: ordered,
+  per-key or unordered, with ignore paths) ship in `@llm4ts/flow`;
+  `xml-validate` (XSD, imports followed) ships in the soap-ace kit as
+  `kits/soap-ace/tools/xml-validate.ts`, the shape a kit's own tools take
+  (`runToolMain` from `@llm4ts/runner/ToolMain`; discovered through the
+  three kit tiers, shipped with the package). A pack names presets in
+  `## Tools` (`- validate-contract: json-validate --openapi
+contracts/openapi.json --component Page`), usable as gates. epic-stories
+  adds one paragraph to every coder's brief — the rule and this pack's
+  presets; `LLM4TS_TOOL_BRIEF=off` drops it for a comparison run.
+- **`llm4ts profile` counts ad-hoc scripts.** A new `script` category
+  (an interpreter with inline code, a heredoc, a redirect into a script
+  file, an interpreter on a scratch file) with its own column, a
+  `coder scripts` row in `--against`, and a hint at three or more per
+  story. Older saved profiles decode with `script: 0`.
+
 ## 3.0.0
 
 ### Breaking

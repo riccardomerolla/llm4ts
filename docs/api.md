@@ -11,6 +11,14 @@ export list; the following modules are the main entry points.
 - `@llm4ts/core/ConnectorConfig` and `ConnectorRegistry`: connector selection.
 - `@llm4ts/core/providers/*`: API and CLI connector implementations.
 - `@llm4ts/core/Streaming`: collection, progress, and timeout helpers.
+- `@llm4ts/flow/tools/*` (ADR 0048): `Tool` holds `defineTool`, `ToolReport`,
+  `ToolSpec`, `parseToolArgs` and `capReport`; `Builtin` lists the shipped
+  tools (`JsonValidate`, `Diff`); `JsonSchemaCheck` and `TreeDiff` are the
+  pure validators behind them. `@llm4ts/runner/Tools` assembles the catalog
+  (built-in, every kit's `tools/`, pack presets), resolves presets, finds a
+  worktree's project through git and writes the brief paragraph;
+  `@llm4ts/runner/ToolMain` is the main of a kit tool file. The CLI is
+  `llm4ts tool list | describe <name> | run <name> [--flag value]`.
 - `@llm4ts/core/eval/*`: checks, judges, evaluators, and suites.
   `judgeWithJudgment(judgment, dimensions)` is the rubric judge over the
   Judgment service: one Score question per dimension.

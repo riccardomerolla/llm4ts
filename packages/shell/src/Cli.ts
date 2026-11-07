@@ -56,6 +56,7 @@ import { mainMenu } from "./Menu.ts"
 import { ModDir, refineSession } from "./Refine.ts"
 import { packageVersion } from "./Package.ts"
 import { ShellUsageError } from "./ShellErrors.ts"
+import { runToolRun, toolCommand } from "./ToolCommand.ts"
 
 export { ShellUsageError }
 
@@ -1075,6 +1076,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     rosterCommand,
     geminiBridgeCommand,
     mcpCommand,
+    toolCommand,
     doctorCommand
   ])
 )
@@ -1082,4 +1084,8 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
 export const runShellCommand = (
   argv: ReadonlyArray<string>
 ): Effect.Effect<void, unknown, Command.Environment> =>
-  Command.runWith(shellCommand, { version: packageVersion })(argv)
+  // `tool run <name> --flag value …` carries the tool's own options, which the
+  // declared parser would reject; it is routed on the raw arguments (ADR 0048).
+  argv[0] === "tool" && argv[1] === "run" && argv[2] !== undefined && !argv[2].startsWith("-")
+    ? runToolRun(argv[2], argv.slice(3))
+    : Command.runWith(shellCommand, { version: packageVersion })(argv)

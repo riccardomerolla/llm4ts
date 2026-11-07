@@ -375,7 +375,7 @@ const wandering: ReadonlyArray<TreeInput> = [
 describe("coder work per story", () => {
   it("counts tool calls by kind, the coder's tasks, and what came before the first edit", () => {
     const [list] = profileOf(wandering).stories
-    assert.deepStrictEqual(list?.toolCalls, { explore: 16, edit: 2, test: 1, other: 0 })
+    assert.deepStrictEqual(list?.toolCalls, { explore: 16, edit: 2, test: 1, script: 0, other: 0 })
     assert.strictEqual(list?.tasks, 2)
     assert.strictEqual(list?.firstEditMs, 8 * 60_000)
     assert.strictEqual(list?.exploreBeforeEdit, 16)
@@ -394,7 +394,7 @@ describe("coder work per story", () => {
 
   it("an older trace without tool categories profiles as before", () => {
     const [home] = profileOf(measured).stories
-    assert.deepStrictEqual(home?.toolCalls, { explore: 0, edit: 0, test: 0, other: 0 })
+    assert.deepStrictEqual(home?.toolCalls, { explore: 0, edit: 0, test: 0, script: 0, other: 0 })
     assert.isUndefined(home?.firstEditMs)
     assert.strictEqual(home?.exploreBeforeEdit, 0)
     assert.notInclude(renderProfile(profileOf(measured)), "Coder work per story")
@@ -424,6 +424,86 @@ describe("coder work per story", () => {
     assert.strictEqual(calm?.firstEditMs, 2 * minute * 1_000)
     assert.strictEqual(calm?.exploreBeforeEdit, 0)
     assert.notInclude(report.findings.map((finding) => finding.text).join("\n"), "found its way")
+  })
+})
+
+/**
+ * One story, "probe", whose coder improvised three ad-hoc scripts (a Python
+ * one-liner, a heredoc, a scratch file) beside one edit and one test run.
+ */
+const improvising: ReadonlyArray<TreeInput> = [
+  at(0, StageStarted.make({ stage: "story probe", lane: "probe", executor: "claude" })),
+  at(0, StageStarted.make({ stage: "Check the ids", lane: "probe" })),
+  ...[0, 1, 2].map((index) =>
+    at(
+      10 + index * 30,
+      Timed.make({ kind: "tool", label: "bash", category: "script", ms: 400, lane: "probe" })
+    )
+  ),
+  at(
+    2 * minute,
+    Timed.make({ kind: "tool", label: "edit", category: "edit", ms: 300, lane: "probe" })
+  ),
+  at(
+    3 * minute,
+    Timed.make({ kind: "tool", label: "bash", category: "test", ms: 20_000, lane: "probe" })
+  ),
+  at(4 * minute, Timed.make({ kind: "model", label: "coder", ms: 200_000, lane: "probe" })),
+  at(4 * minute, StageCompleted.make({ stage: "story probe", lane: "probe" }))
+]
+
+describe("coder scripts per story", () => {
+  it("counts the ad-hoc scripts a coder writes and shows them in the table and the delta", () => {
+    const report = profileOf(improvising)
+    const [probe] = report.stories
+    assert.deepStrictEqual(probe?.toolCalls, { explore: 0, edit: 1, test: 1, script: 3, other: 0 })
+    const text = renderProfile(report)
+    assert.include(text, "Coder work per story")
+    assert.match(text, /story\s+tasks\s+explore\s+edit\s+test\s+script\s+other/u)
+    assert.match(text, /probe\s+1\s+0\s+1\s+1\s+3\s+0/u)
+    assert.include(
+      report.findings.map((finding) => finding.text).join("\n"),
+      "probe: 3 ad-hoc scripts — a pack tool preset (llm4ts tool) would make this repeatable"
+    )
+    const delta = renderProfileDelta(profileDelta(report, profileOf(wandering)), {
+      before: "before.json",
+      after: "after.json"
+    })
+    assert.match(delta, /coder scripts\s+3\s+0/u)
+  })
+
+  it("fewer than three scripts is counted but not called out", () => {
+    // The two stage starts, one script, then the edit, the test and the end.
+    const report = profileOf([...improvising.slice(0, 3), ...improvising.slice(5)])
+    assert.strictEqual(report.stories[0]?.toolCalls.script, 1)
+    assert.notInclude(report.findings.map((finding) => finding.text).join("\n"), "ad-hoc scripts")
+  })
+
+  it("a profile saved before the script column existed still decodes, with script 0", () => {
+    const saved = {
+      ...profileOf(wandering),
+      stories: profileOf(wandering).stories.map(({ toolCalls, ...story }) => ({
+        ...story,
+        toolCalls: {
+          explore: toolCalls.explore,
+          edit: toolCalls.edit,
+          test: toolCalls.test,
+          other: toolCalls.other
+        }
+      }))
+    }
+    const decoded = Schema.decodeUnknownSync(ProfileReport)(saved)
+    assert.deepStrictEqual(decoded.stories[0]?.toolCalls, {
+      explore: 16,
+      edit: 2,
+      test: 1,
+      script: 0,
+      other: 0
+    })
+    assert.strictEqual(
+      Schema.encodeUnknownSync(ProfileReport)(decoded).stories[0]?.toolCalls.script,
+      0
+    )
   })
 })
 

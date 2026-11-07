@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/runner",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Node runner, CLI, terminal, and MCP composition for llm4ts",
   "license": "MIT",
   "type": "module",
@@ -13,6 +13,8 @@
     "src"
   ],
   "exports": {
+    "./ToolMain": "./dist/ToolMain.js",
+    "./Tools": "./dist/Tools.js",
     ".": "./dist/index.js",
     "./Cli": "./dist/Cli.js",
     "./AgentTree": "./dist/AgentTree.js",

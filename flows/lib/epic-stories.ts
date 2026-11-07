@@ -960,6 +960,7 @@ export const serverHealthUrl = (
 
 /** Whether `url` answers 2xx within five seconds (the roster's health check). */
 import { httpProbe } from "@llm4ts/runner/ExecutorRoster"
+import { builtinSpecs, toolBrief } from "@llm4ts/runner/Tools"
 export { httpProbe }
 
 export interface RecoveryTiming {
@@ -2763,6 +2764,9 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
               message: "this runner cannot rebind seats to a worktree (no contextFor)"
             })
           }
+          // The tool catalog paragraph (ADR 0048): the rule and this pack's
+          // presets, so a coder runs `llm4ts tool` instead of a script.
+          const toolsNote = toolBrief(pack?.tools ?? [], builtinSpecs(), process.env)
           const appDirNote =
             appDir === "."
               ? []
@@ -2909,7 +2913,8 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                       "",
                       `Imitate the exemplar feature before inventing anything. Story id: ${story.id}.`,
                       ...appDirNote,
-                      ...(orientation === undefined ? [] : ["", orientation])
+                      ...(orientation === undefined ? [] : ["", orientation]),
+                      ...(toolsNote === undefined ? [] : ["", toolsNote])
                     ].join("\n")
                   ),
                 ...reviewOptions(flags.reviewAt, flags.reviewRounds, process.env),

@@ -80,6 +80,7 @@ describe("renderKitList", () => {
           tier: "builtin",
           description: "COBOL to Spring Boot.",
           packs: ["ace-kafka", "cobol-springboot"],
+          tools: [],
           flows: [],
           shadows: []
         },
@@ -88,6 +89,7 @@ describe("renderKitList", () => {
           root: "/work/.llm4ts/kits/web",
           tier: "project",
           packs: ["jsp-nextjs"],
+          tools: [],
           flows: ["convert-page"],
           shadows: ["builtin"]
         }
@@ -543,6 +545,83 @@ describe("llm4ts graph resolves packs through the shell's KIT tiers", () => {
         assert.strictEqual(pack.name, "j2ee-nextjs-spa")
       } finally {
         rmSync(root, { recursive: true, force: true })
+      }
+    })
+  )
+})
+
+describe("the tool command", () => {
+  const captured = () => {
+    const lines: Array<string> = []
+    const capture: Console.Console = Object.assign(Object.create(console), {
+      log: (...args: ReadonlyArray<unknown>) => void lines.push(args.map(String).join(" "))
+    })
+    return { lines, capture }
+  }
+  const runTool = (argv: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const { lines, capture } = captured()
+      const exit = yield* Effect.exit(
+        runShellCommand(["tool", ...argv]).pipe(
+          Effect.provideService(Console.Console, capture),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      const code = process.exitCode
+      process.exitCode = 0
+      return { exit, output: lines.join("\n"), code }
+    })
+
+  it.effect("lists the built-in tools and describes one", () =>
+    Effect.gen(function* () {
+      const list = yield* runTool(["list"])
+      assert.strictEqual(list.exit._tag, "Success", String(list.exit))
+      assert.include(list.output, "json-validate --document <path>")
+      assert.include(list.output, "diff --expected <path> --actual <path>")
+      const describe = yield* runTool(["describe", "diff"])
+      assert.include(describe.output, "diff: Compare two JSON documents")
+      assert.include(describe.output, "--ordering <string> [default ordered]")
+    })
+  )
+
+  it.effect("runs json-validate from the command line with a JSON report and an exit status", () =>
+    Effect.gen(function* () {
+      const base = mkdtempSync(join(tmpdir(), "llm4ts-cli-tool-"))
+      try {
+        writeFileSync(
+          join(base, "schema.json"),
+          '{"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}'
+        )
+        writeFileSync(join(base, "good.json"), '{"id":"x"}')
+        writeFileSync(join(base, "bad.json"), '{"id":1}')
+        const good = yield* runTool([
+          "run",
+          "json-validate",
+          "--schema",
+          join(base, "schema.json"),
+          "--document",
+          join(base, "good.json")
+        ])
+        assert.strictEqual(good.exit._tag, "Success", String(good.exit))
+        assert.strictEqual(good.code, 0)
+        assert.include(good.output, '"ok":true')
+        const bad = yield* runTool([
+          "run",
+          "json-validate",
+          "--schema",
+          join(base, "schema.json"),
+          "--document",
+          join(base, "bad.json"),
+          "--text"
+        ])
+        assert.strictEqual(bad.code, 1)
+        assert.match(bad.output, /^FAIL json-validate: 1 issue/)
+        assert.include(bad.output, "$.id: expected string, found")
+        const usage = yield* runTool(["run", "json-validate", "--nope"])
+        assert.strictEqual(usage.exit._tag, "Failure")
+        assert.include(String(usage.exit), "unknown argument '--nope'")
+      } finally {
+        rmSync(base, { recursive: true, force: true })
       }
     })
   )

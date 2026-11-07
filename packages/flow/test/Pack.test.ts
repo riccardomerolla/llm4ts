@@ -92,6 +92,26 @@ unit: CALL '([^']+)'
     })
   )
 
+  it.effect("reads '## Tools' presets in manifest order; absent means none", () =>
+    Effect.gen(function* () {
+      const workspace = yield* makeMemoryWorkspace()
+      yield* workspace.write(
+        "packs/tools/pack.md",
+        "# Pack: tools\n\nsource: jsp\n\n## Tools\n\n- validate-contract: json-validate --openapi contracts/openapi.json --component Page\n- compare-pages: diff --ordering per-key\n"
+      )
+      const pack = yield* loadPack(workspace, "packs/tools")
+      assert.deepStrictEqual(pack.tools, [
+        {
+          name: "validate-contract",
+          command: ["json-validate", "--openapi", "contracts/openapi.json", "--component", "Page"]
+        },
+        { name: "compare-pages", command: ["diff", "--ordering", "per-key"] }
+      ])
+      yield* workspace.write("packs/plain/pack.md", "# Pack: plain\n\nsource: jsp\n")
+      assert.isUndefined((yield* loadPack(workspace, "packs/plain")).tools)
+    })
+  )
+
   it.effect("reads an optional setup command; absent means the target needs none", () =>
     Effect.gen(function* () {
       const workspace = yield* makeMemoryWorkspace()

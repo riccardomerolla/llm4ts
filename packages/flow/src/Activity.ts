@@ -139,6 +139,7 @@ export type ToolCategory =
   | "build"
   | "install"
   | "git"
+  | "script"
   | "delegate"
   | "other"
 
@@ -153,6 +154,24 @@ const exploreTools =
   /^(read|read_file|read_many_files|glob|grep|search|search_file_content|list|ls|list_directory|find|view|web_fetch|google_web_search)$/iu
 const editTools = /^(edit|write|write_file|replace|multiedit|apply_patch|create|str_replace)$/iu
 const shellTools = /^(bash|shell|run_shell_command|exec|command_execution)$/iu
+
+/**
+ * An ad-hoc script the coder improvised instead of using a tool the pack
+ * provides: an interpreter fed inline code, a heredoc, a redirect into a
+ * script file, or an interpreter run on a scratch file. Checked before the
+ * test/build/install/git/explore sorting so `python3 - <<EOF` and a heredoc
+ * into `scratch.test.ts` both count as script.
+ */
+const scriptPatterns: ReadonlyArray<RegExp> = [
+  // An interpreter run with inline code: `python3 -c …`, `node -e …`, `python3 -`.
+  /^(python3?|node|ruby|perl|php|deno|bun|tsx|ts-node)\s+(-c|-e|--eval|-p|-)(\s|$)/u,
+  // A heredoc: `<<EOF`, `<<-EOF`, `<<'EOF'`, `<<"EOF"` (not a `<<<` here-string).
+  /(?<!<)<<(?!<)-?\s*(?:'[^']+'|"[^"]+"|\w+)/u,
+  // A redirect into a script file: `cat > scratch.py`, `tee debug.js`.
+  /(?:>>?|\btee(?:\s+-a)?)\s*\S+\.(?:py|js|mjs|cjs|ts|sh|rb)(?=\s|$)/u,
+  // An interpreter run on a scratch file: `/tmp/x.py`, `scratch.js`, `tmp/debug.ts`.
+  /^(python3?|node|tsx|bun)\s+(\/tmp\/|.*\b(scratch|tmp|debug)[^\s]*\.(py|js|mjs|ts))/u
+]
 
 /**
  * What kind of work a coder's tool call is, for "where does the time go":
@@ -171,6 +190,9 @@ export const toolCategory = (tool: string, args: string): ToolCategory => {
   }
   // `cd <worktree> && …`: the command is what follows.
   const command = args.replace(/^\s*cd\s+\S+\s*&&\s*/u, "").trim()
+  if (scriptPatterns.some((pattern) => pattern.test(command))) {
+    return "script"
+  }
   if (/\b(test|vitest|jest|pytest|mocha|playwright)\b/u.test(command)) {
     return "test"
   }

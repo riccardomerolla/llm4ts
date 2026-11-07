@@ -66,6 +66,14 @@ OpenTelemetry backend through the `OTEL_*` variables: [observability](docs/obser
 gates, merges, waiting — with the biggest sinks first, and nothing of the
 code or prompts in it, so it can come back from a customer's server.
 
+`llm4ts tool` is the one command a coder runs inside a task: `list`,
+`describe <name>`, and `run <name> --flag value` print a JSON report (ok,
+summary, issues) for a job the model would otherwise improvise a script
+for — `json-validate` against a JSON Schema or an OpenAPI component,
+`diff` of two JSON documents, `xml-validate` against an XSD. A pack names
+presets in `## Tools`; every story's brief quotes them, and `llm4ts profile`
+counts the ad-hoc scripts that remain. More: [ADR 0048](docs/adr/0048-tool-catalog.md).
+
 `llm4ts mcp` serves the same runs to an MCP client such as Grok Bot,
 Claude Code or Cursor: `preflight`, run status, a `run_wait` long poll,
 `diagnose`, `costs`, and with `--allow-run` it starts and stops flows. It
