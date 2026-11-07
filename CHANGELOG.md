@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.2.4
+
+- **A long tool call counts as evidence.** The transcript records a
+  command's first 120 characters and an ellipsis; a coder's claim to have
+  run `llm4ts tool validate-account --document … --openapi … --component …`
+  was then "never ran" in the judge's eyes and cost the story its tests
+  score. A cut recording now carries a longer claim when its last command
+  segment is the start of that claim. Found on the local rehearsal of the
+  tool catalog (ADR 0048).
+
 ## 3.2.3
 
 - **`llm4ts profile` counts every ad-hoc script.** The classifier now reads

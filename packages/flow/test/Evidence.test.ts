@@ -19,6 +19,20 @@ describe("unverifiedClaims", () => {
     assert.deepStrictEqual(unverifiedClaims(["pnpm test"], []), ["pnpm test"])
   })
 
+  it("a call the transcript cut short carries a longer claim that starts with its head", () => {
+    const claim =
+      "llm4ts tool validate-account --document fixtures/accounts/acc-002.json --openapi contracts/openapi.json --component Account"
+    const recorded = `git status --short && ${claim.slice(0, 80)}…`
+    assert.deepStrictEqual(unverifiedClaims([claim], [recorded]), [])
+    // Too short a head proves nothing; a head of another command proves nothing.
+    assert.deepStrictEqual(unverifiedClaims([claim], ["llm4ts tool…"]), [claim])
+    assert.deepStrictEqual(unverifiedClaims([claim], [`pnpm test -- fixtures/accounts/acc-002…`]), [
+      claim
+    ])
+    // Without the ellipsis a shorter recording is not a prefix match.
+    assert.deepStrictEqual(unverifiedClaims([claim], [claim.slice(0, 80)]), [claim])
+  })
+
   it("empty claims are ignored and nothing claimed means nothing unverified", () => {
     assert.deepStrictEqual(unverifiedClaims(["", "  "], []), [])
     assert.deepStrictEqual(unverifiedClaims([], []), [])
