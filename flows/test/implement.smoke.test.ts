@@ -67,6 +67,8 @@ describe("implement flow smoke", () => {
       // this is what a hang in that drain costs.
       assert.include(result.stdout, "Total:", failureReport("implement", result))
       assert.include(result.stdout, "estimated:", failureReport("implement", result))
+      // Every consumer saw every event: the seats' startup notices included.
+      assert.notInclude(result.stdout, "still unconsumed", failureReport("implement", result))
       assert.isTrue(existsSync(join(fixture.target, "calculator.txt")))
     },
     smokeTimeout

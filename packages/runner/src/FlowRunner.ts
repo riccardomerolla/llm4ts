@@ -254,6 +254,13 @@ export interface FlowRunnerBundle {
   readonly tracker: CostTracker
   readonly runId: string
   readonly judgmentLog?: JudgmentLogShape
+  /**
+   * Publishes what the seats announced while the context was built, then lets
+   * later announcements through as they happen. A subscriber never sees what
+   * was published before it subscribed, so the run calls this once its
+   * terminal and trace are listening; `runWithBundle` does.
+   */
+  readonly announceStartupNotices: Effect.Effect<void>
 }
 
 const truthy = (value: string | undefined): boolean =>
@@ -426,6 +433,18 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   // removal is a request, not a restriction (ADR 0010) — say so on the run's
   // events instead of pretending, so consumers can pick reviewer seats on
   // `capabilities.readOnlyEnforcement`.
+  // Held until the run's own consumers subscribe (`announceStartupNotices`):
+  // `undefined` once they have, and a notice then publishes as it is raised.
+  const heldNotices = yield* Ref.make<ReadonlyArray<string> | undefined>([])
+  const publishNotice = (detail: string): Effect.Effect<void> =>
+    events.publish(FlowEventsValues.CapabilityUnenforceable(detail))
+  const raiseNotice = (detail: string): Effect.Effect<void> =>
+    Ref.modify(heldNotices, (held) =>
+      held === undefined ? [publishNotice(detail), held] : [Effect.void, [...held, detail]]
+    ).pipe(Effect.flatten)
+  const announceStartupNotices = Ref.getAndSet(heldNotices, undefined).pipe(
+    Effect.flatMap((held) => Effect.forEach(held ?? [], publishNotice, { discard: true }))
+  )
   const announceReadOnlyGrade = (
     configuration: ConnectorConfig,
     connector: {
@@ -489,11 +508,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             : "has no per-path deny rule — only the contract text in its prompt keeps it out")
       )
     }
-    return Effect.forEach(
-      notes,
-      (detail) => events.publish(FlowEventsValues.CapabilityUnenforceable(detail)),
-      { discard: true }
-    )
+    return Effect.forEach(notes, raiseNotice, { discard: true })
   }
   // Every seat is metered, so no run is silently free: a backend that reports
   // no token counts (`capabilities.usageReporting` false) is estimated from
@@ -960,6 +975,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       runId,
       roster: rosterDocument,
       ...(judgmentLog === undefined ? {} : { judgmentLog }),
+      announceStartupNotices,
       context
     }
   }
@@ -969,6 +985,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     tracker,
     runId,
     ...(judgmentLog === undefined ? {} : { judgmentLog }),
+    announceStartupNotices,
     context: contextAt(options.workDir, seats, true)
   }
 })
@@ -1065,6 +1082,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   if (recorder !== undefined) {
     yield* recorder.consume(bundle.events)
   }
+  yield* bundle.announceStartupNotices
   yield* surface.setStatus("preparing flow")
   const budget = options.budget
   const enforceBudget =

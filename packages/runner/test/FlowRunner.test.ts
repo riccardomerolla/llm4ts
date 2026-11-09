@@ -302,6 +302,57 @@ describe("embedded runner", () => {
   )
 })
 
+describe("startup notices", () => {
+  // The seats resolve, and announce what their harness cannot enforce, while
+  // the context is built: before the terminal and the trace subscribe.
+  it.live("a capability the harness cannot enforce reaches the screen and the trace", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const output = yield* Ref.make<ReadonlyArray<string>>([])
+        const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+        const registry = makeConnectorRegistry([
+          {
+            connectorId: ConnectorIds.Mock,
+            kind: "Api",
+            create: (_configuration) => Effect.succeed(mock)
+          }
+        ])
+        const surface: TerminalSurface = {
+          palette: plainTerminalPalette,
+          log: (line) => Ref.update(output, (current) => [...current, line]),
+          setStatus: (_label) => Effect.void,
+          suspend: (effect) => effect
+        }
+        const dependencies = { registry, process: process.executor, files: files(state) }
+        const options = {
+          workDir: "/repo",
+          workspace: "/repo",
+          userPrompt: "do it",
+          coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock, effort: "high" }),
+          surface,
+          tracePath: "trace.jsonl",
+          runId: "run-1"
+        }
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(bundle, options, () => Effect.void, dependencies)
+        const trace = (yield* Ref.get(state))["trace.jsonl"] ?? ""
+        const rendered = yield* Ref.get(output)
+
+        assert.isTrue(
+          rendered.some((line) =>
+            line.includes("capability unenforceable: effort 'high' requested from 'mock'")
+          ),
+          rendered.join("\n")
+        )
+        assert.match(trace, /CapabilityUnenforceable/)
+        assert.isFalse(rendered.some((line) => line.includes("still unconsumed")))
+      })
+    )
+  )
+})
+
 describe("runner spans", () => {
   it.effect(
     "a run is a CHAIN root span carrying run, session and flow; its stages hang under it",
