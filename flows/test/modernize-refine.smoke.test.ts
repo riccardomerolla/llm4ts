@@ -107,6 +107,27 @@ const estate = (root: string): void => {
 const read = (root: string, relative: string): string => readFileSync(join(root, relative), "utf8")
 
 describe("modernize-refine (model stubbed)", { timeout: smokeTimeout }, () => {
+  it("explains a source lookup failure when the default pack does not match the extracted estate", () => {
+    const fixture = makeFixture()
+    installStub(fixture, stubProgram(respond))
+    initRepo(fixture.legacy)
+    write(fixture.legacy, "web/AccountSummary.jsp", "<html>Accounts</html>\n")
+    write(fixture.legacy, "docs/modernization/specs/AccountSummary.md", "# Account summary\n")
+    write(
+      fixture.legacy,
+      "docs/modernization/decisions.md",
+      "# Decisions\n\n## Deepen\n\n- AccountSummary: inspect date filtering\n"
+    )
+    commitAll(fixture.legacy, "extracted JSP estate")
+
+    const result = runFlow(fixture, "modernize-refine", fixture.legacy, { LLM4TS_PACK: "" })
+    const output = `${result.stdout}${result.stderr}`
+    assert.notStrictEqual(result.status, 0)
+    assert.include(output, "no legacy source found for program 'AccountSummary'")
+    assert.include(output, "selected pack 'cobol-springboot'")
+    assert.include(output, "--pack")
+  })
+
   it("deepens, proposes, halts on open points, then consolidates and plans per feature", () => {
     const fixture = makeFixture()
     installStub(fixture, stubProgram(respond))

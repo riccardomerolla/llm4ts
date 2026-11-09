@@ -229,7 +229,13 @@ const program = Effect.gen(function* () {
                 const unit = units.find((candidate) => candidate.name === mark.program)
                 if (unit === undefined || unit.sourcePath.length === 0) {
                   return yield* FlowAborted.make({
-                    message: `deepen: no legacy source found for program '${mark.program}'`
+                    message:
+                      `deepen: no legacy source found for program '${mark.program}' under ${input.workDir}; ` +
+                      `selected pack '${pack.name}' matched ${sources.length} source unit(s) using ` +
+                      `programs/sources regex '${pack.programs ?? pack.sources ?? ".*"}'` +
+                      (pack.exclude === undefined ? "" : `, excluding '${pack.exclude}'`) +
+                      ". Re-run with --pack <the pack used for extraction> (or set LLM4TS_PACK). " +
+                      "Also check --repo and that the source filename without its extension matches the program name exactly."
                   })
                 }
                 const [specPath, featurePath, tracePath, mappingPath] = programArtifactPaths(
