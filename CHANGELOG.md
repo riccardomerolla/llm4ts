@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.2.5
+
+- **Capability warnings reach the screen and the trace.** A seat announces
+  what its harness cannot enforce (a read-only request, an effort flag, a
+  path it is asked to keep out of) while the run is set up, before the
+  terminal and the trace were listening, so the warning was never shown or
+  recorded. Every such run, any run on `claude-cli` among them, then waited
+  three seconds at the end and printed `some run events were still
+unconsumed`, a false alarm about its totals. The notices are now published
+  once the run's consumers are subscribed. `FlowRunnerBundle` gains
+  `announceStartupNotices`, which `runWithBundle` calls.
+- **`modernize-refine` explains a missing legacy source.** When a Deepen
+  mark names a program no source matches, the error names the work
+  directory, the selected pack, how many sources its pattern matched, and
+  points at `--pack` / `LLM4TS_PACK`: the usual cause is refining with the
+  default pack an estate extracted with another.
+
 ## 3.2.4
 
 - **A long tool call counts as evidence.** The transcript records a
