@@ -31,9 +31,15 @@ and `pi -p "OK"` — and put pi on a provider with real capacity: its
 default free-tier model allows a handful of requests a day, and a story
 needs dozens.
 
+Write the two settings of the demo to the portal's settings file once
+(`~/demo/portal/.llm4ts/config.env`). Seeding the portal again with `--force`
+removes the file, so run the command again after a reseed:
+
 ```bash
-export LLM4TS_CONTEXT_BUDGET=120000              # bound diffs handed to the judge
-export LLM4TS_CODER_MODEL=openai-codex/gpt-5.5   # pi: provider/model with capacity
+# bound the diffs handed to the judge; pi: a provider/model with capacity
+llm4ts config set --repo ~/demo/portal --project \
+  LLM4TS_CONTEXT_BUDGET=120000 \
+  LLM4TS_CODER_MODEL=openai-codex/gpt-5.5
 ```
 
 Every story runs in its own worktree, a fresh checkout that is installed

@@ -90,9 +90,10 @@ Each run has its own sandbox, so runs can go side by side. Never point `$V cli` 
 
 ## Not covered
 
-The helper has no PTY. The bare `llm4ts` menu, `llm4ts refine`, `llm4ts watch` as a live TUI, and `run --ui tree` need a terminal and are not driven here. `llm4ts mcp`, `gemini-bridge`, `ask` and `doctor`'s connector probes depend on the machine's real CLIs and credentials. Report these as unverified when a change touches them.
+`verify.sh` has no PTY. `term.sh` drives the CLI on a real terminal through tmux, and [features/config.md](features/config.md) uses it for `config edit` and the menu's "Configure settings". The menu's flow runs, `llm4ts refine`, `llm4ts watch` as a live TUI, and `run --ui tree` have no recipe yet and are not driven here. `llm4ts mcp`, `gemini-bridge`, `ask` and `doctor`'s connector probes depend on the machine's real CLIs and credentials. Report these as unverified when a change touches them.
 
 ## Helpers
 
 - `verify.sh` is the harness. Commands: `build`, `doctor`, `new`, `path`, `stub`, `cli`, `snapshot`, `cleanup`, `help`.
+- `term.sh` is the terminal driver for interactive commands. Commands: `start`, `keys`, `shot`, `stop`. It needs tmux.
 - `stubs/implement.cjs` is the responder for the `implement` flow.

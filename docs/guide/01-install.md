@@ -46,11 +46,16 @@ API provider is fine unless you plan to use it.
 ## Pick your coding agent
 
 The last line of the report is the coder llm4ts will drive. It defaults to
-`claude` and is chosen with one environment variable:
+`claude` and is chosen with one setting, written once to your global
+settings file (`~/.config/llm4ts/config.env`):
 
 ```bash
-export LLM4TS_CODER=codex   # claude | codex | gemini | pi | agy | grok | cursor | opencode
+llm4ts config set LLM4TS_CODER=codex   # claude | codex | gemini | pi | agy | grok | cursor | opencode
 ```
+
+`llm4ts run <flow> --coder <name>` chooses another agent for one run, and
+`llm4ts config show` prints every setting in effect and where it comes from.
+[Configuration](../configuration.md#settings-files) describes the files.
 
 The chosen CLI must be installed and authenticated on its own; llm4ts never
 sees your credentials and never passes them on the command line.

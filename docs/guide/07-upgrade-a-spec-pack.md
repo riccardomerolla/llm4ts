@@ -70,7 +70,7 @@ hand: that keeps the pack source-grounded and judged. Let the flow write
 the marks:
 
 ```bash
-LLM4TS_MARK_DEEPEN=1 llm4ts run modernize-pack-upgrade --pack j2ee-nextjs-spa --repo ~/estates/legacy
+llm4ts run modernize-pack-upgrade --pack j2ee-nextjs-spa --repo ~/estates/legacy --set LLM4TS_MARK_DEEPEN=1
 ```
 
 `docs/modernization/decisions.md` now has one line per program under
@@ -85,7 +85,8 @@ llm4ts refine --repo ~/estates/legacy --target ~/estates/nextjs
 ## 4. Continue with the current release
 
 ```bash
-LLM4TS_TARGET_REPO=~/estates/nextjs llm4ts run modernize-refine --pack j2ee-nextjs-spa --repo ~/estates/legacy
+llm4ts config set --repo ~/estates/legacy LLM4TS_TARGET_REPO=~/estates/nextjs   # once per estate
+llm4ts run modernize-refine --pack j2ee-nextjs-spa --repo ~/estates/legacy
 ```
 
 Refine re-extracts the marked programs with the current prompts and judge,
@@ -94,12 +95,13 @@ the README, `decisions.md`, and `domains.md`, flip `- [x] Approved` in
 each, and the rest of the pipeline is the current one:
 
 ```bash
-LLM4TS_LEGACY_REPO=~/estates/legacy llm4ts run modernize-seed --pack j2ee-nextjs-spa --repo ~/estates/nextjs
+llm4ts config set --repo ~/estates/nextjs LLM4TS_LEGACY_REPO=~/estates/legacy   # once per target
+llm4ts run modernize-seed --pack j2ee-nextjs-spa --repo ~/estates/nextjs
 ```
 
 Uncovered units the check listed that no deepen closed are the closing
 `modernize-extract` run's job, exactly as for a wave-by-wave extraction:
-run it once without `LLM4TS_WAVE` and it extracts only what is missing.
+run it once without `--set LLM4TS_WAVE` and it extracts only what is missing.
 
 ## What you do not get
 

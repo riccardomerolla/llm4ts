@@ -3,7 +3,28 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import type { Environment } from "@llm4ts/flow/Settings"
+import {
+  flowEnvironment,
+  registryFacts,
+  resolveConfig,
+  type FlowEnvironment
+} from "@llm4ts/shell/Config"
 import { launchFlow, needsResolveFallback } from "@llm4ts/shell/FlowLaunch"
+
+const childEnvironment = (base: Environment): FlowEnvironment =>
+  flowEnvironment(
+    resolveConfig({
+      facts: registryFacts,
+      flags: [],
+      environment: base,
+      project: undefined,
+      global: undefined,
+      repo: "/",
+      home: "/"
+    }),
+    base
+  )
 
 const withTempDir = <A>(use: (dir: string) => Promise<A>): Promise<A> => {
   const dir = mkdtempSync(join(tmpdir(), "llm4ts-shell-launch-"))
@@ -30,14 +51,21 @@ describe("launchFlow", () => {
         withTempDir(async (dir) => {
           const flowPath = join(dir, "exit-seven.ts")
           writeFileSync(flowPath, "process.exit(7)\n")
-          return Effect.runPromise(launchFlow({ flowPath, taskArgs: [], stdio: "ignore" }))
+          return Effect.runPromise(
+            launchFlow({
+              flowPath,
+              taskArgs: [],
+              environment: childEnvironment(process.env),
+              stdio: "ignore"
+            })
+          )
         })
       )
       assert.strictEqual(exitCode, 7)
     })
   )
 
-  it.effect("passes task argv and the coder override to the child", () =>
+  it.effect("passes task argv and the environment to the child", () =>
     Effect.gen(function* () {
       const exitCode = yield* Effect.promise(() =>
         withTempDir(async (dir) => {
@@ -54,7 +82,7 @@ describe("launchFlow", () => {
             launchFlow({
               flowPath,
               taskArgs: ["do the task"],
-              coder: "codex",
+              environment: childEnvironment({ ...process.env, LLM4TS_CODER: "codex" }),
               stdio: "ignore"
             })
           )
@@ -80,7 +108,14 @@ describe("launchFlow", () => {
               "}"
             ].join("\n")
           )
-          return Effect.runPromise(launchFlow({ flowPath, taskArgs: [], stdio: "ignore" }))
+          return Effect.runPromise(
+            launchFlow({
+              flowPath,
+              taskArgs: [],
+              environment: childEnvironment(process.env),
+              stdio: "ignore"
+            })
+          )
         })
       )
       assert.strictEqual(exitCode, 0)
@@ -93,6 +128,7 @@ describe("launchFlow", () => {
         launchFlow({
           flowPath: join(tmpdir(), "llm4ts-shell-missing", "nope.ts"),
           taskArgs: [],
+          environment: childEnvironment(process.env),
           stdio: "ignore"
         })
       )

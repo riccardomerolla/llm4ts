@@ -46,13 +46,18 @@ other flows across the project (`.llm4ts/flows/`), global
 (`~/.config/llm4ts/flows/`), and built-in tiers. With a global install
 (`npm i -g @llm4ts/shell`), the command is just `llm4ts run …`.
 
-Select the coding agent with the `LLM4TS_CODER` environment variable
-(`claude`, `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, `opencode`;
-default `claude`) — the chosen CLI must be installed and authenticated:
+Select the coding agent with `--coder` (`claude`, `codex`, `gemini`, `pi`,
+`agy`, `grok`, `cursor`, `opencode`; default `claude`). The chosen CLI must
+be installed and authenticated:
 
 ```bash
-LLM4TS_CODER=codex npx -y @llm4ts/shell run implement "<task>"
+npx -y @llm4ts/shell run implement --coder codex "<task>"
 ```
+
+`npx -y @llm4ts/shell config set LLM4TS_CODER=codex` makes that agent the
+default for every run. Any other setting goes on one run with
+`--set NAME=value`, or into the settings files with `config set`.
+`config show` prints what is in effect and where each value comes from.
 
 Key flags:
 

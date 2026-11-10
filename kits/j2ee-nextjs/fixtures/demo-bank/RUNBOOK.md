@@ -43,15 +43,32 @@ Node itself (one download, then offline), or wrap the pack's gate commands
 in a version manager (`fnm exec --using=.nvmrc pnpm lint` works as a gate
 line, since gates are plain argv). `LLM4TS_NODE_CHECK=off` skips the check.
 
-Timing bounds for the day (set in the environment you run flows from):
+Timing bounds for the day, written once to each repository's settings file
+(`.llm4ts/config.env`, llm4ts 3.3.0 or newer), so no command below needs a
+prefix. `reset-demo.mjs` recreates both repositories: run these two commands
+again after every reset.
 
 ```bash
-export LLM4TS_PACK=j2ee-nextjs-spa
-export LLM4TS_LEGACY_REPO=~/demo/legacy-j2ee
-export LLM4TS_JUDGE_ROUNDS=1        # bound judge feedback to one round on stage
-export LLM4TS_MAX_CLOSURE_FILES=8   # bound legacy evidence per page
-export LLM4TS_EXTRACT_CONCURRENCY=3 # pages extracted and judged at once (measure in rehearsal)
+# the legacy estate: survey, extract, refine
+llm4ts config set --repo ~/demo/legacy-j2ee \
+  LLM4TS_PACK=j2ee-nextjs-spa \
+  LLM4TS_JUDGE_ROUNDS=1 \
+  LLM4TS_MAX_CLOSURE_FILES=8 \
+  LLM4TS_EXTRACT_CONCURRENCY=3
+
+# the target: convert-page, convert-all
+llm4ts config set --repo ~/demo/nextjs \
+  LLM4TS_PACK=j2ee-nextjs-spa \
+  LLM4TS_LEGACY_REPO=~/demo/legacy-j2ee \
+  LLM4TS_JUDGE_ROUNDS=1 \
+  LLM4TS_MAX_CLOSURE_FILES=8
 ```
+
+`LLM4TS_JUDGE_ROUNDS=1` bounds judge feedback to one round on stage,
+`LLM4TS_MAX_CLOSURE_FILES=8` bounds the legacy evidence per page, and
+`LLM4TS_EXTRACT_CONCURRENCY=3` is the pages extracted and judged at once
+(measure in rehearsal). `llm4ts config show --repo ~/demo/nextjs` prints
+what is in effect and where each value comes from.
 
 `LLM4TS_PACK` is the one that matters for Act 1: it is what makes the survey
 reason in J2EE terms (web.xml mappings, includes, forwards, ajax targets)
@@ -77,8 +94,8 @@ entered. Keep these two in your back pocket for a real estate with an
 unusual layout, never set them on stage without a reason:
 
 ```bash
-export LLM4TS_EXCLUDE_DIRS=.git,node_modules,target,generated   # replaces the pruned list
-export LLM4TS_MAX_DISCOVER_RESULTS=50000                         # default 20000 for estates
+llm4ts config set --repo <estate> LLM4TS_EXCLUDE_DIRS=.git,node_modules,target,generated   # replaces the pruned list
+llm4ts config set --repo <estate> LLM4TS_MAX_DISCOVER_RESULTS=50000                         # default 20000 for estates
 ```
 
 ## Act 1 — breadth: survey and extract (~duration: measure in rehearsal)
@@ -114,7 +131,7 @@ audience, flip `- [x] Approved` (the human gate is the point — banks like
 this beat).
 
 ```bash
-LLM4TS_WAVE=wave-1 llm4ts run modernize-extract --repo ~/demo/legacy-j2ee
+llm4ts run modernize-extract --repo ~/demo/legacy-j2ee --set LLM4TS_WAVE=wave-1
 ```
 
 Act 2 opens with `accountOverview`, and the survey's plan puts that page in
@@ -123,11 +140,11 @@ dashboard, profile, settings, messages, help), so extract wave-2 as well
 before Act 2 — it is one page plus its servlet and DTO, minutes not tens of
 minutes. Each wave gates only its own units; the pages of later waves are
 listed as "not gating" — say so when the line scrolls past, and mention the
-closing run without `LLM4TS_WAVE` that enforces coverage over the whole
+closing run without `--set LLM4TS_WAVE` that enforces coverage over the whole
 estate once every wave is in.
 
 ```bash
-LLM4TS_WAVE=wave-2 llm4ts run modernize-extract --repo ~/demo/legacy-j2ee
+llm4ts run modernize-extract --repo ~/demo/legacy-j2ee --set LLM4TS_WAVE=wave-2
 ```
 
 ### Refine — the pack becomes what the client wants built (optional beat)
@@ -216,8 +233,9 @@ and the lessons the review phase appends, in one directory they own.
 Optional ADO mirror (decide before the workshop, never set it up live):
 
 ```bash
-export LLM4TS_ADO_ORG_URL=https://dev.azure.com/<org>
-export LLM4TS_ADO_PROJECT=<project>
+llm4ts config set --repo ~/demo/nextjs \
+  LLM4TS_ADO_ORG_URL=https://dev.azure.com/<org> \
+  LLM4TS_ADO_PROJECT=<project>
 # Auth belongs to the az CLI itself: `az devops login` beforehand (or
 # AZURE_DEVOPS_EXT_PAT in the shell) — llm4ts never sees the PAT.
 ```
@@ -233,7 +251,7 @@ export LLM4TS_ADO_PROJECT=<project>
 | Judge keeps rejecting | `LLM4TS_JUDGE_ROUNDS=1` already bounds it; the failure lands on the board with its reason — governance beat, not a crash. |
 | `⟳ flaky … (fresh retry)` lines scrolling past — Gemini CLI's `Loop detected` / `A potential loop was detected`, an empty response, a malformed tool call | Nothing to do: the seat restarts the turn in a fresh process, up to 6 times, and the flow carries on. Say it out loud: the turn was lost, the quota and the prompt were not. Only if all 6 fail does the stage abort — rerun, it resumes. |
 | `⟳ structured output (repair retry)` lines — `Failed to parse response as structured output` | Nothing to do: the model gets its own parse failure quoted back and is asked for the JSON alone, up to 2 more times. If the third reply still does not parse the stage aborts with the reason — rerun resumes; a schema the model can never satisfy is a pack bug, not a stage bug. |
-| `pack 'j2ee-nextjs-spa' not found: no kit ships it` | The shell predates kits (0.18.0) or `LLM4TS_PACK` was overwritten with a path: `llm4ts kits` shows what it sees; `npm i -g @llm4ts/shell@latest`; re-export the bare name. Never happens after a green Act 0. |
+| `pack 'j2ee-nextjs-spa' not found: no kit ships it` | The shell predates kits (0.18.0) or `LLM4TS_PACK` was overwritten with a path: `llm4ts kits` shows what it sees; `npm i -g @llm4ts/shell@latest`; set the bare name again with `llm4ts config set --repo <repo> LLM4TS_PACK=j2ee-nextjs-spa`. Never happens after a green Act 0. |
 | Survey aborts with `discovery stopped at N matching files` (a client's real estate, never the fixture) | The abort names the knobs: tighten the pack's `sources:`/`exclude:`, prune more with `LLM4TS_EXCLUDE_DIRS=.git,node_modules,generated`, or raise `LLM4TS_MAX_DISCOVER_RESULTS`. Rerun. |
 | Everything is on fire | `node kits/j2ee-nextjs/fixtures/demo-bank/reset-demo.mjs ~/demo` and restart the act; Act 1 re-runs in minutes. |
 

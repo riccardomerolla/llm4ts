@@ -37,4 +37,6 @@ try {
 }
 
 console.log(`\ndemo estate ready:\n  legacy: ${legacy}\n  target: ${target}`)
-console.log(`next: export LLM4TS_LEGACY_REPO=${legacy} (see RUNBOOK.md Act 0)`)
+console.log(
+  `next: llm4ts config set --repo ${target} LLM4TS_LEGACY_REPO=${legacy} (see RUNBOOK.md Act 0)`
+)

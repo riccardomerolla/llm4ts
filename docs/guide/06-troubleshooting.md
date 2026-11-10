@@ -38,11 +38,15 @@ llm4ts run implement --repo /path/to/target "task"
 
 ## `LLM4TS_MODEL is required for provider 'openai'`
 
-Every API provider except `mock` needs a model name. Set both variables:
+Every API provider except `mock` needs a model name. Set both settings, for
+one run:
 
 ```bash
-LLM4TS_PROVIDER=openai LLM4TS_MODEL=gpt-4.1-mini llm4ts run hello "..."
+llm4ts run hello --set LLM4TS_PROVIDER=openai --set LLM4TS_MODEL=gpt-4.1-mini "..."
 ```
+
+`llm4ts config set LLM4TS_PROVIDER=openai LLM4TS_MODEL=gpt-4.1-mini` keeps
+them for every run.
 
 ## `pack 'x' not found: no kit ships it (known packs: ...)`
 

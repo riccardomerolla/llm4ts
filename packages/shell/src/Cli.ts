@@ -1,10 +1,11 @@
 import { homedir } from "node:os"
-import { basename, extname, join, resolve } from "node:path"
+import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Console from "effect/Console"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import { FileSystem } from "effect/FileSystem"
 import * as Schema from "effect/Schema"
 import { Argument, Command, Flag } from "effect/cli"
@@ -49,6 +50,15 @@ import {
   type DiscoveredFlow,
   type FlowTierPaths
 } from "./FlowCatalog.ts"
+import {
+  flowEnvironment,
+  flowNameOf,
+  loadConfig,
+  prepareLaunch,
+  resolvedEnvironment,
+  type FlagAssignment
+} from "./Config.ts"
+import { configCommand, configView, parseAssignment, renderDoctorConfig } from "./ConfigCommand.ts"
 import { launchFlow } from "./FlowLaunch.ts"
 import { mcpOptionsFrom } from "./OperatorConfig.ts"
 import { nodeOperatorRuntime, nodeRead, runMcp } from "./OperatorNode.ts"
@@ -192,30 +202,80 @@ export interface RunFlags {
   readonly roster: Option.Option<string>
   readonly executors: Option.Option<string>
   readonly pack: Option.Option<string>
+  readonly coder: Option.Option<string>
   readonly ui: "classic" | "tree"
   readonly transcript: boolean
   readonly otel: boolean
   readonly otelContent: Option.Option<"off" | "on" | "full">
+  readonly set: ReadonlyArray<string>
 }
 
-/** The flow child's environment: `base` with what the `run` flags forward on top. */
-export const runEnvironmentFrom = (
-  flags: RunFlags,
-  flowPath: string,
-  base: Readonly<Record<string, string | undefined>>
-): Record<string, string | undefined> => ({
-  ...base,
-  ...(flags.verbose ? { LLM4TS_VERBOSITY: "verbose" } : {}),
-  ...(Option.isSome(flags.roster) ? { LLM4TS_ROSTER: flags.roster.value } : {}),
-  ...(Option.isSome(flags.executors) ? { LLM4TS_EXECUTORS: flags.executors.value } : {}),
-  ...(Option.isSome(flags.pack) ? { LLM4TS_PACK: flags.pack.value } : {}),
-  ...(flags.ui === "tree" ? { LLM4TS_UI: "tree" } : {}),
-  ...(flags.transcript ? { LLM4TS_TRANSCRIPT: "on" } : {}),
-  ...(flags.otel ? { LLM4TS_OTEL: "on" } : {}),
-  ...(Option.isSome(flags.otelContent) ? { LLM4TS_OTEL_CONTENT: flags.otelContent.value } : {}),
-  // The flow's name, for its spans (ADR 0026).
-  LLM4TS_FLOW: basename(flowPath, extname(flowPath))
+/**
+ * The `run` flags as the config's flag layer: each named flag is its
+ * setting, each `--set` its `NAME=value`. Fails on a `--set` that is no
+ * assignment; whether a name or a value is acceptable is the resolver's call.
+ */
+export const runFlagAssignments = (
+  flags: RunFlags
+): Result.Result<ReadonlyArray<FlagAssignment>, string> => {
+  const named: ReadonlyArray<FlagAssignment> = [
+    ...(flags.verbose ? [{ name: "LLM4TS_VERBOSITY", value: "verbose", flag: "--verbose" }] : []),
+    ...(Option.isSome(flags.roster)
+      ? [{ name: "LLM4TS_ROSTER", value: flags.roster.value, flag: "--roster" }]
+      : []),
+    ...(Option.isSome(flags.executors)
+      ? [{ name: "LLM4TS_EXECUTORS", value: flags.executors.value, flag: "--executors" }]
+      : []),
+    ...(Option.isSome(flags.pack)
+      ? [{ name: "LLM4TS_PACK", value: flags.pack.value, flag: "--pack" }]
+      : []),
+    ...(Option.isSome(flags.coder)
+      ? [{ name: "LLM4TS_CODER", value: flags.coder.value, flag: "--coder" }]
+      : []),
+    ...(flags.ui === "tree" ? [{ name: "LLM4TS_UI", value: "tree", flag: "--ui" }] : []),
+    ...(flags.transcript ? [{ name: "LLM4TS_TRANSCRIPT", value: "on", flag: "--transcript" }] : []),
+    ...(flags.otel ? [{ name: "LLM4TS_OTEL", value: "on", flag: "--otel" }] : []),
+    ...(Option.isSome(flags.otelContent)
+      ? [{ name: "LLM4TS_OTEL_CONTENT", value: flags.otelContent.value, flag: "--otel-content" }]
+      : [])
+  ]
+  const sets: Array<FlagAssignment> = []
+  for (const text of flags.set) {
+    const parsed = parseAssignment(text)
+    if (Result.isFailure(parsed)) {
+      return Result.fail(`--set: ${parsed.failure}`)
+    }
+    sets.push({ ...parsed.success, flag: "--set" })
+  }
+  return Result.succeed([...named, ...sets])
+}
+
+const launchDeps = { files: nodePlainFileStore }
+
+/**
+ * What an in-process verb reads its settings from: the process environment
+ * plus the config files' values for `repo`. A file problem is printed and
+ * the value it concerns left out, and so is a project file that is not
+ * trusted; neither stops a read-only verb.
+ */
+const verbEnvironment = Effect.fn("@llm4ts/shell/Cli.verbEnvironment")(function* (repo: string) {
+  const { resolution } = yield* loadConfig({
+    repo,
+    environment: process.env,
+    flags: [],
+    ...launchDeps
+  }).pipe(Effect.mapError((error) => new ShellUsageError({ message: error.message })))
+  const said = resolution.problems.filter(
+    (problem) => problem.severity === "error" || problem.kind === "untrusted"
+  )
+  for (const problem of said) {
+    yield* Console.error(`llm4ts config: ${problem.message}`)
+  }
+  return resolvedEnvironment(resolution, process.env)
 })
+
+const repoOr = (repo: Option.Option<string>): string =>
+  resolve(Option.getOrElse(repo, () => process.cwd()))
 
 const runCommand = Command.make(
   "run",
@@ -237,6 +297,18 @@ const runCommand = Command.make(
       Flag.optional,
       Flag.withDescription(
         "Pack for the modernization flows, forwarded as LLM4TS_PACK: a kit pack name from `llm4ts kits`, kit/pack, or a directory holding pack.md"
+      )
+    ),
+    coder: Flag.String("coder").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Coding agent for this run (claude, codex, gemini, pi, …), forwarded as LLM4TS_CODER"
+      )
+    ),
+    set: Flag.String("set").pipe(
+      Flag.atLeast(0),
+      Flag.withDescription(
+        "NAME=value: any LLM4TS_* setting for this run only, repeatable; wins over the environment and the config files (llm4ts config show lists them)"
       )
     ),
     verbose: Flag.Boolean("verbose").pipe(
@@ -284,14 +356,25 @@ const runCommand = Command.make(
     Effect.gen(function* () {
       const tiers = shellTierPaths()
       const flowPath = yield* resolveFlow(config.flow, tiers)
-      const environment = runEnvironmentFrom(config, flowPath, process.env)
+      const flags = runFlagAssignments(config)
+      if (Result.isFailure(flags)) {
+        return yield* new ShellUsageError({ message: flags.failure })
+      }
+      const plan = yield* prepareLaunch({
+        repo: repoOr(config.repo),
+        flow: flowNameOf(flowPath),
+        base: process.env,
+        flags: flags.success,
+        ...launchDeps
+      })
+      yield* Effect.forEach(plan.notices, (notice) => Console.error(notice), { discard: true })
       const exitCode = yield* launchFlow({
         flowPath,
         taskArgs: [
           ...(config.repo._tag === "Some" ? ["--repo", config.repo.value] : []),
           ...config.task
         ],
-        environment
+        environment: plan.environment
       })
       yield* Effect.sync(() => {
         process.exitCode = exitCode
@@ -421,21 +504,39 @@ const refineCommand = Command.make(
       }
       const repo = resolve(config.repo._tag === "Some" ? config.repo.value : process.cwd())
       const flowPath = yield* resolveFlow("modernize-refine", shellTierPaths())
-      const environment: Record<string, string | undefined> = { ...process.env }
-      if (config.pack._tag === "Some") {
-        environment.LLM4TS_PACK = config.pack.value
-      }
-      if (config.target._tag === "Some") {
-        environment.LLM4TS_TARGET_REPO = resolve(config.target.value)
-      }
+      const flow = flowNameOf(flowPath)
+      const plan = yield* prepareLaunch({
+        repo,
+        flow,
+        base: process.env,
+        flags: [
+          ...(config.pack._tag === "Some"
+            ? [{ name: "LLM4TS_PACK", value: config.pack.value, flag: "--pack" }]
+            : []),
+          ...(config.target._tag === "Some"
+            ? [
+                {
+                  name: "LLM4TS_TARGET_REPO",
+                  value: resolve(config.target.value),
+                  flag: "--target"
+                }
+              ]
+            : [])
+        ],
+        ...launchDeps
+      })
+      yield* Effect.forEach(plan.notices, (notice) => Console.error(notice), { discard: true })
       yield* refineSession({
         modDir: join(repo, ModDir),
-        environment,
+        environment: plan.environment,
         launch: (extra) =>
           launchFlow({
             flowPath,
             taskArgs: ["--repo", repo],
-            environment: { ...environment, ...extra }
+            environment: flowEnvironment(plan.resolution, process.env, {
+              ...extra,
+              LLM4TS_FLOW: flow
+            })
           }).pipe(Effect.catch((error) => Console.error(error.message).pipe(Effect.as(1))))
       })
     })
@@ -598,7 +699,7 @@ const watchCommand = Command.make(
     Effect.gen(function* () {
       const options = yield* watchOptionsFrom(config)
       yield* makeWatchProgram(
-        { ...options, idleAfterMs: idleAfterFrom(process.env) },
+        { ...options, idleAfterMs: idleAfterFrom(yield* verbEnvironment(options.repo)) },
         nodeWatchDependencies()
       )
     })
@@ -676,11 +777,12 @@ const profileCommand = Command.make(
   )
 )
 
-const rosterSource = (repo: Option.Option<string>) => ({
-  files: nodePlainFileStore,
-  environment: process.env,
-  workDir: resolve(Option.getOrElse(repo, () => process.cwd()))
-})
+const rosterSource = (repo: Option.Option<string>) =>
+  Effect.map(verbEnvironment(repoOr(repo)), (environment) => ({
+    files: nodePlainFileStore,
+    environment,
+    workDir: repoOr(repo)
+  }))
 
 const rosterRepo = Flag.String("repo").pipe(
   Flag.optional,
@@ -700,7 +802,7 @@ const rosterPauseCommand = Command.make(
   (config) =>
     Effect.gen(function* () {
       const exclusion = yield* pauseExecutor(
-        rosterSource(config.repo),
+        yield* rosterSource(config.repo),
         config.id,
         Option.getOrUndefined(config.for)
       )
@@ -716,14 +818,14 @@ const rosterResumeCommand = Command.make(
   },
   (config) =>
     Effect.gen(function* () {
-      yield* resumeExecutor(rosterSource(config.repo), config.id)
+      yield* resumeExecutor(yield* rosterSource(config.repo), config.id)
       yield* Console.log(`${config.id} back in the round`)
     })
 ).pipe(Command.withDescription("Put an executor back in the pick-up round"))
 
 const rosterCommand = Command.make("roster", { repo: rosterRepo }, (config) =>
   Effect.gen(function* () {
-    const report = yield* rosterReport(rosterSource(config.repo))
+    const report = yield* rosterReport(yield* rosterSource(config.repo))
     yield* Console.log(renderRosterReport(report))
   })
 ).pipe(
@@ -862,7 +964,10 @@ const runGraph = (sub: GraphSubcommand, flags: GraphFlags) =>
   Effect.gen(function* () {
     const command = yield* graphCommandFrom(sub, flags)
     yield* Console.log(
-      yield* makeGraphProgram(command, nodeGraphDependencies(process.env, shellTierPaths()))
+      yield* makeGraphProgram(
+        command,
+        nodeGraphDependencies(yield* verbEnvironment(command.repo), shellTierPaths())
+      )
     )
   })
 
@@ -969,7 +1074,7 @@ const geminiBridgeCommand = Command.make(
   },
   (flags) =>
     Effect.gen(function* () {
-      const options = yield* geminiBridgeOptionsFrom(flags)
+      const options = yield* geminiBridgeOptionsFrom(flags, yield* verbEnvironment(process.cwd()))
       yield* makeGeminiBridgeProgram(options, {
         executor: nodeProcessExecutor,
         temporaryFiles: nodeTemporaryFiles,
@@ -1042,11 +1147,33 @@ const mcpCommand = Command.make(
   )
 )
 
-const doctorCommand = Command.make("doctor", {}, () =>
-  Effect.gen(function* () {
-    const report = yield* makeDoctorProgram()
-    yield* Console.log(report.trimEnd())
-  })
+const doctorCommand = Command.make(
+  "doctor",
+  {
+    repo: Flag.String("repo").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "Repository whose .llm4ts/config.env applies (defaults to the current directory)"
+      )
+    )
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const view = yield* configView(
+        {
+          ...launchDeps,
+          executor: nodeProcessExecutor,
+          environment: process.env,
+          cwd: process.cwd()
+        },
+        repoOr(config.repo)
+      )
+      const report = yield* makeDoctorProgram(
+        undefined,
+        resolvedEnvironment(view.loaded.resolution, process.env)
+      )
+      yield* Console.log(`${report.trimEnd()}\n\n${renderDoctorConfig(view)}`)
+    })
 ).pipe(Command.withDescription("Report available connectors and credentials"))
 
 export const shellCommand = Command.make("llm4ts", {}, () =>
@@ -1077,6 +1204,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     geminiBridgeCommand,
     mcpCommand,
     toolCommand,
+    configCommand,
     doctorCommand
   ])
 )
