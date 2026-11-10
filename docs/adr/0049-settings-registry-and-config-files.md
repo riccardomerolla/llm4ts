@@ -133,7 +133,9 @@ terminal with no global file asks for the coder and the reasoner first.
   ship `.llm4ts/config.env` and set settings llm4ts runs as commands
   (`LLM4TS_GATES`, `LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`) or seat flags
   (`LLM4TS_CODER_FLAGS`) for whoever runs llm4ts there. `loadConfig` asks
-  git (`git ls-files -s -- .llm4ts .llm4ts/config.env`) whenever the
+  git (`git ls-files -s -- ":(icase).llm4ts"`, compared without case, since a
+  tracked `.LLM4TS/config.env` is the same file on a case-insensitive
+  filesystem) whenever the
   project file exists. The file counts as the repository's when git tracks
   it, and also when git tracks `.llm4ts` itself as a symbolic link or a
   submodule: git reports a path behind a tracked link as unknown, so asking

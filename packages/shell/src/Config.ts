@@ -641,30 +641,30 @@ export interface LoadedConfig {
   readonly projectTracked: boolean
 }
 
-const projectFileInRepo = join(".llm4ts", "config.env")
-
+// git prints index paths with forward slashes on every platform.
 const runStateDirInRepo = ".llm4ts"
+const projectFileInRepo = ".llm4ts/config.env"
 
 /**
  * Whether the repository supplies `<repo>/.llm4ts/config.env`: git tracks the
  * file, or tracks `.llm4ts` itself (a symbolic link or a submodule), in which
  * case the file behind it is the repository's too even though git reports
- * that path as unknown. No repository or no git: nothing was supplied.
+ * that path as unknown. Case is ignored: on a case-insensitive filesystem a
+ * tracked `.LLM4TS/config.env` is the file llm4ts would read. No repository
+ * or no git: nothing was supplied.
  */
 const trackedByGit = (executor: ProcessExecutorShape, repo: string): Effect.Effect<boolean> =>
-  executor
-    .run(["git", "ls-files", "-s", "--", runStateDirInRepo, projectFileInRepo], repo, {})
-    .pipe(
-      Effect.map(
-        (result) =>
-          result.exitCode === 0 &&
-          result.stdout.some((line) => {
-            const path = line.slice(line.indexOf("\t") + 1)
-            return path === runStateDirInRepo || path === projectFileInRepo
-          })
-      ),
-      Effect.orElseSucceed(() => false)
-    )
+  executor.run(["git", "ls-files", "-s", "--", `:(icase)${runStateDirInRepo}`], repo, {}).pipe(
+    Effect.map(
+      (result) =>
+        result.exitCode === 0 &&
+        result.stdout.some((line) => {
+          const path = line.slice(line.indexOf("\t") + 1).toLowerCase()
+          return path === runStateDirInRepo || path === projectFileInRepo
+        })
+    ),
+    Effect.orElseSucceed(() => false)
+  )
 
 /** Reads both files for `repo`, parses and resolves. An absent file is no problem. */
 export const loadConfig = Effect.fn("@llm4ts/shell/Config.loadConfig")(function* (options: {

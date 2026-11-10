@@ -744,7 +744,7 @@ const failingReads = (store: PlainFileStoreShape, path: string): PlainFileStoreS
       : store.read(candidate)
 })
 
-const lsFiles = JSON.stringify(["git", "ls-files", "-s", "--", ".llm4ts", ".llm4ts/config.env"])
+const lsFiles = JSON.stringify(["git", "ls-files", "-s", "--", ":(icase).llm4ts"])
 
 // `git ls-files -s` lists the index entries under the paths it is given and
 // exits 128 outside a repository; with no git it cannot spawn.
@@ -801,10 +801,11 @@ describe("a project file that git tracks", () => {
   // git reports a path behind a tracked symbolic link as unknown, so the link
   // itself is what gives the repository's file away.
   for (const [label, entry] of [
-    ["a symbolic link", "120000 5d1c5e0 0\t.llm4ts"],
-    ["a submodule", "160000 5d1c5e0 0\t.llm4ts"]
+    [".llm4ts itself as a symbolic link", "120000 5d1c5e0 0\t.llm4ts"],
+    [".llm4ts itself as a submodule", "160000 5d1c5e0 0\t.llm4ts"],
+    ["the file under another case of the folder", "100644 5d1c5e0 0\t.LLM4TS/config.env"]
   ] as const) {
-    it.effect(`is ignored when git tracks .llm4ts itself as ${label}`, () =>
+    it.effect(`is ignored when git tracks ${label}`, () =>
       Effect.gen(function* () {
         const loaded = yield* load(gitListing([entry]))
         assert.isTrue(loaded.projectTracked)
