@@ -83,6 +83,7 @@
     "./Orientation": "./dist/Orientation.js",
     "./Persistence": "./dist/Persistence.js",
     "./RunState": "./dist/RunState.js",
+    "./Settings": "./dist/Settings.js",
     "./Plan": "./dist/Plan.js",
     "./PlanExecution": "./dist/PlanExecution.js",
     "./Port": "./dist/Port.js",

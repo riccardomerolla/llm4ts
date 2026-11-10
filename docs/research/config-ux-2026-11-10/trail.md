@@ -1,0 +1,41 @@
+# Configuration UX: decision trail
+
+Started 2026-11-10 on branch `config-ux`. The question: real usage carries a
+lot of configuration; how do we make it lighter?
+
+## Predicate
+
+1. After a one-time setup, every runbook command runs with zero environment
+   prefixes.
+2. `llm4ts config show` prints each setting's effective value and its source.
+3. An unknown `LLM4TS_*` name prints a warning with the closest known name.
+4. A flow that lacks a required setting fails before it spends a token and
+   names the setting.
+5. `docs/configuration.md` is generated from one registry; a check fails on
+   drift, and when code reads a name the registry lacks.
+
+## Baseline (pre-change, measured)
+
+| Measure                                            | Value | How                                                                         |
+| -------------------------------------------------- | ----- | --------------------------------------------------------------------------- |
+| Distinct `LLM4TS_*` names in packages, flows, kits | 96    | regex over `packages/*/src`, `flows`, `kits` (`.ts`, `.md`), tests excluded |
+| Of those, absent from configuration.md and README  | 43    | same script                                                                 |
+| Names with an `llm4ts run` flag                    | 8     | `runEnvironmentFrom` in `packages/shell/src/Cli.ts`                         |
+| Doc lines carrying an `LLM4TS_…=` assignment       | 28    | `grep -rhcE "LLM4TS_[A-Z_]+=" docs/*.md kits/*/*.md README.md`              |
+| Settings config files (roster and SOAP auth aside) | 0     | grep for a config loader in `packages/*/src`                                |
+| Unknown-name check                                 | none  | inferred: no match for an unknown-variable warning in `packages/*/src`      |
+
+## Log
+
+| When       | Step                | Decision or result                                                                                                                                                   | Evidence                                                                                   |
+| ---------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 2026-11-10 | Frame               | Pain read as: project settings retyped every run, and no way to tell which of 96 names apply. User confirmed.                                                        | chat                                                                                       |
+| 2026-11-10 | Reorder             | Design (file format, registry shape, verb) moves ahead of the registry: the registry is the file's schema.                                                           | this row                                                                                   |
+| 2026-11-10 | Design arena        | Two runners, one judge. Base: candidate 1 (dotenv files, one `LLM4TS_*` spelling). Judge and I agree.                                                                | [design.md](design.md), candidates beside it                                               |
+| 2026-11-10 | Judge finding       | Toggle readers disagree on spellings (`1` only, `1\|true`, `off` only). Files project `1`/`off`, proven by test.                                                     | judge report, cited in design.md                                                           |
+| 2026-11-10 | Fact check          | `.llm4ts/` is git-ignored by `ignoringRunState`; the repo roster already lives there. Project file is per clone.                                                     | `packages/flow/src/RunState.ts:43`, `ExecutorRoster.ts:47`                                 |
+| 2026-11-10 | Owner decisions     | dotenv files with `LLM4TS_*` names; the project file is local to a clone, in `.llm4ts/`.                                                                             | chat                                                                                       |
+| 2026-11-10 | Unit 1: registry    | 96 entries (global 29, project 50, run 12, secret 2, internal 3). VERIFIED: sync test fails on an added unknown read and on a deleted row; chain green (2322 tests). | `examples/test/settings-sync.test.ts`, delegate's bite proofs, my rerun of both test files |
+| 2026-11-10 | Unit 1: toggles     | No current reader misreads `1` or `off`, so files project that pair. Doctor ignores `LLM4TS_GEMINI_BRIDGE=on`; `0` leaves TOOL_BRIEF and PORT_GUIDE_TRIAL on.        | delegate's toggle table with file:line                                                     |
+| 2026-11-10 | Unit 1: scope call  | `LLM4TS_ROSTER` moved from run to project: "always run without the global roster here" is a per-repo wish.                                                           | `Registry.ts`                                                                              |
+| 2026-11-10 | Unit 1: side effect | Four never-read names dropped from the judgment tool's presence list instead of registering dead settings.                                                           | `tools/judgment/lib.ts`                                                                    |

@@ -199,6 +199,11 @@ export list; the following modules are the main entry points.
   generation; `@llm4ts/flow/Approval`: the draft marker and human gate the
   modernization phases pause on (both moved here from the retired
   `@llm4ts/modernize` package in 0.18.0).
+- `@llm4ts/flow/Settings`: the registry of every `LLM4TS_*` setting.
+  `SettingName` is the union of the names; `settingFacts` gives a setting's
+  group, scope, value grammar, default and doc; `readSetting` and
+  `settingValue` decode a raw value or an environment with the setting's
+  grammar; `closestSettingName` names the setting a misspelled name meant.
 
 ## Runner
 
