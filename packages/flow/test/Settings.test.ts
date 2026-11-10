@@ -221,6 +221,21 @@ describe("settingFacts", () => {
     assert.strictEqual(settingFacts("LLM4TS_WAVE").fallback.kind, "off")
   })
 
+  it("says which settings are toggles and which take one of a fixed list", () => {
+    assert.isTrue(settingFacts("LLM4TS_GEMINI_BRIDGE").toggle)
+    assert.deepStrictEqual(settingFacts("LLM4TS_GEMINI_BRIDGE").choices, ["on", "off"])
+    assert.isFalse(settingFacts("LLM4TS_GEMINI_BRIDGE_MODE").toggle)
+    assert.deepStrictEqual(settingFacts("LLM4TS_GEMINI_BRIDGE_MODE").choices, ["acp", "model"])
+    assert.isFalse(settingFacts("LLM4TS_JUDGE_ROUNDS").toggle)
+    assert.deepStrictEqual(settingFacts("LLM4TS_JUDGE_ROUNDS").choices, [])
+    for (const name of settingNames) {
+      const facts = settingFacts(name)
+      for (const choice of facts.choices) {
+        assert.isTrue(Result.isSuccess(readSetting(name, choice)), `${name} ${choice}`)
+      }
+    }
+  })
+
   it("only run-scoped, secret and internal settings stay out of files", () => {
     assert.strictEqual(settingFacts("LLM4TS_WAVE").scope, "run")
     assert.strictEqual(settingFacts("LLM4TS_FLOW").scope, "internal")

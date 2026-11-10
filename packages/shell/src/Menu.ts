@@ -4,6 +4,7 @@ import { FileSystem } from "effect/FileSystem"
 import { Prompt } from "effect/cli"
 import { coderChoices, findOnPath, resolvedCoderToken } from "./CoderChoice.ts"
 import { loadConfig, prepareLaunch, resolvedEnvironment } from "./Config.ts"
+import { openConfigEditor } from "./ConfigCommand.ts"
 import { discoverFlows, type DiscoveredFlow, type FlowTierPaths } from "./FlowCatalog.ts"
 import { launchFlow } from "./FlowLaunch.ts"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
@@ -11,7 +12,7 @@ import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 
 const launchDeps = { files: nodePlainFileStore, executor: nodeProcessExecutor }
 
-type MenuAction = "run" | "view" | "exit"
+type MenuAction = "run" | "view" | "configure" | "exit"
 
 const flowChoice = (flow: DiscoveredFlow): Prompt.SelectChoice<DiscoveredFlow> => {
   const shadows = flow.shadows.length === 0 ? "" : ` (shadows ${flow.shadows.join(", ")})`
@@ -106,7 +107,7 @@ const viewFlowInteractive = Effect.fn("@llm4ts/shell/Menu.viewFlowInteractive")(
 })
 
 /**
- * The interactive main menu: run a flow, view a flow, exit. Ctrl-C inside a
+ * The interactive main menu: run a flow, view a flow, configure settings, exit. Ctrl-C inside a
  * prompt quits the menu cleanly rather than crashing the shell.
  */
 export const mainMenu = Effect.fn("@llm4ts/shell/Menu.mainMenu")(function* (tiers: FlowTierPaths) {
@@ -117,6 +118,7 @@ export const mainMenu = Effect.fn("@llm4ts/shell/Menu.mainMenu")(function* (tier
         choices: [
           { title: "Run a flow", value: "run" },
           { title: "View a flow", value: "view" },
+          { title: "Configure settings", value: "configure" },
           { title: "Exit", value: "exit" }
         ]
       })
@@ -134,6 +136,12 @@ export const mainMenu = Effect.fn("@llm4ts/shell/Menu.mainMenu")(function* (tier
       }
       case "view": {
         yield* viewFlowInteractive(tiers).pipe(Effect.catchTag("QuitError", () => Effect.void))
+        break
+      }
+      case "configure": {
+        yield* openConfigEditor(process.cwd()).pipe(
+          Effect.catchTag("ShellUsage", (error) => Console.error(error.message))
+        )
         break
       }
       case "exit": {

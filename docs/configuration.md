@@ -35,6 +35,7 @@ llm4ts config set --repo ~/work/portal LLM4TS_PACK=j2ee-nextjs-spa
 llm4ts config show                        # effective values and where each one comes from
 llm4ts config show LLM4TS_JUDGE_ROUNDS    # one setting in full: every layer, its grammar, its meaning
 llm4ts config unset LLM4TS_PACK
+llm4ts config edit                        # guided: pick a setting, see it, change or remove it
 llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # this run only
 ```
 
@@ -42,6 +43,27 @@ llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # this run only
 "Belongs in". `--global` and `--project` force one file. `config init` never
 overwrites a line. `--set` is repeatable and takes any setting except a
 secret. `llm4ts run --coder <name>` is short for `--set LLM4TS_CODER=<name>`.
+
+`config edit` is the same editing as questions on a terminal. It lists every
+setting a file may hold, the ones that are set first, each with its
+effective value or default and its source (`global`, `project`,
+`environment`, `default`). Typing filters the list by name. Opening a
+setting prints what `config show NAME` prints, and says so when an export
+will keep winning over the saved value. From there you change the value or
+remove it from a file that holds it. An on/off setting and a setting with a
+fixed list of values are chosen from a list, `LLM4TS_CODER` and
+`LLM4TS_REASONER` from the coding agents with the ones found on `PATH`
+marked, and anything else is typed. A value the grammar does not read is
+refused in place and asked again, and an empty answer leaves the setting as
+it was. To store an empty value, use `config set NAME=`. A value goes to the
+file the setting belongs in. For a global setting edited inside a
+repository, the editor asks whether to save it for every repository or for
+this one only. The editor then returns to the list, and "done" or Ctrl-C
+ends it with one line naming what changed. `config edit NAME` opens one
+setting and ends after it. Bare `llm4ts config` on a terminal opens the
+editor, and so does "Configure settings" in the `llm4ts` menu. Per-run
+settings and secrets are not listed. Off a terminal `config edit` exits
+with code 2 and points at `config set`.
 
 `config set` and `--set` refuse an unknown name and a value the setting's
 grammar does not read. A malformed line in a file stops the launch and names

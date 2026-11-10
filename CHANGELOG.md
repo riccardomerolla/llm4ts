@@ -21,6 +21,13 @@ An existing export keeps the meaning it has today.
   (`--global` and `--project` force one), `config unset NAME…` removes it,
   and `config init` writes the `LLM4TS_*` exports of the current shell into
   the files without overwriting a line. `llm4ts doctor` reports the files.
+- **`llm4ts config edit`.** A guided editor on a terminal: pick a setting
+  from a list you can filter by typing, see its value, default and source,
+  then change it or remove it from a file. On/off settings and settings
+  with a fixed list of values are chosen from a list, and a value the
+  setting does not read is refused and asked again. Bare `llm4ts config`
+  and the menu's "Configure settings" open it. `config edit NAME` opens one
+  setting.
 - **`llm4ts run --set NAME=value`** sets any setting for one run and is
   repeatable. **`llm4ts run --coder <name>`** chooses the coding agent for
   one run. A named flag and `--set` for the same setting is a usage error.

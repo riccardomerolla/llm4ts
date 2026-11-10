@@ -213,6 +213,7 @@ llm4ts config set --repo ~/work/portal LLM4TS_PACK=j2ee-nextjs-spa LLM4TS_LEGACY
 llm4ts config show                        # effective values and where each comes from
 llm4ts config show LLM4TS_JUDGE_ROUNDS    # one setting in full
 llm4ts config unset LLM4TS_PACK
+llm4ts config edit                        # guided on a terminal: pick, see, change or remove
 llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # one run only
 ```
 

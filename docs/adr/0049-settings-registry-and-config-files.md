@@ -123,6 +123,17 @@ requirements stay in the flow.
 the current shell into the files, never overwriting a line, and on a
 terminal with no global file asks for the coder and the reasoner first.
 
+`config edit [NAME]` is a guided editor on a terminal, also opened by bare
+`llm4ts config` and by the menu's "Configure settings". It lists the
+settings a file may hold with their effective value and source, shows the
+chosen one as `config show NAME` does, and asks for a new value or a
+removal. It adds no second way to write: it checks an answer with the plan
+`config set` uses and saves through `config set` and `config unset`, so the
+refusals, the tracked-file rule and the printed change are theirs. How a
+value is asked comes from two registry facts, `toggle` and `choices`, not
+from the grammar's wording. Per-run settings and secrets are not offered.
+Off a terminal it exits with code 2.
+
 ## Consequences
 
 - A runbook's `export` block becomes a one-time `config set` or

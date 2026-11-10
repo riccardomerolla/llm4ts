@@ -215,7 +215,7 @@ const refusedFromFlag = {
   internal: "is set by llm4ts"
 }
 
-const unknownText = (name: string, closest: SettingName | undefined): string =>
+export const unknownText = (name: string, closest: SettingName | undefined): string =>
   closest === undefined
     ? `unknown setting ${name}`
     : `unknown setting ${name}; did you mean ${closest}?`
@@ -571,6 +571,12 @@ const refusedBySet = {
   internal: (name: string) => `${name} is set by llm4ts`
 }
 
+/** Why no file may hold the setting; `undefined` when one may. */
+export const storeRefusal = (fact: SettingFacts): string | undefined =>
+  fact.scope === "run" || fact.scope === "secret" || fact.scope === "internal"
+    ? refusedBySet[fact.scope](fact.name)
+    : undefined
+
 /**
  * Pure: `config set` pairs checked against the registry and routed to a
  * file: a global setting to the global file, a project setting to the
@@ -597,8 +603,9 @@ export const planSet = (
       )
       continue
     }
-    if (fact.scope === "run" || fact.scope === "secret" || fact.scope === "internal") {
-      refusals.push(refusedBySet[fact.scope](name))
+    const refusal = storeRefusal(fact)
+    if (refusal !== undefined) {
+      refusals.push(refusal)
       continue
     }
     const read = readSetting(fact.name, value)
@@ -615,7 +622,11 @@ export const planSet = (
       refusals.push(`${name}: ${written.failure}`)
       continue
     }
-    planned.push({ name: fact.name, value, target: target ?? fact.scope })
+    planned.push({
+      name: fact.name,
+      value,
+      target: target ?? (fact.scope === "project" ? "project" : "global")
+    })
   }
   return refusals.length > 0 ? Result.fail(refusals) : Result.succeed(planned)
 }

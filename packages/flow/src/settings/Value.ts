@@ -21,12 +21,15 @@ export interface SettingValue<A> {
   readonly path: boolean
   /** llm4ts runs it as a command (gates, setup, test-one); docs and `config show` say so. */
   readonly runs: boolean
+  /** Every value the grammar reads, as it is written; empty when the grammar is open. */
+  readonly choices: ReadonlyArray<string>
 }
 
 interface Traits {
   readonly empty?: "unset" | "value"
   readonly path?: boolean
   readonly runs?: boolean
+  readonly choices?: ReadonlyArray<string>
 }
 
 const make = <A>(
@@ -54,7 +57,8 @@ const make = <A>(
   ),
   empty: traits.empty ?? "unset",
   path: traits.path ?? false,
-  runs: traits.runs ?? false
+  runs: traits.runs ?? false,
+  choices: traits.choices ?? []
 })
 
 const integerAtLeast =
@@ -90,7 +94,8 @@ export const toggle: SettingValue<boolean> = make(
     const word = text.toLowerCase()
     return onWords.includes(word) ? true : offWords.includes(word) ? false : undefined
   },
-  (value) => (value ? "on" : "off")
+  (value) => (value ? "on" : "off"),
+  { choices: ["on", "off"] }
 )
 
 /** An integer of at least 1. */
@@ -233,5 +238,6 @@ export const oneOf = <const L extends ReadonlyArray<string>>(choices: L): Settin
     choices.join(", ").replace(/, ([^,]*)$/u, " or $1"),
     Schema.Literals(choices),
     (value) => choices.find((choice) => choice === value.toLowerCase()),
-    (value) => value
+    (value) => value,
+    { choices }
   )

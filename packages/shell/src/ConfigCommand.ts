@@ -1,5 +1,5 @@
-// `llm4ts config show | set | unset | init`: the config files seen and edited
-// from the command line. Every renderer is pure and never prints a secret.
+// `llm4ts config show | set | unset | init | edit`: the config files seen and
+// edited from the command line. Every renderer is pure and never prints a secret.
 import { resolve } from "node:path"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
@@ -36,6 +36,19 @@ import {
   type LoadedConfig,
   type Source
 } from "./Config.ts"
+import {
+  editRequest,
+  environmentNote,
+  pickerRows,
+  saveTargets,
+  sessionSummary,
+  settingActions,
+  targetTitles,
+  unlistedHint,
+  valuePrompt,
+  type SessionChange,
+  type SettingAction
+} from "./ConfigEdit.ts"
 import { ShellUsageError } from "./ShellErrors.ts"
 
 /** Provider keys the connectors read. `config show` says set or unset, never more. */
@@ -414,6 +427,19 @@ const pathOf = (view: ConfigView, layer: FileLayer): string =>
 
 const fileLayers: ReadonlyArray<FileLayer> = ["project", "global"]
 
+/** A path value made absolute the way `config set` writes it. */
+const assignmentOf = (
+  deps: ConfigDeps,
+  name: string,
+  value: string
+): { readonly name: string; readonly value: string } => ({
+  name,
+  value:
+    facts.get(name)?.path === true && value.trim().length > 0
+      ? expandPath(value, deps.cwd, homeOf(deps.environment))
+      : value
+})
+
 export const runConfigShow = Effect.fn("@llm4ts/shell/ConfigCommand.show")(function* (
   deps: ConfigDeps,
   options: {
@@ -457,13 +483,7 @@ export const runConfigSet = Effect.fn("@llm4ts/shell/ConfigCommand.set")(functio
   }
   const assignments = parsed
     .flatMap((pair) => (Result.isSuccess(pair) ? [pair.success] : []))
-    .map(({ name, value }) => ({
-      name,
-      value:
-        facts.get(name)?.path === true && value.trim().length > 0
-          ? expandPath(value, deps.cwd, home)
-          : value
-    }))
+    .map(({ name, value }) => assignmentOf(deps, name, value))
   const planned = planSet(registryFacts, assignments, options.target)
   if (Result.isFailure(planned)) {
     return yield* usage(planned.failure.join("\n"))
@@ -762,6 +782,8 @@ const askSeats = (environment: Environment) =>
     return answers
   })
 
+const onTerminal = (): boolean => process.stdin.isTTY === true && process.stdout.isTTY === true
+
 const nodeDeps = (): ConfigDeps => ({
   files: nodePlainFileStore,
   executor: nodeProcessExecutor,
@@ -882,7 +904,7 @@ const unsetCommand = Command.make(
 const initCommand = Command.make("init", { repo: repoFlag }, (config) =>
   Effect.gen(function* () {
     const deps = nodeDeps()
-    const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true
+    const interactive = onTerminal()
     yield* Console.log(
       yield* runConfigInit(deps, {
         repo: repoOf(config.repo),
@@ -896,15 +918,236 @@ const initCommand = Command.make("init", { repo: repoFlag }, (config) =>
   )
 )
 
-export const configCommand = Command.make("config", {}, () =>
-  Effect.fail(
-    usage(
-      "try `llm4ts config show`, `llm4ts config set NAME=value`, `llm4ts config unset NAME` or `llm4ts config init`"
-    )
+const insideRepository = (deps: ConfigDeps, repo: string): Effect.Effect<boolean> =>
+  deps.executor.run(["git", "rev-parse", "--is-inside-work-tree"], repo, {}).pipe(
+    Effect.map((result) => result.exitCode === 0),
+    Effect.orElseSucceed(() => false)
   )
+
+const heldIn = (view: ConfigView, name: SettingName): ReadonlyArray<FileLayer> =>
+  fileLayers.filter(
+    (layer) =>
+      lastValue(layer === "project" ? view.loaded.project : view.loaded.global, name) !== undefined
+  )
+
+const backChoice = { title: "back", value: undefined }
+
+const askText = (deps: ConfigDeps, fact: SettingFacts, current: string | undefined) =>
+  Prompt.run(
+    Prompt.String({
+      message:
+        current === undefined
+          ? `${fact.name} (${fact.grammar}; empty cancels)`
+          : `${fact.name} (${fact.grammar}; Tab takes the current value, empty cancels)`,
+      ...(current === undefined ? {} : { default: current }),
+      validate: (answer) => {
+        const value = answer.trim()
+        if (value.length === 0) {
+          return Effect.succeed("")
+        }
+        const planned = planSet(registryFacts, [assignmentOf(deps, fact.name, value)])
+        return Result.isFailure(planned)
+          ? Effect.fail(planned.failure.join("; "))
+          : Effect.succeed(value)
+      }
+    })
+  ).pipe(Effect.map((value) => (value.length === 0 ? undefined : value)))
+
+/** The new value, or `undefined` when the question was left unanswered. */
+const askValue = (deps: ConfigDeps, fact: SettingFacts, current: string | undefined) => {
+  const asked = valuePrompt(fact)
+  const select = (choices: ReadonlyArray<Prompt.SelectChoice<string | undefined>>) =>
+    Prompt.run(Prompt.Select({ message: `${fact.name} (${fact.grammar})`, choices }))
+  switch (asked.kind) {
+    case "toggle": {
+      return select([{ title: "on", value: "on" }, { title: "off", value: "off" }, backChoice])
+    }
+    case "choices": {
+      return select([
+        ...asked.choices.map((choice) => ({ title: choice, value: choice })),
+        backChoice
+      ])
+    }
+    case "seat": {
+      return Effect.flatMap(
+        select([
+          ...seatChoices(deps.environment),
+          { title: "another name, typed", value: "" },
+          backChoice
+        ]),
+        (choice) => (choice === "" ? askText(deps, fact, current) : Effect.succeed(choice))
+      )
+    }
+    case "text": {
+      return askText(deps, fact, current)
+    }
+  }
+}
+
+const editSetting = Effect.fn("@llm4ts/shell/ConfigCommand.editSetting")(function* (
+  deps: ConfigDeps,
+  options: { readonly repo: string; readonly inRepository: boolean },
+  fact: SettingFacts,
+  record: (change: SessionChange) => void
+) {
+  const view = yield* viewOf(deps, options.repo)
+  const held = heldIn(view, fact.name)
+  const fileValue = (within: ConfigView, layer: FileLayer): string | undefined =>
+    lastValue(layer === "project" ? within.loaded.project : within.loaded.global, fact.name)
+  const note = environmentNote(view.loaded.resolution, fact.name)
+  yield* Console.log(
+    ["", renderSetting(view, fact.name), ...(note === undefined ? [] : [note]), ""].join("\n")
+  )
+  const action = yield* Prompt.run(
+    Prompt.Select<SettingAction>({
+      message: fact.name,
+      choices: settingActions(held).map((choice) => ({ title: choice.title, value: choice.action }))
+    })
+  )
+  if (action.kind === "back") {
+    return
+  }
+  if (action.kind === "remove") {
+    yield* Console.log(
+      yield* runConfigUnset(deps, { repo: options.repo, names: [fact.name], target: action.layer })
+    )
+    record({ name: fact.name, layer: action.layer, kind: "removed" })
+    return
+  }
+  const first = held[0]
+  const value = yield* askValue(
+    deps,
+    fact,
+    first === undefined ? undefined : fileValue(view, first)
+  )
+  if (value === undefined) {
+    yield* Console.log(`${fact.name} left as it was`)
+    return
+  }
+  const targets = saveTargets(fact, {
+    inRepository: options.inRepository,
+    projectTracked: view.loaded.projectTracked,
+    held
+  })
+  const [only = "global", ...others] = targets
+  const target =
+    others.length === 0
+      ? only
+      : yield* Prompt.run(
+          Prompt.Select<FileLayer>({
+            message: "Save it for",
+            choices: targets.map((layer) => ({ title: targetTitles[layer], value: layer }))
+          })
+        )
+  yield* Console.log(
+    yield* runConfigSet(deps, { repo: options.repo, pairs: [`${fact.name}=${value}`], target })
+  )
+  const after = yield* viewOf(deps, options.repo)
+  if (fileValue(after, target) !== fileValue(view, target)) {
+    record({ name: fact.name, layer: target, kind: "set" })
+  }
+})
+
+/**
+ * The guided editor: pick a setting, see it in full, change or remove it,
+ * back to the list. `name` opens that one setting and ends after it. Ends on
+ * "done" or Ctrl-C with one line on what the session changed.
+ */
+export const editSession = Effect.fn("@llm4ts/shell/ConfigCommand.editSession")(function* (
+  deps: ConfigDeps,
+  options: { readonly repo: string; readonly name?: SettingName }
+) {
+  const changes: Array<SessionChange> = []
+  const record = (change: SessionChange): void => {
+    changes.push(change)
+  }
+  const inRepository = yield* insideRepository(deps, options.repo)
+  const pick = Effect.gen(function* () {
+    const view = yield* viewOf(deps, options.repo)
+    return yield* Prompt.run(
+      Prompt.AutoComplete<SettingName | undefined>({
+        message: "Which setting?",
+        maxPerPage: 12,
+        choices: [
+          { title: "done", value: undefined, description: "leave the editor" },
+          ...pickerRows(view.loaded.resolution).map((row) => ({
+            title: row.title,
+            value: row.name,
+            description: row.description
+          }))
+        ]
+      })
+    )
+  })
+  const open = (name: SettingName) => {
+    const fact = facts.get(name)
+    return fact === undefined
+      ? Effect.void
+      : editSetting(deps, { repo: options.repo, inRepository }, fact, record)
+  }
+  const session =
+    options.name === undefined
+      ? Effect.gen(function* () {
+          yield* Console.log(unlistedHint)
+          while (true) {
+            const name = yield* pick
+            if (name === undefined) {
+              return
+            }
+            yield* open(name).pipe(
+              Effect.catchTag("ShellUsage", (error) => Console.error(error.message))
+            )
+          }
+        })
+      : open(options.name)
+  // Ctrl-C leaves the cursor at the end of the prompt's last line.
+  yield* session.pipe(Effect.catchTag("QuitError", () => Console.log("")))
+  yield* Console.log(sessionSummary(changes))
+})
+
+/** The editor for `repo`, on this process's files and environment. */
+export const openConfigEditor = (repo: string) => editSession(nodeDeps(), { repo })
+
+const editCommand = Command.make(
+  "edit",
+  {
+    name: Argument.String("name").pipe(
+      Argument.optional,
+      Argument.withDescription("Open this setting instead of the list")
+    ),
+    repo: repoFlag
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const request = editRequest(registryFacts, {
+        ...(config.name._tag === "Some" ? { name: config.name.value } : {}),
+        interactive: onTerminal()
+      })
+      if (Result.isFailure(request)) {
+        return yield* usage(request.failure)
+      }
+      yield* editSession(nodeDeps(), {
+        repo: repoOf(config.repo),
+        ...(request.success === undefined ? {} : { name: request.success })
+      })
+    })
 ).pipe(
   Command.withDescription(
-    "The config files (~/.config/llm4ts/config.env, <repo>/.llm4ts/config.env): show, set, unset, init (ADR 0049)"
+    "Guided editor on a terminal: pick a setting, see its value and where it comes from, change or remove it"
+  )
+)
+
+export const configCommand = Command.make("config", {}, () =>
+  onTerminal()
+    ? openConfigEditor(process.cwd())
+    : Effect.fail(
+        usage(
+          "try `llm4ts config show`, `llm4ts config set NAME=value`, `llm4ts config unset NAME`, `llm4ts config init`, or `llm4ts config edit` on a terminal"
+        )
+      )
+).pipe(
+  Command.withDescription(
+    "The config files (~/.config/llm4ts/config.env, <repo>/.llm4ts/config.env): show, set, unset, init, edit (ADR 0049)"
   ),
-  Command.withSubcommands([showCommand, setCommand, unsetCommand, initCommand])
+  Command.withSubcommands([showCommand, setCommand, unsetCommand, initCommand, editCommand])
 )

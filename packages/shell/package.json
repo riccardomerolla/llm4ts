@@ -22,6 +22,7 @@
     "./CoderChoice": "./dist/CoderChoice.js",
     "./Config": "./dist/Config.js",
     "./ConfigCommand": "./dist/ConfigCommand.js",
+    "./ConfigEdit": "./dist/ConfigEdit.js",
     "./FlowCatalog": "./dist/FlowCatalog.js",
     "./FlowLaunch": "./dist/FlowLaunch.js",
     "./FlowProcess": "./dist/FlowProcess.js",

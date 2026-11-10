@@ -9,7 +9,7 @@ import {
   type SettingGroup,
   type SettingScope
 } from "./settings/Registry.ts"
-import type * as Value from "./settings/Value.ts"
+import * as Value from "./settings/Value.ts"
 
 export type { SettingGroup, SettingScope }
 
@@ -48,6 +48,10 @@ export interface SettingFacts {
   readonly scope: SettingScope
   /** "on or off", "a positive integer": what docs and errors print. */
   readonly grammar: string
+  /** The grammar is the shared on/off one. */
+  readonly toggle: boolean
+  /** Every value the grammar reads, as it is written; empty when the grammar is open. */
+  readonly choices: ReadonlyArray<string>
   /** A filesystem path, made absolute when it comes from a file. */
   readonly path: boolean
   /** llm4ts runs the value as a command. */
@@ -78,6 +82,8 @@ export const settingFacts = (name: SettingName): SettingFacts => {
     group: entry.group,
     scope: entry.scope,
     grammar: entry.value.grammar,
+    toggle: entry.value === Value.toggle,
+    choices: entry.value.choices,
     path: entry.value.path,
     runs: entry.value.runs,
     emptyIsValue: entry.value.empty === "value",
