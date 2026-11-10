@@ -5,6 +5,7 @@ import { PlanParseError } from "./FlowError.ts"
 import {
   edgeRuleOfSurvey,
   emptyGraphRules,
+  JoinMatch,
   matchUrl,
   matchUrlPath,
   normalizeUrl,
@@ -29,8 +30,7 @@ export const GraphMechanism = Schema.Literals([
   "codegraph"
 ])
 export type GraphMechanism = typeof GraphMechanism.Type
-export const JoinMatch = Schema.Literals(["exact", "prefix", "extension"])
-export type JoinMatch = typeof JoinMatch.Type
+export { JoinMatch }
 
 export class GraphEvidence extends Schema.Class<GraphEvidence>("GraphEvidence")({
   file: Schema.String,

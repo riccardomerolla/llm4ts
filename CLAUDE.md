@@ -76,6 +76,8 @@ pnpm test
 `pnpm unused` fails when a module under `packages/*/src` has no production
 importer; remove it, use it, or list it in `scripts/unused-modules.mjs` with
 the reason it stays.
+It also fails on an import cycle among those modules, type-only imports
+included: move the shared type or value into a module both can depend on.
 
 `pnpm build && node scripts/pack-smoke.mjs` additionally verifies the
 published artifacts resolve for an external consumer.

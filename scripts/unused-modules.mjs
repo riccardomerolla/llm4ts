@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Fails when a module under packages/*/src is imported by no production file.
+// Fails when a module under packages/*/src is imported by no production file,
+// or when modules there import each other in a circle.
 //
 // Every module is a public subpath export, so an export-map-aware tool sees
 // each one as an entry point and can never call it unused. This check asks the
@@ -72,21 +73,65 @@ for (const [pkg, manifest] of Object.entries(manifests)) {
 // `from "x"`, `import "x"`, `import("x")`, and `new URL("./x", import.meta.url)`
 // (a module handed to a child process by path).
 const specifier = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\bnew URL\(\s*)["']([^"']+)["']/g
-for (const file of production) {
-  const text = readFileSync(path.join(root, file), "utf8")
-  for (const [, spec] of text.matchAll(specifier)) {
-    let target
-    if (spec.startsWith(".")) {
-      target = path.normalize(path.join(path.dirname(file), spec))
-    } else {
-      const match = /^@llm4ts\/([^/]+)(?:\/(.+))?$/.exec(spec)
-      if (match === null || manifests[match[1]] === undefined) continue
-      const exported = manifests[match[1]].exports?.[match[2] === undefined ? "." : `./${match[2]}`]
-      if (typeof exported !== "string") continue
-      target = sourceOf(match[1], exported)
-    }
-    if (target !== file) used.add(target.replace(/\.js$/, ".ts"))
+/** The source file an import specifier in `file` names, when it is one of ours. */
+const resolveSpecifier = (file, spec) => {
+  if (spec.startsWith(".")) {
+    return path.normalize(path.join(path.dirname(file), spec)).replace(/\.js$/, ".ts")
   }
+  const match = /^@llm4ts\/([^/]+)(?:\/(.+))?$/.exec(spec)
+  if (match === null || manifests[match[1]] === undefined) return undefined
+  const exported = manifests[match[1]].exports?.[match[2] === undefined ? "." : `./${match[2]}`]
+  return typeof exported === "string" ? sourceOf(match[1], exported) : undefined
+}
+
+const importsOf = (file) =>
+  [...readFileSync(path.join(root, file), "utf8").matchAll(specifier)]
+    .map(([, spec]) => resolveSpecifier(file, spec))
+    .filter((target) => target !== undefined && target !== file)
+
+for (const file of production) {
+  for (const target of importsOf(file)) used.add(target)
+}
+
+// Import cycles among the package sources, type-only imports included: two
+// modules that name each other cannot be read, moved or tested one at a time.
+// Tarjan's strongly connected components; any component of two or more is a
+// cycle.
+const moduleSet = new Set(modules)
+const graph = new Map(
+  modules.map((file) => [file, importsOf(file).filter((target) => moduleSet.has(target))])
+)
+const cycles = []
+{
+  const index = new Map()
+  const low = new Map()
+  const stack = []
+  const onStack = new Set()
+  const visit = (node) => {
+    index.set(node, index.size)
+    low.set(node, index.get(node))
+    stack.push(node)
+    onStack.add(node)
+    for (const next of graph.get(node)) {
+      if (!index.has(next)) {
+        visit(next)
+        low.set(node, Math.min(low.get(node), low.get(next)))
+      } else if (onStack.has(next)) {
+        low.set(node, Math.min(low.get(node), index.get(next)))
+      }
+    }
+    if (low.get(node) === index.get(node)) {
+      const component = []
+      let member
+      do {
+        member = stack.pop()
+        onStack.delete(member)
+        component.push(member)
+      } while (member !== node)
+      if (component.length > 1) cycles.push(component.sort())
+    }
+  }
+  for (const file of modules) if (!index.has(file)) visit(file)
 }
 
 const unused = modules.filter((file) => !used.has(file))
@@ -99,8 +144,21 @@ if (unexpected.length > 0 || stale.length > 0) {
   console.error(
     "\nA module under packages/*/src needs a production importer. Remove it, use it, or add it to ALLOWED in scripts/unused-modules.mjs with the reason it stays."
   )
-  process.exit(1)
 }
+for (const cycle of cycles) {
+  console.error(`import cycle: ${cycle.join(" <-> ")}`)
+  for (const file of cycle) {
+    for (const target of graph.get(file).filter((next) => cycle.includes(next))) {
+      console.error(`  ${file} imports ${target}`)
+    }
+  }
+}
+if (cycles.length > 0) {
+  console.error(
+    "\nModules under packages/*/src must not import each other in a circle, type-only imports included. Move the shared type or value into the module both can depend on."
+  )
+}
+if (unexpected.length > 0 || stale.length > 0 || cycles.length > 0) process.exit(1)
 console.log(
-  `unused modules: none (${modules.length} checked, ${Object.keys(ALLOWED).length} allowed)`
+  `unused modules: none (${modules.length} checked, ${Object.keys(ALLOWED).length} allowed); import cycles: none`
 )
