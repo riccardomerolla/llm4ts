@@ -3,7 +3,28 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import type { Environment } from "@llm4ts/flow/Settings"
+import {
+  flowEnvironment,
+  registryFacts,
+  resolveConfig,
+  type FlowEnvironment
+} from "@llm4ts/shell/Config"
 import { makeFakeFlowProcess, nodeFlowProcess } from "@llm4ts/shell/FlowProcess"
+
+const childEnvironment = (base: Environment): FlowEnvironment =>
+  flowEnvironment(
+    resolveConfig({
+      facts: registryFacts,
+      flags: [],
+      environment: base,
+      project: undefined,
+      global: undefined,
+      repo: "/",
+      home: "/"
+    }),
+    base
+  )
 
 const withTempDir = <A>(use: (dir: string) => Promise<A>): Promise<A> => {
   const dir = mkdtempSync(join(tmpdir(), "llm4ts-shell-process-"))
@@ -22,7 +43,7 @@ describe("nodeFlowProcess", () => {
             const handle = yield* nodeFlowProcess.start({
               flowPath,
               args: [],
-              environment: process.env,
+              environment: childEnvironment(process.env),
               stdio: { stdout, stderr: join(dir, "logs", "err.log") }
             })
             return yield* handle.exited
@@ -44,7 +65,7 @@ describe("nodeFlowProcess", () => {
             const handle = yield* nodeFlowProcess.start({
               flowPath,
               args: [],
-              environment: process.env,
+              environment: childEnvironment(process.env),
               stdio: "ignore"
             })
             yield* handle.signal("SIGTERM")
@@ -66,7 +87,7 @@ describe("nodeFlowProcess", () => {
             const handle = yield* nodeFlowProcess.start({
               flowPath,
               args: [],
-              environment: process.env,
+              environment: childEnvironment(process.env),
               stdio: "ignore"
             })
             const during = nodeFlowProcess.isAlive(handle.pid)
@@ -88,7 +109,7 @@ describe("makeFakeFlowProcess", () => {
       const handle = yield* fake.process.start({
         flowPath: "a.ts",
         args: ["x"],
-        environment: {},
+        environment: childEnvironment({}),
         stdio: "inherit"
       })
       assert.strictEqual(handle.pid, 1000)

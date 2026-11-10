@@ -55,7 +55,10 @@ engine flows.
 `@llm4ts/shell` is the `llm4ts` CLI and interactive menu (ADR 0006): it
 discovers flows and kits across the three tiers and launches a flow as a
 child `node` process with type stripping, resolving `@llm4ts/*` from its own
-installation when the project pins none.
+installation when the project pins none. It also owns the config files (ADR
+0049): `Config.ts` layers `~/.config/llm4ts/config.env` and
+`<repo>/.llm4ts/config.env` under the environment and the `run` flags, and
+every launcher hands the child the `FlowEnvironment` it returns.
 
 ## JavaScript facade
 

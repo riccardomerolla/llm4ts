@@ -20,8 +20,7 @@ const ALLOWED = {
   "packages/flow/src/BasecampTool.ts": "consumed by sibling projects",
   "packages/flow/src/Classified.ts": "sealed values; the judgment log's redaction contract",
   "packages/flow/src/Mermaid.ts": "kept by decision (3.0.0 cleanup)",
-  "packages/runner/src/McpStdio.ts": "kept by decision (3.0.0 cleanup)",
-  "packages/shell/src/Config.ts": "wired by the config verb (config-ux unit 3)"
+  "packages/runner/src/McpStdio.ts": "kept by decision (3.0.0 cleanup)"
 }
 
 const skipDirs = new Set(["node_modules", "dist", ".repos", "repos", ".git", ".llm4ts", ".claude"])

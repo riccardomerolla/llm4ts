@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process"
 import { constants } from "node:os"
 import * as Effect from "effect/Effect"
+import type { FlowEnvironment } from "./Config.ts"
 import { FlowLaunchError, needsResolveFallback, nodeFlowProcess } from "./FlowProcess.ts"
 
 export { FlowLaunchError, needsResolveFallback }
@@ -8,10 +9,8 @@ export { FlowLaunchError, needsResolveFallback }
 export interface LaunchFlowOptions {
   readonly flowPath: string
   readonly taskArgs: ReadonlyArray<string>
-  readonly environment?: Readonly<Record<string, string | undefined>>
+  readonly environment: FlowEnvironment
   readonly cwd?: string
-  /** Overrides `LLM4TS_CODER` in the child for this run only. */
-  readonly coder?: string
   /** `inherit` shares the terminal (the default); tests use `ignore`. */
   readonly stdio?: "inherit" | "ignore"
 }
@@ -40,10 +39,6 @@ const restoreTerminal = (stdio: "inherit" | "ignore"): void => {
  */
 export const launchFlow = (options: LaunchFlowOptions): Effect.Effect<number, FlowLaunchError> =>
   Effect.gen(function* () {
-    const environment = { ...(options.environment ?? process.env) }
-    if (options.coder !== undefined) {
-      environment.LLM4TS_CODER = options.coder
-    }
     const stdio = options.stdio ?? "inherit"
     const ignoreSigint = (): void => {}
     process.on("SIGINT", ignoreSigint)
@@ -54,7 +49,7 @@ export const launchFlow = (options: LaunchFlowOptions): Effect.Effect<number, Fl
       const handle = yield* nodeFlowProcess.start({
         flowPath: options.flowPath,
         args: options.taskArgs,
-        environment,
+        environment: options.environment,
         stdio,
         ...(options.cwd === undefined ? {} : { cwd: options.cwd })
       })

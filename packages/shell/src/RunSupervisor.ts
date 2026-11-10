@@ -17,7 +17,9 @@ import {
 } from "@llm4ts/flow/OperatorSchemas"
 import type { OperatorKnobs } from "@llm4ts/flow/OperatorSchemas"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import type { FlowLaunchError, FlowProcessHandle, FlowProcessShape } from "./FlowProcess.ts"
+import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
+import { prepareLaunch, type FlagAssignment } from "./Config.ts"
+import { FlowLaunchError, type FlowProcessHandle, type FlowProcessShape } from "./FlowProcess.ts"
 
 /**
  * Where the operator keeps one repository's registry and run logs:
@@ -62,6 +64,8 @@ export interface SupervisorOptions {
   readonly repos: ReadonlyArray<SupervisorRepo>
   readonly environment: Readonly<Record<string, string | undefined>>
   readonly files: PlainFileStoreShape
+  /** Asks git whether a repository's config file came with the clone. */
+  readonly executor: ProcessExecutorShape
   readonly process: FlowProcessShape
   readonly parallelRuns: number
   /** How long `stop` waits after SIGINT before SIGTERM; default 30 s. */
@@ -84,12 +88,18 @@ export const knobsToArgs = (_flow: string, knobs: OperatorKnobs): ReadonlyArray<
   ...(knobs.flags ?? [])
 ]
 
-/** The only knobs that reach the flow's environment. */
-export const knobsToEnvironment = (knobs: OperatorKnobs): Record<string, string> => ({
-  ...(knobs.executors === undefined ? {} : { LLM4TS_EXECUTORS: knobs.executors.join(",") }),
-  ...(knobs.pack === undefined ? {} : { LLM4TS_PACK: knobs.pack }),
-  ...(knobs.coder === undefined ? {} : { LLM4TS_CODER: knobs.coder })
-})
+/** The only knobs that become settings: the operator's flag layer over the config files. */
+export const knobAssignments = (knobs: OperatorKnobs): ReadonlyArray<FlagAssignment> => [
+  ...(knobs.executors === undefined
+    ? []
+    : [{ name: "LLM4TS_EXECUTORS", value: knobs.executors.join(","), flag: "the executors knob" }]),
+  ...(knobs.pack === undefined
+    ? []
+    : [{ name: "LLM4TS_PACK", value: knobs.pack, flag: "the pack knob" }]),
+  ...(knobs.coder === undefined
+    ? []
+    : [{ name: "LLM4TS_CODER", value: knobs.coder, flag: "the coder knob" }])
+]
 
 const randomHex = (): string =>
   Math.floor(Math.random() * 0x10000)
@@ -243,6 +253,17 @@ export const makeRunSupervisor = (
             state: "starting",
             ...(requestId === undefined ? {} : { requestId })
           })
+          // Refused before anything is recorded: a bad knob, a broken config
+          // file, or a setting the flow cannot start without.
+          const plan = yield* prepareLaunch({
+            repo: request.repo.path,
+            flow: request.flow.name,
+            base: childEnvironment(request.baseEnvironment),
+            flags: knobAssignments(request.knobs),
+            files: options.files,
+            executor: options.executor,
+            extra: { LLM4TS_RUN_ID: runId, LLM4TS_TRACE_PATH: tracePath }
+          }).pipe(Effect.mapError((error) => new FlowLaunchError({ message: error.message })))
           launching.add(runId)
           return yield* Effect.gen(function* () {
             yield* record(starting)
@@ -250,13 +271,7 @@ export const makeRunSupervisor = (
               .start({
                 flowPath: request.flow.path,
                 args,
-                environment: {
-                  ...childEnvironment(request.baseEnvironment),
-                  ...knobsToEnvironment(request.knobs),
-                  LLM4TS_RUN_ID: runId,
-                  LLM4TS_TRACE_PATH: tracePath,
-                  LLM4TS_FLOW: request.flow.name
-                },
+                environment: plan.environment,
                 cwd: request.repo.path,
                 stdio: { stdout: join(logDir, "stdout.log"), stderr: join(logDir, "stderr.log") },
                 detached: true

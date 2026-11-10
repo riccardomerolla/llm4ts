@@ -8,6 +8,7 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import type { FileSystem } from "effect/FileSystem"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import { nodeGraphDependencies } from "@llm4ts/runner/Graph"
 import {
   costsOptionsFrom,
@@ -17,11 +18,12 @@ import {
   renderFlowList,
   renderKitList,
   resolveFlow,
-  runEnvironmentFrom,
+  runFlagAssignments,
   runShellCommand,
   geminiBridgeOptionsFrom,
   watchOptionsFrom
 } from "@llm4ts/shell/Cli"
+import { registryFacts } from "@llm4ts/shell/Config"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
 import { mcpOptionsFrom, type McpFlags } from "@llm4ts/shell/OperatorConfig"
 
@@ -373,37 +375,91 @@ describe("profileOptionsFrom", () => {
   )
 })
 
-describe("runEnvironmentFrom", () => {
-  const none: Parameters<typeof runEnvironmentFrom>[0] = {
+describe("runFlagAssignments", () => {
+  const none: Parameters<typeof runFlagAssignments>[0] = {
     verbose: false,
     roster: Option.none(),
     executors: Option.none(),
     pack: Option.none(),
+    coder: Option.none(),
     ui: "classic",
     transcript: false,
     otel: false,
-    otelContent: Option.none()
+    otelContent: Option.none(),
+    set: []
+  }
+  const assigned = (flags: Partial<typeof none>) => {
+    const result = runFlagAssignments({ ...none, ...flags })
+    return Result.isSuccess(result)
+      ? result.success.map(({ name, value, flag }) => `${flag} ${name}=${value}`)
+      : result.failure
   }
 
-  it("keeps the base environment and names the flow, forwarding nothing unasked", () => {
-    const environment = runEnvironmentFrom(none, "/flows/epic-stories.ts", {
-      HOME: "/home/me",
-      LLM4TS_OTEL_CONTENT: "full"
-    })
-    assert.deepStrictEqual(environment, {
-      HOME: "/home/me",
-      LLM4TS_OTEL_CONTENT: "full",
-      LLM4TS_FLOW: "epic-stories"
-    })
+  it("assigns nothing unasked", () => {
+    assert.deepStrictEqual(assigned({}), [])
   })
 
-  it("forwards --otel and --otel-content, the flag winning over the shell", () => {
-    const environment = runEnvironmentFrom(
-      { ...none, otel: true, otelContent: Option.some("on") },
-      "/flows/implement.ts",
-      { LLM4TS_OTEL_CONTENT: "full" }
+  it("maps each named flag to its setting and names the flag", () => {
+    assert.deepStrictEqual(
+      assigned({
+        verbose: true,
+        roster: Option.some("none"),
+        executors: Option.some("a,b"),
+        pack: Option.some("j2ee-nextjs-spa"),
+        coder: Option.some("codex"),
+        ui: "tree",
+        transcript: true,
+        otel: true,
+        otelContent: Option.some("full")
+      }),
+      [
+        "--verbose LLM4TS_VERBOSITY=verbose",
+        "--roster LLM4TS_ROSTER=none",
+        "--executors LLM4TS_EXECUTORS=a,b",
+        "--pack LLM4TS_PACK=j2ee-nextjs-spa",
+        "--coder LLM4TS_CODER=codex",
+        "--ui LLM4TS_UI=tree",
+        "--transcript LLM4TS_TRANSCRIPT=on",
+        "--otel LLM4TS_OTEL=on",
+        "--otel-content LLM4TS_OTEL_CONTENT=full"
+      ]
     )
-    assert.deepStrictEqual([environment.LLM4TS_OTEL, environment.LLM4TS_OTEL_CONTENT], ["on", "on"])
+  })
+
+  it("every flag's setting is the one the registry names for it", () => {
+    const result = runFlagAssignments({
+      ...none,
+      verbose: true,
+      roster: Option.some("none"),
+      executors: Option.some("a"),
+      pack: Option.some("p"),
+      ui: "tree",
+      transcript: true,
+      otel: true,
+      otelContent: Option.some("on")
+    })
+    assert.deepStrictEqual(
+      (Result.isSuccess(result) ? result.success : [])
+        .map(({ name, flag }) => `${name} ${flag}`)
+        .sort(),
+      registryFacts
+        .flatMap((fact) => (fact.flag === undefined ? [] : [`${fact.name} ${fact.flag}`]))
+        .sort()
+    )
+  })
+
+  it("splits each --set at its first = and keeps the rest as the value", () => {
+    assert.deepStrictEqual(
+      assigned({ set: ["LLM4TS_WAVE=wave-1", "LLM4TS_GATES=pnpm test --filter=a"] }),
+      ["--set LLM4TS_WAVE=wave-1", "--set LLM4TS_GATES=pnpm test --filter=a"]
+    )
+  })
+
+  it("refuses a --set that is no assignment, without repeating it", () => {
+    assert.strictEqual(
+      assigned({ set: ["LLM4TS_WAVE"] }),
+      "--set: expected NAME=value, got an argument with no ="
+    )
   })
 })
 

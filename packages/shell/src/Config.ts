@@ -4,11 +4,12 @@
 // hands the result to a flow child. No message built here carries a value,
 // so a secret cannot leak through one.
 import { homedir } from "node:os"
-import { isAbsolute, join, resolve } from "node:path"
+import { basename, extname, isAbsolute, join, resolve } from "node:path"
 import * as Brand from "effect/Brand"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { ignoringRunState } from "@llm4ts/flow/RunState"
 import {
@@ -20,6 +21,7 @@ import {
   type SettingFacts,
   type SettingName
 } from "@llm4ts/flow/Settings"
+import { ShellUsageError } from "./ShellErrors.ts"
 
 export type FileLayer = "project" | "global"
 
@@ -38,6 +40,7 @@ export type ProblemKind =
   | "duplicate"
   | "conflict"
   | "shadowed"
+  | "tracked"
 
 export interface ConfigProblem {
   readonly severity: ProblemSeverity
@@ -97,7 +100,7 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("Conf
 /** Every registry entry, in registry order. */
 export const registryFacts: ReadonlyArray<SettingFacts> = settingNames.map(settingFacts)
 
-const homeOf = (environment: Environment): string => environment.HOME ?? homedir()
+export const homeOf = (environment: Environment): string => environment.HOME ?? homedir()
 
 /** `${XDG_CONFIG_HOME:-~/.config}/llm4ts/config.env`. */
 export const globalConfigPath = (environment: Environment): string =>
@@ -443,26 +446,31 @@ const projected = (setting: ResolvedSetting): string => {
 }
 
 /**
- * The child's environment: `base`, plus each value a file or a flag supplies
- * (never a default), minus `shellOnly` settings, plus `extra`. A value that
- * comes from the environment is left exactly as `base` holds it.
+ * What an in-process verb reads: `base`, plus each value a file or a flag
+ * supplies (never a default). A value that comes from the environment is
+ * left exactly as `base` holds it.
  */
+export const resolvedEnvironment = (resolution: Resolution, base: Environment): Environment => ({
+  ...base,
+  ...Object.fromEntries(
+    [...resolution.settings.values()]
+      .filter((setting) => setting.source.layer !== "environment")
+      .map((setting): readonly [string, string] => [setting.name, projected(setting)])
+  )
+})
+
+/** The child's environment: the resolved one, minus `shellOnly` settings, plus `extra`. */
 export const flowEnvironment = (
   resolution: Resolution,
   base: Environment,
   extra: Environment = {}
 ): FlowEnvironment => {
-  const supplied = [...resolution.settings.values()]
-    .filter((setting) => setting.source.layer !== "environment")
-    .map((setting): readonly [string, string] => [setting.name, projected(setting)])
   const shellOnly = new Set<string>(
     resolution.facts.filter((fact) => fact.shellOnly).map((fact) => fact.name)
   )
   return brandFlowEnvironment({
     ...Object.fromEntries(
-      Object.entries({ ...base, ...Object.fromEntries(supplied) }).filter(
-        ([name]) => !shellOnly.has(name)
-      )
+      Object.entries(resolvedEnvironment(resolution, base)).filter(([name]) => !shellOnly.has(name))
     ),
     ...extra
   })
@@ -623,10 +631,24 @@ const readFile = (files: PlainFileStoreShape, path: string) =>
 
 export interface LoadedConfig {
   readonly resolution: Resolution
-  /** `undefined`: the file is absent. */
+  /** `undefined`: the file is absent, or git tracks it and it is ignored. */
   readonly project: ConfigFile | undefined
   readonly global: ConfigFile | undefined
+  /**
+   * Git tracks the project file, so it came with the clone and none of it is
+   * read: it could set commands llm4ts runs for whoever cloned the repository.
+   */
+  readonly projectTracked: boolean
 }
+
+const projectFileInRepo = join(".llm4ts", "config.env")
+
+/** Whether git tracks `<repo>/.llm4ts/config.env`. No repository or no git: not tracked. */
+const trackedByGit = (executor: ProcessExecutorShape, repo: string): Effect.Effect<boolean> =>
+  executor.run(["git", "ls-files", "--error-unmatch", "--", projectFileInRepo], repo, {}).pipe(
+    Effect.map((result) => result.exitCode === 0),
+    Effect.orElseSucceed(() => false)
+  )
 
 /** Reads both files for `repo`, parses and resolves. An absent file is no problem. */
 export const loadConfig = Effect.fn("@llm4ts/shell/Config.loadConfig")(function* (options: {
@@ -634,25 +656,130 @@ export const loadConfig = Effect.fn("@llm4ts/shell/Config.loadConfig")(function*
   readonly environment: Environment
   readonly flags: ReadonlyArray<FlagAssignment>
   readonly files: PlainFileStoreShape
+  readonly executor: ProcessExecutorShape
 }): Effect.fn.Return<LoadedConfig, ConfigFileError> {
   const parsed = (path: string) =>
     readFile(options.files, path).pipe(
       Effect.map((text) => (text === undefined ? undefined : parseConfigFile(text, path)))
     )
   const global = yield* parsed(globalConfigPath(options.environment))
-  const project = yield* parsed(projectConfigPath(options.repo))
-  return {
-    resolution: resolveConfig({
-      facts: registryFacts,
-      flags: options.flags,
-      environment: options.environment,
-      project,
-      global,
-      repo: options.repo,
-      home: homeOf(options.environment)
-    }),
+  const projectPath = projectConfigPath(options.repo)
+  const found = yield* parsed(projectPath)
+  const projectTracked =
+    found !== undefined && (yield* trackedByGit(options.executor, options.repo))
+  const project = projectTracked ? undefined : found
+  const resolution = resolveConfig({
+    facts: registryFacts,
+    flags: options.flags,
+    environment: options.environment,
     project,
-    global
+    global,
+    repo: options.repo,
+    home: homeOf(options.environment)
+  })
+  return {
+    resolution: projectTracked
+      ? {
+          ...resolution,
+          problems: [
+            ...resolution.problems,
+            {
+              severity: "warning",
+              kind: "tracked",
+              message: `${projectPath}: tracked by git, so it is ignored; llm4ts reads only a local project file. Untrack it: git rm --cached ${projectFileInRepo}`
+            }
+          ]
+        }
+      : resolution,
+    project,
+    global,
+    projectTracked
+  }
+})
+
+/** `convert-page` for `/flows/convert-page.ts`: the name `requiredBy` and `LLM4TS_FLOW` carry. */
+export const flowNameOf = (flowPath: string): string => basename(flowPath, extname(flowPath))
+
+/**
+ * Pure: what a launch refuses over (every error) and what it prints first:
+ * each warning, and each environment value that overrides a file. An unknown
+ * environment name with no close setting stays silent: a user's own flow may
+ * read it.
+ */
+export const launchProblems = (
+  resolution: Resolution
+): { readonly blocking: ReadonlyArray<string>; readonly notices: ReadonlyArray<string> } => ({
+  blocking: resolution.problems
+    .filter((problem) => problem.severity === "error")
+    .map((problem) => problem.message),
+  notices: resolution.problems.flatMap((problem) =>
+    problem.severity === "warning"
+      ? [`warning: ${problem.message}`]
+      : problem.kind === "shadowed"
+        ? [`note: ${problem.message}`]
+        : []
+  )
+})
+
+/** Pure: what `flow` lacks, with each setting's doc and the two ways to set it. */
+export const renderMissing = (
+  flow: string,
+  repo: string,
+  missing: ReadonlyArray<SettingFacts>
+): string =>
+  missing
+    .flatMap((fact) => [
+      `${flow} needs ${fact.name}: ${fact.doc}`,
+      `  for this repository:  llm4ts config set --repo ${repo} ${fact.name}=<value>`,
+      `  for this run only:    llm4ts run ${flow} --set ${fact.name}=<value>`
+    ])
+    .join("\n")
+
+export interface LaunchPlan {
+  readonly resolution: Resolution
+  /** Printed to stderr before the child starts. */
+  readonly notices: ReadonlyArray<string>
+  readonly environment: FlowEnvironment
+}
+
+/**
+ * The one way to a flow child's environment: loads the config for `repo`,
+ * refuses on any error or on a setting `flow` cannot start without, and
+ * projects the rest, naming the flow in `LLM4TS_FLOW`.
+ */
+export const prepareLaunch = Effect.fn("@llm4ts/shell/Config.prepareLaunch")(function* (options: {
+  readonly repo: string
+  readonly flow: string
+  readonly base: Environment
+  readonly flags: ReadonlyArray<FlagAssignment>
+  readonly files: PlainFileStoreShape
+  readonly executor: ProcessExecutorShape
+  readonly extra?: Environment
+}): Effect.fn.Return<LaunchPlan, ShellUsageError> {
+  const { resolution } = yield* loadConfig({
+    repo: options.repo,
+    environment: options.base,
+    flags: options.flags,
+    files: options.files,
+    executor: options.executor
+  }).pipe(Effect.mapError((error) => new ShellUsageError({ message: error.message })))
+  const { blocking, notices } = launchProblems(resolution)
+  if (blocking.length > 0) {
+    return yield* new ShellUsageError({ message: blocking.join("\n") })
+  }
+  const missing = missingRequired(resolution, options.flow)
+  if (missing.length > 0) {
+    return yield* new ShellUsageError({
+      message: renderMissing(options.flow, options.repo, missing)
+    })
+  }
+  return {
+    resolution,
+    notices,
+    environment: flowEnvironment(resolution, options.base, {
+      ...options.extra,
+      LLM4TS_FLOW: options.flow
+    })
   }
 })
 

@@ -6,6 +6,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import type { FlowEnvironment } from "./Config.ts"
 
 export class FlowLaunchError extends Schema.TaggedError<FlowLaunchError>()("FlowLaunch", {
   message: Schema.String
@@ -46,7 +47,8 @@ const resolveFallbackUrl = (() => {
 export interface FlowProcessStart {
   readonly flowPath: string
   readonly args: ReadonlyArray<string>
-  readonly environment: Readonly<Record<string, string | undefined>>
+  /** Made by `flowEnvironment` only, so no launcher can skip the config files. */
+  readonly environment: FlowEnvironment
   readonly cwd?: string
   /**
    * File paths are opened for append by the Node implementation. `ignore`

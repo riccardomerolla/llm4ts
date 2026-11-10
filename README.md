@@ -40,11 +40,12 @@ one task at a time, and resumes where it stopped. Point it at a throwaway
 repository and the coding agent you have installed:
 
 ```bash
-LLM4TS_CODER=codex llm4ts run implement "Add a multiply function next to add, with tests"
+llm4ts run implement --coder codex "Add a multiply function next to add, with tests"
 ```
 
-`LLM4TS_CODER` is `claude` (default), `codex`, `gemini`, `pi`, `agy`,
-`grok`, `cursor`, or `opencode`; the CLI must be installed and logged in.
+`--coder` is `claude` (default), `codex`, `gemini`, `pi`, `agy`, `grok`,
+`cursor`, or `opencode`; the CLI must be installed and logged in.
+`llm4ts config set LLM4TS_CODER=codex` makes it the default for every run.
 Every task is a commit on the flow's branch, the plan lives under
 `.llm4ts/` in that repository, and re-running the same command resumes it.
 `llm4ts list` shows the other built-ins: `sdd`, `issue-pr`, `epic-stories`,
@@ -199,15 +200,32 @@ by copying a skill directory.
 
 ## Configuration
 
-Everything is environment-driven; nothing is required for the mock provider.
+Every setting is an `LLM4TS_*` name; nothing is required for the mock
+provider. A setting comes from, highest first: a `run` flag or
+`--set NAME=value`, the environment, the project file
+`<repo>/.llm4ts/config.env`, the global file `~/.config/llm4ts/config.env`
+(ADR 0049).
 
-| Variable                                                | Effect                                                                                         |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `LLM4TS_CODER`                                          | Coding agent: `claude` (default), `codex`, `gemini`, `pi`, `agy`, `grok`, `cursor`, `opencode` |
-| `LLM4TS_PROVIDER` / `LLM4TS_MODEL`                      | API provider and model for provider-driven flows such as `hello`                               |
-| `LLM4TS_PACK`                                           | Pack for the modernization flows, also `llm4ts run --pack`                                     |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` | Provider credentials, applied automatically                                                    |
-| `LLM4TS_VERBOSITY`                                      | Terminal verbosity                                                                             |
+```bash
+llm4ts config init                        # write the LLM4TS_* exports of this shell into the files
+llm4ts config set LLM4TS_CODER=pi         # each name goes to the file it belongs in
+llm4ts config set --repo ~/work/portal LLM4TS_PACK=j2ee-nextjs-spa LLM4TS_LEGACY_REPO=~/legacy/ib-core
+llm4ts config show                        # effective values and where each comes from
+llm4ts config show LLM4TS_JUDGE_ROUNDS    # one setting in full
+llm4ts config unset LLM4TS_PACK
+llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # one run only
+```
+
+An unknown name or an unreadable value in `--set` or `config set` is
+refused, and a flow that lacks a setting it requires stops before it starts.
+
+| Variable                                                | Effect                                                                                  |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `LLM4TS_CODER`                                          | Coding agent, also `llm4ts run --coder`: `claude` (default), `codex`, `gemini`, `pi`, … |
+| `LLM4TS_PROVIDER` / `LLM4TS_MODEL`                      | API provider and model for provider-driven flows such as `hello`                        |
+| `LLM4TS_PACK`                                           | Pack for the modernization flows, also `llm4ts run --pack`                              |
+| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` | Provider credentials, applied automatically                                             |
+| `LLM4TS_VERBOSITY`                                      | Terminal verbosity                                                                      |
 
 See the [configuration guide](docs/configuration.md) for the full list.
 

@@ -3,8 +3,13 @@ import * as Effect from "effect/Effect"
 import { FileSystem } from "effect/FileSystem"
 import { Prompt } from "effect/cli"
 import { coderChoices, findOnPath, resolvedCoderToken } from "./CoderChoice.ts"
+import { loadConfig, prepareLaunch, resolvedEnvironment } from "./Config.ts"
 import { discoverFlows, type DiscoveredFlow, type FlowTierPaths } from "./FlowCatalog.ts"
 import { launchFlow } from "./FlowLaunch.ts"
+import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
+import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
+
+const launchDeps = { files: nodePlainFileStore, executor: nodeProcessExecutor }
 
 type MenuAction = "run" | "view" | "exit"
 
@@ -37,9 +42,9 @@ const selectCoder = Effect.fn("@llm4ts/shell/Menu.selectCoder")(function* (
   const resolved = resolvedCoderToken(environment)
   const choices: Array<Prompt.SelectChoice<string | undefined>> = [
     {
-      title: `environment default (${resolved})`,
+      title: `configured (${resolved})`,
       value: undefined,
-      description: "Use LLM4TS_CODER as-is"
+      description: "LLM4TS_CODER from the environment or the config files"
     },
     ...coderChoices.map(
       (choice): Prompt.SelectChoice<string | undefined> => ({
@@ -67,11 +72,21 @@ const runFlowInteractive = Effect.fn("@llm4ts/shell/Menu.runFlowInteractive")(fu
   const task = yield* Prompt.run(
     Prompt.String({ message: "Task text (empty uses the flow's default)" })
   )
-  const coder = yield* selectCoder(process.env)
+  const repo = process.cwd()
+  const settled = yield* loadConfig({ repo, environment: process.env, flags: [], ...launchDeps })
+  const coder = yield* selectCoder(resolvedEnvironment(settled.resolution, process.env))
+  const plan = yield* prepareLaunch({
+    repo,
+    flow: flow.name,
+    base: process.env,
+    flags: coder === undefined ? [] : [{ name: "LLM4TS_CODER", value: coder, flag: "the menu" }],
+    ...launchDeps
+  })
+  yield* Effect.forEach(plan.notices, (notice) => Console.error(notice), { discard: true })
   const exitCode = yield* launchFlow({
     flowPath: flow.path,
     taskArgs: task.trim().length === 0 ? [] : [task],
-    ...(coder === undefined ? {} : { coder })
+    environment: plan.environment
   })
   yield* exitCode === 0
     ? Console.log(`${flow.name} completed`)
@@ -108,7 +123,13 @@ export const mainMenu = Effect.fn("@llm4ts/shell/Menu.mainMenu")(function* (tier
     ).pipe(Effect.catchTag("QuitError", () => Effect.succeed<MenuAction>("exit")))
     switch (action) {
       case "run": {
-        yield* runFlowInteractive(tiers).pipe(Effect.catchTag("QuitError", () => Effect.void))
+        yield* runFlowInteractive(tiers).pipe(
+          Effect.catchTag("QuitError", () => Effect.void),
+          Effect.catchTags({
+            ShellUsage: (error) => Console.error(error.message),
+            ConfigFileError: (error) => Console.error(error.message)
+          })
+        )
         break
       }
       case "view": {

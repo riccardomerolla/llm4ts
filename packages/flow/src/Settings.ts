@@ -2,6 +2,7 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import {
+  settingGroups,
   settings,
   type Fallback,
   type Setting,
@@ -11,6 +12,9 @@ import {
 import type * as Value from "./settings/Value.ts"
 
 export type { SettingGroup, SettingScope }
+
+/** Each group's id and title, in the order docs and `config show --all` print them. */
+export const groupTitles: ReadonlyArray<readonly [SettingGroup, string]> = settingGroups
 export type Environment = Readonly<Record<string, string | undefined>>
 
 /** The registry's keys: a misspelled name does not compile. */

