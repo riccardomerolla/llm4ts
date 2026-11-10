@@ -136,13 +136,14 @@ export const saveTargets = (
   fact: SettingFacts,
   where: {
     readonly inRepository: boolean
-    readonly projectTracked: boolean
+    /** The project file is not trusted, so nothing is written to it. */
+    readonly projectRefused: boolean
     readonly held: ReadonlyArray<FileLayer>
   }
 ): ReadonlyArray<FileLayer> =>
   fact.scope !== "global"
     ? ["project"]
-    : !where.inRepository || where.projectTracked
+    : !where.inRepository || where.projectRefused
       ? ["global"]
       : where.held.includes("project")
         ? ["project", "global"]

@@ -11,7 +11,13 @@ A user writes `LLM4TS_*` settings once, in a global file under `HOME` or a proje
 - `config-set-typo` refuses an unknown `--set` name with the closest setting, exit 2, agent never called.
 - `config-env-typo` warns about a misspelled export and still runs.
 - `config-preflight` refuses a flow that lacks a required setting, exit 2, agent never called.
-- `config-tracked` ignores a project file that git tracks.
+- `config-trust-write` trusts what `config set` writes: no trust step for a user who only uses the verbs.
+- `config-trust-changed` reads none of a project file edited by hand, and refuses a launch, exit 2, agent never called.
+- `config-trust-accept` lists the file with `config trust --yes`, tags what runs as a command, and records.
+- `config-trust-arrived` treats a project file that came with a repository, plain or behind a committed link, as not trusted.
+- `config-trust-refuse-write` writes nothing into an untrusted project file.
+- `config-untrust` forgets the record.
+- `config-trust-terminal` asks once on a terminal: `n` records nothing, `y` records.
 - `config-init` imports the environment's settings and changes nothing on a second run.
 - `config-edit` is the guided editor on a terminal: filter the list, open a setting, change or remove it, leave with a summary.
 - `config-edit-refusals` exits 2 off a terminal and for a name no file may hold.
@@ -19,6 +25,7 @@ A user writes `LLM4TS_*` settings once, in a global file under `HOME` or a proje
 ## How to get to it (user POV)
 
 - Run `llm4ts config set NAME=value`, `llm4ts config unset NAME`, `llm4ts config show` or `llm4ts config init`.
+- After editing `<repo>/.llm4ts/config.env` by hand, or receiving one with a repository, run `llm4ts config trust`. `llm4ts config untrust` forgets it.
 - On a terminal run `llm4ts config edit`, `llm4ts config edit NAME`, bare `llm4ts config`, or bare `llm4ts` and choose "Configure settings".
 - Add `--repo <dir>` to any of them from outside the repository.
 - Run `llm4ts run <flow> --set NAME=value` or `llm4ts run <flow> --coder <name>`.
@@ -39,8 +46,22 @@ Preconditions:
 - **Typo in --set.** Run `$V cli $R config-set-typo -- run --roster none --set LLM4TS_VERBOSTY=verbose implement "Add a multiply function"`. Exit code `2`. Stderr is `llm4ts: --set: unknown setting LLM4TS_VERBOSTY; did you mean LLM4TS_VERBOSITY?`. `stub-calls.log` is absent.
 - **Preflight.** Run `$V cli $R config-preflight -- run --roster none pack-fork`. Exit code `2`. Stderr has `pack-fork needs LLM4TS_TARGET_KIND:` and `pack-fork needs LLM4TS_FORK_AS:`, each followed by a `llm4ts config set --repo` line and a `llm4ts run pack-fork --set` line. `stub-calls.log` is absent.
 - **Typo in the environment.** Run `$V cli $R config-env-typo LLM4TS_VERBOSTY=verbose -- run --roster none implement "Add a multiply function"`. Exit code `0`. Stderr starts with `warning: the environment: unknown setting LLM4TS_VERBOSTY; did you mean LLM4TS_VERBOSITY?`. Stdout ends with `✔ flow completed`.
-- **Tracked project file.** In a new sandbox write `.llm4ts/config.env` in the repository, `git add -f` it and commit. Run `$V cli $R config-tracked-show -- config show`. The `project` row ends with `ignored (tracked by git)`, the `warnings` block names `git rm --cached .llm4ts/config.env`, and no setting from the file is listed. `config set LLM4TS_JUDGE_ROUNDS=1` then exits `2`.
 - **Init.** Run `$V cli $R config-init LLM4TS_JUDGE_ROUNDS=2 LLM4TS_WAVE=w1 -- config init`. Stdout has a `wrote` block for the project file with `LLM4TS_JUDGE_ROUNDS=2`, one for the global file with `LLM4TS_CODER=claude`, and `skipped LLM4TS_WAVE is set per run`. The same command under a new label prints `nothing to do:` and no `wrote` line.
+
+The trust proofs run in order in a new sandbox with the counting responder installed. `P="$($V path $R repo)/.llm4ts/config.env"` is the project file and `S="$($V path $R sandbox)/home/.local/state/llm4ts/config-trust.json"` is the trust list.
+
+- **Trust: writing is trusting.** Run `$V cli $R trust-a-set -- config set LLM4TS_JUDGE_ROUNDS=1`, then `$V cli $R trust-a-show -- config show`. The `project` row ends with `1 setting`, the row `LLM4TS_JUDGE_ROUNDS   1   project:1` is listed, and `$S` holds one record.
+- **Trust: an edit by hand.** Run `printf 'LLM4TS_GATES=echo pwned\n' >> "$P"`, then `$V cli $R trust-b-show -- config show`. The `project` row ends with `changed since trusted`, the `warnings` block has `has changed since it was trusted, so llm4ts did not read it. Review and accept it: llm4ts config trust --repo`, and neither `LLM4TS_JUDGE_ROUNDS` nor `LLM4TS_GATES` is listed. Run `$V cli $R trust-b-run -- run --roster none implement "Add a multiply function"`. Exit code `2`. Stderr has the same sentence and `Nothing was started.` `stub-calls.log` is absent.
+- **Trust: refused write.** Run `$V cli $R trust-e-set -- config set LLM4TS_PACK=x`. Exit code `2`. Stderr has `so llm4ts writes nothing to it. Review and accept it first: llm4ts config trust --repo`. `$P` is unchanged.
+- **Trust: off a terminal.** Run `$V cli $R trust-c-plain -- config trust`. Exit code `2`. Stdout is the listing, stderr starts with `llm4ts: not recorded:`, and `$S` still holds the old hash.
+- **Trust: accept.** Run `$V cli $R trust-c-yes -- config trust --yes`. Exit code `0`. Stdout has `project file` with the path, `LLM4TS_JUDGE_ROUNDS   1`, `LLM4TS_GATES   echo pwned   [runs as a command]`, `2 settings; llm4ts runs 1 value as a command` and a last line that starts with `trusted:`. `config show` then lists both settings from `project:1` and `project:2`. The same command again prints `is already trusted`.
+- **Trust: untrust.** Run `$V cli $R trust-f-untrust -- config untrust`. Stdout starts with `no longer trusted:`. `config show` then has the `project` row end with `not trusted`.
+- **Trust: a file that arrived with the repository.** In a new sandbox write `.llm4ts/config.env` with `LLM4TS_GATES=echo pwned`, `git add -f` it and commit. `config show` has the `project` row end with `not trusted` and no `LLM4TS_GATES` row. `run --roster none implement "…"` exits `2` and `stub-calls.log` is absent. In another new sandbox put the file in a tracked folder `shared/`, commit `.llm4ts` as a symbolic link to `shared`, and repeat: same result. Git is not asked in either case.
+
+`config trust` asks on a terminal, so these two are driven through `term.sh` like the editor below, in a new sandbox whose project file was written by hand.
+
+- **Trust: no, then yes.** Run `$T start $R`, `$T keys "llm4ts config trust" Enter`, `$T shot $R trust-g-ask`. The screen has the listing and the question `Trust this file? llm4ts will read it, and run what it says to run`. Run `$T keys n Enter` and `$T shot $R trust-g-no`. The screen ends with `not trusted: nothing was recorded`, and `$S` is absent. Run the command again, `$T keys y Enter`, `$T shot $R trust-g-yes`. The screen ends with a line that starts with `trusted:`, and `$S` holds one record.
+- **Trust: the editor's save is trusted.** Run `$T keys "llm4ts config edit LLM4TS_JUDGE_ROUNDS" Enter`, `$T keys Enter`, `$T keys 2 Enter`, `$T shot $R trust-g-edit`. The screen has `LLM4TS_JUDGE_ROUNDS=2` with `new` or `changed`. `$V cli $R trust-g-show -- config show` lists `LLM4TS_JUDGE_ROUNDS   2` from the project file with no trust warning. With an untrusted project file, `llm4ts config edit` prints the listing and asks the same question before the list opens.
 
 The guided editor needs a terminal, so it is driven through tmux with `T=.claude/skills/verify-llm4ts/term.sh`. `$T start $R` opens a detached session in the sandbox repository with a clean environment, the sandbox `HOME`, and `llm4ts` on `PATH` as the built CLI. `$T keys …` sends tmux keys, and `$T shot $R <label>` saves and prints the screen as `<label>.screen.txt` in the evidence directory. Use a new sandbox with no config file, and run the steps in order.
 
@@ -66,4 +87,5 @@ The guided editor needs a terminal, so it is driven through tmux with `T=.claude
 - Typing in the list filters on the row text, so `project` also filters to the rows whose source is the project file. Type a part of the name.
 - The row under the cursor carries its group after `-`. The other rows do not.
 - `$T start` kills any earlier session of this helper. Run `$T stop` before `$V cleanup $R`.
+- The trust list is keyed by the repository path the command was given. `$V cli` runs in the sandbox repository, whose path resolves to `/private/var/…` on macOS; `--repo` with the `/var/…` spelling is another key and is asked about again.
 - `doctor`'s connector probes depend on the machine. Only its `config:` section is stable.

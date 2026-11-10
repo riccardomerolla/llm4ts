@@ -53,7 +53,6 @@ import {
 import {
   flowEnvironment,
   flowNameOf,
-  launchProblems,
   loadConfig,
   prepareLaunch,
   resolvedEnvironment,
@@ -251,12 +250,13 @@ export const runFlagAssignments = (
   return Result.succeed([...named, ...sets])
 }
 
-const launchDeps = { files: nodePlainFileStore, executor: nodeProcessExecutor }
+const launchDeps = { files: nodePlainFileStore }
 
 /**
  * What an in-process verb reads its settings from: the process environment
  * plus the config files' values for `repo`. A file problem is printed and
- * the value it concerns left out; it does not stop a read-only verb.
+ * the value it concerns left out, and so is a project file that is not
+ * trusted; neither stops a read-only verb.
  */
 const verbEnvironment = Effect.fn("@llm4ts/shell/Cli.verbEnvironment")(function* (repo: string) {
   const { resolution } = yield* loadConfig({
@@ -265,8 +265,11 @@ const verbEnvironment = Effect.fn("@llm4ts/shell/Cli.verbEnvironment")(function*
     flags: [],
     ...launchDeps
   }).pipe(Effect.mapError((error) => new ShellUsageError({ message: error.message })))
-  for (const message of launchProblems(resolution).blocking) {
-    yield* Console.error(`llm4ts config: ${message}`)
+  const said = resolution.problems.filter(
+    (problem) => problem.severity === "error" || problem.kind === "untrusted"
+  )
+  for (const problem of said) {
+    yield* Console.error(`llm4ts config: ${problem.message}`)
   }
   return resolvedEnvironment(resolution, process.env)
 })
@@ -1157,7 +1160,12 @@ const doctorCommand = Command.make(
   (config) =>
     Effect.gen(function* () {
       const view = yield* configView(
-        { ...launchDeps, environment: process.env, cwd: process.cwd() },
+        {
+          ...launchDeps,
+          executor: nodeProcessExecutor,
+          environment: process.env,
+          cwd: process.cwd()
+        },
         repoOr(config.repo)
       )
       const report = yield* makeDoctorProgram(

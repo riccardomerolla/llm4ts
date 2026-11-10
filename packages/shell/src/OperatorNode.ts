@@ -6,14 +6,12 @@ import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import type { ServeError } from "effect/http/HttpServerError"
-import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { PersistenceError } from "@llm4ts/flow/FlowError"
 import { nodeListTraces } from "@llm4ts/runner/Costs"
 import { collectDoctorReport } from "@llm4ts/runner/Doctor"
 import { httpProbe, rosterReport } from "@llm4ts/runner/ExecutorRoster"
 import { interruptOnSignal, type SignalSource } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
-import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 import { nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import { nodeListEpics } from "@llm4ts/runner/Watch"
 import { discoverFlows, type FlowTierPaths } from "./FlowCatalog.ts"
@@ -34,8 +32,6 @@ import { makeRunSupervisor } from "./RunSupervisor.ts"
 export interface McpRuntime<E> {
   readonly operator: Omit<OperatorDeps, "supervisor">
   readonly flowProcess: FlowProcessShape
-  /** Runs git for the config files' tracked check. */
-  readonly executor: ProcessExecutorShape
   /** The server; `runOperatorServer` on Node, a stand-in in tests. */
   readonly serve: (config: OperatorConfig, deps: OperatorDeps) => Effect.Effect<never, E>
   /** How long stopping a run waits after SIGINT before SIGTERM; the supervisor's default when absent. */
@@ -60,7 +56,6 @@ export const runMcp = <E>(
         repos: config.repos,
         environment: runtime.operator.environment,
         files: runtime.operator.files,
-        executor: runtime.executor,
         process: runtime.flowProcess,
         parallelRuns: config.parallelRuns,
         ...(runtime.graceMs === undefined ? {} : { graceMs: runtime.graceMs })
@@ -148,6 +143,5 @@ export const nodeOperatorRuntime = (
     environment
   },
   flowProcess: nodeFlowProcess,
-  executor: nodeProcessExecutor,
   serve: runOperatorServer
 })

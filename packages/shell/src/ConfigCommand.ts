@@ -1,5 +1,5 @@
-// `llm4ts config show | set | unset | init | edit`: the config files seen and
-// edited from the command line. Every renderer is pure and never prints a secret.
+// `llm4ts config show | set | unset | init | edit | trust | untrust`: the
+// config files seen, edited and accepted from the command line. Every renderer is pure and never prints a secret.
 import { resolve } from "node:path"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
@@ -37,6 +37,17 @@ import {
   type Source
 } from "./Config.ts"
 import {
+  configTrustPath,
+  contentHash,
+  forgetTrust,
+  loadTrustStore,
+  recordTrust,
+  trustCommand,
+  trustDecision,
+  writeRefusal,
+  type Distrust
+} from "./ConfigTrust.ts"
+import {
   editRequest,
   environmentNote,
   pickerRows,
@@ -65,6 +76,7 @@ export interface ConfigView {
   readonly environment: Environment
   readonly globalPath: string
   readonly projectPath: string
+  readonly repo: string
   readonly home: string
 }
 
@@ -100,7 +112,7 @@ const suppliedBy = (view: ConfigView, layer: FileLayer): number =>
 
 const counted = (count: number): string => (count === 1 ? "1 setting" : `${count} settings`)
 
-type FileState = "absent" | "present" | "ignored"
+type FileState = "absent" | "present" | Distrust
 
 const fileStates = (
   view: ConfigView
@@ -119,21 +131,19 @@ const fileStates = (
   {
     layer: "project",
     path: view.projectPath,
-    state: view.loaded.projectTracked
-      ? "ignored"
-      : view.loaded.project === undefined
-        ? "absent"
-        : "present",
+    state: view.loaded.projectTrust === "trusted" ? "present" : view.loaded.projectTrust,
     settings: suppliedBy(view, "project")
   }
 ]
 
 const stateText = (file: { readonly state: FileState; readonly settings: number }): string =>
-  file.state === "ignored"
-    ? "ignored (tracked by git)"
-    : file.state === "absent"
-      ? "absent"
-      : counted(file.settings)
+  file.state === "untrusted"
+    ? "not trusted"
+    : file.state === "changed"
+      ? "changed since trusted"
+      : file.state === "absent"
+        ? "absent"
+        : counted(file.settings)
 
 const fileRows = (view: ConfigView): ReadonlyArray<ReadonlyArray<string>> =>
   fileStates(view).map((file) => [file.layer, tilde(file.path, view.home), stateText(file)])
@@ -313,13 +323,16 @@ export const renderShowJson = (view: ConfigView): string => {
   )
 }
 
-/** Pure: doctor's section: both files, how many settings each supplies, what blocks a run. */
+/**
+ * Pure: doctor's section: both files, how many settings each supplies, what
+ * blocks a run: every error, and a project file that is not trusted.
+ */
 export const renderDoctorConfig = (view: ConfigView): string =>
   [
     "config:",
     ...table(
       fileStates(view).map((file) => [
-        file.state === "present" ? "✔" : file.state === "ignored" ? "✖" : "·",
+        file.state === "present" ? "✔" : file.state === "absent" ? "·" : "✖",
         file.layer,
         tilde(file.path, view.home),
         stateText(file)
@@ -327,7 +340,7 @@ export const renderDoctorConfig = (view: ConfigView): string =>
       "  "
     ),
     ...view.loaded.resolution.problems
-      .filter((problem) => problem.severity === "error")
+      .filter((problem) => problem.severity === "error" || problem.kind === "untrusted")
       .map((problem) => `  ✖ ${problem.message}`)
   ].join("\n")
 
@@ -376,8 +389,88 @@ const lastValue = (file: ConfigFile | undefined, name: string): string | undefin
   return value
 }
 
-const trackedRefusal = (projectPath: string): string =>
-  `${projectPath} is tracked by git, so llm4ts ignores it and writes nothing to it. Untrack it first: git rm --cached .llm4ts/config.env`
+/** The settings whose value is passed to a coding agent's command line. */
+export const seatFlagSettings: ReadonlyArray<SettingName> = [
+  "LLM4TS_CODER_FLAGS",
+  "LLM4TS_REASONING_FLAGS"
+]
+
+// A file under review is not the user's yet: a control or direction
+// character in it could repaint the terminal and hide a line.
+const visible = (text: string): string =>
+  text.replace(
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
+    (character) => `\\u${(character.codePointAt(0) ?? 0).toString(16).padStart(4, "0")}`
+  )
+
+const plural = (count: number, one: string, many: string): string =>
+  count === 1 ? `1 ${one}` : `${count} ${many}`
+
+/**
+ * Pure: what `config trust` asks the user to accept: the file's path, every
+ * setting line with its value, tagged when llm4ts runs the value as a
+ * command or hands it to a coding agent as flags, and every line the parser
+ * rejects. A secret's value is not printed.
+ */
+export const renderTrustListing = (text: string, projectPath: string): string => {
+  const raw = text.split("\n")
+  const file = parseConfigFile(text, projectPath)
+  const rows = file.lines.flatMap((line): ReadonlyArray<ReadonlyArray<string>> => {
+    if (line._tag === "Other") {
+      return []
+    }
+    if (line._tag === "Malformed") {
+      return [
+        [
+          `line ${line.line}`,
+          visible((raw[line.line - 1] ?? "").trim()),
+          "[rejected: not a NAME=value line]"
+        ]
+      ]
+    }
+    const fact = facts.get(line.name)
+    const tag =
+      fact === undefined
+        ? "[not a setting: ignored]"
+        : fact.scope === "secret"
+          ? "[a secret: ignored in a file]"
+          : fact.runs
+            ? "[runs as a command]"
+            : seatFlagSettings.includes(fact.name)
+              ? "[flags for a coding agent]"
+              : ""
+    return [
+      [
+        line.name,
+        fact?.scope === "secret"
+          ? "(value hidden)"
+          : line.value.length === 0
+            ? "(empty)"
+            : visible(line.value),
+        tag
+      ]
+    ]
+  })
+  const entries = file.lines.filter((line) => line._tag === "Entry")
+  const running = entries.filter((line) => facts.get(line.name)?.runs === true).length
+  return [
+    `project file  ${projectPath}`,
+    ...table(rows, "  "),
+    rows.length === 0
+      ? "it sets nothing"
+      : `${plural(entries.length, "setting", "settings")}; llm4ts runs ${plural(running, "value", "values")} as a command`
+  ].join("\n")
+}
+
+const distrustOf = (loaded: LoadedConfig): Distrust | undefined =>
+  loaded.projectTrust === "untrusted" || loaded.projectTrust === "changed"
+    ? loaded.projectTrust
+    : undefined
+
+const projectRefusal = (view: ConfigView): string | undefined => {
+  const distrust = distrustOf(view.loaded)
+  return distrust === undefined ? undefined : writeRefusal(view.projectPath, view.repo, distrust)
+}
 
 export interface ConfigDeps {
   readonly files: PlainFileStoreShape
@@ -396,14 +489,14 @@ const viewOf = Effect.fn("@llm4ts/shell/ConfigCommand.viewOf")(function* (
     repo,
     environment: deps.environment,
     flags: [],
-    files: deps.files,
-    executor: deps.executor
+    files: deps.files
   }).pipe(Effect.mapError((error) => usage(error.message)))
   return {
     loaded,
     environment: deps.environment,
     globalPath: globalConfigPath(deps.environment),
     projectPath: projectConfigPath(repo),
+    repo,
     home: homeOf(deps.environment)
   }
 })
@@ -417,13 +510,35 @@ const readParsed = (deps: ConfigDeps, path: string) =>
     Effect.mapError((error) => usage(`cannot read ${path}: ${error.message}`))
   )
 
-const write = (deps: ConfigDeps, path: string, changes: ReadonlyArray<ConfigChange>) =>
-  writeConfig({ files: deps.files, path, changes }).pipe(
-    Effect.mapError((error) => usage(error.message))
-  )
-
 const pathOf = (view: ConfigView, layer: FileLayer): string =>
   layer === "project" ? view.projectPath : view.globalPath
+
+const trust = (deps: ConfigDeps, repo: string, hash: string) =>
+  recordTrust(deps.files, configTrustPath(deps.environment), repo, hash).pipe(
+    Effect.mapError((error) => usage(`cannot record trust: ${error.message}`))
+  )
+
+/**
+ * Writing is trusting: what llm4ts writes to the project file on the user's
+ * word is recorded as trusted. The write goes through only while the file
+ * still holds the content `view` judged.
+ */
+const write = Effect.fn("@llm4ts/shell/ConfigCommand.write")(function* (
+  deps: ConfigDeps,
+  view: ConfigView,
+  layer: FileLayer,
+  changes: ReadonlyArray<ConfigChange>
+): Effect.fn.Return<void, ShellUsageError> {
+  const written = yield* writeConfig({
+    files: deps.files,
+    path: pathOf(view, layer),
+    changes,
+    ...(layer === "project" ? { expect: { hash: view.loaded.projectHash } } : {})
+  }).pipe(Effect.mapError((error) => usage(error.message)))
+  if (layer === "project" && written !== undefined) {
+    yield* trust(deps, view.repo, contentHash(written))
+  }
+})
 
 const fileLayers: ReadonlyArray<FileLayer> = ["project", "global"]
 
@@ -489,8 +604,9 @@ export const runConfigSet = Effect.fn("@llm4ts/shell/ConfigCommand.set")(functio
     return yield* usage(planned.failure.join("\n"))
   }
   const view = yield* viewOf(deps, options.repo)
-  if (view.loaded.projectTracked && planned.success.some((set) => set.target === "project")) {
-    return yield* usage(trackedRefusal(view.projectPath))
+  const refusal = projectRefusal(view)
+  if (refusal !== undefined && planned.success.some((set) => set.target === "project")) {
+    return yield* usage(refusal)
   }
   const reports: Array<FileChanges> = []
   for (const layer of fileLayers) {
@@ -511,7 +627,7 @@ export const runConfigSet = Effect.fn("@llm4ts/shell/ConfigCommand.set")(functio
         ]
       })
     })
-    yield* write(deps, path, sets)
+    yield* write(deps, view, layer, sets)
   }
   const after = yield* viewOf(deps, options.repo)
   const written = new Set<string>(planned.success.map((set) => set.name))
@@ -542,11 +658,12 @@ export const runConfigUnset = Effect.fn("@llm4ts/shell/ConfigCommand.unset")(fun
     return yield* usage("config unset needs a setting name")
   }
   const view = yield* viewOf(deps, options.repo)
-  if (view.loaded.projectTracked && options.target === "project") {
-    return yield* usage(trackedRefusal(view.projectPath))
+  const refusal = projectRefusal(view)
+  if (refusal !== undefined && options.target === "project") {
+    return yield* usage(refusal)
   }
   const layers = (options.target === undefined ? fileLayers : [options.target]).filter(
-    (layer) => layer !== "project" || !view.loaded.projectTracked
+    (layer) => layer !== "project" || refusal === undefined
   )
   const reports: Array<FileChanges> = []
   const found = new Set<string>()
@@ -572,20 +689,24 @@ export const runConfigUnset = Effect.fn("@llm4ts/shell/ConfigCommand.unset")(fun
     reports.push({ layer, path, rows: held })
     yield* write(
       deps,
-      path,
+      view,
+      layer,
       held.map(([name]) => ({ name, value: undefined }))
     )
   }
   return renderChanges(
     reports,
-    options.names
-      .filter((name) => !found.has(name))
-      .map((name) => {
-        const closest = isSettingName(name) ? undefined : closestSettingName(name)
-        return closest === undefined
-          ? `${name} is not set in a config file`
-          : `${name} is not set in a config file; did you mean ${closest}?`
-      }),
+    [
+      ...options.names
+        .filter((name) => !found.has(name))
+        .map((name) => {
+          const closest = isSettingName(name) ? undefined : closestSettingName(name)
+          return closest === undefined
+            ? `${name} is not set in a config file`
+            : `${name} is not set in a config file; did you mean ${closest}?`
+        }),
+      ...(refusal === undefined ? [] : [`left alone: ${refusal}`])
+    ],
     view.home
   )
 })
@@ -610,13 +731,15 @@ export interface InitPlan {
  * Pure: what `config init` writes. Every `LLM4TS_*` the environment sets goes
  * to the file its scope belongs in unless that file already has a line for
  * it; run-scoped, secret, internal, unreadable and unknown names are skipped
- * with the reason. `answers` fill only names nothing sets yet.
+ * with the reason, and so is a project setting while the project file is not
+ * trusted. `answers` fill only names nothing sets yet.
  */
 export const planInit = (input: {
   readonly environment: Environment
   readonly global: ConfigFile | undefined
   readonly project: ConfigFile | undefined
-  readonly projectTracked: boolean
+  /** Why nothing may be written to the project file; absent when it may. */
+  readonly projectRefusal?: string
   readonly cwd: string
   readonly home: string
   readonly answers: SeatAnswers
@@ -641,8 +764,8 @@ export const planInit = (input: {
       skipped.push(`skipped ${Result.isFailure(planned) ? planned.failure.join("; ") : fact.name}`)
       continue
     }
-    if (set.target === "project" && input.projectTracked) {
-      skipped.push(`skipped ${fact.name}: the project file is tracked by git and ignored`)
+    if (set.target === "project" && input.projectRefusal !== undefined) {
+      skipped.push(`skipped ${fact.name}: ${input.projectRefusal}`)
       continue
     }
     const current = lastValue(fileOf(set.target), fact.name)
@@ -730,11 +853,12 @@ export const runConfigInit = Effect.fn("@llm4ts/shell/ConfigCommand.init")(funct
   const view = yield* viewOf(deps, options.repo)
   const answers =
     view.loaded.global === undefined && options.ask !== undefined ? yield* options.ask : []
+  const refusal = projectRefusal(view)
   const plan = planInit({
     environment: deps.environment,
     global: view.loaded.global,
     project: view.loaded.project,
-    projectTracked: view.loaded.projectTracked,
+    ...(refusal === undefined ? {} : { projectRefusal: refusal }),
     cwd: deps.cwd,
     home: view.home,
     answers
@@ -742,7 +866,7 @@ export const runConfigInit = Effect.fn("@llm4ts/shell/ConfigCommand.init")(funct
   for (const layer of fileLayers) {
     const changes = plan.writes.filter((entry) => entry.layer === layer)
     if (changes.length > 0) {
-      yield* write(deps, pathOf(view, layer), changes)
+      yield* write(deps, view, layer, changes)
     }
   }
   return renderInit(plan, {
@@ -750,6 +874,89 @@ export const runConfigInit = Effect.fn("@llm4ts/shell/ConfigCommand.init")(funct
     project: view.projectPath,
     home: view.home
   })
+})
+
+export type ProjectReview =
+  | { readonly _tag: "Absent"; readonly projectPath: string }
+  | { readonly _tag: "Trusted"; readonly projectPath: string }
+  | {
+      readonly _tag: "Pending"
+      readonly projectPath: string
+      readonly repo: string
+      /** The hash of the text `listing` was rendered from: what accepting records. */
+      readonly hash: string
+      readonly listing: string
+    }
+
+/** Reads the project file of `repo` once: how it stands, and what there is to accept. */
+export const reviewProject = Effect.fn("@llm4ts/shell/ConfigCommand.reviewProject")(function* (
+  deps: ConfigDeps,
+  repo: string
+): Effect.fn.Return<ProjectReview, ShellUsageError> {
+  const projectPath = projectConfigPath(repo)
+  const text = yield* deps.files
+    .read(projectPath)
+    .pipe(Effect.mapError((error) => usage(`cannot read ${projectPath}: ${error.message}`)))
+  if (text === undefined) {
+    return { _tag: "Absent", projectPath }
+  }
+  const hash = contentHash(text)
+  const store = yield* loadTrustStore(deps.files, configTrustPath(deps.environment))
+  return trustDecision(store, repo, hash) === "trusted"
+    ? { _tag: "Trusted", projectPath }
+    : { _tag: "Pending", projectPath, repo, hash, listing: renderTrustListing(text, projectPath) }
+})
+
+/** Records the reviewed content as trusted; the line that says so. */
+export const acceptProject = Effect.fn("@llm4ts/shell/ConfigCommand.acceptProject")(function* (
+  deps: ConfigDeps,
+  review: Extract<ProjectReview, { readonly _tag: "Pending" }>
+): Effect.fn.Return<string, ShellUsageError> {
+  yield* trust(deps, review.repo, review.hash)
+  return `trusted: ${review.projectPath} (llm4ts reads it until its content changes)`
+})
+
+export type TrustStep =
+  | { readonly kind: "done"; readonly line: string }
+  | { readonly kind: "record" }
+  | { readonly kind: "ask" }
+  | { readonly kind: "refuse"; readonly line: string }
+
+/** Pure: what `config trust` does with a review: nothing, record, ask, or stop unrecorded. */
+export const trustStep = (
+  review: ProjectReview,
+  options: { readonly yes: boolean; readonly interactive: boolean }
+): TrustStep =>
+  review._tag === "Absent"
+    ? { kind: "done", line: `no project file at ${review.projectPath}: nothing to trust` }
+    : review._tag === "Trusted"
+      ? { kind: "done", line: `${review.projectPath} is already trusted` }
+      : options.yes
+        ? { kind: "record" }
+        : options.interactive
+          ? { kind: "ask" }
+          : {
+              kind: "refuse",
+              line: `not recorded: review the listing, then ${trustCommand(review.repo)} --yes, or answer on a terminal`
+            }
+
+export const trustQuestion = "Trust this file? llm4ts will read it, and run what it says to run"
+
+export const declinedLine = "not trusted: nothing was recorded"
+
+export const runConfigUntrust = Effect.fn("@llm4ts/shell/ConfigCommand.untrust")(function* (
+  deps: ConfigDeps,
+  options: { readonly repo: string }
+): Effect.fn.Return<string, ShellUsageError> {
+  const removed = yield* forgetTrust(
+    deps.files,
+    configTrustPath(deps.environment),
+    options.repo
+  ).pipe(Effect.mapError((error) => usage(`cannot record trust: ${error.message}`)))
+  const projectPath = projectConfigPath(options.repo)
+  return removed
+    ? `no longer trusted: ${projectPath}`
+    : `${projectPath} was not trusted: nothing to remove`
 })
 
 const seatChoices = (environment: Environment): Array<Prompt.SelectChoice<string>> =>
@@ -1026,7 +1233,7 @@ const editSetting = Effect.fn("@llm4ts/shell/ConfigCommand.editSetting")(functio
   }
   const targets = saveTargets(fact, {
     inRepository: options.inRepository,
-    projectTracked: view.loaded.projectTracked,
+    projectRefused: distrustOf(view.loaded) !== undefined,
     held
   })
   const [only = "global", ...others] = targets
@@ -1062,6 +1269,18 @@ export const editSession = Effect.fn("@llm4ts/shell/ConfigCommand.editSession")(
     changes.push(change)
   }
   const inRepository = yield* insideRepository(deps, options.repo)
+  const review = yield* reviewProject(deps, options.repo)
+  if (review._tag === "Pending") {
+    yield* Console.log(review.listing)
+    const accepted = yield* Prompt.run(
+      Prompt.Confirm({ message: trustQuestion, initial: false })
+    ).pipe(Effect.catchTag("QuitError", () => Effect.succeed(false)))
+    yield* Console.log(
+      accepted
+        ? yield* acceptProject(deps, review)
+        : `${declinedLine}; the editor saves to the global file only, and a save to the project file is refused`
+    )
+  }
   const pick = Effect.gen(function* () {
     const view = yield* viewOf(deps, options.repo)
     return yield* Prompt.run(
@@ -1137,17 +1356,68 @@ const editCommand = Command.make(
   )
 )
 
+const trustCommandLine = Command.make(
+  "trust",
+  {
+    yes: Flag.Boolean("yes").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Record without asking, after you have read the listing")
+    ),
+    repo: repoFlag
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const deps = nodeDeps()
+      const review = yield* reviewProject(deps, repoOf(config.repo))
+      const step = trustStep(review, { yes: config.yes, interactive: onTerminal() })
+      if (step.kind === "done") {
+        return yield* Console.log(step.line)
+      }
+      if (review._tag !== "Pending") {
+        return
+      }
+      yield* Console.log(review.listing)
+      if (step.kind === "refuse") {
+        return yield* usage(step.line)
+      }
+      const accepted =
+        step.kind === "record" ||
+        (yield* Prompt.run(Prompt.Confirm({ message: trustQuestion, initial: false })).pipe(
+          Effect.catchTag("QuitError", () => Effect.succeed(false))
+        ))
+      yield* Console.log(accepted ? yield* acceptProject(deps, review) : declinedLine)
+    })
+).pipe(
+  Command.withDescription(
+    "Review the project file and accept it: llm4ts reads a project file only while its content is the one you trusted"
+  )
+)
+
+const untrustCommand = Command.make("untrust", { repo: repoFlag }, (config) =>
+  Effect.gen(function* () {
+    yield* Console.log(yield* runConfigUntrust(nodeDeps(), { repo: repoOf(config.repo) }))
+  })
+).pipe(Command.withDescription("Forget the trust recorded for this repository's project file"))
+
 export const configCommand = Command.make("config", {}, () =>
   onTerminal()
     ? openConfigEditor(process.cwd())
     : Effect.fail(
         usage(
-          "try `llm4ts config show`, `llm4ts config set NAME=value`, `llm4ts config unset NAME`, `llm4ts config init`, or `llm4ts config edit` on a terminal"
+          "try `llm4ts config show`, `llm4ts config set NAME=value`, `llm4ts config unset NAME`, `llm4ts config init`, `llm4ts config trust`, or `llm4ts config edit` on a terminal"
         )
       )
 ).pipe(
   Command.withDescription(
-    "The config files (~/.config/llm4ts/config.env, <repo>/.llm4ts/config.env): show, set, unset, init, edit (ADR 0049)"
+    "The config files (~/.config/llm4ts/config.env, <repo>/.llm4ts/config.env): show, set, unset, init, edit, trust, untrust (ADR 0049)"
   ),
-  Command.withSubcommands([showCommand, setCommand, unsetCommand, initCommand, editCommand])
+  Command.withSubcommands([
+    showCommand,
+    setCommand,
+    unsetCommand,
+    initCommand,
+    editCommand,
+    trustCommandLine,
+    untrustCommand
+  ])
 )

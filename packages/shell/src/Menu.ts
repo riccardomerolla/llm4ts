@@ -3,14 +3,14 @@ import * as Effect from "effect/Effect"
 import { FileSystem } from "effect/FileSystem"
 import { Prompt } from "effect/cli"
 import { coderChoices, findOnPath, resolvedCoderToken } from "./CoderChoice.ts"
-import { loadConfig, prepareLaunch, resolvedEnvironment } from "./Config.ts"
+import { launchTrustRefusal, loadConfig, prepareLaunch, resolvedEnvironment } from "./Config.ts"
 import { openConfigEditor } from "./ConfigCommand.ts"
 import { discoverFlows, type DiscoveredFlow, type FlowTierPaths } from "./FlowCatalog.ts"
 import { launchFlow } from "./FlowLaunch.ts"
+import { ShellUsageError } from "./ShellErrors.ts"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
-import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
 
-const launchDeps = { files: nodePlainFileStore, executor: nodeProcessExecutor }
+const launchDeps = { files: nodePlainFileStore }
 
 type MenuAction = "run" | "view" | "configure" | "exit"
 
@@ -75,6 +75,10 @@ const runFlowInteractive = Effect.fn("@llm4ts/shell/Menu.runFlowInteractive")(fu
   )
   const repo = process.cwd()
   const settled = yield* loadConfig({ repo, environment: process.env, flags: [], ...launchDeps })
+  const refusal = launchTrustRefusal(settled, repo)
+  if (refusal !== undefined) {
+    return yield* new ShellUsageError({ message: refusal })
+  }
   const coder = yield* selectCoder(resolvedEnvironment(settled.resolution, process.env))
   const plan = yield* prepareLaunch({
     repo,

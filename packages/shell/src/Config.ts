@@ -9,7 +9,6 @@ import * as Brand from "effect/Brand"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { ignoringRunState } from "@llm4ts/flow/RunState"
 import {
@@ -21,6 +20,16 @@ import {
   type SettingFacts,
   type SettingName
 } from "@llm4ts/flow/Settings"
+import {
+  configTrustPath,
+  contentHash,
+  distrustNotice,
+  launchRefusal,
+  loadTrustStore,
+  trustDecision,
+  unusableStoreNotice,
+  type ProjectTrust
+} from "./ConfigTrust.ts"
 import { ShellUsageError } from "./ShellErrors.ts"
 
 export type FileLayer = "project" | "global"
@@ -40,7 +49,7 @@ export type ProblemKind =
   | "duplicate"
   | "conflict"
   | "shadowed"
-  | "tracked"
+  | "untrusted"
 
 export interface ConfigProblem {
   readonly severity: ProblemSeverity
@@ -642,59 +651,47 @@ const readFile = (files: PlainFileStoreShape, path: string) =>
 
 export interface LoadedConfig {
   readonly resolution: Resolution
-  /** `undefined`: the file is absent, or git tracks it and it is ignored. */
+  /** `undefined`: the file is absent, or it is not trusted and none of it is read. */
   readonly project: ConfigFile | undefined
   readonly global: ConfigFile | undefined
   /**
-   * Git tracks the project file, so it came with the clone and none of it is
-   * read: it could set commands llm4ts runs for whoever cloned the repository.
+   * How the project file stands against the user's trust list. Only a
+   * `trusted` file reaches the resolution: the file can set commands llm4ts
+   * runs, and anyone who hands over a directory can put one in it.
    */
-  readonly projectTracked: boolean
+  readonly projectTrust: ProjectTrust
+  /** The hash of the project file as it was read; `undefined` when absent. */
+  readonly projectHash: string | undefined
 }
 
-// git prints index paths with forward slashes on every platform.
-const runStateDirInRepo = ".llm4ts"
-const projectFileInRepo = ".llm4ts/config.env"
-
 /**
- * Whether the repository supplies `<repo>/.llm4ts/config.env`: git tracks the
- * file, or tracks `.llm4ts` itself (a symbolic link or a submodule), in which
- * case the file behind it is the repository's too even though git reports
- * that path as unknown. Case is ignored: on a case-insensitive filesystem a
- * tracked `.LLM4TS/config.env` is the file llm4ts would read. No repository
- * or no git: nothing was supplied.
+ * Reads both files for `repo`, parses and resolves. An absent file is no
+ * problem. The project file is hashed from the text that is then parsed, so
+ * the content that was judged is the content that is used.
  */
-const trackedByGit = (executor: ProcessExecutorShape, repo: string): Effect.Effect<boolean> =>
-  executor.run(["git", "ls-files", "-s", "--", `:(icase)${runStateDirInRepo}`], repo, {}).pipe(
-    Effect.map(
-      (result) =>
-        result.exitCode === 0 &&
-        result.stdout.some((line) => {
-          const path = line.slice(line.indexOf("\t") + 1).toLowerCase()
-          return path === runStateDirInRepo || path === projectFileInRepo
-        })
-    ),
-    Effect.orElseSucceed(() => false)
-  )
-
-/** Reads both files for `repo`, parses and resolves. An absent file is no problem. */
 export const loadConfig = Effect.fn("@llm4ts/shell/Config.loadConfig")(function* (options: {
   readonly repo: string
   readonly environment: Environment
   readonly flags: ReadonlyArray<FlagAssignment>
   readonly files: PlainFileStoreShape
-  readonly executor: ProcessExecutorShape
 }): Effect.fn.Return<LoadedConfig, ConfigFileError> {
-  const parsed = (path: string) =>
-    readFile(options.files, path).pipe(
-      Effect.map((text) => (text === undefined ? undefined : parseConfigFile(text, path)))
-    )
-  const global = yield* parsed(globalConfigPath(options.environment))
+  const globalPath = globalConfigPath(options.environment)
+  const globalText = yield* readFile(options.files, globalPath)
+  const global = globalText === undefined ? undefined : parseConfigFile(globalText, globalPath)
   const projectPath = projectConfigPath(options.repo)
-  const found = yield* parsed(projectPath)
-  const projectTracked =
-    found !== undefined && (yield* trackedByGit(options.executor, options.repo))
-  const project = projectTracked ? undefined : found
+  const projectText = yield* readFile(options.files, projectPath)
+  const projectHash = projectText === undefined ? undefined : contentHash(projectText)
+  const trustPath = configTrustPath(options.environment)
+  const store =
+    projectHash === undefined ? undefined : yield* loadTrustStore(options.files, trustPath)
+  const projectTrust: ProjectTrust =
+    projectHash === undefined || store === undefined
+      ? "absent"
+      : trustDecision(store, options.repo, projectHash)
+  const project =
+    projectText !== undefined && projectTrust === "trusted"
+      ? parseConfigFile(projectText, projectPath)
+      : undefined
   const resolution = resolveConfig({
     facts: registryFacts,
     flags: options.flags,
@@ -704,23 +701,29 @@ export const loadConfig = Effect.fn("@llm4ts/shell/Config.loadConfig")(function*
     repo: options.repo,
     home: homeOf(options.environment)
   })
+  const notice = (message: string): ConfigProblem => ({
+    severity: "warning",
+    kind: "untrusted",
+    message
+  })
+  const distrust =
+    projectTrust === "untrusted" || projectTrust === "changed"
+      ? [
+          ...(store?._tag === "Unusable"
+            ? [notice(unusableStoreNotice(trustPath, store.reason))]
+            : []),
+          notice(distrustNotice(projectPath, options.repo, projectTrust))
+        ]
+      : []
   return {
-    resolution: projectTracked
-      ? {
-          ...resolution,
-          problems: [
-            ...resolution.problems,
-            {
-              severity: "warning",
-              kind: "tracked",
-              message: `${projectPath}: tracked by git, so it is ignored; llm4ts reads only a local project file. Untrack it: git rm --cached ${projectFileInRepo}`
-            }
-          ]
-        }
-      : resolution,
+    resolution:
+      distrust.length === 0
+        ? resolution
+        : { ...resolution, problems: [...resolution.problems, ...distrust] },
     project,
     global,
-    projectTracked
+    projectTrust,
+    projectHash
   }
 })
 
@@ -762,6 +765,12 @@ export const renderMissing = (
     ])
     .join("\n")
 
+/** Pure: why a launch for `repo` stops over its project file; `undefined` when it may go on. */
+export const launchTrustRefusal = (loaded: LoadedConfig, repo: string): string | undefined =>
+  loaded.projectTrust === "untrusted" || loaded.projectTrust === "changed"
+    ? launchRefusal(projectConfigPath(repo), repo, loaded.projectTrust)
+    : undefined
+
 export interface LaunchPlan {
   readonly resolution: Resolution
   /** Printed to stderr before the child starts. */
@@ -771,7 +780,8 @@ export interface LaunchPlan {
 
 /**
  * The one way to a flow child's environment: loads the config for `repo`,
- * refuses on any error or on a setting `flow` cannot start without, and
+ * refuses on a project file that is not trusted, on any error or on a
+ * setting `flow` cannot start without, and
  * projects the rest, naming the flow in `LLM4TS_FLOW`.
  */
 export const prepareLaunch = Effect.fn("@llm4ts/shell/Config.prepareLaunch")(function* (options: {
@@ -780,16 +790,19 @@ export const prepareLaunch = Effect.fn("@llm4ts/shell/Config.prepareLaunch")(fun
   readonly base: Environment
   readonly flags: ReadonlyArray<FlagAssignment>
   readonly files: PlainFileStoreShape
-  readonly executor: ProcessExecutorShape
   readonly extra?: Environment
 }): Effect.fn.Return<LaunchPlan, ShellUsageError> {
-  const { resolution } = yield* loadConfig({
+  const loaded = yield* loadConfig({
     repo: options.repo,
     environment: options.base,
     flags: options.flags,
-    files: options.files,
-    executor: options.executor
+    files: options.files
   }).pipe(Effect.mapError((error) => new ShellUsageError({ message: error.message })))
+  const refusal = launchTrustRefusal(loaded, options.repo)
+  if (refusal !== undefined) {
+    return yield* new ShellUsageError({ message: refusal })
+  }
+  const { resolution } = loaded
   const { blocking, notices } = launchProblems(resolution)
   if (blocking.length > 0) {
     return yield* new ShellUsageError({ message: blocking.join("\n") })
@@ -813,23 +826,36 @@ export const prepareLaunch = Effect.fn("@llm4ts/shell/Config.prepareLaunch")(fun
 /**
  * Applies `changes` to the file at `path` and replaces it atomically; the
  * first write under a `.llm4ts/` directory leaves its `.gitignore`, as a
- * run's first write does. Succeeds with whether the file changed: setting
- * the current values writes nothing.
+ * run's first write does. Succeeds with the text written, or `undefined`
+ * when nothing changed: setting the current values writes nothing. With
+ * `expect`, a file whose content is not the one that was judged (its hash,
+ * `undefined` for absent) is left alone.
  */
 export const writeConfig = Effect.fn("@llm4ts/shell/Config.writeConfig")(function* (options: {
   readonly files: PlainFileStoreShape
   readonly path: string
   readonly changes: ReadonlyArray<ConfigChange>
-}): Effect.fn.Return<boolean, ConfigFileError> {
+  readonly expect?: { readonly hash: string | undefined }
+}): Effect.fn.Return<string | undefined, ConfigFileError> {
   const { path } = options
   const files = ignoringRunState(options.files)
-  const before = (yield* readFile(files, path)) ?? ""
+  const found = yield* readFile(files, path)
+  if (
+    options.expect !== undefined &&
+    options.expect.hash !== (found === undefined ? undefined : contentHash(found))
+  ) {
+    return yield* ConfigFileError.make({
+      path,
+      message: `${path} changed while llm4ts was working; nothing was written`
+    })
+  }
+  const before = found ?? ""
   const edited = editConfigText(before, options.changes)
   if (Result.isFailure(edited)) {
     return yield* ConfigFileError.make({ path, message: edited.failure })
   }
   if (edited.success === before) {
-    return false
+    return undefined
   }
   yield* files
     .writeAtomic(path, edited.success)
@@ -838,5 +864,5 @@ export const writeConfig = Effect.fn("@llm4ts/shell/Config.writeConfig")(functio
         ConfigFileError.make({ path, message: `cannot write ${path}: ${error.message}` })
       )
     )
-  return true
+  return edited.success
 })

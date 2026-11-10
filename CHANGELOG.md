@@ -47,12 +47,19 @@ An existing export keeps the meaning it has today.
   environment only, and `config show` never prints their value. A per-run
   setting such as `LLM4TS_WAVE` goes in `--set`. A file line that names
   either kind is ignored with a warning.
-- **A project file that git tracks is not read.** The project file is local
-  to a clone, and `.llm4ts/` is git-ignored. A cloned repository could
-  otherwise set the commands llm4ts runs (`LLM4TS_GATES`,
-  `LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`). llm4ts warns and names the
-  fix, `git rm --cached .llm4ts/config.env`, and `config set` writes nothing
-  to a tracked file.
+- **A project file is read only when you trusted it.** The project file
+  can set the commands llm4ts runs (`LLM4TS_GATES`, `LLM4TS_WORKTREE_SETUP`,
+  `LLM4TS_TEST_ONE`), and a cloned or unpacked repository could arrive with
+  one. llm4ts keeps a per-user list of the content you accepted for each
+  repository. `config set`, `unset`, `init` and `edit` trust what they
+  write. After an edit by hand, **`llm4ts config trust`** lists every
+  setting in the file, tags the values llm4ts runs as commands, asks once
+  and records; `--yes` records without asking, and `config untrust` forgets.
+  With a file that is new or has changed, `run`, `refine` and the MCP
+  operator's `start` refuse with exit code 2 before anything starts,
+  `config show` and `doctor` go on without the file and say
+  `not trusted` or `changed since trusted`, and `config set` writes nothing
+  to it.
 - **Toggles from a file or a flag reach the flow as `1` or `off`**, whatever
   spelling the file uses. A value from the environment is passed through
   unchanged.

@@ -17,7 +17,6 @@ import {
 } from "@llm4ts/flow/OperatorSchemas"
 import type { OperatorKnobs } from "@llm4ts/flow/OperatorSchemas"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import { prepareLaunch, type FlagAssignment } from "./Config.ts"
 import { FlowLaunchError, type FlowProcessHandle, type FlowProcessShape } from "./FlowProcess.ts"
 
@@ -64,8 +63,6 @@ export interface SupervisorOptions {
   readonly repos: ReadonlyArray<SupervisorRepo>
   readonly environment: Readonly<Record<string, string | undefined>>
   readonly files: PlainFileStoreShape
-  /** Asks git whether a repository's config file came with the clone. */
-  readonly executor: ProcessExecutorShape
   readonly process: FlowProcessShape
   readonly parallelRuns: number
   /** How long `stop` waits after SIGINT before SIGTERM; default 30 s. */
@@ -254,14 +251,14 @@ export const makeRunSupervisor = (
             ...(requestId === undefined ? {} : { requestId })
           })
           // Refused before anything is recorded: a bad knob, a broken config
-          // file, or a setting the flow cannot start without.
+          // file, a project file that is not trusted, or a setting the flow
+          // cannot start without.
           const plan = yield* prepareLaunch({
             repo: request.repo.path,
             flow: request.flow.name,
             base: childEnvironment(request.baseEnvironment),
             flags: knobAssignments(request.knobs),
             files: options.files,
-            executor: options.executor,
             extra: { LLM4TS_RUN_ID: runId, LLM4TS_TRACE_PATH: tracePath }
           }).pipe(Effect.mapError((error) => new FlowLaunchError({ message: error.message })))
           launching.add(runId)

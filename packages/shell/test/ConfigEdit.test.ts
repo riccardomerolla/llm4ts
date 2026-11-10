@@ -196,9 +196,9 @@ describe("valuePrompt", () => {
 describe("saveTargets", () => {
   const where = (
     inRepository: boolean,
-    projectTracked: boolean,
+    projectRefused: boolean,
     held: ReadonlyArray<FileLayer>
-  ) => ({ inRepository, projectTracked, held })
+  ) => ({ inRepository, projectRefused, held })
 
   it.each([
     ["LLM4TS_CODER", where(true, false, []), ["global", "project"]],

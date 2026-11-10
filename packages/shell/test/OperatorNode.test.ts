@@ -8,7 +8,6 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import { latestRuns, type OperatorRun } from "@llm4ts/flow/OperatorSchemas"
-import { makeFakeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import type { InterruptSignal } from "@llm4ts/runner/FlowRunner"
 import { makeFakeFlowProcess } from "@llm4ts/shell/FlowProcess"
@@ -83,7 +82,6 @@ const interruptedBy = (signal: InterruptSignal) =>
           environment: { HOME: "/home/op", XDG_STATE_HOME: "/state" }
         },
         flowProcess: fake.process,
-        executor: (yield* makeFakeProcessExecutor()).executor,
         serve: (_config, deps) =>
           deps.supervisor
             .start({
@@ -158,7 +156,6 @@ describe("runMcp", () => {
               environment: { HOME: "/home/op", XDG_STATE_HOME: "/state" }
             },
             flowProcess: fake.process,
-            executor: (yield* makeFakeProcessExecutor()).executor,
             serve: () => Effect.fail("port in use" as const)
           },
           signals.source

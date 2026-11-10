@@ -49,7 +49,8 @@ absolute against the repository (project file) or the home directory
 (global file).
 
 The project file is local to a clone. `.llm4ts/` is git-ignored by the tool
-itself, and a project file that git tracks is not read (see Consequences).
+itself, and a project file is read only when the user has trusted its
+content for that repository (see Consequences).
 
 ### Precedence
 
@@ -118,7 +119,8 @@ requirements stay in the flow.
 ### The verb
 
 `llm4ts config show [NAME] [--all] [--json]`, `config set NAME=value…`,
-`config unset NAME…` and `config init`. `run` gains `--set NAME=value`
+`config unset NAME…`, `config init`, `config trust [--yes]` and
+`config untrust`. `run` gains `--set NAME=value`
 (repeatable) and `--coder <name>`. `init` imports the `LLM4TS_*` exports of
 the current shell into the files, never overwriting a line, and on a
 terminal with no global file asks for the coder and the reasoner first.
@@ -129,7 +131,10 @@ settings a file may hold with their effective value and source, shows the
 chosen one as `config show NAME` does, and asks for a new value or a
 removal. It adds no second way to write: it checks an answer with the plan
 `config set` uses and saves through `config set` and `config unset`, so the
-refusals, the tracked-file rule and the printed change are theirs. How a
+refusals, the trust rule and the printed change are theirs. With a project
+file that is not trusted it prints the listing `config trust` prints and
+asks the same question before the list opens; after a no it saves to the
+global file only. How a
 value is asked comes from two registry facts, `toggle` and `choices`, not
 from the grammar's wording. Per-run settings and secrets are not offered.
 Off a terminal it exits with code 2.
@@ -140,28 +145,45 @@ Off a terminal it exits with code 2.
   `config init`; the commands after it need no prefix.
 - An existing export behaves as before. The only new output on an unchanged
   setup is a warning for a misspelled name that is close to a real one.
-- **A project file that git tracks is ignored.** A cloned repository could
-  ship `.llm4ts/config.env` and set settings llm4ts runs as commands
-  (`LLM4TS_GATES`, `LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`) or seat flags
-  (`LLM4TS_CODER_FLAGS`) for whoever runs llm4ts there. `loadConfig` asks
-  git (`git ls-files -s -- ":(icase).llm4ts"`, compared without case, since a
-  tracked `.LLM4TS/config.env` is the same file on a case-insensitive
-  filesystem) whenever the
-  project file exists. The file counts as the repository's when git tracks
-  it, and also when git tracks `.llm4ts` itself as a symbolic link or a
-  submodule: git reports a path behind a tracked link as unknown, so asking
-  about the file alone would let a committed link through. When it is the
-  repository's, none of it is read, a warning
-  says so and names the fix (`git rm --cached .llm4ts/config.env`),
-  `config show` prints the file as `ignored (tracked by git)`, and
-  `config set`, `config unset --project` and `config init` write nothing to
-  it. Outside a git repository, or with no git installed, the file counts
-  as untracked: nothing there arrived through git, and a directory unpacked
-  from an archive is trusted exactly as its `.llm4ts/roster.json`,
-  `.llm4ts/flows/` and `package.json` scripts already are. A per-user trust
-  list keyed by repository path and content hash would close that case too;
-  it is not built. Every launch pays one `git ls-files` when a project file
-  exists.
+- **A project file is used only when the user trusted it.** The file can
+  set settings llm4ts runs as commands (`LLM4TS_GATES`,
+  `LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`) and seat flags
+  (`LLM4TS_CODER_FLAGS`, `LLM4TS_REASONING_FLAGS`), and whoever hands over a
+  directory, by clone or by archive, can put one in it. The rule: llm4ts
+  uses a project file only when the user has trusted exactly that content
+  for exactly that repository.
+  - The trust list is one JSON file the tool owns,
+    `${XDG_STATE_HOME:-~/.local/state}/llm4ts/config-trust.json`: a map from
+    a repository's absolute path to the SHA-256 of its project file. It
+    lives outside every repository, so nothing a repository holds can add
+    to it. A list that cannot be read or decoded trusts nothing, and a
+    warning says so.
+  - `loadConfig` hashes the text it read and then parses that same text.
+    A match with the record for the repository's path means the file is
+    used. With no record (`not trusted`) or another hash
+    (`changed since trusted`) none of the file reaches the resolution: not
+    its settings, and not its warnings.
+  - Writing is trusting. `config set`, `unset`, `init` and `edit` record
+    the hash of what they wrote, so a user who only uses the verbs never
+    meets a trust step. They write nothing into a file that is not
+    trusted; a write to the global file in the same command still happens.
+  - `llm4ts config trust [--repo <dir>] [--yes]` prints the file's path,
+    every setting in it with its value, a tag on each value llm4ts runs as
+    a command and on seat flags, and every line the parser rejects. Control
+    and direction characters are printed escaped, so a file cannot hide a
+    line of its own listing. It asks one confirmation on a terminal, and
+    records the hash of the text it listed. Off a terminal without `--yes`
+    it prints the listing and exits 2. `config untrust` removes the record.
+  - A launch (`run`, `refine`, the menu, the MCP operator's `start`) with a
+    project file that is not trusted is refused before anything is
+    spawned: a run must not go on other settings than the user believes
+    are in force. `config show`, `doctor` and the other in-process verbs
+    go on without the file and say so with the command that accepts it.
+  - A user who edits the file by hand runs `llm4ts config trust` once per
+    edit. A repository that moves is not trusted at its new path.
+  - The path is the one llm4ts was given, made absolute, not the real path
+    behind symbolic links: the same repository reached through a link is
+    asked about once more.
 - The MCP operator's knobs are validated like flags. A knob value the
   grammar does not read, a malformed config line, or a missing required
   setting fails `start` before a run is recorded.
@@ -178,9 +200,28 @@ Off a terminal it exits with code 2.
   from what the environment carries, a second vocabulary beside the names
   every doc and error already uses, and no paste path from an `export`
   block.
-- **A committed project file.** It needs a location outside `.llm4ts/` and
-  a trust step for settings that run commands. The owner chose a file local
-  to the clone; the tracked check above enforces that choice.
+- **A committed project file.** It needs a location outside `.llm4ts/`.
+  The owner chose a file local to the clone. The trust list would cover a
+  committed file too, at one `config trust` per change.
+- **Asking git whether the file came with the clone.** The first build
+  ignored a project file that git tracks. Three reviews each found a way
+  past the check:
+  1. `.llm4ts` committed as a symbolic link to a tracked folder. Git
+     reports a path behind a tracked link as unknown, so the file passed.
+  2. `.LLM4TS/config.env` committed under another letter case. On a
+     case-insensitive filesystem it is the file llm4ts reads, and the
+     plain pathspec listed nothing.
+  3. The index path compared with the platform separator, which never
+     matches git's forward slashes on Windows.
+
+  A directory unpacked from an archive was not covered at all, and neither
+  was a machine without git. Each fix kept the premise that git's answer
+  tells where a file came from. The premise is what failed, so the check
+  was removed and trust no longer depends on anything git reports.
+
+- **Trusting a repository, not its content.** A record keyed by path alone
+  would keep trusting a file after a `git pull` or an unpacked archive
+  replaced it. The hash makes every change ask again.
 - **Kit-local settings declarations.** The kits that exist ship in this
   repository, so one table covers them. Revisit when a kit lives elsewhere.
 - **Walk-up discovery of the project file.** The roster already resolves

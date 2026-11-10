@@ -214,6 +214,8 @@ llm4ts config show                        # effective values and where each come
 llm4ts config show LLM4TS_JUDGE_ROUNDS    # one setting in full
 llm4ts config unset LLM4TS_PACK
 llm4ts config edit                        # guided on a terminal: pick, see, change or remove
+llm4ts config trust                       # review and accept a project file you edited by hand or received
+llm4ts config untrust                     # forget that acceptance
 llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # one run only
 ```
 
@@ -233,8 +235,9 @@ The settings most runs touch:
 
 Provider credentials (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `GEMINI_API_KEY`) and the two llm4ts secrets stay in the environment and
-never go in a file. The project file is local to a clone: llm4ts does not
-read one that git tracks. The [configuration guide](docs/configuration.md)
+never go in a file. llm4ts reads a project file only when you trusted its
+content: the `config` commands trust what they write, and a file you edited
+by hand or received with a repository needs `llm4ts config trust` once. The [configuration guide](docs/configuration.md)
 describes the files and holds the reference of every setting, generated
 from the registry (`node scripts/settings-docs.mjs`).
 

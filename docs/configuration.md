@@ -81,11 +81,50 @@ ignored with a warning.
 - A per-run setting, such as `LLM4TS_WAVE`, goes on the command with `--set`.
 - `LLM4TS_FLOW`, `LLM4TS_RUN_ID` and `LLM4TS_TRACE_PATH` are set by llm4ts.
 
-The project file is local to a clone. llm4ts git-ignores `.llm4ts/`, and it
-does not read a project file that git tracks, because a cloned repository
-could otherwise set the commands llm4ts runs (`LLM4TS_GATES`,
-`LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`). A warning names the fix,
-`git rm --cached .llm4ts/config.env`.
+### Trusting the project file
+
+The project file can set commands llm4ts runs (`LLM4TS_GATES`,
+`LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`) and the flags a coding agent is
+started with. A repository you cloned or unpacked could arrive with one. So
+llm4ts uses a project file only when you have trusted exactly that content
+for exactly that repository.
+
+- `config set`, `config unset`, `config init` and `config edit` trust what
+  they write. If you only ever change the file with these commands, there
+  is no trust step.
+- If you edit the file by hand, run `llm4ts config trust` once after each
+  edit.
+- If the file arrived with the repository, run `llm4ts config trust` and
+  read the listing before you accept it.
+
+```bash
+llm4ts config trust            # list the file, ask once, record
+llm4ts config trust --yes      # list the file and record without asking
+llm4ts config untrust          # forget this repository's record
+```
+
+`config trust` prints the file's path and every setting in it with its
+value. A value llm4ts runs as a command is tagged `[runs as a command]`, and
+agent flags are tagged `[flags for a coding agent]`. A line the parser
+rejects is printed with its line number. Off a terminal without `--yes` it
+prints the listing, records nothing and exits with code 2.
+
+While a project file is new or has changed since you trusted it, llm4ts
+reads none of it:
+
+- `llm4ts run`, `llm4ts refine`, a flow started from the menu and the MCP
+  operator's `start` refuse with exit code 2 before anything is started. The
+  message names the file and the command that reviews it.
+- `config show`, `doctor` and the other verbs that start no flow go on
+  without the file. `config show` lists it as `not trusted` or
+  `changed since trusted`.
+- `config set`, `config unset --project` and `config init` write nothing to
+  it. `config edit` shows the listing and asks the same question first.
+
+The records are in `${XDG_STATE_HOME:-~/.local/state}/llm4ts/config-trust.json`,
+one per repository path. A repository you move is asked about again at its
+new path. llm4ts git-ignores `.llm4ts/`, so the file stays local to a clone
+unless someone commits it on purpose.
 
 Only the `llm4ts` command reads the files. A flow script started with `node`
 or `pnpm --filter @llm4ts/flows <flow>` reads only the environment.
