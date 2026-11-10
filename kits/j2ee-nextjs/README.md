@@ -23,7 +23,8 @@ target) the [workshop runbook](fixtures/demo-bank/RUNBOOK.md) rehearses on.
 
 ```sh
 llm4ts run modernize-pack-check --pack j2ee-nextjs-spa --repo /path/to/legacy-estate
-LLM4TS_LEGACY_REPO=/path/to/legacy-estate llm4ts run convert-page --pack j2ee-nextjs-spa --repo /path/to/nextjs accountOverview
+llm4ts config set --repo /path/to/nextjs LLM4TS_LEGACY_REPO=/path/to/legacy-estate   # once per target
+llm4ts run convert-page --pack j2ee-nextjs-spa --repo /path/to/nextjs accountOverview
 ```
 
 The convert flows default to `j2ee-nextjs-spa`; `kits/test/packs.test.ts`

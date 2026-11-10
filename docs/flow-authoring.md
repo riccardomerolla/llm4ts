@@ -269,13 +269,23 @@ The first line is a `//` comment on purpose: a flow's opening comment line is
 its one-line description, which the `llm4ts` shell shows when listing
 discovered flows.
 
-Run it against a scratch repository with:
+Run it against a scratch repository from the checkout. A script started this
+way reads only the environment, so the coder is chosen with a variable:
+
+<!-- settings:env-prefix a script started with pnpm --filter reads only the environment -->
 
 ```sh
 LLM4TS_CODER=codex \
 pnpm --filter @llm4ts/flows implement -- \
   --repo /path/to/repository \
   "Add a multiply function with tests"
+```
+
+Started through the shell, the same flow takes the coder from `--coder` or
+from the [settings files](configuration.md#settings-files), with no prefix:
+
+```sh
+llm4ts run implement --coder codex --repo /path/to/repository "Add a multiply function with tests"
 ```
 
 ### The new pieces
@@ -298,6 +308,14 @@ pnpm --filter @llm4ts/flows implement -- \
   connector config (`claude` by default). This is the same `coder` slot rung
   1 filled with `ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock })`
   — here it resolves to a CLI coding agent instead of an HTTP provider.
+
+  A flow reads its settings from `process.env`. `llm4ts run` resolves the
+  flags, the environment and the settings files first, then starts the flow
+  with the result in its environment, so the flow needs no file reader. The
+  built-in flows still parse each variable themselves.
+  `settingValue(name, process.env)` from `@llm4ts/flow/Settings` reads one
+  registered setting with its grammar and default, and a flow may use it for
+  the names the registry holds.
 
 - **`planFrom(context.reasoning, input.prompt)`** — from
   `@llm4ts/flow/Planner`, is called immediately here, but calling it only

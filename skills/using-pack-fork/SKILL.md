@@ -25,13 +25,13 @@ that reuses what's already there instead of inventing something new.
 ## How
 
 ```bash
-LLM4TS_PACK=<source pack> \
-LLM4TS_TARGET_KIND=frontend \
-LLM4TS_FORK_AS=<new-pack-name> \
-npx -y @llm4ts/shell run pack-fork --repo <path-to-target-repo>
+npx -y @llm4ts/shell run pack-fork --repo <path-to-target-repo> \
+  --pack <source pack> \
+  --set LLM4TS_TARGET_KIND=frontend \
+  --set LLM4TS_FORK_AS=<new-pack-name>
 ```
 
-- `LLM4TS_PACK` — the source pack to fork from, resolved the normal way
+- `--pack` (`LLM4TS_PACK`) — the source pack to fork from, resolved the normal way
   (bare name, `kit/pack`, or a directory holding `pack.md`).
 - `LLM4TS_TARGET_KIND` — `frontend` or `backend`; picks which fixed set of
   categories gets analyzed (tech stack always included either way).

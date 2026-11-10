@@ -53,6 +53,7 @@ Rung by rung, the same three ideas recur:
 - [flows/README.md](../../flows/README.md) is the catalogue of every shipped
   flow, and [examples/README.md](../../examples/README.md) the runnable
   scripts.
-- [Configuration](../configuration.md) lists every environment variable;
+- [Configuration](../configuration.md) describes the settings files and
+  lists every setting;
   [Provider capabilities](../provider-capabilities.md) says which connector
   supports what.

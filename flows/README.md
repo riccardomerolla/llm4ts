@@ -68,6 +68,12 @@ pnpm --filter @llm4ts/flows implement -- \
 > llm4ts run modernize-survey --repo /path/to/legacy-estate
 > ```
 
+Where a command below chooses a setting, it uses the `llm4ts` command. Only
+`llm4ts` reads the settings files, `--set` and `--coder`
+([configuration](../docs/configuration.md#settings-files)). A script started
+with `pnpm --filter` or `node` reads only the environment. From the checkout,
+`pnpm llm4ts run …` runs the working tree's CLI.
+
 ## Seed a complete workflow
 
 `examples/seed.sh` copies a minimal starter into a new directory, initializes
@@ -81,7 +87,11 @@ examples/seed.sh sdd /path/to/new-project
 examples/seed.sh local
 ```
 
-Pass `--run` to seed and immediately start the live flow:
+Pass `--run` to seed and immediately start the live flow. `seed.sh` starts
+the flow with `pnpm --filter`, and a script started this way reads only the
+environment, so the agent is chosen with a variable here:
+
+<!-- settings:env-prefix seed.sh starts the flow with pnpm --filter, which reads only the environment -->
 
 ```sh
 LLM4TS_CODER=codex examples/seed.sh implement --run
@@ -114,16 +124,16 @@ open a pull request according to the selected flow.
 The implementation flow defaults to Claude Code. It stores the generated plan
 under the target repository's `.llm4ts/` directory, resumes completed tasks on
 rerun, creates the plan's epic branch, and commits each reviewed task. Select
-another installed, authenticated agent with `LLM4TS_CODER`:
+another installed, authenticated agent with `--coder`:
 
 ```sh
-LLM4TS_CODER=codex \
-pnpm --filter @llm4ts/flows implement -- \
+llm4ts run implement --coder codex \
   --repo /path/to/repository \
   "Add a multiply function with tests"
 ```
 
-Accepted values are `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`,
+`llm4ts config set LLM4TS_CODER=codex` makes that agent the default for every
+run. Accepted values are `claude`, `codex`, `gemini`, `pi`, `agy`, `grok`,
 `cursor`, and `opencode`. The inherited `LLM4ZIO_CODER` name is no longer read
 for migration.
 
@@ -253,8 +263,8 @@ extract pack into an **epic brief** with you, and `epic-stories` plans from
 the approved brief.
 
 ```sh
-LLM4TS_LEGACY_REPO=~/legacy/ib-core \
-  llm4ts run epic-design --repo ~/work/portal "Current account: balance, movements, statements"
+llm4ts config set --repo ~/work/portal LLM4TS_LEGACY_REPO=~/legacy/ib-core   # once per target
+llm4ts run epic-design --repo ~/work/portal "Current account: balance, movements, statements"
 ```
 
 - It runs rooted at the **target** repository. `LLM4TS_LEGACY_REPO` must hold
@@ -513,8 +523,8 @@ policy that gets to an MVP sooner. Same flags, seats and environment, plus
 the per-test evidence each MVP outcome needs:
 
 ```bash
-LLM4TS_TEST_REPORT=reports/junit.xml \
-  llm4ts run epic-mvp --repo ~/work/portal -- "Add the current account and wire transfers"
+llm4ts config set --repo ~/work/portal LLM4TS_TEST_REPORT=reports/junit.xml   # once per target
+llm4ts run epic-mvp --repo ~/work/portal -- "Add the current account and wire transfers"
 llm4ts run epic-mvp --repo ~/work/portal -- --land      # only once the MVP is reached
 llm4ts run epic-mvp --repo ~/work/portal -- --iterate   # plan what was parked
 ```
@@ -657,15 +667,20 @@ of at least 128K, and keep it loaded (no idle TTL):
 
 ```sh
 # pi on LM Studio
-LLM4TS_CODER_MODEL=lmstudio/qwen/qwen3.6-35b-a3b:medium \
-  llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 1 "…"
+llm4ts run epic-stories --repo ~/demo/portal \
+  --set LLM4TS_CODER_MODEL=lmstudio/qwen/qwen3.6-35b-a3b:medium \
+  -- --concurrency 1 "…"
 
 # claude CLI on LM Studio's Anthropic-compatible endpoint (both seats go
 # local unless LLM4TS_REASONER names another CLI)
 ANTHROPIC_BASE_URL=http://127.0.0.1:1234 ANTHROPIC_AUTH_TOKEN=lmstudio \
-LLM4TS_CODER=claude LLM4TS_CODER_MODEL=qwen/qwen3.6-35b-a3b \
-  llm4ts run epic-stories --repo ~/demo/portal -- --concurrency 1 "…"
+  llm4ts run epic-stories --repo ~/demo/portal \
+  --coder claude --set LLM4TS_CODER_MODEL=qwen/qwen3.6-35b-a3b \
+  -- --concurrency 1 "…"
 ```
+
+`--set` and `--coder` apply to one run. On a machine that always codes on the
+local model, write the same values once with `llm4ts config set`.
 
 When a chat's replayed history outgrows the window, the coder is retried
 once with the current turn only. Its earlier work is in the working tree.
@@ -682,8 +697,7 @@ the branch, and opens a PR. A blocked assessment is posted back to the issue.
 It performs real Git and GitHub writes:
 
 ```sh
-LLM4TS_CODER=claude \
-pnpm --filter @llm4ts/flows issue-pr -- \
+llm4ts run issue-pr --coder claude \
   --repo /path/to/repository \
   "owner/repository#42"
 ```
@@ -701,16 +715,15 @@ By default it uses Gemini Pro for specification/planning and Gemini Flash for
 coding/review. Override the model IDs or select one CLI for every role:
 
 ```sh
-LLM4TS_REASONING_MODEL=gemini-3-pro-preview \
-LLM4TS_CODER_MODEL=gemini-2.5-flash \
-pnpm --filter @llm4ts/flows sdd -- \
+llm4ts run sdd \
+  --set LLM4TS_REASONING_MODEL=gemini-3-pro-preview \
+  --set LLM4TS_CODER_MODEL=gemini-2.5-flash \
   --repo /path/to/maven-repository \
   "Add due dates and mark overdue items"
 ```
 
 ```sh
-LLM4TS_CODER=codex \
-pnpm --filter @llm4ts/flows sdd -- \
+llm4ts run sdd --coder codex \
   --repo /path/to/maven-repository \
   "Add due dates and mark overdue items"
 ```
@@ -721,9 +734,9 @@ Start LM Studio on port 1234 with a model loaded, install `pi` plus its LM Studi
 bridge, then run:
 
 ```sh
-LLM4TS_REASONING_MODEL=qwen/qwen3-coder-30b \
-LLM4TS_CODER_MODEL=qwen/qwen3-coder-30b \
-pnpm --filter @llm4ts/flows local -- \
+llm4ts run local \
+  --set LLM4TS_REASONING_MODEL=qwen/qwen3-coder-30b \
+  --set LLM4TS_CODER_MODEL=qwen/qwen3-coder-30b \
   --repo /path/to/repository \
   "Add a multiply function with tests"
 ```
@@ -812,7 +825,7 @@ and `kits/test/packs.test.ts` shows what the flows require of it.
 ### Phase 0 — survey
 
 ```sh
-pnpm --filter @llm4ts/flows modernize-survey -- --repo /path/to/legacy-estate
+llm4ts run modernize-survey --repo /path/to/legacy-estate
 ```
 
 Writes `docs/modernization/{inventory.md,graph.json,wave-plan.md}` and
@@ -824,8 +837,7 @@ measured cost projection. A human reviews the plan and flips `- [x] Approved`.
 ### Phase 1 — extract
 
 ```sh
-LLM4TS_WAVE=wave-1 \
-pnpm --filter @llm4ts/flows modernize-extract -- --repo /path/to/legacy-estate
+llm4ts run modernize-extract --repo /path/to/legacy-estate --set LLM4TS_WAVE=wave-1
 ```
 
 Per program and resumable: one structured analyst call writes the spec,
@@ -859,8 +871,8 @@ correctness.
 ### Phase 2 — seed (deterministic, no model calls)
 
 ```sh
-LLM4TS_LEGACY_REPO=/path/to/legacy-estate \
-pnpm --filter @llm4ts/flows modernize-seed -- --repo /path/to/target
+llm4ts config set --repo /path/to/target LLM4TS_LEGACY_REPO=/path/to/legacy-estate   # once per target
+llm4ts run modernize-seed --repo /path/to/target
 ```
 
 Refuses to run until the spec pack is approved. Scaffolds an empty target from
@@ -871,7 +883,7 @@ the pack, copies specs/features/indexes across the wall — never legacy source
 ### Phase 3 — implement
 
 ```sh
-pnpm --filter @llm4ts/flows modernize-implement -- --repo /path/to/target
+llm4ts run modernize-implement --repo /path/to/target
 ```
 
 Implements each plan task behind the pack's `build`/`test` gates with the
@@ -883,7 +895,7 @@ advisory playbook. A spec-compliance judge then scores the branch
 ### Phase 4 — verify
 
 ```sh
-pnpm --filter @llm4ts/flows modernize-verify -- --repo /path/to/target
+llm4ts run modernize-verify --repo /path/to/target
 ```
 
 Generates equivalence vectors per program from the specs (resumable), replays
@@ -902,7 +914,7 @@ arrive as `0.1` and diff against the expected value.
 ### Phase 5 — review
 
 ```sh
-pnpm --filter @llm4ts/flows modernize-review -- --repo /path/to/target
+llm4ts run modernize-review --repo /path/to/target
 ```
 
 Runs the full reviewer roster plus the pack's lenses over the branch diff,
@@ -912,7 +924,7 @@ improvements, and generalizable lessons appended to the pack's `lessons.md`.
 ### Benchmarking
 
 ```sh
-pnpm --filter @llm4ts/flows modernize-bench -- --repo /path/to/fixture-copy
+llm4ts run modernize-bench --repo /path/to/fixture-copy
 ```
 
 Measures an extraction run over a disposable fixture and appends a
@@ -923,7 +935,6 @@ the per-wave projection the survey embeds.
 ## Judge suite
 
 ```sh
-LLM4TS_CODER=claude \
-pnpm --filter @llm4ts/flows judge-suite -- \
+llm4ts run judge-suite --coder claude \
   "You can return an unopened item within 30 days with its receipt."
 ```

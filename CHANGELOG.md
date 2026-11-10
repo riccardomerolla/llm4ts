@@ -1,5 +1,71 @@
 # Changelog
 
+## 3.3.0
+
+Settings no longer have to be typed in front of every command (ADR 0049).
+An existing export keeps the meaning it has today.
+
+- **Settings files.** llm4ts reads `LLM4TS_*` settings from a global file,
+  `~/.config/llm4ts/config.env`, and a project file,
+  `<repo>/.llm4ts/config.env`. A file holds one `NAME=value` per line, with
+  an optional `export`, so an `export` block from a shell profile is a valid
+  file. A setting comes from, highest first: a `run` flag or `--set`, the
+  environment, the project file, the global file, the default. Every launch
+  through `llm4ts` applies the files: `run`, `refine`, the menu, the MCP
+  operator, and the verbs `doctor`, `graph`, `watch`, `roster` and
+  `gemini-bridge`. A flow script started with `node` or `pnpm --filter`
+  reads only the environment.
+- **`llm4ts config`.** `config show` prints each setting's effective value
+  and where it comes from, `config show NAME` one setting in full,
+  `config set NAME=value…` writes each name to the file it belongs in
+  (`--global` and `--project` force one), `config unset NAME…` removes it,
+  and `config init` writes the `LLM4TS_*` exports of the current shell into
+  the files without overwriting a line. `llm4ts doctor` reports the files.
+- **`llm4ts run --set NAME=value`** sets any setting for one run and is
+  repeatable. **`llm4ts run --coder <name>`** chooses the coding agent for
+  one run. A named flag and `--set` for the same setting is a usage error.
+- **Names and values are checked.** `--set` and `config set` refuse an
+  unknown name and a value the setting's grammar does not read, and a
+  malformed line in a file stops the launch with `path:line`. The
+  environment only warns: an unknown `LLM4TS_*` export that is close to a
+  real name prints the name it probably meant, so `LLM4TS_JUDGE_ROUND=1` no
+  longer passes in silence.
+- **Preflight.** A flow that lacks a setting it cannot start without
+  (`LLM4TS_LEGACY_REPO` for `modernize-seed` and the convert flows,
+  `LLM4TS_TARGET_KIND` and `LLM4TS_FORK_AS` for `pack-fork`) exits with
+  code 2 before it starts, names the setting and prints the two commands
+  that set it.
+- **Secrets and per-run settings stay out of the files.**
+  `LLM4TS_GEMINI_BRIDGE_TOKEN` and `LLM4TS_MCP_TOKEN` are read from the
+  environment only, and `config show` never prints their value. A per-run
+  setting such as `LLM4TS_WAVE` goes in `--set`. A file line that names
+  either kind is ignored with a warning.
+- **A project file that git tracks is not read.** The project file is local
+  to a clone, and `.llm4ts/` is git-ignored. A cloned repository could
+  otherwise set the commands llm4ts runs (`LLM4TS_GATES`,
+  `LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`). llm4ts warns and names the
+  fix, `git rm --cached .llm4ts/config.env`, and `config set` writes nothing
+  to a tracked file.
+- **Toggles from a file or a flag reach the flow as `1` or `off`**, whatever
+  spelling the file uses. A value from the environment is passed through
+  unchanged.
+- **Generated settings reference.** `docs/configuration.md` opens with the
+  settings files and a reference of every setting: its value grammar, its
+  default, where it belongs, the flows that require it and what it changes.
+  `node scripts/settings-docs.mjs` writes the reference from the registry,
+  and `pnpm test` fails when the two differ.
+- **Runbooks without prefixes.** The READMEs, the guide, the kit and example
+  runbooks and the skills now use `llm4ts config set`, `--set` and `--coder`
+  where they used `LLM4TS_…=` in front of a command. A test keeps it so. An
+  example script that reads only the environment keeps its prefix and says
+  why.
+- **`@llm4ts/flow/Settings`.** The registry is a public subpath:
+  `settingNames`, `settingFacts(name)`, `settingValue(name, environment)`,
+  `readSetting`, `closestSettingName` and `settingsReference()`. A test
+  fails when code reads an `LLM4TS_*` name the registry lacks, or when a
+  document names one. The built-in flows still parse the environment
+  themselves.
+
 ## 3.2.6
 
 - **`llm4ts run --verbose` reaches the flow.** The shell passed the flag on

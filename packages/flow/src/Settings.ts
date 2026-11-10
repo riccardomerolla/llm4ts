@@ -125,6 +125,84 @@ export const settingValue = <N extends SettingName>(
   return Result.isSuccess(read) && read.success !== undefined ? read.success : unset
 }
 
+const belongsIn: Readonly<Record<SettingScope, string>> = {
+  global: "global file",
+  project: "project file",
+  run: "per run",
+  secret: "environment only",
+  internal: "set by llm4ts"
+}
+
+// Outside code spans, a variable name or a `<placeholder>` word becomes a code
+// span: Markdown would otherwise read `<repo>` as an HTML tag.
+const codeWord = /[^\s`]*<[a-z-]+>[^\s`,;:)]*|\b[A-Z][A-Z0-9]*_(?:[A-Z0-9_]*[A-Z0-9]\b|\*)/gu
+
+const cell = (text: string): string =>
+  text
+    .split("`")
+    .map((part, index) => (index % 2 === 0 ? part.replace(codeWord, "`$&`") : part))
+    .join("`")
+    .replaceAll("|", "\\|")
+
+const table = (rows: ReadonlyArray<ReadonlyArray<string>>): ReadonlyArray<string> => {
+  const widths = (rows[0] ?? []).map((_, column) =>
+    Math.max(3, ...rows.map((row) => (row[column] ?? "").length))
+  )
+  const line = (row: ReadonlyArray<string>): string =>
+    `| ${row.map((text, column) => text.padEnd(widths[column] ?? 0)).join(" | ")} |`
+  const [head = [], ...body] = rows
+  return [
+    line(head),
+    `| ${widths.map((width) => "-".repeat(width)).join(" | ")} |`,
+    ...body.map(line)
+  ]
+}
+
+/**
+ * The settings reference of `docs/configuration.md`: one table per group, in
+ * registry order, already laid out the way Prettier lays out a Markdown
+ * table. `scripts/settings-docs.mjs` writes it into the document.
+ */
+export const settingsReference = (): string =>
+  groupTitles
+    .flatMap(([group, title]) => {
+      const rows = settingNames
+        .map(settingFacts)
+        .filter((facts) => facts.group === group)
+        .map((facts) => [
+          `\`${facts.name}\``,
+          cell(facts.grammar) + (facts.runs ? " (run as a command)" : ""),
+          cell(facts.fallback.text),
+          belongsIn[facts.scope],
+          facts.requiredBy.map((flow) => `\`${flow}\``).join(", "),
+          cell(facts.doc) + (facts.flag === undefined ? "" : ` Flag: \`${facts.flag}\`.`)
+        ])
+      // A column no row of the group fills is left out.
+      const columns = [
+        "Setting",
+        "Value",
+        "Default",
+        "Belongs in",
+        "Required by",
+        "Meaning"
+      ].flatMap((heading, column) =>
+        rows.some((row) => row[column] !== "") ? [[heading, column] as const] : []
+      )
+      return rows.length === 0
+        ? []
+        : [
+            `### ${title}`,
+            "",
+            ...table([
+              columns.map(([heading]) => heading),
+              ...rows.map((row) => columns.map(([, column]) => row[column] ?? ""))
+            ]),
+            ""
+          ]
+    })
+    .join("\n")
+    .trimEnd()
+
 const prefix = "LLM4TS_"
 
 /** Damerau-Levenshtein in its optimal-string-alignment form: a swap of two neighbours costs 1. */

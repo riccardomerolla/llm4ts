@@ -22,7 +22,7 @@ to run next; `--run` starts it immediately.
 ## Run implement
 
 ```bash
-LLM4TS_CODER=codex llm4ts run implement "Add a multiply function next to add, with a node:test test file"
+llm4ts run implement --coder codex "Add a multiply function next to add, with a node:test test file"
 ```
 
 `run` takes the flow name, then the task text. `--repo <dir>` targets another

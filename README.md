@@ -218,16 +218,24 @@ llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # one run only
 
 An unknown name or an unreadable value in `--set` or `config set` is
 refused, and a flow that lacks a setting it requires stops before it starts.
+An exported `LLM4TS_*` name that is close to a real one prints a warning
+with the name it probably meant.
 
-| Variable                                                | Effect                                                                                  |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `LLM4TS_CODER`                                          | Coding agent, also `llm4ts run --coder`: `claude` (default), `codex`, `gemini`, `pi`, … |
-| `LLM4TS_PROVIDER` / `LLM4TS_MODEL`                      | API provider and model for provider-driven flows such as `hello`                        |
-| `LLM4TS_PACK`                                           | Pack for the modernization flows, also `llm4ts run --pack`                              |
-| `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` | Provider credentials, applied automatically                                             |
-| `LLM4TS_VERBOSITY`                                      | Terminal verbosity                                                                      |
+The settings most runs touch:
 
-See the [configuration guide](docs/configuration.md) for the full list.
+| Setting                            | Effect                                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------------------- |
+| `LLM4TS_CODER`                     | Coding agent, also `llm4ts run --coder`: `claude` (default), `codex`, `gemini`, `pi`, … |
+| `LLM4TS_PROVIDER` / `LLM4TS_MODEL` | API provider and model for provider-driven flows such as `hello`                        |
+| `LLM4TS_PACK`                      | Pack for the modernization flows, also `llm4ts run --pack`                              |
+| `LLM4TS_VERBOSITY`                 | Terminal verbosity, also `llm4ts run --verbose`                                         |
+
+Provider credentials (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`) and the two llm4ts secrets stay in the environment and
+never go in a file. The project file is local to a clone: llm4ts does not
+read one that git tracks. The [configuration guide](docs/configuration.md)
+describes the files and holds the reference of every setting, generated
+from the registry (`node scripts/settings-docs.mjs`).
 
 ## Working on this repository
 

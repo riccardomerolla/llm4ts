@@ -1,5 +1,251 @@
 # Configuration
 
+## Settings files
+
+Every setting is an `LLM4TS_*` name. llm4ts takes a setting from the first
+of these places that has it (ADR 0049):
+
+1. A `run` flag, or `--set NAME=value` on `llm4ts run`.
+2. The environment.
+3. The project file, `<repo>/.llm4ts/config.env`. `<repo>` is the command's
+   `--repo`, else the working directory. Parent directories are not searched.
+4. The global file, `~/.config/llm4ts/config.env`
+   (`$XDG_CONFIG_HOME/llm4ts/config.env` when that variable is set).
+5. The setting's default.
+
+A file holds one `NAME=value` per line. An `export` in front of the name is
+allowed, so an `export` block copied from a shell profile is a valid file.
+Blank lines and `#` comments are skipped. A value is unquoted or wholly
+quoted. There are no escapes, no interpolation and no multi-line values. A
+path value has `~/` expanded and is made absolute against the repository in
+the project file and against the home directory in the global file.
+
+```dotenv
+# ~/work/portal/.llm4ts/config.env
+LLM4TS_PACK=j2ee-nextjs-spa
+LLM4TS_LEGACY_REPO=~/legacy/ib-core
+```
+
+The `config` verb reads and edits both files:
+
+```sh
+llm4ts config init                        # write the LLM4TS_* exports of this shell into the files
+llm4ts config set LLM4TS_CODER=pi         # each name goes to the file it belongs in
+llm4ts config set --repo ~/work/portal LLM4TS_PACK=j2ee-nextjs-spa
+llm4ts config show                        # effective values and where each one comes from
+llm4ts config show LLM4TS_JUDGE_ROUNDS    # one setting in full: every layer, its grammar, its meaning
+llm4ts config unset LLM4TS_PACK
+llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # this run only
+```
+
+`config set` writes each name to the file the reference below lists under
+"Belongs in". `--global` and `--project` force one file. `config init` never
+overwrites a line. `--set` is repeatable and takes any setting except a
+secret. `llm4ts run --coder <name>` is short for `--set LLM4TS_CODER=<name>`.
+
+`config set` and `--set` refuse an unknown name and a value the setting's
+grammar does not read. A malformed line in a file stops the launch and names
+`path:line`. The environment only warns: an unknown `LLM4TS_*` export that is
+close to a real name prints the name it probably meant. A flow that lacks a
+setting it requires exits with code 2 before it starts, and names the
+setting.
+
+Three kinds of setting never come from a file. A file line that names one is
+ignored with a warning.
+
+- A secret (`LLM4TS_GEMINI_BRIDGE_TOKEN`, `LLM4TS_MCP_TOKEN`) is read from
+  the environment only. `config set` and `--set` refuse it, and
+  `config show` prints `(secret, set)` in place of its value.
+- A per-run setting, such as `LLM4TS_WAVE`, goes on the command with `--set`.
+- `LLM4TS_FLOW`, `LLM4TS_RUN_ID` and `LLM4TS_TRACE_PATH` are set by llm4ts.
+
+The project file is local to a clone. llm4ts git-ignores `.llm4ts/`, and it
+does not read a project file that git tracks, because a cloned repository
+could otherwise set the commands llm4ts runs (`LLM4TS_GATES`,
+`LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`). A warning names the fix,
+`git rm --cached .llm4ts/config.env`.
+
+Only the `llm4ts` command reads the files. A flow script started with `node`
+or `pnpm --filter @llm4ts/flows <flow>` reads only the environment.
+
+## Settings reference
+
+`scripts/settings-docs.mjs` writes this section from the registry in
+`@llm4ts/flow/Settings`. Do not edit it by hand: `pnpm test` fails when it
+differs from the registry. "Belongs in" is where `config set` writes the
+setting. A value marked "run as a command" is a command line that llm4ts
+executes.
+
+<!-- settings:begin -->
+
+### Seats and models
+
+| Setting                    | Value                          | Default                                                      | Belongs in   | Meaning                                                                                                                                                            |
+| -------------------------- | ------------------------------ | ------------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LLM4TS_CODER`             | text                           | claude; pi in the epic flows                                 | global file  | The coding agent that edits files: claude, codex, gemini, pi, agy, grok, cursor or opencode.                                                                       |
+| `LLM4TS_REASONER`          | text                           | claude                                                       | global file  | The agent that plans, reviews and judges in the epic, soap, roundtable and taskforce flows; any coder name.                                                        |
+| `LLM4TS_CODER_MODEL`       | text                           | the agent's own default; the local and sdd flows name theirs | global file  | The coder seat's model. pi takes provider/model, such as openai-codex/gpt-5.5.                                                                                     |
+| `LLM4TS_REASONING_MODEL`   | text                           | the agent's own default; the local and sdd flows name theirs | global file  | The reasoning seat's model.                                                                                                                                        |
+| `LLM4TS_CODER_FLAGS`       | key=value pairs separated by ; | none                                                         | global file  | Extra CLI flags for the coder seat in the epic flows, on top of its preset's own.                                                                                  |
+| `LLM4TS_REASONING_FLAGS`   | key=value pairs separated by ; | none                                                         | global file  | Extra CLI flags for the reasoning seat in the epic flows.                                                                                                          |
+| `LLM4TS_CODER_HEALTH_URL`  | an http or https URL           | the local server's model list at its default address         | global file  | The URL polled until a local serving engine answers again after it went down.                                                                                      |
+| `LLM4TS_PROVIDER`          | text                           | mock                                                         | global file  | The API provider of provider-driven flows such as hello: mock, openai, anthropic, gemini, lm-studio, ollama or mlx-lm. Any provider but mock needs `LLM4TS_MODEL`. |
+| `LLM4TS_MODEL`             | text                           | none; required unless the provider is mock                   | global file  | The model `LLM4TS_PROVIDER` serves.                                                                                                                                |
+| `LLM4TS_JUDGMENT_PROVIDER` | text                           | the reasoning seat answers typed judgments                   | global file  | The API provider of the judgment seat, named the way `LLM4TS_PROVIDER` is.                                                                                         |
+| `LLM4TS_JUDGMENT_MODEL`    | text                           | none; required with a judgment provider other than mock      | global file  | The model `LLM4TS_JUDGMENT_PROVIDER` serves.                                                                                                                       |
+| `LLM4TS_JUDGMENT_BACKEND`  | llm or typesafe                | llm                                                          | global file  | What answers typed judgments: an LLM seat, or the TypeSafe API (needs `TYPESAFE_API_KEY`).                                                                         |
+| `LLM4TS_JUDGMENT_BATCHING` | independent or shared-prefix   | independent                                                  | global file  | shared-prefix sends the questions of one judgment request behind one shared prompt prefix, for a local model that caches it.                                       |
+| `LLM4TS_ISOLATED`          | on or off                      | off                                                          | project file | Asks every CLI seat to leave the repository's own hooks, MCP servers, settings and instruction files unloaded.                                                     |
+| `LLM4TS_ROSTER`            | text                           | the user's and the repository's roster.json, merged          | project file | The executor roster in place of the roster.json files: a roster file, or none for one executor per seat. Flag: `--roster`.                                         |
+| `LLM4TS_EXECUTORS`         | names separated by commas      | every executor of the roster                                 | per run      | Narrows the roster to these executor ids. Flag: `--executors`.                                                                                                     |
+
+### Repositories, packs and worktrees
+
+| Setting                 | Value                                              | Default                                                                                                   | Belongs in   | Required by                                                        | Meaning                                                                                                                          |
+| ----------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_PACK`           | text                                               | cobol-springboot in the modernization flows; j2ee-nextjs-spa in the convert flows; none in the epic flows | project file |                                                                    | The pack: a kit pack name, kit/pack, or a directory holding pack.md. Flag: `--pack`.                                             |
+| `LLM4TS_LEGACY_REPO`    | a path                                             | none                                                                                                      | project file | `modernize-seed`, `convert-page`, `convert-all`, `convert-feature` | The legacy repository holding docs/modernization/, for flows rooted at the target. epic-design needs it too, except with --list. |
+| `LLM4TS_TARGET_REPO`    | a path                                             | none: a refine proposal claims nothing as provided by the target                                          | project file |                                                                    | The target repository, mounted read-only by modernize-refine; `llm4ts refine --target` sets it.                                  |
+| `LLM4TS_WORKTREE_ROOT`  | a path                                             | `<repo>.worktrees` beside the repository                                                                  | project file |                                                                    | Where the epic flows and taskforce keep their worktrees, one folder per epic.                                                    |
+| `LLM4TS_WORKTREE_SETUP` | a command line; empty runs none (run as a command) | the pack's setup:, else pnpm install --offline                                                            | project file |                                                                    | Prepares each story worktree before its coder starts; empty skips setup.                                                         |
+| `LLM4TS_SETUP_AGENT`    | on or off                                          | off                                                                                                       | project file |                                                                    | Gives the coder one turn to repair a failed worktree setup, then runs the setup again.                                           |
+| `LLM4TS_APP_DIR`        | text                                               | the repository root, or its one first-level folder with a package.json                                    | project file |                                                                    | The folder inside the repository where setup and gates run, relative to it (frontend).                                           |
+| `LLM4TS_NODE_CHECK`     | on or off                                          | on                                                                                                        | project file |                                                                    | Checks the node on PATH against the repository's pin before gates run; off runs anyway.                                          |
+
+### Gates
+
+| Setting                  | Value                                           | Default                                                                                   | Belongs in   | Meaning                                                                                                   |
+| ------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_GATES`           | command lines separated by ; (run as a command) | the pack's ## Gates, else pnpm typecheck, lint, test and build where the app defines them | project file | The gate commands of the epic flows, overriding the pack's.                                               |
+| `LLM4TS_GATE_TIMEOUT`    | a positive number of seconds                    | 1200 seconds                                                                              | project file | How long a gate may run before it is killed and reported as a hang.                                       |
+| `LLM4TS_GATE_TAIL_CHARS` | a positive integer                              | 4000                                                                                      | project file | How many characters of a red gate's output the fix prompt carries.                                        |
+| `LLM4TS_TEST_REPORT`     | text                                            | none; epic-mvp needs this or `LLM4TS_TEST_ONE`                                            | project file | The JUnit XML report the test gate writes, relative to the app folder; epic-mvp reads its evidence there. |
+| `LLM4TS_TEST_ONE`        | a command line (run as a command)               | none; epic-mvp needs this or `LLM4TS_TEST_REPORT`                                         | project file | A test command run once per outcome in epic-mvp, with {tag} or {tagRegex} replaced by the outcome's tag.  |
+
+### Review, judging and stalls
+
+| Setting                   | Value                        | Default                                                             | Belongs in   | Meaning                                                                                                                                  |
+| ------------------------- | ---------------------------- | ------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_JUDGE_ROUNDS`     | a positive integer           | 3 story-review rounds in the epic flows; 2 judge attempts elsewhere | project file | Judge attempts before a story, page or program fails; in the epic flows --review-rounds and --judge-rounds set it too.                   |
+| `LLM4TS_REVIEW_VOTES`     | a positive integer           | 1; 2 in the port flows                                              | project file | Independent votes of the adversarial review lens per round.                                                                              |
+| `LLM4TS_REVIEW_FIXER`     | separate                     | the implementer's own chat fixes review findings                    | project file | separate sends review findings to a fresh fixer chat.                                                                                    |
+| `LLM4TS_MERGE_REVISIONS`  | a whole number, 0 or more    | 1                                                                   | project file | Times a story whose merge turns the epic gates red goes back to be fixed; 0 fails at once. --merge-revisions sets it too.                |
+| `LLM4TS_TASK_CONCURRENCY` | a positive integer           | 1                                                                   | project file | Coders working on one story at once; --task-concurrency sets it too.                                                                     |
+| `LLM4TS_DEFER_FINDINGS`   | on or off                    | off                                                                 | project file | Fixes only Critical review findings in place and defers the rest to one refine round after the last merge; --defer-findings sets it too. |
+| `LLM4TS_DEFER_TESTS`      | on or off                    | off                                                                 | project file | Records the judge's tests score as debt instead of failing the story; --defer-tests sets it too.                                         |
+| `LLM4TS_STALL_REPEATS`    | a positive integer           | 5                                                                   | project file | Ends a coder turn that repeats one tool call this many times in a row; at least 2.                                                       |
+| `LLM4TS_STALL_MINUTES`    | a positive number of minutes | no silence limit                                                    | project file | Ends a coder turn that prints nothing for this long.                                                                                     |
+
+### Context and estate bounds
+
+| Setting                       | Value                     | Default                                          | Belongs in   | Meaning                                                                             |
+| ----------------------------- | ------------------------- | ------------------------------------------------ | ------------ | ----------------------------------------------------------------------------------- |
+| `LLM4TS_CONTEXT_BUDGET`       | a positive integer        | 400000                                           | project file | The character budget of the evidence one prompt may carry.                          |
+| `LLM4TS_ORIENTATION_CHARS`    | a whole number, 0 or more | 8000                                             | project file | How much of the repository digest the planner and every coder see; 0 leaves it out. |
+| `LLM4TS_STORY_CONTEXT_CHARS`  | a whole number, 0 or more | 40000                                            | project file | How much of the code a story starts from its coder sees up front; 0 leaves it out.  |
+| `LLM4TS_RETRO_CHARS`          | a positive integer        | 60000                                            | project file | The character budget of the digest epic-retro reads.                                |
+| `LLM4TS_MAX_READ_BYTES`       | a positive integer        | the workspace's cap; 8388608 for a legacy estate | project file | The per-file read cap, for estates whose sources exceed it.                         |
+| `LLM4TS_MAX_DISCOVER_RESULTS` | a positive integer        | the workspace's cap; 20000 for a legacy estate   | project file | How many files a discovery may return before it fails.                              |
+| `LLM4TS_EXCLUDE_DIRS`         | names separated by commas | the built-in pruned list (.git, node_modules, …) | project file | Directory names discovery prunes, replacing the built-in list.                      |
+
+### Modernization flows
+
+| Setting                      | Value               | Default                                                | Belongs in   | Required by | Meaning                                                                                                                           |
+| ---------------------------- | ------------------- | ------------------------------------------------------ | ------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_WAVE`                | text                | every wave, with estate-wide coverage                  | per run      |             | Scopes modernize-extract to one wave of the approved plan.                                                                        |
+| `LLM4TS_EXTRACT_CONCURRENCY` | a positive integer  | 1                                                      | project file |             | Programs modernize-extract extracts and judges at once.                                                                           |
+| `LLM4TS_ANALYST_TURNS`       | a positive integer  | 48                                                     | project file |             | The turn budget of one program's analyst in modernize-extract and modernize-refine.                                               |
+| `LLM4TS_MAX_CLOSURE_FILES`   | a positive integer  | 40 in the modernization flows; 12 in the convert flows | project file |             | How many files of a program's include closure are named as evidence.                                                              |
+| `LLM4TS_GRAPH_REFINE`        | on or off           | on                                                     | project file |             | The LLM pass that refines modernize-survey's code graph; off ships the regex graph.                                               |
+| `LLM4TS_REGROUP`             | on or off           | off                                                    | per run      |             | Makes modernize-refine consolidate domains again even when domains.md is current; `llm4ts refine` sets it for its regroup action. |
+| `LLM4TS_MARK_DEEPEN`         | on or off           | off                                                    | per run      |             | Makes modernize-pack-upgrade add a ## Deepen request to every incompatible program.                                               |
+| `LLM4TS_APPROVER`            | text                | the OS user                                            | global file  |             | The name that signs refine decisions and the seed's provenance.                                                                   |
+| `LLM4TS_BENCH_MODE`          | measure or report   | measure; report when the task is `report`              | per run      |             | Whether modernize-bench measures a run or prints the comparison report.                                                           |
+| `LLM4TS_BENCH_PROJECT`       | a positive integer  | no projection                                          | per run      |             | A program count the bench report projects its measured cost onto.                                                                 |
+| `LLM4TS_TARGET_KIND`         | frontend or backend | none                                                   | per run      | `pack-fork` | Which side of the target repository pack-fork reads conventions from.                                                             |
+| `LLM4TS_FORK_AS`             | text                | none                                                   | per run      | `pack-fork` | The forked pack's name, lowercase kebab-case.                                                                                     |
+| `LLM4TS_FEEDBACK`            | text                | none: a fresh fork                                     | per run      |             | What to fix in the fork `LLM4TS_FORK_AS` names, revising it instead of starting over.                                             |
+
+### Port flows
+
+| Setting                      | Value                     | Default         | Belongs in   | Meaning                                                                      |
+| ---------------------------- | ------------------------- | --------------- | ------------ | ---------------------------------------------------------------------------- |
+| `LLM4TS_PORT_PILOT`          | a whole number, 0 or more | 0: no pilot     | per run      | Ports this many files first, then stops for an approval of the pilot report. |
+| `LLM4TS_PORT_CONCURRENCY`    | a positive integer        | 4               | project file | Files the port flows work on at once.                                        |
+| `LLM4TS_PORT_BATCH`          | a positive integer        | 100             | project file | Files port-files takes from the queue per run.                               |
+| `LLM4TS_PORT_SOURCE_CHARS`   | a positive integer        | 120000          | project file | How many characters of one source file a port prompt carries; at least 1000. |
+| `LLM4TS_PORT_SHARDS`         | a whole number, 0 or more | 0: one checkout | project file | Worktrees port-files spreads its work over, under .llm4ts/port/shards.       |
+| `LLM4TS_PORT_TEST_ROUNDS`    | a positive integer        | 4               | project file | Fix rounds port-tests gives a red test gate.                                 |
+| `LLM4TS_PORT_COMPILE_ROUNDS` | a positive integer        | 6               | project file | Fix rounds port-compile gives a red build.                                   |
+| `LLM4TS_PORT_GUIDE_SAMPLE`   | a positive integer        | 3               | project file | Files port-guide samples to draft the porting guide.                         |
+| `LLM4TS_PORT_GUIDE_TRIAL`    | on or off                 | on              | project file | The trial port that proves port-guide's draft; off skips it.                 |
+
+### Kit: soap-ace
+
+| Setting               | Value  | Default                                                     | Belongs in   | Meaning                                                                                          |
+| --------------------- | ------ | ----------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ |
+| `LLM4TS_SOAP_SERVICE` | text   | the only service discovered; several need the name          | project file | The SOAP service the soap flows work on, and the folder of its auth.json.                        |
+| `LLM4TS_SOAP_ENV`     | text   | the default profile, auth.json                              | per run      | The environment whose `auth.<env>.json` the soap flows use; `-- --env` sets it too.              |
+| `LLM4TS_SOAP_STUB`    | a path | calls go to the network                                     | project file | A folder of recorded `<operation>.xml` responses that answers SOAP calls instead of the network. |
+| `LLM4TS_ACE_API`      | text   | derived from the service: DemoBankService gives DemoBankApi | project file | The name of the ACE API project soap-epic builds.                                                |
+
+### Kit: j2ee-nextjs
+
+| Setting              | Value                | Default                | Belongs in   | Meaning                                                                                     |
+| -------------------- | -------------------- | ---------------------- | ------------ | ------------------------------------------------------------------------------------------- |
+| `LLM4TS_ADO_ORG_URL` | an http or https URL | no Azure DevOps mirror | project file | The Azure DevOps organization convert-all mirrors its board to; needs `LLM4TS_ADO_PROJECT`. |
+| `LLM4TS_ADO_PROJECT` | text                 | no Azure DevOps mirror | project file | The Azure DevOps project of the work-item mirror.                                           |
+| `LLM4TS_ADO_REPO`    | text                 | the project's name     | project file | The Azure DevOps repository the mirrored work items link to.                                |
+| `LLM4TS_FAIL_FAST`   | on or off            | off                    | per run      | Stops convert-all at the first page that fails instead of marking it and going on.          |
+
+### Terminal, transcripts and the agent tree
+
+| Setting             | Value                           | Default                   | Belongs in   | Meaning                                                                                                                 |
+| ------------------- | ------------------------------- | ------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_VERBOSITY`  | quiet, normal, verbose or debug | normal                    | global file  | How much the terminal shows. Flag: `--verbose`.                                                                         |
+| `LLM4TS_UI`         | classic or tree                 | classic                   | global file  | tree draws the agent tree full-screen on a terminal; q returns to the classic view. Flag: `--ui`.                       |
+| `LLM4TS_TIMESTAMPS` | on or off                       | off                       | global file  | Prefixes every terminal line with the time.                                                                             |
+| `LLM4TS_TRANSCRIPT` | on or off                       | off; on in the epic flows | global file  | Records what each seat is told and answers under .llm4ts/transcripts/, for `llm4ts watch --tail`. Flag: `--transcript`. |
+| `LLM4TS_IDLE_AFTER` | a span such as 90s, 5m or 1h    | 2m                        | global file  | How long a lane of the agent tree may be silent before it is marked idle.                                               |
+| `LLM4TS_TOOL_BRIEF` | on or off                       | on                        | project file | The paragraph of a coder's brief that lists the pack's tool presets; off drops it.                                      |
+
+### OpenTelemetry and usage estimates
+
+| Setting                           | Value              | Default                                          | Belongs in  | Meaning                                                                                                                                                 |
+| --------------------------------- | ------------------ | ------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_OTEL`                     | on or off          | off, unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set | global file | Exports spans over OTLP, to a local Phoenix unless the `OTEL_*` variables say otherwise; off silences export even with an endpoint set. Flag: `--otel`. |
+| `LLM4TS_OTEL_CONTENT`             | off, on or full    | off                                              | global file | What exported spans carry besides usage: on adds prompts, replies and tool I/O; full the system prompt too. Flag: `--otel-content`.                     |
+| `LLM4TS_ESTIMATE_USAGE`           | on or off          | on                                               | global file | Estimates token usage from character counts for seats whose backend reports none.                                                                       |
+| `LLM4TS_ESTIMATE_MODEL`           | text               | claude-sonnet-4                                  | global file | The price-list model usage estimates are priced as.                                                                                                     |
+| `LLM4TS_ESTIMATE_CHARS_PER_TOKEN` | a positive integer | 4                                                | global file | Characters per token in usage estimates.                                                                                                                |
+
+### Gemini bridge
+
+| Setting                      | Value              | Default                                      | Belongs in       | Meaning                                                                                                    |
+| ---------------------------- | ------------------ | -------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_GEMINI_BRIDGE`       | on or off          | off                                          | global file      | Starts the local Gemini bridge for pi seats during a run.                                                  |
+| `LLM4TS_GEMINI_BRIDGE_MODE`  | acp or model       | acp                                          | global file      | The route the bridge serves: acp, a Gemini ACP session, or model, one locked-down gemini call per request. |
+| `LLM4TS_GEMINI_BRIDGE_MODEL` | text               | the one bridge model pi's models.json offers | global file      | The provider/model pi is started with when its models.json offers several bridge models.                   |
+| `LLM4TS_GEMINI_BRIDGE_PORT`  | a positive integer | 8731                                         | global file      | The port on 127.0.0.1 the bridge listens on.                                                               |
+| `LLM4TS_GEMINI_BRIDGE_TOKEN` | text               | no token required                            | environment only | The bearer every bridge request must carry in model mode; also pi's apiKey.                                |
+| `LLM4TS_GEMINI_MODEL`        | text               | the model pi's request names                 | global file      | The Gemini model the bridge reasons with.                                                                  |
+
+### MCP operator
+
+| Setting            | Value | Default                                | Belongs in       | Meaning                                                        |
+| ------------------ | ----- | -------------------------------------- | ---------------- | -------------------------------------------------------------- |
+| `LLM4TS_MCP_TOKEN` | text  | no HTTP transport without --token-file | environment only | The bearer token of `llm4ts mcp --http`; never reaches a flow. |
+
+### Set by llm4ts
+
+| Setting             | Value  | Default                                         | Belongs in    | Meaning                                                                  |
+| ------------------- | ------ | ----------------------------------------------- | ------------- | ------------------------------------------------------------------------ |
+| `LLM4TS_FLOW`       | text   | set by the launcher                             | set by llm4ts | The running flow's name, for its spans.                                  |
+| `LLM4TS_RUN_ID`     | text   | the runner makes one                            | set by llm4ts | The run's id, set by the MCP operator so it can find the run it started. |
+| `LLM4TS_TRACE_PATH` | a path | `.llm4ts/trace-<start>.jsonl` in the repository | set by llm4ts | Where the run writes its trace, set by the MCP operator.                 |
+
+<!-- settings:end -->
+
 ## JavaScript facade
 
 `createClient` validates a plain object:
@@ -20,15 +266,13 @@ arguments, events, or persisted flow artifacts.
 ## Judgment seat
 
 Typed judgments (ADR 0017) run on their own seat, which defaults to the
-reasoning seat:
-
-| Variable                   | Meaning                                                                                                                                      |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LLM4TS_JUDGMENT_PROVIDER` | An API provider name as for `LLM4TS_PROVIDER`; unset keeps the reasoning seat                                                                |
-| `LLM4TS_JUDGMENT_MODEL`    | Its model                                                                                                                                    |
-| `LLM4TS_JUDGMENT_BACKEND`  | `llm` (default) or `typesafe` for the hosted Jev model                                                                                       |
-| `LLM4TS_JUDGMENT_BATCHING` | `independent` (default, one call per question) or `shared-prefix` (one call per request, state sent once, each answer read as its own label) |
-| `TYPESAFE_API_KEY`         | Required by the `typesafe` backend; header only, never logged                                                                                |
+reasoning seat. `LLM4TS_JUDGMENT_PROVIDER` and `LLM4TS_JUDGMENT_MODEL` name
+another seat, the way `LLM4TS_PROVIDER` and `LLM4TS_MODEL` do.
+`LLM4TS_JUDGMENT_BACKEND=typesafe` selects the hosted Jev model. It requires
+`TYPESAFE_API_KEY`, which is sent as a header only and never logged.
+`LLM4TS_JUDGMENT_BATCHING=shared-prefix` makes one call per request, with
+the state sent once and each answer read as its own label. The default,
+`independent`, makes one call per question.
 
 A small non-thinking model served by `mlx-lm` is the intended judgment seat:
 one forward pass and one output token per question.
@@ -130,11 +374,12 @@ routed to it.
 marking the bridged ones:
 
 ```sh
-LLM4TS_GEMINI_BRIDGE=1 llm4ts doctor
+llm4ts config set LLM4TS_GEMINI_BRIDGE=on   # once per machine
+llm4ts doctor
 ```
 
-From a source checkout, `pnpm build && LLM4TS_GEMINI_BRIDGE=1 pnpm llm4ts
-doctor` runs the working tree's CLI instead of the installed release.
+From a source checkout, `pnpm build && pnpm llm4ts doctor` runs the working
+tree's CLI instead of the installed release.
 
 ```text
 prerequisites:
@@ -177,7 +422,8 @@ pi's provider for this mode uses the OpenAI completions API:
 ```
 
 ```sh
-LLM4TS_GEMINI_BRIDGE=1 LLM4TS_GEMINI_BRIDGE_MODE=model llm4ts doctor
+llm4ts config set LLM4TS_GEMINI_BRIDGE=on LLM4TS_GEMINI_BRIDGE_MODE=model
+llm4ts doctor
 ```
 
 #### Running the bridge on its own
@@ -282,11 +528,9 @@ characters on both sides of a request and is published under the model label
 of any measured total. Measured usage always wins: the estimate only fills a
 gap the backend left.
 
-| Variable                          | Effect                                                              |
-| --------------------------------- | ------------------------------------------------------------------- |
-| `LLM4TS_ESTIMATE_MODEL`           | Pricing reference for the estimate. Default `claude-sonnet-4`       |
-| `LLM4TS_ESTIMATE_CHARS_PER_TOKEN` | Characters per estimated token. Default 4                           |
-| `LLM4TS_ESTIMATE_USAGE`           | `0`, `false`, `no`, or `off` leaves the seats raw, accruing nothing |
+`LLM4TS_ESTIMATE_MODEL` is the price-list model the estimate is priced as,
+and `LLM4TS_ESTIMATE_CHARS_PER_TOKEN` is the characters counted per token.
+`LLM4TS_ESTIMATE_USAGE=off` leaves the seats raw, so nothing accrues.
 
 `FlowRunnerOptions.estimateUsage: false` does the same for one run in code and
 takes precedence over the environment.
@@ -331,10 +575,9 @@ prompt carries its tail and, for CLI coders, its path. Without gate commands
 (a flow that passes `lint` but no `baseline`) every red line blocks, as
 before.
 
-| Variable                 | Effect                                                                 |
-| ------------------------ | ---------------------------------------------------------------------- |
-| `LLM4TS_GATE_TIMEOUT`    | Seconds before a gate is killed and reported as a hang. Default `1200` |
-| `LLM4TS_GATE_TAIL_CHARS` | Characters of gate output in the fix prompt. Default `4000`            |
+`LLM4TS_GATE_TIMEOUT` is the number of seconds before a gate is killed and
+reported as a hang. `LLM4TS_GATE_TAIL_CHARS` is how many characters of gate
+output the fix prompt carries.
 
 `--land` deletes the baselines and compacts the gate logs to their failing
 lines.
@@ -367,17 +610,18 @@ a reviewer cannot place is moved down, never dropped: a Critical with no file
 becomes a Warning, a finding naming a file the diff does not touch becomes an
 Info, each as a `ReviewFindingDemoted` event.
 
-| Variable              | Effect                                                                                                                |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `LLM4TS_REVIEW_VOTES` | Independent votes of the adversarial lens per round; any Critical blocks. Default `1`                                 |
-| `LLM4TS_REVIEW_FIXER` | `separate`: findings go to a fresh fixer chat briefed to apply them and nothing else. Default: the implementer's chat |
+`LLM4TS_REVIEW_VOTES` is the number of independent votes of the adversarial
+lens per round, and any Critical blocks. `LLM4TS_REVIEW_FIXER=separate` sends
+the findings to a fresh fixer chat that is briefed to apply them and nothing
+else. By default the implementer's chat fixes them.
 
-`epic-mvp` (ADR 0042) needs per-test evidence for each MVP outcome, one of:
-
-| Variable             | Effect                                                                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `LLM4TS_TEST_REPORT` | The JUnit XML report the test gate writes, relative to the app directory; an outcome is green when every test tagged `[story#n]` passed |
-| `LLM4TS_TEST_ONE`    | A command run once per outcome, `{tag}` or `{tagRegex}` replaced by its tag (`pnpm vitest run -t {tagRegex}`); green when it exits 0    |
+`epic-mvp` (ADR 0042) needs per-test evidence for each MVP outcome, from one
+of two settings. `LLM4TS_TEST_REPORT` is the JUnit XML report the test gate
+writes, relative to the app directory. An outcome is green when every test
+tagged `[story#n]` passed. `LLM4TS_TEST_ONE` is a command run once per
+outcome, with `{tag}` or `{tagRegex}` replaced by its tag
+(`pnpm vitest run -t {tagRegex}`). An outcome is green when the command
+exits 0.
 
 `epic-draft` (ADR 0043) takes two flags of its own: `--with-tests` keeps the
 test gate while drafting (it is off by default; typecheck, lint and build
@@ -421,10 +665,10 @@ arguments too many times in a row, or, when asked, a turn with no output
 for too long. The story fails with the signal in its reason, dependents
 hold, and the retro digest shows it.
 
-| Variable               | Effect                                                                                |
-| ---------------------- | ------------------------------------------------------------------------------------- |
-| `LLM4TS_STALL_REPEATS` | Identical tool calls in a row that end the turn. Default `5`                          |
-| `LLM4TS_STALL_MINUTES` | Minutes without output that end the turn. Unset: off (a slow seat looks like silence) |
+`LLM4TS_STALL_REPEATS` is the number of identical tool calls in a row that
+ends the turn. `LLM4TS_STALL_MINUTES` is the number of minutes without
+output that ends the turn. It is off unless set, because a slow seat looks
+like silence.
 
 The retro can edit the loop, not only the stories (ADR 0027 decision 12).
 Its digest ends with a Signatures section when a pattern repeats across
@@ -517,18 +761,19 @@ next run), `port-ledger` (`<specs-dir>/ledger.tsv`, committed), `port-files`
 (`diagnostics-<round>.md`), `port-tests` (`.llm4ts/port/tests/`: a
 `.baseline.json` and a `.diag.md` per test file, `report-<round>.md`).
 
-| Variable                     | Effect                                                                                                                                                                                       |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LLM4TS_PORT_PILOT`          | Port this many files, write the pilot report, stop behind `- [ ] Approved`. Unset: all                                                                                                       |
-| `LLM4TS_PORT_CONCURRENCY`    | Files or units worked at once. Default `4`                                                                                                                                                   |
-| `LLM4TS_PORT_BATCH`          | Files per batch (6 when the batch's first file is over 2200 lines). Default `100`                                                                                                            |
-| `LLM4TS_PORT_SOURCE_CHARS`   | Characters of one source file in the implementer's prompt. Default `120000`                                                                                                                  |
-| `LLM4TS_PORT_COMPILE_ROUNDS` | Rebuild rounds before `port-compile` stops with diagnostics left. Default `6`                                                                                                                |
-| `LLM4TS_PORT_TEST_ROUNDS`    | Differential rounds before `port-tests` stops with red files left. Default `4`                                                                                                               |
-| `LLM4TS_PORT_GUIDE_SAMPLE`   | Sample sources `port-guide` audits and trial-ports. Default `3`                                                                                                                              |
-| `LLM4TS_PORT_GUIDE_TRIAL`    | `off` skips the trial port (auditors and refuters only)                                                                                                                                      |
-| `LLM4TS_REVIEW_VOTES`        | Adversarial votes per unit; the port flows default to `2`                                                                                                                                    |
-| `LLM4TS_PORT_SHARDS`         | Worktrees `port-files` spreads its implementers over (`.llm4ts/port/shards/<n>`, one branch each, merged into the checkout after every round, removed at the end). Default `0`: one checkout |
+The [port settings](#port-flows) bound each step. Three of them do more
+than their one-line meaning says:
+
+- `LLM4TS_PORT_PILOT` ports that many files, writes the pilot report and
+  stops behind `- [ ] Approved`. Unset, the flow ports every file.
+- `LLM4TS_PORT_BATCH` is the files per batch. A batch whose first file is
+  over 2200 lines takes 6.
+- `LLM4TS_PORT_SHARDS` spreads the implementers of `port-files` over that
+  many worktrees (`.llm4ts/port/shards/<n>`, one branch each). The flow
+  merges them into the checkout after every round and removes them at the
+  end.
+
+`LLM4TS_REVIEW_VOTES` defaults to `2` in the port flows.
 
 ## Capabilities
 
@@ -572,6 +817,6 @@ python3 -m venv ~/.mlxenv && ~/.mlxenv/bin/pip install mlx-lm
 ~/.mlxenv/bin/python -m mlx_lm.server --model ~/.lmstudio/models/mlx-community/Qwen3-4B-Instruct-2507-4bit --port 8080
 ```
 
-Then `LLM4TS_PROVIDER=mlx-lm LLM4TS_MODEL=<the same path>`; the default base
-URL is `http://localhost:8080`. The model id must be the path the server
+Then set `LLM4TS_PROVIDER` to `mlx-lm` and `LLM4TS_MODEL` to the same path.
+The default base URL is `http://localhost:8080`. The model id must be the path the server
 lists at `/v1/models`.

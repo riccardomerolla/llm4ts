@@ -20,7 +20,11 @@ pnpm build
 
 ## Real API provider
 
-Select a provider and model:
+Select a provider and model. These examples are scripts started with
+`pnpm --filter`, and a script started this way reads only the environment,
+not the settings files of the `llm4ts` command:
+
+<!-- settings:env-prefix an example script started with pnpm --filter reads only the environment -->
 
 ```sh
 LLM4TS_PROVIDER=openai \
@@ -33,6 +37,8 @@ pnpm --filter @llm4ts/examples api -- "Explain this repository"
 `ollama`, or `mock`. Cloud credentials are read from `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`. Local providers
 need no key:
+
+<!-- settings:env-prefix an example script started with pnpm --filter reads only the environment -->
 
 ```sh
 LLM4TS_PROVIDER=ollama \
@@ -56,12 +62,15 @@ The script prints the bridge-backed `provider/model` pairs it finds in your
 `models.json` and runs `pi --model` with the single one, so no name is
 hardcoded. With several it stops and asks you to pick:
 
+<!-- settings:env-prefix an example script started with pnpm --filter reads only the environment -->
+
 ```sh
 LLM4TS_GEMINI_BRIDGE_MODEL=<provider>/<model> \
   pnpm --filter @llm4ts/examples gemini-acp-bridge-smoke
 ```
 
-`LLM4TS_GEMINI_BRIDGE=1 llm4ts doctor` prints the same list.
+`llm4ts doctor` prints the same list when `LLM4TS_GEMINI_BRIDGE` is on
+(`llm4ts config set LLM4TS_GEMINI_BRIDGE=on`).
 
 ```sh
 pnpm build
