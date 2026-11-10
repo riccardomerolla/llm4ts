@@ -153,7 +153,6 @@ const runFlow = (
         PATH: `${fixture.binDir}:${process.env.PATH ?? ""}`,
         LLM4TS_PACK: "cobol-springboot",
         LLM4TS_CODER: "claude",
-        LLM4TS_VERBOSITY: "quiet",
         ...extraEnv
       }
     }

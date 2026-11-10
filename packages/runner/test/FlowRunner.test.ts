@@ -353,6 +353,72 @@ describe("startup notices", () => {
   )
 })
 
+describe("terminal verbosity", () => {
+  // `llm4ts run --verbose` reaches a flow as LLM4TS_VERBOSITY: no flow script
+  // passes `verbosity` itself.
+  const renderedWith = (
+    environment: Readonly<Record<string, string>>,
+    verbosity?: "Quiet" | "Normal" | "Verbose"
+  ) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const output = yield* Ref.make<ReadonlyArray<string>>([])
+        const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+        const registry = makeConnectorRegistry([
+          { connectorId: ConnectorIds.Mock, kind: "Api", create: () => Effect.succeed(mock) }
+        ])
+        const surface: TerminalSurface = {
+          palette: plainTerminalPalette,
+          log: (line) => Ref.update(output, (current) => [...current, line]),
+          setStatus: (_label) => Effect.void,
+          suspend: (effect) => effect
+        }
+        const dependencies = { registry, process: process.executor, files: files(state) }
+        const options = {
+          workDir: "/repo",
+          workspace: "/repo",
+          userPrompt: "do it",
+          coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+          surface,
+          environment,
+          persistRun: false,
+          ...(verbosity === undefined ? {} : { verbosity })
+        }
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* runWithBundle(
+          bundle,
+          options,
+          (context) =>
+            context.events.publish(
+              TokensUsed.make({
+                agent: "coder",
+                usage: TokenUsage.make({ prompt: 100, completion: 40, total: 140 })
+              })
+            ),
+          dependencies
+        )
+        return yield* Ref.get(output)
+      })
+    )
+  const tokenLine = (lines: ReadonlyArray<string>): boolean =>
+    lines.some((line) => line.includes("tokens: coder 100 in / 40 out"))
+
+  it.live("follows LLM4TS_VERBOSITY when the caller names none", () =>
+    Effect.gen(function* () {
+      assert.isTrue(tokenLine(yield* renderedWith({ LLM4TS_VERBOSITY: "verbose" })))
+      assert.isFalse(tokenLine(yield* renderedWith({})))
+    })
+  )
+
+  it.live("keeps the verbosity the caller named over the environment", () =>
+    Effect.gen(function* () {
+      assert.isFalse(tokenLine(yield* renderedWith({ LLM4TS_VERBOSITY: "verbose" }, "Normal")))
+    })
+  )
+})
+
 describe("runner spans", () => {
   it.effect(
     "a run is a CHAIN root span carrying run, session and flow; its stages hang under it",
@@ -875,6 +941,32 @@ describe("gemini ACP bridge wiring (ADR 0016)", () => {
           recordingDependencies(seen, state, stdin, () => piModelsJson)
         )
         // Coder, the reasoning seat that defaults to it, and its read-only judge.
+        assert.deepStrictEqual(yield* Ref.get(seen), [
+          "gemini-bridge/gemini-2.5-pro",
+          "gemini-bridge/gemini-2.5-pro",
+          "gemini-bridge/gemini-2.5-pro"
+        ])
+      })
+    )
+  )
+
+  // The other switches of the run (LLM4TS_ISOLATED and friends) take `on`.
+  it.effect("takes `on` as opting in", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const seen = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const stdin = yield* Queue.unbounded<string>()
+        yield* makeFlowRunnerContext(
+          {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "do it",
+            coder: piCoder,
+            environment: { LLM4TS_GEMINI_BRIDGE: "on", LLM4TS_GEMINI_BRIDGE_PORT: "0" }
+          },
+          recordingDependencies(seen, state, stdin, () => piModelsJson)
+        )
         assert.deepStrictEqual(yield* Ref.get(seen), [
           "gemini-bridge/gemini-2.5-pro",
           "gemini-bridge/gemini-2.5-pro",

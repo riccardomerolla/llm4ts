@@ -118,6 +118,7 @@ import {
   consumeTerminalEvents,
   formatDurationMs,
   makeTerminalSurface,
+  parseVerbosity,
   type TerminalSurface,
   type Verbosity
 } from "./Terminal.ts"
@@ -264,7 +265,7 @@ export interface FlowRunnerBundle {
 }
 
 const truthy = (value: string | undefined): boolean =>
-  value !== undefined && ["1", "true", "yes"].includes(value.trim().toLowerCase())
+  value !== undefined && ["1", "true", "on", "yes"].includes(value.trim().toLowerCase())
 
 const switchedOff = (value: string | undefined): boolean =>
   value !== undefined && ["0", "false", "no", "off"].includes(value.trim().toLowerCase())
@@ -537,20 +538,29 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   // meter decorates the retrying seat, so an estimate reflects the attempt
   // that actually succeeded, and it sees `scoreLabelSequence` when the
   // connector has one (the retry wrapper does not carry it).
-  const resolveSeat = (configuration: ConnectorConfig) =>
-    dependencies.registry.resolve(configuration).pipe(
+  // The one way a seat comes to be: bridged, bound to its directory, kept out
+  // of the run's denied paths, then resolved, retried and metered.
+  const resolveSeat = (seat: ConnectorConfig, workDir: string) => {
+    const configuration = prepareConnector(
+      bridged(seat),
+      workDir,
+      runEnvironment,
+      options.deniedPaths
+    )
+    return dependencies.registry.resolve(configuration).pipe(
       Effect.mapError(FlowLlmError.from),
       Effect.flatMap((connector) =>
         announceReadOnlyGrade(configuration, connector).pipe(
           Effect.andThen(
             Effect.flatMap(resilient(connector), (retrying) => {
-              const seat = { ...connector, ...retrying }
-              return Effect.map(metered(seat), (measured) => ({ ...seat, ...measured }))
+              const resolved = { ...connector, ...retrying }
+              return Effect.map(metered(resolved), (measured) => ({ ...resolved, ...measured }))
             })
           )
         )
       )
     )
+  }
   // Judgment usage is metered like any chat (ADR 0005 amendment) and every
   // fallback from label scoring to the verbalized path is announced.
   const judgmentHooks = {
@@ -620,17 +630,10 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     FlowError,
     Scope.Scope
   > {
-    const environment = options.environment ?? process.env
-    const coder = yield* resolveSeat(
-      prepareConnector(bridged(options.coder), workDir, environment, options.deniedPaths)
-    )
-    const reasoningService = yield* resolveSeat(
-      prepareConnector(bridged(reasoning), workDir, environment, options.deniedPaths)
-    )
+    const coder = yield* resolveSeat(options.coder, workDir)
+    const reasoningService = yield* resolveSeat(reasoning, workDir)
     const reviewers = yield* Effect.forEach(options.reviewers ?? [], (configuration) =>
-      resolveSeat(
-        prepareConnector(bridged(configuration), workDir, environment, options.deniedPaths)
-      )
+      resolveSeat(configuration, workDir)
     )
     // The judgment seat is the reasoner with its tools taken away: a judge
     // reads, it does not act. Over an API reasoner (no tools to take) it is
@@ -639,12 +642,8 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       options.judgment ??
       (reasoning instanceof CliConnectorConfig ? asReadOnly(reasoning) : undefined)
     const judgmentSeat =
-      judgmentConfig === undefined
-        ? reasoningService
-        : yield* resolveSeat(
-            prepareConnector(bridged(judgmentConfig), workDir, environment, options.deniedPaths)
-          )
-    const judgment = yield* judgmentFor(judgmentSeat, judgmentConfig ?? reasoning, environment)
+      judgmentConfig === undefined ? reasoningService : yield* resolveSeat(judgmentConfig, workDir)
+    const judgment = yield* judgmentFor(judgmentSeat, judgmentConfig ?? reasoning, runEnvironment)
     return { coder, reasoning: reasoningService, reviewers, judge: judgmentSeat, judgment }
   })
   const contextAt = (
@@ -801,9 +800,9 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
               violations: [`executor '${executor.id}' has an unknown harness '${executor.harness}'`]
             })
           }
-          const seat: RosterSeat = yield* resolveSeat(
-            prepareConnector(bridged(configuration), workDir, runEnvironment, options.deniedPaths)
-          ).pipe(ScopeModule.provide(runScope))
+          const seat: RosterSeat = yield* resolveSeat(configuration, workDir).pipe(
+            ScopeModule.provide(runScope)
+          )
           seatCache.set(key, seat)
           return seat
         })
@@ -882,9 +881,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         const judgmentSeat =
           options.judgment === undefined
             ? view.forRole("judge")
-            : yield* resolveSeat(
-                prepareConnector(bridged(options.judgment), workDir, runEnvironment)
-              ).pipe(ScopeModule.provide(runScope))
+            : yield* resolveSeat(options.judgment, workDir).pipe(ScopeModule.provide(runScope))
         const judged = yield* judgmentFor(judgmentSeat, judgmentConfig, runEnvironment)
         // Over the roster's judge seat the calls are timed already; name them.
         const judgment =
@@ -1007,7 +1004,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   const dependencies = withRunStateIgnore(given)
   const startedAt = yield* Clock.currentTimeMillis
   const environment = options.environment ?? process.env
-  const verbosity = options.verbosity ?? "Normal"
+  const verbosity = options.verbosity ?? parseVerbosity(environment.LLM4TS_VERBOSITY)
   const persistRun = options.persistRun ?? true
   // OpenTelemetry export (ADR 0026): decided from the environment, built once
   // per run, flushed when the run's scope closes.

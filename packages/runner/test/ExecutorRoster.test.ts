@@ -2,7 +2,11 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
-import { ApiConnectorConfig, CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import {
+  ApiConnectorConfig,
+  CliConnectorConfig,
+  type ConnectorConfig
+} from "@llm4ts/core/ConnectorConfig"
 import { makeConnectorRegistry } from "@llm4ts/core/ConnectorRegistry"
 import type { Message } from "@llm4ts/core/Models"
 import { ConnectorIds, LlmChunk, LlmConfig, type ConnectorId } from "@llm4ts/core/Models"
@@ -275,6 +279,60 @@ const answering = (name: string, calls: Ref.Ref<ReadonlyArray<string>>) => {
 }
 
 describe("a run served from a roster", () => {
+  // port-guide passes `deniedPaths: []`: its seats write under `.llm4ts/` on
+  // purpose. A judgment seat the flow names itself is a seat of that run too.
+  it.effect("gives the flow's own judgment seat the run's denied paths", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const memory = yield* makeMemoryPlainFileStore()
+        const denied = yield* Ref.make<Readonly<Record<string, ReadonlyArray<string> | undefined>>>(
+          {}
+        )
+        const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+        const factory = (id: ConnectorId) => ({
+          connectorId: id,
+          kind: "Cli" as const,
+          create: (config: ConnectorConfig) =>
+            Ref.update(denied, (all) => ({
+              ...all,
+              [id.value]: config instanceof CliConnectorConfig ? config.deniedPaths : undefined
+            })).pipe(Effect.as(mock))
+        })
+        yield* makeFlowRunnerContext(
+          {
+            workDir: "/repo",
+            workspace: "/repo",
+            userPrompt: "port",
+            coder: CliConnectorConfig.make({ connectorId: ConnectorIds.ClaudeCli }),
+            judgment: CliConnectorConfig.make({ connectorId: ConnectorIds.Codex }),
+            roster: RosterDocument.make({
+              executors: [
+                ExecutorSpec.make({
+                  id: "claude",
+                  harness: "claude",
+                  roles: ["coder", "planner", "reviewer", "judge"],
+                  slots: 2
+                })
+              ]
+            }),
+            deniedPaths: [],
+            environment: { HOME: "/home/me" }
+          },
+          {
+            registry: makeConnectorRegistry([
+              factory(ConnectorIds.ClaudeCli),
+              factory(ConnectorIds.Codex)
+            ]),
+            process: process.executor,
+            files: memory.store
+          }
+        )
+        assert.deepStrictEqual((yield* Ref.get(denied))[ConnectorIds.Codex.value], [])
+      })
+    )
+  )
+
   it.effect("holds a coder per context and leases reasoning away from it", () =>
     Effect.scoped(
       Effect.gen(function* () {

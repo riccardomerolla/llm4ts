@@ -306,7 +306,6 @@ describe("pack-fork", { timeout: smokeTimeout }, () => {
           PATH: `${fixture.binDir}:${process.env.PATH ?? ""}`,
           LLM4TS_PACK: "forked/acmecorp-nextjs",
           LLM4TS_CODER: "claude",
-          LLM4TS_VERBOSITY: "quiet",
           LLM4TS_TARGET_KIND: "frontend",
           LLM4TS_FORK_AS: "acmecorp-nextjs"
         }

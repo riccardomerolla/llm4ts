@@ -81,7 +81,7 @@ describe("skills stay in sync with the guide and the codebase", () => {
       {
         cwd: project,
         encoding: "utf8",
-        env: { ...process.env, LLM4TS_PROVIDER: "mock", LLM4TS_VERBOSITY: "quiet" }
+        env: { ...process.env, LLM4TS_PROVIDER: "mock" }
       }
     )
     assert.strictEqual(

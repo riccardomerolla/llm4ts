@@ -253,8 +253,7 @@ const runSurvey = (estate: Estate, cwd: string = flowsRoot, pack = "cobol-spring
         LLM4TS_PACK: pack,
         // The stub answers as `claude`, which is also coderFromEnv's default;
         // set it explicitly so the test does not depend on that default.
-        LLM4TS_CODER: "claude",
-        LLM4TS_VERBOSITY: "quiet"
+        LLM4TS_CODER: "claude"
       }
     }
   )
