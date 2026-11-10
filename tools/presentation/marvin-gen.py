@@ -4,15 +4,16 @@ The engine (CSS, node animations, navigation, speaker notes) is lifted from the
 committed v1 deck (24acaf82); this script replaces the slides, the scenarios
 and the copy so the two languages never drift. Run from the repository root:
 
-    python3 docs/presentation/marvin-gen.py && pnpm exec prettier --write docs/presentation/marvin*.html
+    python3 tools/presentation/marvin-gen.py && pnpm exec prettier --write docs/presentation/marvin*.html
 
 Yellow <span class="tbd"> fields are placeholders the presenter fills in before
 the meeting; the deck counts them in a DRAFT badge until none are left.
 """
-import re, sys, json
-ROOT = "/Users/riccardo/git/github/riccardomerolla/llm4ts/docs/presentation/"
+import re, sys, json, os
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.join(REPO, "docs", "presentation") + os.sep
 import subprocess
-G = lambda f: subprocess.run(["git","-C","/Users/riccardo/git/github/riccardomerolla/llm4ts","show","24acaf82:docs/presentation/"+f],capture_output=True,text=True,check=True).stdout
+G = lambda f: subprocess.run(["git","-C",REPO,"show","24acaf82:docs/presentation/"+f],capture_output=True,text=True,check=True).stdout
 en_src = G("marvin.html")
 it_src = G("marvin-it.html")
 

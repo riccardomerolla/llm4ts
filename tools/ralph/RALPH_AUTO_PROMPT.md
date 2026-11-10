@@ -18,7 +18,6 @@ The `specs/` directory contains actionable implementation plans:
 
 - `specs/pending/` - specifications waiting to be implemented
 - `specs/completed/` - specifications the user has accepted as done
-- `specs/architecture/` - orientation notes pointing into the canonical docs
 
 Canonical engineering documentation lives elsewhere and takes precedence:
 `CLAUDE.md` (rules and verification) and `docs/` (architecture, API,
