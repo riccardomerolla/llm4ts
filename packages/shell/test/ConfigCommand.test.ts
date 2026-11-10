@@ -30,7 +30,12 @@ const git = (tracked: boolean): ProcessExecutorShape =>
   makeProcessExecutor({
     run: (argv) =>
       argv[0] === "git"
-        ? Effect.succeed(ProcessResult.make({ stdout: [], exitCode: tracked ? 0 : 1 }))
+        ? Effect.succeed(
+            ProcessResult.make({
+              stdout: tracked ? ["100644 5d1c5e0 0\t.llm4ts/config.env"] : [],
+              exitCode: 0
+            })
+          )
         : Effect.fail(ProviderError.make({ message: "unexpected command" })),
     runStreaming: () => Stream.empty
   })

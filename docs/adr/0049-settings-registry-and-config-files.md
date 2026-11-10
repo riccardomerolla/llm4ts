@@ -133,13 +133,21 @@ terminal with no global file asks for the coder and the reasoner first.
   ship `.llm4ts/config.env` and set settings llm4ts runs as commands
   (`LLM4TS_GATES`, `LLM4TS_WORKTREE_SETUP`, `LLM4TS_TEST_ONE`) or seat flags
   (`LLM4TS_CODER_FLAGS`) for whoever runs llm4ts there. `loadConfig` asks
-  git (`git ls-files --error-unmatch -- .llm4ts/config.env`) whenever the
-  project file exists. When it is tracked, none of it is read, a warning
+  git (`git ls-files -s -- .llm4ts .llm4ts/config.env`) whenever the
+  project file exists. The file counts as the repository's when git tracks
+  it, and also when git tracks `.llm4ts` itself as a symbolic link or a
+  submodule: git reports a path behind a tracked link as unknown, so asking
+  about the file alone would let a committed link through. When it is the
+  repository's, none of it is read, a warning
   says so and names the fix (`git rm --cached .llm4ts/config.env`),
   `config show` prints the file as `ignored (tracked by git)`, and
   `config set`, `config unset --project` and `config init` write nothing to
   it. Outside a git repository, or with no git installed, the file counts
-  as untracked. Every launch pays one `git ls-files` when a project file
+  as untracked: nothing there arrived through git, and a directory unpacked
+  from an archive is trusted exactly as its `.llm4ts/roster.json`,
+  `.llm4ts/flows/` and `package.json` scripts already are. A per-user trust
+  list keyed by repository path and content hash would close that case too;
+  it is not built. Every launch pays one `git ls-files` when a project file
   exists.
 - The MCP operator's knobs are validated like flags. A knob value the
   grammar does not read, a malformed config line, or a missing required

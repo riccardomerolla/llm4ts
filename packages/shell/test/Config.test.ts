@@ -744,20 +744,27 @@ const failingReads = (store: PlainFileStoreShape, path: string): PlainFileStoreS
       : store.read(candidate)
 })
 
-const lsFiles = JSON.stringify(["git", "ls-files", "--error-unmatch", "--", ".llm4ts/config.env"])
+const lsFiles = JSON.stringify(["git", "ls-files", "-s", "--", ".llm4ts", ".llm4ts/config.env"])
 
-// `git ls-files --error-unmatch` exits 0 for a tracked file, 1 for an
-// untracked one and 128 outside a repository; with no git it cannot spawn.
-const gitAnswering = (exitCode: number | "missing"): ProcessExecutorShape =>
+// `git ls-files -s` lists the index entries under the paths it is given and
+// exits 128 outside a repository; with no git it cannot spawn.
+const gitListing = (
+  answer: ReadonlyArray<string> | "no repository" | "missing"
+): ProcessExecutorShape =>
   makeProcessExecutor({
     run: (argv) =>
-      exitCode === "missing" || JSON.stringify(argv) !== lsFiles
+      answer === "missing" || JSON.stringify(argv) !== lsFiles
         ? Effect.fail(ProviderError.make({ message: "git failed: command not found" }))
-        : Effect.succeed(ProcessResult.make({ stdout: [], exitCode })),
+        : Effect.succeed(
+            answer === "no repository"
+              ? ProcessResult.make({ stdout: [], exitCode: 128 })
+              : ProcessResult.make({ stdout: [...answer], exitCode: 0 })
+          ),
     runStreaming: () => Stream.empty
   })
 
-const untracked = gitAnswering(1)
+const trackedFile = gitListing(["100644 5d1c5e0 0\t.llm4ts/config.env"])
+const untracked = gitListing([])
 
 describe("a project file that git tracks", () => {
   const files = {
@@ -778,7 +785,7 @@ describe("a project file that git tracks", () => {
 
   it.effect("is ignored whole, with a warning that says how to untrack it", () =>
     Effect.gen(function* () {
-      const loaded = yield* load(gitAnswering(0))
+      const loaded = yield* load(trackedFile)
       assert.isTrue(loaded.projectTracked)
       assert.isUndefined(loaded.project)
       assert.deepStrictEqual([...loaded.resolution.settings.keys()], ["LLM4TS_REASONER"])
@@ -791,10 +798,30 @@ describe("a project file that git tracks", () => {
     })
   )
 
+  // git reports a path behind a tracked symbolic link as unknown, so the link
+  // itself is what gives the repository's file away.
+  for (const [label, entry] of [
+    ["a symbolic link", "120000 5d1c5e0 0\t.llm4ts"],
+    ["a submodule", "160000 5d1c5e0 0\t.llm4ts"]
+  ] as const) {
+    it.effect(`is ignored when git tracks .llm4ts itself as ${label}`, () =>
+      Effect.gen(function* () {
+        const loaded = yield* load(gitListing([entry]))
+        assert.isTrue(loaded.projectTracked)
+        assert.isUndefined(loaded.project)
+        assert.isFalse(loaded.resolution.settings.has("LLM4TS_GATES"))
+      })
+    )
+  }
+
   for (const [label, executor] of [
-    ["untracked", gitAnswering(1)],
-    ["outside a git repository", gitAnswering(128)],
-    ["with no git installed", gitAnswering("missing")]
+    ["untracked", untracked],
+    [
+      "untracked beside other tracked run state",
+      gitListing(["100644 5d1c5e0 0\t.llm4ts/flows/mine.ts"])
+    ],
+    ["outside a git repository", gitListing("no repository")],
+    ["with no git installed", gitListing("missing")]
   ] as const) {
     it.effect(`is read when ${label}`, () =>
       Effect.gen(function* () {

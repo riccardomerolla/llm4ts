@@ -48,8 +48,11 @@ const setup = (
     const git = yield* makeFakeProcessExecutor({
       responses: new Map([
         [
-          JSON.stringify(["git", "ls-files", "--error-unmatch", "--", ".llm4ts/config.env"]),
-          ProcessResult.make({ stdout: [], exitCode: options.configTracked === true ? 0 : 1 })
+          JSON.stringify(["git", "ls-files", "-s", "--", ".llm4ts", ".llm4ts/config.env"]),
+          ProcessResult.make({
+            stdout: options.configTracked === true ? ["100644 5d1c5e0 0\t.llm4ts/config.env"] : [],
+            exitCode: 0
+          })
         ]
       ])
     })
