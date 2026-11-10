@@ -10,8 +10,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  # write is needed only by the dispatch path, which pushes the release tag;
-  # job-level permissions cannot be split per trigger.
+  # write pushes the release tag on the dispatch path and creates the GitHub
+  # Release on both; job-level permissions cannot be split per trigger.
   contents: write
   id-token: write
 
@@ -60,6 +60,11 @@ jobs:
             fi
           done
 
+      # The GitHub Release body is this version's CHANGELOG.md section. Read
+      # before anything is published: a release with no entry stops here.
+      - name: Release notes for ${{ steps.version.outputs.version }}
+        run: node scripts/release-notes.mjs "${{ steps.version.outputs.version }}" > "$RUNNER_TEMP/release-notes.md"
+
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm format:check
@@ -80,3 +85,16 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag "v$version"
           git push origin "v$version"
+
+      # Last, so the tag exists on both paths. Rerunning a release whose
+      # GitHub Release already exists refreshes its notes.
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${{ steps.version.outputs.version }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$tag" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi

@@ -91,7 +91,9 @@ git tag vX.Y.Z && git push origin main vX.Y.Z
 ```
 
 The release workflow refuses to publish when the tag does not match every
-package version. Alternatively, once the version bump is on `main`, run the
+package version, or when `CHANGELOG.md` has no `## X.Y.Z` section: that
+section becomes the body of the GitHub Release the workflow creates after
+publishing (`scripts/release-notes.mjs`). Alternatively, once the version bump is on `main`, run the
 Release workflow manually (workflow_dispatch in the Actions tab): it publishes
 the checked-out versions and pushes the matching `vX.Y.Z` tag itself.
 
