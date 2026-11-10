@@ -347,6 +347,27 @@ $format_output
 "
     fi
 
+    # Unused modules
+    echo ""
+    echo "2c. Unused modules..."
+    echo "---------------------"
+    local unused_output
+    if unused_output=$(pnpm unused 2>&1); then
+        echo -e "${GREEN}Unused-module check passed${NC}"
+    else
+        echo -e "${RED}Unused-module check failed${NC}"
+        ci_failed=1
+        error_output+="## Unused Modules Check Failed
+
+Command: \`pnpm unused\`
+
+\`\`\`
+$unused_output
+\`\`\`
+
+"
+    fi
+
     # Building
     echo ""
     echo "3. Building..."

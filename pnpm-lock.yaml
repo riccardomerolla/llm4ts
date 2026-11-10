@@ -9,7 +9,7 @@ importers:
   .:
     devDependencies:
       '@effect/language-service':
-        specifier: latest
+        specifier: 0.87.1
         version: 0.87.1
       '@effect/vitest':
         specifier: 4.0.0
@@ -41,6 +41,9 @@ importers:
       prettier:
         specifier: ^3.7.4
         version: 3.7.4
+      tsx:
+        specifier: 4.21.0
+        version: 4.21.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -117,9 +120,6 @@ importers:
       '@llm4ts/core':
         specifier: workspace:*
         version: link:../core
-      '@llm4ts/flow':
-        specifier: workspace:*
-        version: link:../flow
       '@llm4ts/runner':
         specifier: workspace:*
         version: link:../runner
@@ -1919,7 +1919,6 @@ snapshots:
       '@esbuild/win32-arm64': 0.27.2
       '@esbuild/win32-ia32': 0.27.2
       '@esbuild/win32-x64': 0.27.2
-    optional: true
 
   escape-string-regexp@4.0.0: {}
 
@@ -2037,7 +2036,6 @@ snapshots:
   get-tsconfig@4.13.0:
     dependencies:
       resolve-pkg-maps: 1.0.0
-    optional: true
 
   glob-parent@6.0.2:
     dependencies:
@@ -2248,8 +2246,7 @@ snapshots:
 
   resolve-from@4.0.0: {}
 
-  resolve-pkg-maps@1.0.0:
-    optional: true
+  resolve-pkg-maps@1.0.0: {}
 
   rolldown@1.1.5:
     dependencies:
@@ -2323,7 +2320,6 @@ snapshots:
       get-tsconfig: 4.13.0
     optionalDependencies:
       fsevents: 2.3.3
-    optional: true
 
   type-check@0.4.0:
     dependencies:

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
@@ -217,5 +217,20 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
       /"implement":\s*"node --experimental-strip-types implement\.ts"/,
       'flows/package.json no longer defines the "implement" script (or its command changed), referenced by docs/flow-authoring.md'
     )
+  })
+
+  it("every top-level flows/*.ts flow script has a script entry in flows/package.json", () => {
+    const packageJsonSource = readRepoFile("flows/package.json")
+    const flowNames = readdirSync(join(repositoryRoot, "flows"))
+      .filter((entry) => entry.endsWith(".ts"))
+      .map((entry) => entry.slice(0, -".ts".length))
+    assert.isNotEmpty(flowNames)
+    for (const name of flowNames) {
+      assert.include(
+        packageJsonSource,
+        `"${name}": "node --experimental-strip-types ${name}.ts"`,
+        `flows/package.json has no "${name}" script for flows/${name}.ts`
+      )
+    }
   })
 })

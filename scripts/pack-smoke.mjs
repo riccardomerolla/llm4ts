@@ -5,13 +5,15 @@
  * of the workspace src aliases used by tests. Run after `pnpm build`.
  */
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-const packages = ["core", "flow", "runner", "js", "shell"]
+const packages = readdirSync(path.join(repoRoot, "packages")).filter((name) =>
+  existsSync(path.join(repoRoot, "packages", name, "package.json"))
+)
 // The consumer installs the same exact effect the packages were built against.
 const effectPin = JSON.parse(
   readFileSync(path.join(repoRoot, "packages", "core", "package.json"), "utf8")

@@ -3,7 +3,7 @@
  * release is always: `pnpm version:set X.Y.Z`, commit, tag `vX.Y.Z`, push.
  * The release workflow refuses to publish when the tag and versions disagree.
  */
-import { readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -14,7 +14,10 @@ if (version === undefined || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version))
 }
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-for (const name of ["core", "flow", "runner", "js", "shell"]) {
+const packages = readdirSync(path.join(repoRoot, "packages")).filter((name) =>
+  existsSync(path.join(repoRoot, "packages", name, "package.json"))
+)
+for (const name of packages) {
   const manifestPath = path.join(repoRoot, "packages", name, "package.json")
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
   manifest.version = version

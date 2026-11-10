@@ -52,9 +52,12 @@ const sourceOf = (pkg, distPath) =>
   path.join("packages", pkg, distPath.replace(/^\.\/dist\//, "src/").replace(/\.js$/, ".ts"))
 
 const modules = packages.flatMap((pkg) => walk(path.join(root, "packages", pkg, "src")))
+// scripts/sync-shell-flows.mjs copies flows/ and kits/ here at build time; a
+// stale copy must not count as an importer.
+const buildCopies = ["packages/shell/flows/", "packages/shell/kits/"]
 const production = ["packages", "flows", "kits", "tools", "scripts", "examples"]
   .flatMap((dir) => walk(path.join(root, dir)))
-  .filter((file) => !isTest(file))
+  .filter((file) => !isTest(file) && !buildCopies.some((copy) => file.startsWith(copy)))
 
 const used = new Set()
 // Entry points: what a package's root export and its bin run.
