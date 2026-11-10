@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.2.6
+
+- **`llm4ts run --verbose` reaches the flow.** The shell passed the flag on
+  as `LLM4TS_VERBOSITY`, but a flow's terminal only read the option a flow
+  script never sets, so every flow ran at normal verbosity. The run now
+  falls back to the variable: `--verbose` shows token and capability lines.
+  `LLM4TS_VERBOSITY=quiet` takes effect for flows as well; a shell that
+  exports it will see less output than before.
+- **A flow's own judgment seat follows the run's denied paths under a
+  roster.** That one seat was prepared without the run's `deniedPaths` and
+  always got the default `.llm4ts/**`, so a flow passing `[]` (port-guide)
+  was not honoured there. Every seat is now prepared in one place.
+- **`LLM4TS_GEMINI_BRIDGE=on` opts in**, as `1`, `true` and `yes` do.
+
 ## 3.2.5
 
 - **Capability warnings reach the screen and the trace.** A seat announces
