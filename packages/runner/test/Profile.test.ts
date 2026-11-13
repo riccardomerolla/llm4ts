@@ -6,10 +6,13 @@ import { EpicRun, appendEpicRun } from "@llm4ts/flow/EpicRuns"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import { TokenUsage } from "@llm4ts/core/Models"
 import {
+  BriefReported,
   EvidenceChecked,
   Info,
   ReviewFindings,
+  RoundtableTurn,
   StageCompleted,
+  StageFailed,
   StageStarted,
   StoryJudged,
   Timed,
@@ -563,5 +566,138 @@ describe("story review diff size (ADR 0044)", () => {
     const [home] = profileOf(measured).stories
     assert.isUndefined(home?.reviewDiffLines)
     assert.notInclude(renderProfile(profileOf(measured)), "review diff")
+  })
+})
+
+describe("roundtable and taskforce lanes", () => {
+  const turn = (speaker: string, id: number) =>
+    RoundtableTurn.make({
+      lane: speaker,
+      meeting: "payments-hub",
+      item: 1,
+      itemTitle: "Integration",
+      round: 1,
+      turn: id,
+      kind: "position",
+      blocking: false,
+      answers: [],
+      summary: "Events over calls."
+    })
+
+  /**
+   * A roundtable as `flows/lib/roundtable.ts` publishes it: every attendee's
+   * lane opens with the run, each turn is the speaker's, the model calls are
+   * the run's own, and the lanes close together ten minutes in.
+   */
+  const meeting: ReadonlyArray<TreeInput> = [
+    at(0, StageStarted.make({ stage: "attendee Cloud Architect", lane: "Cloud Architect" })),
+    at(0, StageStarted.make({ stage: "attendee Security Lead", lane: "Security Lead" })),
+    at(2 * minute, Timed.make({ kind: "model", label: "attendee", ms: 2 * 60_000 })),
+    at(2 * minute, turn("Cloud Architect", 1)),
+    at(5 * minute, Timed.make({ kind: "model", label: "attendee", ms: 3 * 60_000 })),
+    at(5 * minute, turn("Security Lead", 2)),
+    at(
+      10 * minute,
+      StageCompleted.make({ stage: "attendee Cloud Architect", lane: "Cloud Architect" })
+    ),
+    at(10 * minute, StageCompleted.make({ stage: "attendee Security Lead", lane: "Security Lead" }))
+  ]
+
+  it("an attendee's lane is profiled, from the run's start to the meeting's end", () => {
+    const report = profileOf(meeting)
+    assert.deepStrictEqual(
+      report.stories.map((lane) => [lane.id, lane.kind, lane.status, lane.wallMs]),
+      [
+        ["Cloud Architect", "attendee", "done", 10 * 60_000],
+        ["Security Lead", "attendee", "done", 10 * 60_000]
+      ]
+    )
+    assert.deepStrictEqual(report.stories[0]?.gaps, [
+      { ms: 8 * 60_000, after: "a roundtable turn", before: "a stage end" },
+      { ms: 2 * 60_000, after: "a stage start", before: "a roundtable turn" }
+    ])
+    assert.deepStrictEqual(report.outside, [{ label: "attendee", count: 2, ms: 5 * 60_000 }])
+  })
+
+  it("the text names attendees, not stories", () => {
+    const text = renderProfile(profileOf(meeting))
+    assert.include(text, "llm4ts profile · 10m00s wall · 2 attendees")
+    assert.include(text, "attendee calls: 2, 5m00s (25% of attendee time)")
+    assert.include(text, "\nAttendee time\n")
+    assert.include(text, "\nAttendees\n  attendee ")
+    assert.include(text, "Timed outside any attendee")
+    assert.notMatch(text, /stor(y|ies)/iu)
+  })
+
+  /**
+   * A taskforce as `flows/lib/taskforce.ts` publishes it: every specialist's
+   * lane opens with the run, a brief is a stage on its owner's lane and ends
+   * in a report; here the run stops before the second specialist's lane closes.
+   */
+  const team: ReadonlyArray<TreeInput> = [
+    at(0, StageStarted.make({ stage: "specialist Backend Engineer", lane: "Backend Engineer" })),
+    at(0, StageStarted.make({ stage: "specialist Tester", lane: "Tester" })),
+    at(1 * minute, StageStarted.make({ stage: "B1: Payments API", lane: "Backend Engineer" })),
+    at(7 * minute, Timed.make({ kind: "model", label: "specialist", ms: 5 * 60_000 })),
+    at(7 * minute, StageCompleted.make({ stage: "B1: Payments API", lane: "Backend Engineer" })),
+    at(
+      7 * minute,
+      BriefReported.make({
+        lane: "Backend Engineer",
+        run: "payments",
+        brief: "B1",
+        title: "Payments API",
+        wave: 1,
+        attempt: 1,
+        status: "PASS",
+        summary: "Endpoints in place."
+      })
+    ),
+    at(
+      8 * minute,
+      StageFailed.make({
+        stage: "specialist Backend Engineer",
+        message: "wave 2 blocked",
+        lane: "Backend Engineer"
+      })
+    ),
+    at(9 * minute, Info.make({ message: "taskforce: stopped" }))
+  ]
+
+  it("a specialist's lane is profiled, with its briefs as its tasks", () => {
+    const report = profileOf(team)
+    assert.deepStrictEqual(
+      report.stories.map((lane) => [lane.id, lane.kind, lane.status, lane.wallMs, lane.tasks]),
+      [
+        ["Backend Engineer", "specialist", "failed", 8 * 60_000, 1],
+        ["Tester", "specialist", "running", 9 * 60_000, 0]
+      ]
+    )
+    assert.deepStrictEqual(report.stories[0]?.gaps[0], {
+      ms: 6 * 60_000,
+      after: "a stage start",
+      before: "a stage end"
+    })
+    const text = renderProfile(report)
+    assert.include(text, "· 2 specialists")
+    assert.include(text, "\nSpecialists\n  specialist ")
+    assert.match(text, /Backend Engineer\s+failed\s+8m00s/u)
+    assert.match(text, /Tester\s+running\s+9m00s/u)
+  })
+
+  it("a story's profile is unchanged: no kind, and the words stay stories", () => {
+    const report = profileOf(measured)
+    assert.isFalse(report.stories.some((story) => "kind" in story))
+    assert.include(renderProfile(report), "· 1 story")
+    assert.include(renderProfile(report), "\nStories\n  story ")
+  })
+
+  it("a lane closes only on its own kind's stage", () => {
+    const [home] = profileOf([
+      at(0, StageStarted.make({ stage: "story home", lane: "home" })),
+      at(60, StageCompleted.make({ stage: "attendee home", lane: "home" })),
+      at(120, Info.make({ message: "still going", lane: "home" }))
+    ]).stories
+    assert.strictEqual(home?.status, "running")
   })
 })

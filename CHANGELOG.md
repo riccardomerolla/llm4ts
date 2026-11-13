@@ -17,6 +17,11 @@
 - `pnpm unused` also fails on an import cycle among `packages/*/src`. The
   three that existed are broken with no public name moved.
 - `@llm4ts/js` no longer declares `@llm4ts/flow`, which it never imported.
+- `llm4ts profile` shows roundtable attendee lanes and taskforce specialist
+  lanes, and names them so. It opened a lane only for a story.
+- **`llm4ts profile` knows how large a story's reviewed diff was.** A
+  review's diff size was dropped when the event was stamped with its story's
+  lane, which is the only place the profile reads it.
 
 ## 3.3.0
 

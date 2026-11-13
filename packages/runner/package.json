@@ -22,6 +22,7 @@
     "./Connectors": "./dist/Connectors.js",
     "./Costs": "./dist/Costs.js",
     "./Doctor": "./dist/Doctor.js",
+    "./EventPresentation": "./dist/EventPresentation.js",
     "./ExecutorRoster": "./dist/ExecutorRoster.js",
     "./FlowArgs": "./dist/FlowArgs.js",
     "./FlowRunner": "./dist/FlowRunner.js",

@@ -18,7 +18,7 @@ import { ApprovedMarker, DraftApprovalMarker } from "./Approval.ts"
 import { Board, BoardVersion } from "./BoardSync.ts"
 import { cap } from "./Context.ts"
 import { PersistenceError, type FlowError, type StoryPlanInvalid } from "./FlowError.ts"
-import { FlowEvent, Info, type FlowEventsShape } from "./FlowEvents.ts"
+import { FlowEvent, Info, laneOf, type FlowEventsShape } from "./FlowEvents.ts"
 import type { TraceLine } from "./FlowRecorder.ts"
 import { Plan, Task, parsePlan } from "./Plan.ts"
 import { loadVersioned, makePlanStore, type PlainFileStoreShape } from "./Persistence.ts"
@@ -186,9 +186,6 @@ const traceView = (lines: ReadonlyArray<TraceLine>): TraceView => {
   return { outcome, events }
 }
 
-const laneOf = (event: FlowEvent): string | undefined =>
-  "lane" in event && typeof event.lane === "string" ? event.lane : undefined
-
 const retryLine = /^⟳ (.+?) — retry (\d+)\/(\d+): (.*)$/u
 
 const retryKind = (what: string): string =>
@@ -317,7 +314,7 @@ const storySection = (
     )
   }
 
-  const laneEvents = trace.events.filter((event) => laneOf(event) === story.id)
+  const laneEvents = trace.events.filter((event) => laneOf(event)?.lane === story.id)
   const traceLines: Array<string> = []
   const retries: Array<string> = []
   for (const event of laneEvents) {

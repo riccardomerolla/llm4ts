@@ -1,11 +1,19 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type { FlowError } from "@llm4ts/flow/FlowError"
-import type { FlowEvent, Timed } from "@llm4ts/flow/FlowEvents"
+import {
+  LaneKind,
+  laneClosed,
+  laneOf,
+  laneOpened,
+  type FlowEvent,
+  type Timed
+} from "@llm4ts/flow/FlowEvents"
 import { readTrace } from "@llm4ts/flow/Replay"
 import { duration, treeInputsOfTrace, type TreeInput } from "./AgentTree.ts"
 
 export { duration }
+import { presentationOf } from "./EventPresentation.ts"
 import { formatCount } from "./Terminal.ts"
 import {
   resolveTraceTarget,
@@ -81,6 +89,8 @@ export type ToolCalls = typeof ToolCalls.Type
 
 export const StoryProfile = Schema.Struct({
   id: Schema.String,
+  /** What the lane stands for when it is not a story: a roundtable attendee, a taskforce specialist. */
+  kind: Schema.optionalKey(LaneKind),
   executor: Schema.optionalKey(Schema.String),
   status: Schema.Literals(["done", "failed", "running"]),
   wallMs: Ms,
@@ -169,6 +179,7 @@ interface TimedAt {
 
 interface Lane {
   readonly id: string
+  readonly kind: LaneKind
   start: number
   end: number | undefined
   status: "done" | "failed" | "running"
@@ -204,8 +215,6 @@ interface Lease {
   readonly label: string | undefined
 }
 
-const storyStage = /^story (\S+)$/u
-
 /** Events a coder turn emits while it runs: not where a model call starts. */
 const withinTurn: ReadonlySet<FlowEvent["_tag"]> = new Set([
   "ToolUse",
@@ -230,65 +239,20 @@ const groupBy = <A>(items: ReadonlyArray<A>, key: (item: A) => string): Map<stri
   return groups
 }
 
-const laneOf = (event: FlowEvent): string | undefined =>
-  "lane" in event && typeof event.lane === "string" ? event.lane : undefined
-
 /** An event as the gaps name it: its kind, never its content. */
 const describe = (event: FlowEvent): string => {
-  switch (event._tag) {
-    case "StageStarted":
-      return "a stage start"
-    case "StageCompleted":
-      return "a stage end"
-    case "StageFailed":
-      return "a stage failure"
-    case "ToolUse":
-      return "a coder tool call"
-    case "TokensUsed":
-      return "a token report"
-    case "Info":
-      return "a log note"
-    case "ReviewFindings":
-      return "a review round"
-    case "StoryJudged":
-      return "a judge verdict"
-    case "AssistantMessage":
-      return "an assistant message"
-    case "CapabilityUsed":
-    case "CapabilityDenied":
-    case "CapabilityUnenforceable":
-      return "a capability check"
-    case "EvidenceChecked":
-      return "an evidence check"
-    case "ReviewFindingDemoted":
-      return "a review finding demoted"
-    case "ExecutorLeased":
-    case "ExecutorReleased":
-    case "ExecutorExcluded":
-    case "ExecutorResumed":
-    case "ExecutorHandedOver":
-      return "a roster change"
-    case "Timed":
-      switch (event.kind) {
-        case "model":
-          return `the end of a ${event.label} call`
-        case "tool":
-          return `the end of tool ${event.label}`
-        case "gate":
-          return `the end of gate ${event.label}`
-        case "wait":
-          return `the end of a wait for the ${event.label}`
-        default:
-          return `the end of ${event.label}`
-      }
-    case "Began":
-      return event.kind === "model"
-        ? `the start of a ${event.label} call`
-        : `the start of ${event.kind} ${event.label}`
-    default:
-      return "an event"
-  }
+  const { kind } = presentationOf(event)
+  return typeof kind === "function" ? kind(event) : kind
 }
+
+const bareLaneStage = /^(\S+) (\S+)$/u
+
+/**
+ * A stage that is the lane's own and not one of its coder's tasks: its steps
+ * (`story home: setup`) and a bare `<kind> <id>` that names another lane.
+ */
+const ownStage = (lane: Lane, stage: string): boolean =>
+  bareLaneStage.exec(stage)?.[1] === lane.kind || stage.startsWith(`${lane.kind} ${lane.id}:`)
 
 const gapThresholdMs = 30_000
 
@@ -346,14 +310,15 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
       continue
     }
     const { event, at } = input
-    const laneId = laneOf(event)
-    const lane = laneId === undefined ? undefined : lanes.get(laneId)
+    const tagged = laneOf(event)
+    const lane = tagged === undefined ? undefined : lanes.get(tagged.lane)
     switch (event._tag) {
       case "StageStarted": {
-        const story = storyStage.exec(event.stage)?.[1]
-        if (story !== undefined && event.lane === story) {
-          lanes.set(story, {
-            id: story,
+        const opened = laneOpened(event)
+        if (opened !== undefined) {
+          lanes.set(opened.id, {
+            id: opened.id,
+            kind: opened.kind,
             start: at,
             end: undefined,
             status: "running",
@@ -377,11 +342,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
           })
           continue
         }
-        if (
-          lane !== undefined &&
-          !storyStage.test(event.stage) &&
-          !event.stage.startsWith(`story ${lane.id}:`)
-        ) {
+        if (lane !== undefined && !ownStage(lane, event.stage)) {
           lane.tasks += 1
           lane.firstTask = lane.firstTask ?? at
         }
@@ -392,7 +353,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
         if (event.stage === "story plan" && event.lane === undefined) {
           planReady = at
         }
-        if (lane !== undefined && event.stage === `story ${lane.id}`) {
+        if (lane !== undefined && laneClosed(event)?.kind === lane.kind) {
           lane.end = at
           lane.status = event._tag === "StageFailed" ? "failed" : "done"
         }
@@ -462,7 +423,7 @@ export const profileOf = (inputs: ReadonlyArray<TreeInput>): ProfileReport => {
     }
     if (lane !== undefined) {
       lane.moments.push({ at, what: describe(event) })
-      lane.executor = lane.executor ?? ("executor" in event ? event.executor : undefined)
+      lane.executor = lane.executor ?? tagged?.executor
       if (!withinTurn.has(event._tag)) {
         lane.last = at
       }
@@ -673,6 +634,7 @@ const storyProfile = (
     lowConfidenceTasks: lane.lowConfidenceTasks,
     ...(lane.reviewDiffLines === undefined ? {} : { reviewDiffLines: lane.reviewDiffLines }),
     id: lane.id,
+    ...(lane.kind === "story" ? {} : { kind: lane.kind }),
     ...(lane.executor === undefined ? {} : { executor: lane.executor }),
     status: lane.status,
     wallMs,
@@ -711,6 +673,24 @@ const share = (ms: number, of: number): string => (of <= 0 ? "" : `${Math.round(
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? "" : "s"}`
 
+interface LaneWord {
+  readonly one: string
+  readonly many: string
+}
+
+/** What a report calls its lanes: their kind when they share one, stories when it has none. */
+const laneWord = (stories: ReadonlyArray<StoryProfile>): LaneWord => {
+  const kinds = new Set(stories.map((story) => story.kind ?? "story"))
+  const [kind = "story"] = kinds
+  return kinds.size > 1
+    ? { one: "lane", many: "lanes" }
+    : kind === "story"
+      ? { one: "story", many: "stories" }
+      : { one: kind, many: `${kind}s` }
+}
+
+const capitalized = (word: string): string => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`
+
 const findingsOf = (facts: {
   readonly steps: { readonly avgSteps: number; readonly avgStepMs: number }
   readonly toolCategories: ReadonlyArray<CountRow>
@@ -723,7 +703,9 @@ const findingsOf = (facts: {
   readonly storyTime: number
   readonly estimated: boolean
 }): ReadonlyArray<Finding> => {
-  const ofStories = (ms: number) => `${duration(ms)} (${share(ms, facts.storyTime)} of story time)`
+  const word = laneWord(facts.stories)
+  const ofStories = (ms: number) =>
+    `${duration(ms)} (${share(ms, facts.storyTime)} of ${word.one} time)`
   const byRole = [...groupBy(facts.models, (row) => row.role).entries()].map(([role, rows]) => {
     const calls = sum(rows.map((row) => row.calls))
     const ms = sum(rows.map((row) => row.ms))
@@ -853,6 +835,7 @@ const table = (
 
 export const renderProfile = (report: ProfileReport): string => {
   const storyTime = sum(report.stories.map((story) => story.wallMs))
+  const word = laneWord(report.stories)
   const categories: ReadonlyArray<readonly [string, number]> = [
     [report.estimated ? "model + tools + gates (estimated)" : "model", report.totals.model],
     ["coder tools", report.totals.tools],
@@ -862,7 +845,7 @@ export const renderProfile = (report: ProfileReport): string => {
     ["unaccounted", report.totals.unaccounted]
   ]
   return [
-    `llm4ts profile · ${duration(report.wallMs)} wall · ${report.stories.length} ${report.stories.length === 1 ? "story" : "stories"}${
+    `llm4ts profile · ${duration(report.wallMs)} wall · ${report.stories.length} ${report.stories.length === 1 ? word.one : word.many}${
       report.estimated
         ? " · estimated: this trace has no timings (before 2.22), model time is read from gaps"
         : ""
@@ -873,16 +856,16 @@ export const renderProfile = (report: ProfileReport): string => {
       ? ["  nothing timed yet"]
       : report.findings.map((finding, index) => `  ${index + 1}. ${finding.text}`)),
     "",
-    "Story time",
+    `${capitalized(word.one)} time`,
     ...table(
       ["category", "time", "share"],
       categories.map(([name, ms]) => [name, duration(ms), share(ms, storyTime)])
     ),
     "",
-    "Stories",
+    capitalized(word.many),
     ...table(
       [
-        "story",
+        word.one,
         "status",
         "wall",
         "queued",
@@ -932,10 +915,10 @@ export const renderProfile = (report: ProfileReport): string => {
       ? []
       : [
           "",
-          "Coder work per story",
+          `Coder work per ${word.one}`,
           ...table(
             [
-              "story",
+              word.one,
               "tasks",
               "explore",
               "edit",
@@ -962,7 +945,7 @@ export const renderProfile = (report: ProfileReport): string => {
       ? []
       : [
           "",
-          "Largest review diff per story",
+          `Largest review diff per ${word.one}`,
           ...report.stories.flatMap((story) =>
             story.reviewDiffLines === undefined
               ? []
@@ -987,7 +970,7 @@ export const renderProfile = (report: ProfileReport): string => {
       ? []
       : [
           "",
-          "Timed outside any story (the run's own planning, or a seat no story owns)",
+          `Timed outside any ${word.one} (the run's own planning, or a seat no ${word.one} owns)`,
           ...table(
             ["label", "count", "total"],
             report.outside.map((row) => [row.label, String(row.count), duration(row.ms)])

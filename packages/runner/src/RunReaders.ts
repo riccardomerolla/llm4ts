@@ -24,6 +24,7 @@ import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistenc
 import { parsePlan } from "@llm4ts/flow/Plan"
 import { readTrace } from "@llm4ts/flow/Replay"
 import { emptyTree, reduceTree, treeInputsOfTrace, type TreeState } from "./AgentTree.ts"
+import { digestedTags, presentationOf, type DigestLine } from "./EventPresentation.ts"
 import { summarizeTree } from "./RunSummary.ts"
 import { loadTranscript, tailLinesOf, type TranscriptFiles } from "./Transcripts.ts"
 
@@ -146,60 +147,10 @@ export const runStatusOf = (
   })
 }
 
-export const meaningfulKinds: ReadonlySet<string> = new Set([
-  "StoryStatusChanged",
-  "StageFailed",
-  "Aborted",
-  "CapabilityUnenforceable",
-  "ExecutorExcluded",
-  "ExecutorHandedOver",
-  "StoryJudged",
-  "Began",
-  "RunEnded",
-  "CriterionChecked",
-  "Parked"
-])
+/** Trace kinds a digest shows: the events with a digest line, and the run's end (a trace line, not an event). */
+export const meaningfulKinds: ReadonlySet<string> = new Set([...digestedTags, "RunEnded"])
 
-const textOf = (
-  event: FlowEvent
-): { readonly text: string; readonly lane?: string } | undefined => {
-  switch (event._tag) {
-    case "StoryStatusChanged":
-      return { text: `story ${event.id} ${event.status}`, lane: event.id }
-    case "CriterionChecked":
-      return { text: `criterion ${event.tag} ${event.status}`, lane: event.story }
-    case "Parked":
-      return { text: `parked ${event.item}: ${event.reason}`, lane: event.story }
-    case "StageFailed":
-      return {
-        text: `${event.stage} failed: ${event.message}`,
-        ...(event.lane === undefined ? {} : { lane: event.lane })
-      }
-    case "Aborted":
-      return { text: `aborted: ${event.message}` }
-    case "CapabilityUnenforceable":
-      return { text: `capability unenforceable: ${event.detail}` }
-    case "ExecutorExcluded":
-      return { text: `${event.executor} excluded: ${event.reason}` }
-    case "ExecutorHandedOver":
-      return {
-        text: `${event.from} handed over ${event.role} (${event.scope}): ${event.reason}`,
-        ...(event.label === undefined ? {} : { lane: event.label })
-      }
-    case "StoryJudged":
-      return {
-        text: `${event.lane} judged round ${event.round}: ${event.cleared ? "cleared" : `${event.issues} issues`}`,
-        lane: event.lane
-      }
-    case "Began":
-      return {
-        text: `began ${event.kind} ${event.label}`,
-        ...(event.lane === undefined ? {} : { lane: event.lane })
-      }
-    default:
-      return undefined
-  }
-}
+const textOf = (event: FlowEvent): DigestLine | undefined => presentationOf(event).digest?.(event)
 
 export const meaningfulEventsAfter = (
   lines: ReadonlyArray<TraceLine>,

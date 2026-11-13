@@ -5,16 +5,18 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
 import type * as Scope from "effect/Scope"
-import * as Schema from "effect/Schema"
 import {
+  eventLanes,
   type FlowEvent,
   type FlowEventHub,
+  laneOf,
+  type LaneRef,
   rosterEventMessage,
   type ReviewFindings
 } from "@llm4ts/flow/FlowEvents"
+import { atLeast, presentationOf, Verbosity } from "./EventPresentation.ts"
 
-export const Verbosity = Schema.Literals(["Quiet", "Normal", "Verbose", "Debug"])
-export type Verbosity = typeof Verbosity.Type
+export { Verbosity }
 
 export const parseVerbosity = (value: string | undefined): Verbosity => {
   switch (value?.trim().toLowerCase()) {
@@ -30,45 +32,10 @@ export const parseVerbosity = (value: string | undefined): Verbosity => {
 }
 
 export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean => {
-  switch (event._tag) {
-    // Advise mode publishes a separate Info event for the operator; progress
-    // feeds the status rows; a blackboard run is for the trace file; a lease
-    // ending is routine; the story's outcome already says whether the judge
-    // cleared it. None is a line of its own.
-    case "JudgmentObserved":
-    case "BlackboardRun":
-    case "UsageProgress":
-    case "ExecutorReleased":
-    case "StoryJudged":
-    case "RoundtableTurn":
-    case "BriefReported":
-    case "Timed":
-    case "TasksPlanned":
-    case "TaskStarted":
-    case "TaskCompleted":
-    case "StoryStatusChanged":
-      return false
-    // A gate or a setup may run for many minutes: its start is a line, so a
-    // long one reads as running, not stuck. Other work starts too often.
-    case "Began":
-      return event.kind === "gate" && verbosity !== "Quiet"
-    case "StageStarted":
-    case "StageCompleted":
-    case "StageFailed":
-    case "Aborted":
-    case "CapabilityDenied":
-    case "CapabilityUnenforceable":
-    case "EvidenceChecked":
-    case "ReviewFindingDemoted":
-      return true
-    // Every git read and gate command is a capability event: useful in a
-    // trace, noise on screen once several stories run.
-    case "TokensUsed":
-    case "CapabilityUsed":
-      return verbosity === "Verbose" || verbosity === "Debug"
-    default:
-      return verbosity !== "Quiet"
-  }
+  const { line } = presentationOf(event)
+  return typeof line === "function"
+    ? line(event, verbosity)
+    : line !== "never" && atLeast(verbosity, line)
 }
 
 export const terminalSafe = (value: string): string => {
@@ -559,33 +526,20 @@ interface OpenStage {
   readonly startedAt: number
 }
 
-/** The lane an event belongs to (a concurrent story), if it carries one. */
-export const laneOfEvent = (
-  event: FlowEvent
-): { readonly lane: string; readonly executor?: string } | undefined => {
-  switch (event._tag) {
-    case "StageStarted":
-    case "StageCompleted":
-    case "StageFailed":
-    case "Info":
-    case "ToolUse":
-    case "AssistantMessage":
-    case "TokensUsed":
-    case "UsageProgress":
-    case "ReviewFindings":
-    case "TasksPlanned":
-    case "TaskStarted":
-    case "TaskCompleted":
-      return event.lane === undefined
-        ? undefined
-        : {
-            lane: event.lane,
-            ...(event.executor === undefined ? {} : { executor: event.executor })
-          }
-    default:
-      return undefined
-  }
-}
+/**
+ * The lane an event belongs to on screen (a concurrent story), if it carries
+ * one. This is `laneOf` with two exclusions, both kept as they were:
+ * - an event whose producer names its lane (a verdict, a roundtable turn, an
+ *   evidence check, a parked item) prints, when it prints, as a line of the
+ *   run: only the events `withLane` stamps drive a lane's row;
+ * - `Timed` and `Began`: one arriving after its lane's last stage closed
+ *   would reopen a row that never closes (`UsageProgress` has the same
+ *   hazard and is guarded where the consumer reads it).
+ */
+export const laneOfEvent = (event: FlowEvent): LaneRef | undefined =>
+  eventLanes[event._tag].lane !== "stamped" || event._tag === "Timed" || event._tag === "Began"
+    ? undefined
+    : laneOf(event)
 
 /** `bonifici-list · lemonade-deepseek` — how a lane is named on screen. */
 export const laneLabel = (lane: string, executor: string | undefined): string =>

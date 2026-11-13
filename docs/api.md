@@ -239,6 +239,8 @@ export list; the following modules are the main entry points.
   repositories into a `CostReport`, skipping and naming unreadable traces;
   `llm4ts costs` is its command.
 - `@llm4ts/runner/McpStdio`: JSON-RPC MCP stdio transport.
+- `@llm4ts/runner/EventPresentation`: `eventPresentation`, one entry per
+  event: the verbosity it prints at, its kind in a profile gap, its digest line.
 
 ## JavaScript
 

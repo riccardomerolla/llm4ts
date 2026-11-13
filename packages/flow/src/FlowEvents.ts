@@ -575,117 +575,252 @@ export const shortenLaneArgs = (args: string, workDir: string | undefined): stri
   return args.split(`cd ${root} && `).join("").split(`${root}/`).join("")
 }
 
-const stamped = (
-  event: FlowEvent,
-  lane: string,
-  executor: string | undefined,
-  workDir: string | undefined,
-  clone: number | undefined
-): FlowEvent => {
-  const tags = { lane, ...(executor === undefined ? {} : { executor }) }
-  const usageTags = { ...tags, ...(clone === undefined ? {} : { clone }) }
-  switch (event._tag) {
-    case "TasksPlanned":
-      return event.lane !== undefined ? event : TasksPlanned.make({ tasks: event.tasks, ...tags })
-    case "TaskStarted":
-      return event.lane !== undefined
-        ? event
-        : TaskStarted.make({
-            index: event.index,
-            count: event.count,
-            title: event.title,
-            ...(event.satisfies === undefined ? {} : { satisfies: event.satisfies }),
-            ...tags,
-            // A parallel task names its own coder, not the lane's (ADR 0034).
-            ...(event.parallel === undefined ? {} : { parallel: event.parallel }),
-            ...(event.executor === undefined ? {} : { executor: event.executor }),
-            ...(event.clone === undefined ? {} : { clone: event.clone })
-          })
-    case "TaskCompleted":
-      return event.lane !== undefined
-        ? event
-        : TaskCompleted.make({
-            index: event.index,
-            count: event.count,
-            title: event.title,
-            ...tags
-          })
-    case "StageStarted":
-      return event.lane !== undefined ? event : StageStarted.make({ stage: event.stage, ...tags })
-    case "StageCompleted":
-      return event.lane !== undefined ? event : StageCompleted.make({ stage: event.stage, ...tags })
-    case "StageFailed":
-      return event.lane !== undefined
-        ? event
-        : StageFailed.make({ stage: event.stage, message: event.message, ...tags })
-    case "Info":
-      return event.lane !== undefined ? event : Info.make({ message: event.message, ...tags })
-    case "ToolUse":
-      return event.lane !== undefined
-        ? event
-        : ToolUse.make({
-            tool: event.tool,
-            args: shortenLaneArgs(event.args, workDir),
-            ...(event.parent === undefined ? {} : { parent: event.parent }),
-            ...tags
-          })
-    case "AssistantMessage":
-      return event.lane !== undefined ? event : AssistantMessage.make({ text: event.text, ...tags })
-    case "ReviewFindings":
-      return event.lane !== undefined
-        ? event
-        : ReviewFindings.make({
-            round: event.round,
-            settled: event.settled,
-            issues: event.issues,
-            ...tags
-          })
-    case "UsageProgress":
-      return event.lane !== undefined
-        ? event
-        : UsageProgress.make({
-            call: event.call,
-            ...(event.usage === undefined ? {} : { usage: event.usage }),
-            ...(event.done === undefined ? {} : { done: event.done }),
-            ...tags
-          })
-    case "TokensUsed":
-      return event.lane !== undefined
-        ? event
-        : TokensUsed.make({
-            agent: event.agent,
-            usage: event.usage,
-            ...(event.model === undefined ? {} : { model: event.model }),
-            // The lane's clone is its coder's: a reviewer or judge on the
-            // lane's events ran on another executor (ADR 0033).
-            ...(event.agent === "coder" ? usageTags : tags)
-          })
-    // The lane's executor is its coder's: it names a coder call or tool, not
-    // a reviewer's or judge's call made on another executor.
-    case "Timed":
-      return event.lane !== undefined
-        ? event
-        : Timed.make({
-            ...event,
-            lane,
-            ...(executor !== undefined &&
-            ((event.kind === "model" && event.label === "coder") || event.kind === "tool")
-              ? { executor }
-              : {})
-          })
-    case "Began":
-      return event.lane !== undefined
-        ? event
-        : Began.make({
-            ...event,
-            lane,
-            ...(executor !== undefined && event.kind === "model" && event.label === "coder"
-              ? { executor }
-              : {})
-          })
-    default:
-      return event
+export type FlowEventTag = FlowEvent["_tag"]
+/** Each event class by its tag: what a table keyed by tag is typed over. */
+export type FlowEventByTag = {
+  readonly [K in FlowEventTag]: Extract<FlowEvent, { readonly _tag: K }>
+}
+type Tag = FlowEventTag
+type EventOf = FlowEventByTag
+
+/** The lane an event is in, and the executor working it when the event names one. */
+export interface LaneRef {
+  readonly lane: string
+  readonly executor?: string
+}
+
+/** What `withLane` knows of its lane when an event passes through it. */
+export interface LaneTags {
+  readonly lane: string
+  readonly executor: string | undefined
+  readonly clone: number | undefined
+  readonly workDir: string | undefined
+}
+
+/**
+ * How an event stands to lanes. `none`: it has no lane. `carried`: its
+ * producer names the lane, and `withLane` leaves it alone. `stamped`:
+ * `withLane` names the lane on one published without, through `stamp`.
+ */
+export interface LaneRule<E> {
+  readonly lane: "none" | "carried" | "stamped"
+  readonly read?: (event: E) => LaneRef | undefined
+  readonly stamp?: (event: E, tags: LaneTags) => E
+}
+
+interface Unlaned {
+  readonly lane: "none"
+}
+interface Carried<E> {
+  readonly lane: "carried"
+  readonly read: (event: E) => LaneRef | undefined
+}
+interface Stamped<E> extends Omit<Carried<E>, "lane"> {
+  readonly lane: "stamped"
+  readonly stamp: (event: E, tags: LaneTags) => E
+}
+
+const readLane = (event: {
+  readonly lane?: string
+  readonly executor?: string
+}): LaneRef | undefined =>
+  event.lane === undefined
+    ? undefined
+    : { lane: event.lane, ...(event.executor === undefined ? {} : { executor: event.executor }) }
+
+const unlaned: Unlaned = { lane: "none" }
+const carried: Carried<{ readonly lane?: string }> = { lane: "carried", read: readLane }
+const stamped = <E extends { readonly lane?: string; readonly executor?: string }>(
+  stamp: (event: E, tags: LaneTags) => E
+): Stamped<E> => ({ lane: "stamped", read: readLane, stamp })
+
+/** The lane and, when it has one, the executor working it. */
+const seat = (tags: LaneTags): LaneRef => ({
+  lane: tags.lane,
+  ...(tags.executor === undefined ? {} : { executor: tags.executor })
+})
+
+const laneRules = {
+  JudgmentObserved: unlaned,
+  BlackboardRun: unlaned,
+  StageStarted: stamped<StageStarted>((event, tags) =>
+    StageStarted.make({ stage: event.stage, ...seat(tags) })
+  ),
+  StageCompleted: stamped<StageCompleted>((event, tags) =>
+    StageCompleted.make({ stage: event.stage, ...seat(tags) })
+  ),
+  StageFailed: stamped<StageFailed>((event, tags) =>
+    StageFailed.make({ stage: event.stage, message: event.message, ...seat(tags) })
+  ),
+  Aborted: unlaned,
+  Info: stamped<Info>((event, tags) => Info.make({ message: event.message, ...seat(tags) })),
+  ToolUse: stamped<ToolUse>((event, tags) =>
+    ToolUse.make({
+      tool: event.tool,
+      args: shortenLaneArgs(event.args, tags.workDir),
+      ...(event.parent === undefined ? {} : { parent: event.parent }),
+      ...seat(tags)
+    })
+  ),
+  AssistantMessage: stamped<AssistantMessage>((event, tags) =>
+    AssistantMessage.make({ text: event.text, ...seat(tags) })
+  ),
+  TokensUsed: stamped<TokensUsed>((event, tags) =>
+    TokensUsed.make({
+      agent: event.agent,
+      usage: event.usage,
+      ...(event.model === undefined ? {} : { model: event.model }),
+      ...seat(tags),
+      // The lane's clone is its coder's: a reviewer or judge on the
+      // lane's events ran on another executor (ADR 0033).
+      ...(event.agent === "coder" && tags.clone !== undefined ? { clone: tags.clone } : {})
+    })
+  ),
+  UsageProgress: stamped<UsageProgress>((event, tags) =>
+    UsageProgress.make({
+      call: event.call,
+      ...(event.usage === undefined ? {} : { usage: event.usage }),
+      ...(event.done === undefined ? {} : { done: event.done }),
+      ...seat(tags)
+    })
+  ),
+  ReviewFindings: stamped<ReviewFindings>((event, tags) =>
+    ReviewFindings.make({
+      round: event.round,
+      settled: event.settled,
+      issues: event.issues,
+      ...(event.diffLines === undefined ? {} : { diffLines: event.diffLines }),
+      ...seat(tags)
+    })
+  ),
+  CapabilityUsed: unlaned,
+  CapabilityDenied: unlaned,
+  CapabilityUnenforceable: unlaned,
+  EvidenceChecked: carried,
+  ReviewFindingDemoted: carried,
+  Declassified: unlaned,
+  ExecutorLeased: unlaned,
+  ExecutorReleased: unlaned,
+  ExecutorExcluded: unlaned,
+  ExecutorResumed: unlaned,
+  ExecutorHandedOver: unlaned,
+  StoryJudged: carried,
+  RoundtableTurn: carried,
+  BriefReported: carried,
+  // The lane's executor is its coder's: it names a coder call or tool, not
+  // a reviewer's or judge's call made on another executor.
+  Timed: stamped<Timed>((event, tags) =>
+    Timed.make({
+      ...event,
+      lane: tags.lane,
+      ...(tags.executor !== undefined &&
+      ((event.kind === "model" && event.label === "coder") || event.kind === "tool")
+        ? { executor: tags.executor }
+        : {})
+    })
+  ),
+  Began: stamped<Began>((event, tags) =>
+    Began.make({
+      ...event,
+      lane: tags.lane,
+      ...(tags.executor !== undefined && event.kind === "model" && event.label === "coder"
+        ? { executor: tags.executor }
+        : {})
+    })
+  ),
+  TasksPlanned: stamped<TasksPlanned>((event, tags) =>
+    TasksPlanned.make({ tasks: event.tasks, ...seat(tags) })
+  ),
+  TaskStarted: stamped<TaskStarted>((event, tags) =>
+    TaskStarted.make({
+      index: event.index,
+      count: event.count,
+      title: event.title,
+      ...(event.satisfies === undefined ? {} : { satisfies: event.satisfies }),
+      ...seat(tags),
+      // A parallel task names its own coder, not the lane's (ADR 0034).
+      ...(event.parallel === undefined ? {} : { parallel: event.parallel }),
+      ...(event.executor === undefined ? {} : { executor: event.executor }),
+      ...(event.clone === undefined ? {} : { clone: event.clone })
+    })
+  ),
+  TaskCompleted: stamped<TaskCompleted>((event, tags) =>
+    TaskCompleted.make({
+      index: event.index,
+      count: event.count,
+      title: event.title,
+      ...seat(tags)
+    })
+  ),
+  StoryStatusChanged: unlaned,
+  CriterionChecked: carried,
+  Parked: carried
+} satisfies {
+  // An event with a `lane` field cannot be declared unlaned, nor the reverse.
+  readonly [K in Tag]: "lane" extends keyof EventOf[K]
+    ? Carried<EventOf[K]> | Stamped<EventOf[K]>
+    : Unlaned
+}
+
+/**
+ * Every event's standing to lanes. Exhaustive by type: adding an event class
+ * without an entry here fails `pnpm typecheck`.
+ */
+export const eventLanes: { readonly [K in Tag]: LaneRule<EventOf[K]> } = laneRules
+
+// A tag and its event are one value's, so the rule found by the tag takes the
+// event. TypeScript does not correlate the two across the union; reading the
+// rule through a generic key is the step that lets it.
+const ruleOf = <K extends Tag>(tag: K): LaneRule<EventOf[K]> => eventLanes[tag]
+
+/** The lane of any event that is in one, and its executor when the event names it. */
+export const laneOf = (event: FlowEvent): LaneRef | undefined => ruleOf(event._tag).read?.(event)
+
+const stampedWith = (event: FlowEvent, tags: LaneTags): FlowEvent => {
+  const rule = ruleOf(event._tag)
+  return rule.stamp === undefined || rule.read?.(event) !== undefined
+    ? event
+    : rule.stamp(event, tags)
+}
+
+export const LaneKind = Schema.Literals(["story", "attendee", "specialist"])
+/** What a lane stands for: a story's coder (ADR 0022), a roundtable attendee (ADR 0046), or a taskforce specialist (ADR 0047). */
+export type LaneKind = typeof LaneKind.Type
+
+/** A lane as its opening stage names it. */
+export interface LaneName {
+  readonly kind: LaneKind
+  readonly id: string
+}
+
+const isLaneKind = Schema.is(LaneKind)
+const laneStagePattern = /^(\S+) (.+)$/u
+
+/**
+ * The lane protocol, read side: a lane opens with a `StageStarted` whose stage
+ * is `<kind> <id>` and whose lane is that id (names may hold spaces), and
+ * closes when the same stage completes or fails.
+ */
+const laneNamed = (stage: string, lane: string | undefined): LaneName | undefined => {
+  const [, kind, id] = laneStagePattern.exec(stage) ?? []
+  return kind !== undefined && isLaneKind(kind) && id !== undefined && id === lane
+    ? { kind, id }
+    : undefined
+}
+
+/** The lane this event opens, when it is the `StageStarted` that opens one. */
+export const laneOpened = (event: FlowEvent): LaneName | undefined =>
+  event._tag === "StageStarted" ? laneNamed(event.stage, event.lane) : undefined
+
+/** The lane this event closes, when it is the end of the stage that opened one. */
+export const laneClosed = (
+  event: FlowEvent
+): (LaneName & { readonly failed: boolean }) | undefined => {
+  if (event._tag !== "StageCompleted" && event._tag !== "StageFailed") {
+    return undefined
   }
+  const named = laneNamed(event.stage, event.lane)
+  return named === undefined ? undefined : { ...named, failed: event._tag === "StageFailed" }
 }
 
 /**
@@ -697,7 +832,9 @@ export const withLane = (events: FlowEventsShape, lane: Lane): FlowEventsShape =
   publish: (event) =>
     Effect.flatMap(lane.executor ?? Effect.succeed(undefined), (executor) =>
       Effect.flatMap(lane.clone ?? Effect.succeed(undefined), (clone) =>
-        events.publish(stamped(event, lane.lane, executor, lane.workDir, clone))
+        events.publish(
+          stampedWith(event, { lane: lane.lane, executor, clone, workDir: lane.workDir })
+        )
       )
     )
 })
