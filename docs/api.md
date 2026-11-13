@@ -207,7 +207,10 @@ export list; the following modules are the main entry points.
   `SettingName` is the union of the names; `settingFacts` gives a setting's
   group, scope, value grammar, default and doc; `readSetting` and
   `settingValue` decode a raw value or an environment with the setting's
-  grammar; `closestSettingName` names the setting a misspelled name meant.
+  grammar; `settingGiven` tells unset, read and unreadable apart with no
+  default applied, and `settingText` spells a setting for a reader that
+  refuses a value by name; `closestSettingName` names the setting a
+  misspelled name meant.
 
 ## Runner
 

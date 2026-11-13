@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { settingGiven, settingText } from "@llm4ts/flow/Settings"
 
 /**
  * Reading `pi`'s own model config (ADR 0016). Separate from `Doctor.ts` so
@@ -29,10 +30,7 @@ export const defaultReadPiModelsJson = (): string | undefined => {
 
 export const geminiBridgePort = (
   environment: Readonly<Record<string, string | undefined>>
-): string =>
-  isSet(environment.LLM4TS_GEMINI_BRIDGE_PORT)
-    ? environment.LLM4TS_GEMINI_BRIDGE_PORT.trim()
-    : defaultGeminiBridgePort
+): string => settingText("LLM4TS_GEMINI_BRIDGE_PORT", environment) ?? defaultGeminiBridgePort
 
 /**
  * Which route the bridge serves (ADR 0037): `acp` (ADR 0016's Anthropic
@@ -46,12 +44,10 @@ export type GeminiBridgeMode =
 export const geminiBridgeMode = (
   environment: Readonly<Record<string, string | undefined>>
 ): GeminiBridgeMode => {
-  const value = (environment.LLM4TS_GEMINI_BRIDGE_MODE ?? "").trim().toLowerCase()
-  return value === "" || value === "acp"
-    ? { _tag: "Mode", mode: "acp" }
-    : value === "model"
-      ? { _tag: "Mode", mode: "model" }
-      : { _tag: "Unknown", value }
+  const given = settingGiven("LLM4TS_GEMINI_BRIDGE_MODE", environment)
+  return given._tag === "Unreadable"
+    ? { _tag: "Unknown", value: given.text.toLowerCase() }
+    : { _tag: "Mode", mode: given._tag === "Read" ? given.value : "acp" }
 }
 
 /**

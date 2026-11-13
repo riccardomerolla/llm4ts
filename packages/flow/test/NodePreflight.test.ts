@@ -148,6 +148,25 @@ describe("nodePreflightReport", () => {
       assert.deepStrictEqual(yield* fake.recorded, [])
     })
   )
+
+  it.effect("reads LLM4TS_NODE_CHECK as a toggle; an unreadable value leaves the check on", () =>
+    Effect.gen(function* () {
+      const files = yield* makeMemoryPlainFileStore()
+      const fake = yield* nodeOnPath("v24.12.0")
+      yield* files.store.writeAtomic("/app/.nvmrc", "20")
+      const tagFor = (value: string) =>
+        Effect.map(
+          nodePreflightReport(fake.executor, files.store, "/app", { LLM4TS_NODE_CHECK: value }),
+          (report) => report._tag
+        )
+      for (const off of ["0", "false", "off", "no", "OFF", " No "]) {
+        assert.strictEqual(yield* tagFor(off), "Off", off)
+      }
+      for (const on of ["1", "true", "on", "yes", "TRUE", "maybe", ""]) {
+        assert.strictEqual(yield* tagFor(on), "Mismatch", on)
+      }
+    })
+  )
 })
 
 describe("nodePreflight", () => {

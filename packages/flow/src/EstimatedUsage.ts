@@ -6,6 +6,7 @@ import type { LlmError } from "@llm4ts/core/Errors"
 import type { LabelSequence, LlmServiceShape } from "@llm4ts/core/LlmService"
 import { LabelDistribution, LlmChunk, TokenUsage, type Message } from "@llm4ts/core/Models"
 import { estimateCostUsd } from "./PriceList.ts"
+import { settingGiven, settingValue } from "./Settings.ts"
 
 // ESTIMATED token accounting for connectors that report none (Antigravity,
 // Copilot, and Cursor on the capability matrix; every backend whose
@@ -35,10 +36,10 @@ export const defaultReferenceModel = "claude-sonnet-4"
 export const estimatedUsageOptionsFromEnv = (
   environment: Readonly<Record<string, string | undefined>>
 ): EstimatedUsageOptions => {
-  const parsed = Number.parseInt(environment.LLM4TS_ESTIMATE_CHARS_PER_TOKEN ?? "", 10)
+  const charsPerToken = settingGiven("LLM4TS_ESTIMATE_CHARS_PER_TOKEN", environment)
   return {
-    referenceModel: environment.LLM4TS_ESTIMATE_MODEL?.trim() || defaultReferenceModel,
-    ...(Number.isFinite(parsed) && parsed > 0 ? { charsPerToken: parsed } : {})
+    referenceModel: settingValue("LLM4TS_ESTIMATE_MODEL", environment),
+    ...(charsPerToken._tag === "Read" ? { charsPerToken: charsPerToken.value } : {})
   }
 }
 

@@ -1543,6 +1543,69 @@ describe("seat usage metering", () => {
     )
   )
 
+  it.effect("reads LLM4TS_ESTIMATE_USAGE as a toggle; an unreadable value keeps metering", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const metered = (value: string) =>
+          Effect.gen(function* () {
+            const { state, dependencies, options: base } = yield* setupWith(silent)
+            const options = { ...base, environment: { LLM4TS_ESTIMATE_USAGE: value } }
+            const bundle = yield* makeFlowRunnerContext(options, dependencies)
+            yield* runWithBundle(
+              bundle,
+              options,
+              (context) => completeAndPublish(context.coder, context.events, "x".repeat(40)),
+              dependencies
+            )
+            return (yield* Ref.get(state))[options.costLedgerPath] !== undefined
+          })
+        for (const off of ["0", "false", "off", "no", "OFF"]) {
+          assert.isFalse(yield* metered(off), off)
+        }
+        for (const on of ["1", "true", "on", "yes", "YES", "maybe", ""]) {
+          assert.isTrue(yield* metered(on), on)
+        }
+      })
+    )
+  )
+
+  it.effect("reads LLM4TS_TIMESTAMPS as a toggle; an unreadable value prints no time", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const stamped = (environment: Readonly<Record<string, string | undefined>>) =>
+          Effect.gen(function* () {
+            const { dependencies, options: base } = yield* setupWith(silent)
+            const output = yield* Ref.make<ReadonlyArray<string>>([])
+            const options = {
+              ...base,
+              environment,
+              surface: {
+                ...base.surface,
+                log: (line: string) => Ref.update(output, (lines) => [...lines, line])
+              }
+            }
+            const bundle = yield* makeFlowRunnerContext(options, dependencies)
+            yield* runWithBundle(
+              bundle,
+              options,
+              (context) => context.events.publish(StageStarted.make({ stage: "Example" })),
+              dependencies
+            )
+            const line = (yield* Ref.get(output)).find((text) => text.includes("▶ Example"))
+            assert.isDefined(line)
+            return /^\d\d:\d\d:\d\d /u.test(line ?? "")
+          })
+        for (const on of ["1", "true", "on", "yes", "TRUE", " On "]) {
+          assert.isTrue(yield* stamped({ LLM4TS_TIMESTAMPS: on }), on)
+        }
+        for (const off of ["0", "false", "off", "no", "OFF", "maybe", ""]) {
+          assert.isFalse(yield* stamped({ LLM4TS_TIMESTAMPS: off }), off)
+        }
+        assert.isFalse(yield* stamped({}))
+      })
+    )
+  )
+
   // The decorator returns a bare `LlmServiceShape`: everything else the
   // connector carries has to survive the seat being metered.
   it.effect("keeps the connector's capabilities and batched label scoring", () =>

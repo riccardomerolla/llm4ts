@@ -18,6 +18,7 @@ import type { ProcessExecutorShape } from "@llm4ts/core/ProcessExecutor"
 import { FlowAborted, type FlowError } from "./FlowError.ts"
 import { Info, type FlowEventsShape } from "./FlowEvents.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
+import { settingValue } from "./Settings.ts"
 
 /** A Node pin as the application wrote it, and where. */
 export class NodePin extends Schema.Class<NodePin>("NodePin")({
@@ -226,9 +227,6 @@ export type NodePreflightReport =
     }
   | { readonly _tag: "Ok"; readonly node: string; readonly summary: string }
 
-const switchedOff = (value: string | undefined): boolean =>
-  value !== undefined && ["off", "0", "false", "no"].includes(value.trim().toLowerCase())
-
 const describePin = (pin: NodePin): string => `${pin.spec} (${pin.source})`
 
 /**
@@ -242,7 +240,7 @@ export const nodePreflightReport = Effect.fn("@llm4ts/flow/NodePreflight.report"
   appDir: string,
   environment: Readonly<Record<string, string | undefined>>
 ): Effect.fn.Return<NodePreflightReport> {
-  if (switchedOff(environment.LLM4TS_NODE_CHECK)) {
+  if (!settingValue("LLM4TS_NODE_CHECK", environment)) {
     return { _tag: "Off", summary: "node: check off (LLM4TS_NODE_CHECK)" }
   }
   const pins = yield* nodePinsOf(files, appDir)

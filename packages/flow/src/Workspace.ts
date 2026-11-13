@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import { WorkspaceIoError, WorkspaceLimitError, WorkspacePathError } from "./FlowError.ts"
+import { settingValue } from "./Settings.ts"
 
 export type WorkspaceError = WorkspacePathError | WorkspaceLimitError | WorkspaceIoError
 
@@ -63,27 +64,6 @@ export const legacySourceWorkspaceLimits: WorkspaceLimits = Object.freeze({
   maxResults: 20_000
 })
 
-const positiveInteger = (raw: string | undefined): number | undefined => {
-  const text = raw?.trim()
-  if (text === undefined || text.length === 0 || !/^\d+$/.test(text)) {
-    return undefined
-  }
-  const parsed = Number.parseInt(text, 10)
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
-}
-
-const directoryList = (raw: string | undefined): ReadonlyArray<string> | undefined => {
-  const text = raw?.trim()
-  if (text === undefined || text.length === 0) {
-    return undefined
-  }
-  const names = text
-    .split(",")
-    .map((name) => name.trim())
-    .filter((name) => name.length > 0 && !name.includes("/") && !name.includes("\\"))
-  return names.length === 0 ? undefined : names
-}
-
 /**
  * `defaults` with the caps overridden from the environment when the values
  * are well-formed; anything else leaves that default untouched:
@@ -101,9 +81,12 @@ export const workspaceLimitsFromEnv = (
   environment: Readonly<Record<string, string | undefined>>,
   defaults: WorkspaceLimits = defaultWorkspaceLimits
 ): WorkspaceLimits => {
-  const maxReadBytes = positiveInteger(environment.LLM4TS_MAX_READ_BYTES)
-  const maxResults = positiveInteger(environment.LLM4TS_MAX_DISCOVER_RESULTS)
-  const excludeDirs = directoryList(environment.LLM4TS_EXCLUDE_DIRS)
+  const maxReadBytes = settingValue("LLM4TS_MAX_READ_BYTES", environment)
+  const maxResults = settingValue("LLM4TS_MAX_DISCOVER_RESULTS", environment)
+  const names = (settingValue("LLM4TS_EXCLUDE_DIRS", environment) ?? []).filter(
+    (name) => !name.includes("/") && !name.includes("\\")
+  )
+  const excludeDirs = names.length === 0 ? undefined : names
   if (maxReadBytes === undefined && maxResults === undefined && excludeDirs === undefined) {
     return defaults
   }

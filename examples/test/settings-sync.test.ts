@@ -98,6 +98,60 @@ describe("the settings registry stays in sync with the code", () => {
 })
 
 /**
+ * A setting is read through `settingValue`, `settingGiven` or `settingText`,
+ * so its grammar and default are the registry's (ADR 0049). A raw read is
+ * `<object>.LLM4TS_X` or `<object>["LLM4TS_X"]` in production code outside
+ * the registry itself. Each ceiling may only go down: lower it when an area
+ * is converted, never raise it to admit a new read.
+ */
+const rawRead = /\.LLM4TS_[A-Z0-9_]+|\[\s*["'`]LLM4TS_[A-Z0-9_]+["'`]\s*\]/gu
+const registryCode = /^packages\/flow\/src\/(?:Settings\.ts$|settings\/)/u
+const rawReadCeilings = { packages: 0, flows: 59, kits: 25 } as const
+
+const rawReadsIn = (text: string): number => [...text.matchAll(rawRead)].length
+
+const rawReads = (area: keyof typeof rawReadCeilings): ReadonlyArray<string> =>
+  scannedFiles
+    .filter(
+      (file) =>
+        file.startsWith(`${area}/`) && /\.[cm]?[jt]sx?$/u.test(file) && !registryCode.test(file)
+    )
+    .flatMap((file) =>
+      readFileSync(join(repositoryRoot, file), "utf8")
+        .split("\n")
+        .flatMap((text, index) =>
+          Array.from({ length: rawReadsIn(text) }, () => `${file}:${index + 1} ${text.trim()}`)
+        )
+    )
+
+describe("settings are read through the registry", () => {
+  it("counts member and bracket reads, not writes of an environment or lists of names", () => {
+    assert.strictEqual(rawReadsIn("const a = environment.LLM4TS_PACK?.trim()"), 1)
+    assert.strictEqual(rawReadsIn('process.env["LLM4TS_RUN_ID"] ?? env.LLM4TS_FLOW'), 2)
+    assert.strictEqual(rawReadsIn('settingValue("LLM4TS_PACK", environment)'), 0)
+    assert.strictEqual(rawReadsIn('launch({ LLM4TS_REGROUP: "1" })'), 0)
+    assert.strictEqual(rawReadsIn('const seats = ["LLM4TS_CODER", "LLM4TS_REASONER"]'), 0)
+  })
+
+  for (const area of ["packages", "flows", "kits"] as const) {
+    it(`${area}: no more raw LLM4TS_* reads than the ceiling`, () => {
+      const found = rawReads(area)
+      const ceiling = rawReadCeilings[area]
+      assert.isAtMost(
+        found.length,
+        ceiling,
+        `read these through settingValue from @llm4ts/flow/Settings:\n${found.join("\n")}\n`
+      )
+      assert.strictEqual(
+        found.length,
+        ceiling,
+        `${area} has fewer raw reads than its ceiling: lower rawReadCeilings.${area} to ${found.length}`
+      )
+    })
+  }
+})
+
+/**
  * The documentation a user reads today. The frozen records (`plan.md`,
  * `docs/csp/`, `docs/CSP_STATUS.md`, `docs/parity.md`), the ADRs, the research
  * notes and the changelog describe the past and are left out.

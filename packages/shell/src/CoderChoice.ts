@@ -1,6 +1,7 @@
 import { accessSync, constants } from "node:fs"
 import { delimiter, join } from "node:path"
 import { connectorTable, offeredCoders } from "@llm4ts/core/Models"
+import { settingValue } from "@llm4ts/flow/Settings"
 
 /**
  * The coding agents a menu offers: the name written as `LLM4TS_CODER`, and
@@ -46,6 +47,6 @@ export const findOnPath = (
 export const resolvedCoderToken = (
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): string => {
-  const token = environment.LLM4TS_CODER ?? "claude"
-  return coderChoices.some((choice) => choice.token === token) ? token : "claude"
+  const token = settingValue("LLM4TS_CODER", environment)
+  return coderChoices.find((choice) => choice.token === token)?.token ?? "claude"
 }

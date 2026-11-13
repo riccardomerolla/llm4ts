@@ -57,6 +57,16 @@
 - **`llm4ts profile` knows how large a story's reviewed diff was.** A
   review's diff size was dropped when the event was stamped with its story's
   lane, which is the only place the profile reads it.
+- **Every toggle the packages read takes the same eight spellings.**
+  `1`, `true`, `on`, `yes` turn a toggle on and `0`, `false`, `off`, `no` turn
+  it off, in any case. Three readers took fewer: `LLM4TS_TIMESTAMPS` read
+  only `1` and `true`, `llm4ts doctor` did not read `LLM4TS_GEMINI_BRIDGE=on`
+  though a run did, and `LLM4TS_TOOL_BRIEF` was dropped only by `off`. The
+  readers under `packages/*/src` now go through the settings registry, so a
+  number with text after it (`LLM4TS_CONTEXT_BUDGET=12abc`,
+  `LLM4TS_ORIENTATION_CHARS=1e3`) counts as unset, as the launch warning
+  already said, and an empty `LLM4TS_PROVIDER` means mock. The flows and kits
+  still read their own settings as before.
 
 ## 3.3.0
 

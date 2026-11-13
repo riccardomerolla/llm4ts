@@ -20,5 +20,7 @@ describe("coder choices", () => {
     assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: "copilot" }), "claude")
     assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: "claude-cli" }), "claude")
     assert.strictEqual(resolvedCoderToken({}), "claude")
+    assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: " Grok " }), "grok")
+    assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: "" }), "claude")
   })
 })

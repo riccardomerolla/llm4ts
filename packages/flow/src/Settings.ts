@@ -113,6 +113,32 @@ export const readSetting = <N extends SettingName>(
   return Option.isSome(decoded) ? Result.succeed(decoded.value) : Result.fail(value.grammar)
 }
 
+/** What the environment holds for a setting, before any default. */
+export type Given<N extends SettingName> =
+  | { readonly _tag: "Unset" }
+  | { readonly _tag: "Read"; readonly value: ValueOf<N> }
+  /** `text` is the trimmed value the grammar did not read: to report or refuse, never to parse. */
+  | { readonly _tag: "Unreadable"; readonly text: string }
+
+/**
+ * `settingValue` without the default, for a reader that keeps its own default
+ * or tells an unreadable value from an unset one.
+ */
+export const settingGiven = <N extends SettingName>(
+  name: N,
+  environment: Environment
+): Given<N> => {
+  const raw = environment[name]
+  if (raw === undefined) {
+    return { _tag: "Unset" }
+  }
+  const read = readSetting(name, raw)
+  if (Result.isFailure(read)) {
+    return { _tag: "Unreadable", text: raw.trim() }
+  }
+  return read.success === undefined ? { _tag: "Unset" } : { _tag: "Read", value: read.success }
+}
+
 /**
  * The setting's value in `environment`. Unset: the default when the setting
  * has one, else `undefined`. A value the grammar does not read counts as
@@ -122,13 +148,26 @@ export const settingValue = <N extends SettingName>(
   name: N,
   environment: Environment
 ): Reading<N> => {
-  const unset = entries[name].fallback.value
-  const raw = environment[name]
-  if (raw === undefined) {
-    return unset
-  }
-  const read = readSetting(name, raw)
-  return Result.isSuccess(read) && read.success !== undefined ? read.success : unset
+  const given = settingGiven(name, environment)
+  return given._tag === "Read" ? given.value : entries[name].fallback.value
+}
+
+type Spelled = {
+  readonly [N in SettingName]: Values[N] extends string | number ? N : never
+}[SettingName]
+
+/**
+ * The setting as the text to look up or quote: the value read, else the text
+ * the grammar refused, else `undefined`. For a reader that names what it was
+ * given in its own refusal.
+ */
+export const settingText = (name: Spelled, environment: Environment): string | undefined => {
+  const given = settingGiven(name, environment)
+  return given._tag === "Read"
+    ? String(given.value)
+    : given._tag === "Unreadable"
+      ? given.text
+      : undefined
 }
 
 const belongsIn: Readonly<Record<SettingScope, string>> = {

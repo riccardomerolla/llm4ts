@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import type * as Tracer from "effect/Tracer"
 import type { TokenUsage } from "@llm4ts/core/Models"
 import { isEstimatedModel } from "./EstimatedUsage.ts"
+import { settingValue } from "./Settings.ts"
 
 export type SpanKind = "CHAIN" | "AGENT" | "LLM" | "TOOL" | "EVALUATOR"
 
@@ -49,10 +50,7 @@ export type OtelContent = "off" | "on" | "full"
 /** LLM4TS_OTEL_CONTENT: `on` or `full`; anything else is off. */
 export const otelContent = (
   environment: Readonly<Record<string, string | undefined>>
-): OtelContent => {
-  const value = environment.LLM4TS_OTEL_CONTENT?.trim().toLowerCase()
-  return value === "on" ? "on" : value === "full" ? "full" : "off"
-}
+): OtelContent => settingValue("LLM4TS_OTEL_CONTENT", environment)
 
 export interface SpanOptions {
   readonly kind: SpanKind

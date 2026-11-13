@@ -4,6 +4,7 @@
 // call, computed once per epic, so every story stops rediscovering the
 // layout with `ls`, `find` and `grep` round trips.
 import { cap } from "./Context.ts"
+import { settingGiven } from "./Settings.ts"
 
 export interface OrientationInput {
   /** Tracked files, repo-relative, as `git ls-files` prints them. */
@@ -184,9 +185,6 @@ export const orientationOf = (input: OrientationInput): string | undefined => {
 export const orientationChars = (
   environment: Readonly<Record<string, string | undefined>>
 ): { readonly orientationChars?: number } => {
-  const raw = environment.LLM4TS_ORIENTATION_CHARS?.trim()
-  const value = Number(raw ?? "")
-  return raw === undefined || raw.length === 0 || !Number.isInteger(value) || value < 0
-    ? {}
-    : { orientationChars: value }
+  const chars = settingGiven("LLM4TS_ORIENTATION_CHARS", environment)
+  return chars._tag === "Read" ? { orientationChars: chars.value } : {}
 }

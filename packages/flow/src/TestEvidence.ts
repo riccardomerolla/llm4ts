@@ -6,6 +6,7 @@
 import * as Schema from "effect/Schema"
 import type { OracleRules } from "./OracleGuard.ts"
 import { defaultOracleRules } from "./OracleGuard.ts"
+import { settingValue } from "./Settings.ts"
 
 /** The tag tests of a criterion carry in their name: `[story-id#2]` for its second criterion. */
 export const criterionTag = (storyId: string, index: number): string => `[${storyId}#${index}]`
@@ -106,11 +107,11 @@ export type EvidenceSource =
 export const evidenceSourceFromEnvironment = (
   environment: Readonly<Record<string, string | undefined>>
 ): EvidenceSource | undefined => {
-  const report = environment.LLM4TS_TEST_REPORT?.trim()
-  if (report !== undefined && report.length > 0) {
+  const report = settingValue("LLM4TS_TEST_REPORT", environment)
+  if (report !== undefined) {
     return { _tag: "Report", path: report }
   }
-  const command = environment.LLM4TS_TEST_ONE?.trim()
+  const command = settingValue("LLM4TS_TEST_ONE", environment)
   if (command !== undefined && (command.includes("{tag}") || command.includes("{tagRegex}"))) {
     return { _tag: "Command", argv: command.split(/\s+/u) }
   }

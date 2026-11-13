@@ -12,6 +12,7 @@ import * as OtlpExporter from "effect/observability/OtlpExporter"
 import * as OtlpMetrics from "effect/observability/OtlpMetrics"
 import * as OtlpSerialization from "effect/observability/OtlpSerialization"
 import * as OtlpTracer from "effect/observability/OtlpTracer"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { packageVersion } from "./Package.ts"
 
 export type OtelConfig =
@@ -23,8 +24,6 @@ export const phoenixTracesUrl = "http://localhost:6006/v1/traces"
 
 const truthy = (value: string | undefined): boolean =>
   /^(on|1|true|yes)$/iu.test(value?.trim() ?? "")
-const falsy = (value: string | undefined): boolean =>
-  /^(off|0|false|no)$/iu.test(value?.trim() ?? "")
 
 /**
  * Off unless asked. An OTLP endpoint in the environment wins and is used as
@@ -34,7 +33,8 @@ const falsy = (value: string | undefined): boolean =>
 export const otelConfig = (
   environment: Readonly<Record<string, string | undefined>>
 ): OtelConfig => {
-  if (truthy(environment.OTEL_SDK_DISABLED) || falsy(environment.LLM4TS_OTEL)) {
+  const asked = settingValue("LLM4TS_OTEL", environment)
+  if (truthy(environment.OTEL_SDK_DISABLED) || asked === false) {
     return { mode: "off" }
   }
   // Under the test runner the exporter's sleeps run on a TestClock nobody
@@ -49,9 +49,7 @@ export const otelConfig = (
   if (endpoint !== undefined && endpoint.length > 0) {
     return { mode: "env", endpoint }
   }
-  return truthy(environment.LLM4TS_OTEL)
-    ? { mode: "phoenix", tracesUrl: phoenixTracesUrl }
-    : { mode: "off" }
+  return asked === true ? { mode: "phoenix", tracesUrl: phoenixTracesUrl } : { mode: "off" }
 }
 
 export interface OtelResource {

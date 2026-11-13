@@ -1,3 +1,4 @@
+import * as Duration from "effect/Duration"
 import type { TokenUsage } from "@llm4ts/core/Models"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -11,6 +12,7 @@ import {
 } from "@llm4ts/flow/FlowEvents"
 import type { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { estimateCostUsd } from "@llm4ts/flow/PriceList"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { formatCount } from "./Terminal.ts"
 
 /**
@@ -241,16 +243,8 @@ export interface TreeOptions {
 export const defaultIdleAfterMs = 120_000
 
 /** `LLM4TS_IDLE_AFTER`: `90s`, `5m`, `1h` (a bare number is seconds); two minutes otherwise. */
-export const idleAfterFrom = (
-  environment: Readonly<Record<string, string | undefined>>
-): number => {
-  const match = /^(\d+)\s*(s|m|h)?$/u.exec(environment.LLM4TS_IDLE_AFTER?.trim() ?? "")
-  if (match === null) {
-    return defaultIdleAfterMs
-  }
-  const unit = match[2] === "h" ? 3_600_000 : match[2] === "m" ? 60_000 : 1_000
-  return Number(match[1]) * unit
-}
+export const idleAfterFrom = (environment: Readonly<Record<string, string | undefined>>): number =>
+  Duration.toMillis(settingValue("LLM4TS_IDLE_AFTER", environment))
 
 export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   title: options.title ?? "flow",
