@@ -11,7 +11,6 @@ export const LlmProvider = Schema.Literals([
   "LmStudio",
   "Ollama",
   "MlxLm",
-  "OpenCode",
   "Mock"
 ])
 export type LlmProvider = typeof LlmProvider.Type
@@ -121,14 +120,7 @@ export const connectorTable = {
     executable: "gemini",
     names: ["gemini", "gemini-cli"]
   },
-  OpenCode: {
-    id: "opencode",
-    kind: "Cli",
-    provider: "OpenCode",
-    baseUrl: "http://localhost:4096",
-    executable: "opencode",
-    names: ["opencode"]
-  },
+  OpenCode: { id: "opencode", kind: "Cli", executable: "opencode", names: ["opencode"] },
   Codex: { id: "codex", kind: "Cli", executable: "codex", names: ["codex"] },
   Copilot: { id: "copilot", kind: "Cli", executable: "gh", names: [] },
   Pi: { id: "pi", kind: "Cli", executable: "pi", names: ["pi"] },

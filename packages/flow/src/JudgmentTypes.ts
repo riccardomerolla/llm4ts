@@ -1,3 +1,4 @@
+// @internal: judgment literals; Judgment re-exports them
 import * as Schema from "effect/Schema"
 
 /**

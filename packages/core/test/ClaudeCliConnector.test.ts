@@ -1,6 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -14,12 +13,6 @@ import {
   makeProcessExecutor,
   processCommandKey
 } from "@llm4ts/core/ProcessExecutor"
-import {
-  claudeSessionArgv,
-  claudeUserMessageJson,
-  openClaudeAgentSession,
-  parseClaudeSessionLine
-} from "@llm4ts/core/providers/ClaudeAgentSession"
 import {
   claudeAuthProbe,
   claudeCliExtraArgs,
@@ -282,57 +275,6 @@ describe("ClaudeCliConnector sub-agents (ADR 0033)", () => {
     )
     assert.isUndefined(chunk?.metadata.model)
   })
-})
-
-describe("ClaudeAgentSession", () => {
-  it("frames argv and user turns as stream-json", () => {
-    assert.deepStrictEqual(claudeSessionArgv("sonnet", ["--mcp-config", "x.json"]).slice(-4), [
-      "--model",
-      "sonnet",
-      "--mcp-config",
-      "x.json"
-    ])
-    assert.deepStrictEqual(JSON.parse(claudeUserMessageJson("do the thing")), {
-      type: "user",
-      message: {
-        role: "user",
-        content: "do the thing"
-      }
-    })
-  })
-
-  it("parses text, tools, usage, and completion events", () => {
-    const events = streamLines.flatMap(parseClaudeSessionLine)
-
-    assert.strictEqual(events[0]?._tag, "TextDelta")
-    assert.strictEqual(events[1]?._tag, "ToolUse")
-    assert.strictEqual(events[2]?._tag, "Usage")
-    assert.strictEqual(events[3]?._tag, "Done")
-  })
-
-  it.effect("drives a scoped bidirectional process to a terminal result", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const stdin = yield* Queue.unbounded<string>()
-        const executor = makeProcessExecutor({
-          run: () => Effect.succeed(ProcessResult.make({ stdout: [], exitCode: 0 })),
-          runStreaming: () => Stream.empty,
-          runBidirectional: () => Effect.succeed([stdin, Stream.fromIterable(streamLines)])
-        })
-        const session = yield* openClaudeAgentSession(
-          executor,
-          claudeSessionArgv(undefined, []),
-          "/repo"
-        )
-        const result = yield* session.awaitResult
-
-        assert.strictEqual(result.text, "done")
-        assert.strictEqual(result.usage?.total, 1240)
-        assert.strictEqual(result.usage?.costUsd, 0.1234)
-        assert.strictEqual(result.model, "claude-sonnet-4-6")
-      })
-    )
-  )
 })
 
 describe("ClaudeCliConnector auth probe", () => {

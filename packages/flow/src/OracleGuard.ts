@@ -1,3 +1,4 @@
+// @internal: oracle protection for the review and story loops
 // The oracle guard (ADR 0027, decision 4): a change may not delete a test
 // file, add a skip or focus marker, or lower the passed-test count unless
 // its plan entry says it may. Deterministic, from the diff and the gate

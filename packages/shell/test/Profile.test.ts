@@ -28,7 +28,7 @@ import {
   profileOf,
   renderProfile,
   renderProfileDelta
-} from "@llm4ts/runner/Profile"
+} from "../src/Profile.ts"
 
 const t0 = 1_790_000_000_000
 const at = (seconds: number, event: FlowEvent): TreeInput => ({

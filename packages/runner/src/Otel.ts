@@ -1,3 +1,4 @@
+// @internal: OpenTelemetry export wired by FlowRunner and Doctor
 // OpenTelemetry export (ADR 0026): Effect's own OTLP tracer and metrics
 // exporters over core's fetch client, so a run can show up in Phoenix,
 // Langfuse, SigNoz or any collector with no SDK and no new dependency.

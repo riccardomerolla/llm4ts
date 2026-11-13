@@ -13,7 +13,7 @@ import {
 import { readTrace } from "@llm4ts/flow/Replay"
 import { makeStoryPlanStore, type Story, type StoryPlan } from "@llm4ts/flow/StoryPlan"
 import { TraceUnreadable, tailGateLogs, tailTranscript, type RunSources } from "./RunReaders.ts"
-import { loadTranscript, type TranscriptFiles } from "./Transcripts.ts"
+import { loadTranscript, type TranscriptFiles } from "@llm4ts/runner/Transcripts"
 
 /**
  * Read-only answers about one story of an epic run, from the files the story

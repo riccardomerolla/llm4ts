@@ -1,7 +1,12 @@
 # API Guide
 
-The packages expose explicit subpaths. The package manifests are the canonical
-export list; the following modules are the main entry points.
+The packages expose explicit subpaths, derived from the sources (ADR 0050).
+Every module under `packages/<pkg>/src` is a public subpath unless its first
+line is `// @internal: <reason>`; `pnpm unused` fails when a manifest's
+`exports` map drifts from that, when anything outside a package imports one
+of its internal modules, or when a module uses `export *`;
+`pnpm exports:write` rewrites the maps. `@llm4ts/shell` is the `llm4ts` bin and
+exports no module. The following modules are the main entry points.
 
 ## Core
 
@@ -59,9 +64,9 @@ export list; the following modules are the main entry points.
   output when a backend has no native read. `mlx-lm` answers it from token
   log-probabilities in one forward pass.
 - `@llm4ts/core/observability/*`: `Redaction` and `StreamRecorder`. Runs
-  export OpenTelemetry through `@llm4ts/runner/Otel` (ADR 0026); the
-  `Tracing`, `Metrics`, `MeteredLlmService` and `StructuredLogger` modules
-  it replaced were removed in 3.0.0.
+  export OpenTelemetry through the runner, which `runNode` wires (ADR 0026);
+  the `Tracing`, `Metrics`, `MeteredLlmService` and `StructuredLogger`
+  modules it replaced were removed in 3.0.0.
 
 ## Flow
 
@@ -169,10 +174,8 @@ export list; the following modules are the main entry points.
   `FlowRunnerOptions.judgmentLog: true` (off by default, no environment
   variable); files accumulate across runs at
   `<workDir>/.llm4ts/judgments/<consumer>.jsonl`, with `at` in epoch
-  milliseconds as in `FlowRecorder`. State is preserved verbatim except
-  sealed `Classified` values: text and JSON conversion use `Classified(…)`,
-  without declassification. Explicitly declassified strings have no remaining
-  classification metadata. Writes degrade permanently on a persistence or
+  milliseconds as in `FlowRecorder`. State is written as its JSON form, so a
+  value's own `toJSON` decides what lands in the file. Writes degrade permanently on a persistence or
   encoding failure, as with the recorder, without changing the flow result.
   The engine never stages or commits these observations; this repository
   already ignores `.llm4ts/`.
@@ -209,8 +212,10 @@ export list; the following modules are the main entry points.
   `settingValue` decode a raw value or an environment with the setting's
   grammar; `settingGiven` tells unset, read and unreadable apart with no
   default applied, and `settingText` spells a setting for a reader that
-  refuses a value by name; `closestSettingName` names the setting a
-  misspelled name meant.
+  refuses a value by name; `unreadableEnvironment` lists the values an
+  environment holds that their grammar does not read, the refusal
+  `llm4ts run`, `runFlowMain` and `runNode` make before a flow starts;
+  `closestSettingName` names the setting a misspelled name meant.
 
 ## Runner
 
@@ -242,10 +247,12 @@ export list; the following modules are the main entry points.
   appends to `.llm4ts/costs.jsonl` under `workDir` unless
   `FlowRunnerOptions.tracePath` / `costLedgerPath` name other files or
   `persistRun: false` turns both off.
-- `@llm4ts/runner/Costs`: `makeCostsProgram` reads the traces of one or more
-  repositories into a `CostReport`, skipping and naming unreadable traces;
-  `llm4ts costs` is its command.
-- `@llm4ts/runner/McpStdio`: JSON-RPC MCP stdio transport.
+- The offline readers behind `llm4ts costs`, `profile`, `watch` and the
+  operator's run and story views (`Costs`, `Profile`, `Watch`, `RunReaders`,
+  `StoryReaders`) live in `@llm4ts/shell` as internal modules of the CLI.
+  They have no library subpath; `@llm4ts/flow/CostReport`,
+  `@llm4ts/flow/Replay` and `@llm4ts/runner/EventPresentation` are the
+  public pieces they read with.
 - `@llm4ts/runner/EventPresentation`: `eventPresentation`, one entry per
   event: the verbosity it prints at, its kind in a profile gap, its digest line.
 

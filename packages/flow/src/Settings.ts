@@ -142,7 +142,8 @@ export const settingGiven = <N extends SettingName>(
 /**
  * The setting's value in `environment`. Unset: the default when the setting
  * has one, else `undefined`. A value the grammar does not read counts as
- * unset, as it did for every reader before the registry.
+ * unset here; a launch through the shell or the runner has already refused
+ * it (`unreadableEnvironment`).
  */
 export const settingValue = <N extends SettingName>(
   name: N,
@@ -151,6 +152,24 @@ export const settingValue = <N extends SettingName>(
   const given = settingGiven(name, environment)
   return given._tag === "Read" ? given.value : entries[name].fallback.value
 }
+
+/**
+ * Why an environment value the grammar does not read stops a run: the name
+ * and the grammar, never the value, so a secret cannot leak through it.
+ */
+export const unreadableInEnvironment = (name: SettingName): string =>
+  `the environment: ${name} must be ${entries[name].value.grammar}; fix or unset it`
+
+/**
+ * One line per setting `environment` holds a value for that its grammar does
+ * not read, in registry order; empty when every value reads. The shell and
+ * the runner refuse a launch on any, so `settingValue`'s lenience never
+ * decides a run.
+ */
+export const unreadableEnvironment = (environment: Environment): ReadonlyArray<string> =>
+  settingNames
+    .filter((name) => settingGiven(name, environment)._tag === "Unreadable")
+    .map(unreadableInEnvironment)
 
 type Spelled = {
   readonly [N in SettingName]: Values[N] extends string | number ? N : never

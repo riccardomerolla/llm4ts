@@ -10,11 +10,11 @@ import {
   type Timed
 } from "@llm4ts/flow/FlowEvents"
 import { readTrace } from "@llm4ts/flow/Replay"
-import { duration, treeInputsOfTrace, type TreeInput } from "./AgentTree.ts"
+import { duration, treeInputsOfTrace, type TreeInput } from "@llm4ts/runner/AgentTree"
 
 export { duration }
-import { presentationOf } from "./EventPresentation.ts"
-import { formatCount } from "./Terminal.ts"
+import { presentationOf } from "@llm4ts/runner/EventPresentation"
+import { formatCount } from "@llm4ts/runner/Terminal"
 import {
   resolveTraceTarget,
   WatchTargetMissing,
@@ -1157,7 +1157,7 @@ const encodeReport = Schema.encodeSync(Schema.fromJsonString(ProfileReport))
 const decodeReport = Schema.decodeUnknownOption(Schema.fromJsonString(ProfileReport))
 const encodeDelta = Schema.encodeSync(Schema.fromJsonString(ProfileDelta))
 
-const reportAt = Effect.fn("@llm4ts/runner/Profile.reportAt")(function* (
+const reportAt = Effect.fn("@llm4ts/shell/Profile.reportAt")(function* (
   files: TraceSources["files"],
   path: string
 ): Effect.fn.Return<ProfileReport, FlowError | WatchTargetMissing> {
@@ -1179,7 +1179,7 @@ const reportAt = Effect.fn("@llm4ts/runner/Profile.reportAt")(function* (
  * or JSON for comparing runs; with `against`, the delta from that earlier
  * run to this one.
  */
-export const makeProfileProgram = Effect.fn("@llm4ts/runner/Profile.make")(function* (
+export const makeProfileProgram = Effect.fn("@llm4ts/shell/Profile.make")(function* (
   options: ProfileOptions,
   sources: TraceSources
 ): Effect.fn.Return<string, FlowError | WatchTargetMissing> {

@@ -14,7 +14,7 @@ import {
   readPending,
   reviewCandidates,
   writePending
-} from "@llm4ts/flow/JudgmentDataset"
+} from "../../packages/flow/src/JudgmentDataset.ts"
 import { JudgmentObservation, judgmentLogPath } from "@llm4ts/flow/JudgmentLog"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 import { argValue, commits, lenses } from "./lib.ts"

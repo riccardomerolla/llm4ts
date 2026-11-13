@@ -14,7 +14,6 @@ export {
   asReadOnly,
   asToolless,
   coderFor,
-  coderFromEnv,
   mock,
   coderFromEnvironment,
   reasonerFromEnvironment,
@@ -27,7 +26,6 @@ export type { OpenedPack } from "./Packs.ts"
 export { nodePlainFileStore } from "./NodePlainFileStore.ts"
 export { makeNodeWorkspace } from "./NodeWorkspace.ts"
 export { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
-export { reviewFingerprint } from "./ReviewFingerprint.ts"
 
 export { completeAndPublish, implementPlanFlow } from "@llm4ts/flow/Flow"
 export type { ImplementPlanOptions } from "@llm4ts/flow/Flow"

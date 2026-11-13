@@ -14,9 +14,7 @@ import {
   rosterEventMessage,
   type ReviewFindings
 } from "@llm4ts/flow/FlowEvents"
-import { atLeast, presentationOf, Verbosity } from "./EventPresentation.ts"
-
-export { Verbosity }
+import { atLeast, presentationOf, type Verbosity } from "./EventPresentation.ts"
 
 export const parseVerbosity = (value: string | undefined): Verbosity => {
   switch (value?.trim().toLowerCase()) {
@@ -278,8 +276,6 @@ export const terminalLine = (
           : palette.dim(
               `evidence: ${safe(event.task)} — ${event.claimed} claimed command(s) ran${event.confidence === undefined ? "" : `, confidence ${event.confidence}`}`
             )
-    case "Declassified":
-      return palette.info(`declassified: ${safe(event.label)}`)
     case "ExecutorLeased":
     case "ExecutorReleased":
     case "ExecutorExcluded":

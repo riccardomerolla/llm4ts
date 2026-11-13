@@ -40,7 +40,7 @@ import {
   type PackIndex,
   type RefineDisposition
 } from "@llm4ts/flow/EpicBrief"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import {
   EpicBriefInvalid,
   ExtractPackMissing,

@@ -10,8 +10,6 @@ import { Reviewer, parseReviewer } from "./Reviewer.ts"
 import { CoverageRule } from "./SpecChecks.ts"
 import type { WorkspaceError, WorkspaceShape } from "./Workspace.ts"
 
-export { Reviewer, parseReviewer } from "./Reviewer.ts"
-
 export const ComparisonOrdering = Schema.Literals(["Ordered", "Unordered", "PerKey"])
 export type ComparisonOrdering = typeof ComparisonOrdering.Type
 

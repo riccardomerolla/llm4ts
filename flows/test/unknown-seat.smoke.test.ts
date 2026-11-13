@@ -1,7 +1,7 @@
 import { describe, it, assert } from "@effect/vitest"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
-import { coderIds } from "@llm4ts/runner/Connectors"
+import { unreadableInEnvironment } from "@llm4ts/flow/Settings"
 import {
   commitAll,
   failureReport,
@@ -54,7 +54,8 @@ const needs: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "epic-design": { LLM4TS_LEGACY_REPO: "legacy" }
 }
 
-const refusal = (variable: string) => `unknown ${variable} 'codx'; expected ${coderIds.join("|")}`
+// The runner refuses the name before the flow reads its seats, as `llm4ts run` does.
+const refusal = unreadableInEnvironment
 
 const runWith = (flow: string, environment: Readonly<Record<string, string>>) => {
   const fixture = makeFixture()
@@ -88,23 +89,19 @@ describe("a flow refuses a seat name it does not know", () => {
     smokeTimeout
   )
 
-  // A flow answers for the seats it runs. `implement` has no reasoning seat
-  // of its own, so a bad LLM4TS_REASONER is the shell's to warn about, not
-  // this flow's to refuse.
+  // Since 4.0.0 an unreadable value stops every launch, as the shell's does:
+  // `implement` runs no reasoning seat and still refuses a bad LLM4TS_REASONER.
   it(
-    "a flow does not refuse a name for a seat it never uses",
+    "a flow refuses a name even for a seat it never uses",
     () => {
       const { result, called } = runWith("implement", {
         LLM4TS_CODER: "claude",
         LLM4TS_REASONER: "codx"
       })
 
-      assert.notInclude(
-        result.stderr,
-        "unknown LLM4TS_REASONER",
-        failureReport("implement", result)
-      )
-      assert.isTrue(existsSync(called))
+      assert.strictEqual(result.status, 1, failureReport("implement", result))
+      assert.include(result.stderr, refusal("LLM4TS_REASONER"), failureReport("implement", result))
+      assert.isFalse(existsSync(called), "the stub agent was started")
     },
     smokeTimeout
   )

@@ -219,8 +219,9 @@ llm4ts config untrust                     # forget that acceptance
 llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # one run only
 ```
 
-An unknown name or an unreadable value in `--set` or `config set` is
-refused, and a flow that lacks a setting it requires stops before it starts.
+An unknown name or an unreadable value in `--set`, `config set` or the
+environment is refused, and a flow that lacks a setting it requires stops
+before it starts.
 An exported `LLM4TS_*` name that is close to a real one prints a warning
 with the name it probably meant.
 

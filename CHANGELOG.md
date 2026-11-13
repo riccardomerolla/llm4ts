@@ -1,5 +1,138 @@
 # Changelog
 
+## 4.0.0
+
+### Breaking
+
+A removal release, phase 2 of the 2026-11-09 architecture review. Each
+removed name or subpath says what replaces it; where none is named, nothing
+does.
+
+- **`coderFromEnv` is removed** from `@llm4ts/runner` and
+  `@llm4ts/runner/Connectors`, as 3.4.0 said. Use
+  `coderFromEnvironment(environment?, fallback?)`. It takes the same
+  environment argument but is not a drop-in: it returns an
+  `Effect<CliConnectorConfig, ScriptUsage>` instead of a plain
+  `CliConnectorConfig`, so a caller `yield*`s it, and an unknown
+  `LLM4TS_CODER` fails with `ScriptUsage` instead of running claude. The
+  sibling project nightcall calls `coderFromEnv` (`src/Engineer.ts`,
+  `src/Stages.ts`) and must switch to `coderFromEnvironment` before it moves
+  to 4.x.
+- **`awaitConsumed` is removed** from `@llm4ts/flow/FlowEvents`. Count with
+  `hub.consume(name, handle)` and wait with `hub.drained(timeout?)` or the
+  returned consumer's `caughtUp(timeout?)`.
+- **`reasonerFromEnvironment` and `storyCoderFromEnvironment` are removed
+  from the epic flows' library** (`flows/lib/epic-stories.ts`). Use
+  `reasonerFromEnvironment` from `@llm4ts/runner/Connectors`, and
+  `coderFromEnvironment(environment, pi)` for a coder seat that defaults to
+  pi.
+- **The agent session seam is removed**: `@llm4ts/core/AgentSession` and
+  `@llm4ts/core/providers/ClaudeAgentSession` (`openClaudeAgentSession`,
+  `claudeSessionArgv`, `claudeUserMessageJson`, `parseClaudeSessionLine`).
+  No replacement. Delegation is not planned for 4.x, and ADR 0035 is
+  superseded.
+- **`@llm4ts/flow/Classified` and the `Declassified` event are removed**:
+  the `Classified` class, the `Declassified` member of `FlowEvent`, its
+  `FlowEventsValues.Declassified` constructor, its lane and its
+  presentation entry. No replacement. Nothing published the event.
+- **`@llm4ts/flow/Mermaid` is removed** (`renderMermaid`,
+  `renderMermaidTrace`, `mermaidDocument`, `mermaidLiveUrl`). No
+  replacement. The code graph's `renderGraphMermaid` in
+  `@llm4ts/flow/GraphRender` stays.
+- **`@llm4ts/runner/McpStdio` is removed** (`runMcpStdio`,
+  `mcpStdioResponses`). No replacement. `handleMcpLine` in
+  `@llm4ts/flow/McpServer` stays.
+- **`"OpenCode"` is no longer an `LlmProvider`.** It was left over from the
+  HTTP provider removed in 3.0.0. An `LlmConfig` with `provider: "OpenCode"`
+  no longer decodes, `defaultBaseUrl("OpenCode")` and
+  `providerConnectorId("OpenCode")` no longer compile, and the `opencode`
+  row of `connectorTable` has no provider and no default base URL, so
+  `connectorProvider` and `connectorDefaultBaseUrl` return `undefined` for
+  it. No replacement. The `opencode` CLI connector is unchanged: it is
+  keyed by its table name, `OpenCode`, which stays.
+- **`reviewFingerprint` is removed** from `@llm4ts/runner` and
+  `@llm4ts/runner/ReviewFingerprint`. Use `fingerprintOf([...parts])` from
+  `@llm4ts/flow/ReviewCache`: it takes an array, not variadic parts, and
+  hashes differently. `judgeAllPrograms` loses its `fingerprint` option and
+  keys its verdict cache with `fingerprintOf` itself. Persisted review
+  caches (modernize-implement, modernize-review, modernize-extract,
+  modernize-bench, the j2ee kit's convert) are re-evaluated once on the
+  first 4.0.0 run.
+- **Pass-through re-exports are removed.** Import each name from its home
+  module:
+  - `publishUsage`, `structuredAndPublish`: from `@llm4ts/flow/Usage`, not
+    `@llm4ts/flow/Flow`.
+  - everything `@llm4ts/flow/Gates` re-exported (`GateBaseline`,
+    `baselineKey`, `ensureBaseline`, `triageGates`, `normalizeGateOutput`
+    and the rest of the pure gate triage): from `@llm4ts/flow/GateTriage`.
+  - `Reviewer`, `parseReviewer`: from `@llm4ts/flow/Reviewer`, not
+    `@llm4ts/flow/Pack`.
+  - `ToolGrade`: from `@llm4ts/flow/Roundtable`, not
+    `@llm4ts/flow/Taskforce`.
+  - `JoinMatch`: from `@llm4ts/flow/GraphRules`, not `@llm4ts/flow/Survey`.
+  - the `Evaluator` type: from `@llm4ts/core/eval/Eval`, not
+    `@llm4ts/core/eval/Evaluator`.
+  - `Verbosity`: from `@llm4ts/runner/EventPresentation`, not
+    `@llm4ts/runner/Terminal`.
+
+  The sibling project nightcall imports none of these names.
+
+- **The offline readers move from the runner to the shell.**
+  `@llm4ts/runner/Costs`, `@llm4ts/runner/Profile`, `@llm4ts/runner/Watch`,
+  `@llm4ts/runner/RunReaders` and `@llm4ts/runner/StoryReaders` are removed.
+  The five modules now live in `@llm4ts/shell` as an internal part of the
+  `llm4ts` CLI, with no subpath export. `llm4ts costs`, `llm4ts profile`,
+  `llm4ts watch` and the `llm4ts mcp` operator's run and story tools behave
+  as before. No library replacement; their spans are now named
+  `@llm4ts/shell/…`. The sibling projects nightcall and dunder-mifflin
+  import none of the five.
+- `pnpm unused` also fails when a package's source or tests import a package
+  above it in `core → flow → runner → {js, shell}`, so the runner cannot
+  import the shell (ADR 0006).
+- **The public surface is decided in the sources (ADR 0050).** A module whose
+  first line is `// @internal: <reason>` has no subpath; `pnpm unused`
+  derives every `exports` map and fails on drift, on an outside import of an
+  internal module and on `export *` (`pnpm exports:write` rewrites the maps).
+  35 subpaths are removed:
+  - `@llm4ts/core/UsageLimits`: no replacement; internal.
+  - `@llm4ts/flow/ReviewModel`: import `ReviewIssue`, `ReviewResult`,
+    `Severity` and `reviewPrompt` from `@llm4ts/flow/Review`.
+  - `@llm4ts/flow/CapabilityGuard`, `CarriedNotes`, `Evidence`,
+    `JudgmentDataset`, `JudgmentEval`, `OracleGuard`, `Recheck`: no
+    replacement; internal.
+  - `@llm4ts/runner/NodeHttpClient`, `NodeGeminiCliExecutor`,
+    `NodeGeminiModelBridge`, `Otel`: no replacement; `runNode` wires them.
+  - `@llm4ts/runner/Package`, `WindowsCommand`: no replacement; internal.
+  - every `@llm4ts/shell` subpath (`Cli`, `CoderChoice`, `Config`,
+    `ConfigCommand`, `ConfigEdit`, `ConfigTrust`, `FlowCatalog`,
+    `FlowLaunch`, `FlowProcess`, `Menu`, `OperatorActTools`,
+    `OperatorConfig`, `OperatorNode`, `OperatorRuns`, `OperatorServer`,
+    `OperatorTools`, `Package`, `Refine`, `RunSupervisor`, `ShellErrors`):
+    the package is the `llm4ts` bin; run the CLI instead.
+
+  The sibling projects nightcall and dunder-mifflin import none of the 35.
+
+- **An unreadable `LLM4TS_*` value in the environment stops the launch.**
+  Up to 3.4.0, `LLM4TS_JUDGE_ROUNDS=abc` or `LLM4TS_FAIL_FAST=maybe` printed
+  a warning under `llm4ts run` and counted as unset, so the run went on at
+  the default; a flow started without the shell did not even warn. Now
+  `llm4ts run` (and `refine`, the menu and the MCP operator's `start`) exits
+  with code 2 before the flow starts, and a flow started without the shell
+  refuses in `runFlowMain` (exit code 1) and in `runNode` (`ScriptUsage`)
+  before its run starts:
+
+  ```text
+  the environment: LLM4TS_JUDGE_ROUNDS must be a positive integer; fix or unset it
+  ```
+
+  The message names the setting and its grammar, never the value. Fix the
+  value or unset the variable; `llm4ts config show` lists it with where it
+  comes from. A flow now also refuses an unknown name for a seat it does not
+  run (`LLM4TS_REASONER=codx` under `implement`). `settingValue` itself still
+  reads an unreadable value as unset for a library caller outside the
+  runner; `unreadableEnvironment` in `@llm4ts/flow/Settings` lists what a
+  launch refuses (ADR 0049, amendment of 2026-11-13).
+
 ## 3.4.0
 
 - **A run says which consumer missed events.** The event hub gains

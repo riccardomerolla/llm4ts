@@ -23,8 +23,13 @@ import {
   type TreeInput,
   type TreeState,
   type TreeView
-} from "./AgentTree.ts"
-import { enterScreen, leaveScreen, makeScreenPainter, nodeTreeKeys } from "./AgentTreeSurface.ts"
+} from "@llm4ts/runner/AgentTree"
+import {
+  enterScreen,
+  leaveScreen,
+  makeScreenPainter,
+  nodeTreeKeys
+} from "@llm4ts/runner/AgentTreeSurface"
 import {
   loadTranscript,
   nodeTranscriptFiles,
@@ -33,9 +38,9 @@ import {
   transcriptFileOf,
   type TailTarget,
   type TranscriptFiles
-} from "./Transcripts.ts"
+} from "@llm4ts/runner/Transcripts"
 import { nodeListTraces, TraceDirectoryName } from "./Costs.ts"
-import { nodePlainFileStore } from "./NodePlainFileStore.ts"
+import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 
 /**
  * `llm4ts watch` (ADR 0022): the agent tree over a trace file — a live run
@@ -235,7 +240,7 @@ const transcriptDirOf = (
     return runId === undefined ? undefined : join(repo, TraceDirectoryName, "transcripts", runId)
   })
 
-export const makeWatchProgram = Effect.fn("@llm4ts/runner/Watch.make")(function* (
+export const makeWatchProgram = Effect.fn("@llm4ts/shell/Watch.make")(function* (
   options: WatchOptions,
   dependencies: WatchDependencies
 ): Effect.fn.Return<void, FlowError | WatchTargetMissing> {

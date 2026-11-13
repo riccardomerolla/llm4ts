@@ -10,6 +10,7 @@ import {
   settingNames,
   settingText,
   settingValue,
+  unreadableEnvironment,
   type SettingName
 } from "@llm4ts/flow/Settings"
 
@@ -191,6 +192,38 @@ describe("settingValue", () => {
       400_000
     )
     assert.isUndefined(settingValue("LLM4TS_STALL_MINUTES", { LLM4TS_STALL_MINUTES: "soon" }))
+  })
+})
+
+describe("unreadableEnvironment", () => {
+  it("names each value its grammar does not read, with the grammar, in registry order", () => {
+    assert.deepStrictEqual(
+      unreadableEnvironment({
+        LLM4TS_STALL_MINUTES: "soon",
+        LLM4TS_JUDGE_ROUNDS: "abc",
+        LLM4TS_ISOLATED: "maybe"
+      }),
+      [
+        "the environment: LLM4TS_ISOLATED must be on or off; fix or unset it",
+        "the environment: LLM4TS_JUDGE_ROUNDS must be a positive integer; fix or unset it",
+        "the environment: LLM4TS_STALL_MINUTES must be a positive number of minutes; fix or unset it"
+      ]
+    )
+  })
+
+  it("passes a readable, empty or unknown value, and never quotes one", () => {
+    const environment = {
+      LLM4TS_JUDGE_ROUNDS: "3",
+      LLM4TS_STALL_MINUTES: "",
+      LLM4TS_MY_OWN_FLOW_KNOB: "anything",
+      LLM4TS_MCP_TOKEN: "s3cret-token",
+      LLM4TS_ISOLATED: "s3cret-token"
+    }
+    const problems = unreadableEnvironment(environment)
+    assert.deepStrictEqual(problems, [
+      "the environment: LLM4TS_ISOLATED must be on or off; fix or unset it"
+    ])
+    assert.notInclude(problems.join("\n"), "s3cret")
   })
 })
 

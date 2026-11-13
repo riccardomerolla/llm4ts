@@ -1,3 +1,4 @@
+// @internal: incremental re-checks for Review and Stories
 /**
  * Incremental re-review (ADR 0044): what each reviewer found last time, which
  * files a fix touched, and so which reviewers a round asks again — in full,

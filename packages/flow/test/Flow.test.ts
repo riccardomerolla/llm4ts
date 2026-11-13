@@ -11,9 +11,9 @@ import {
   implementPlanFlow,
   flowReviewer,
   completeAndPublish,
-  satisfiedByJudgment,
-  structuredAndPublish
+  satisfiedByJudgment
 } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeCollectingFlowEvents, makeFlowEventHub, type FlowEvent } from "@llm4ts/flow/FlowEvents"
@@ -21,7 +21,7 @@ import { Committed, type GitToolShape } from "@llm4ts/flow/GitTool"
 import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
-import { GateBaseline } from "@llm4ts/flow/Gates"
+import { GateBaseline } from "@llm4ts/flow/GateTriage"
 import { makeMemoryPlainFileStore, makePlanStore } from "@llm4ts/flow/Persistence"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"

@@ -34,12 +34,11 @@ import {
   nodePlainFileStore,
   openPack,
   resolveFlowInput,
-  reviewFingerprint,
   runFlowMain,
   runNode,
   stage
 } from "@llm4ts/runner"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { FlowEvents, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import { judgeAllPrograms } from "@llm4ts/flow/ProgramJudge"
 import { Provenance, makeProvenanceStore } from "@llm4ts/flow/Provenance"
@@ -322,8 +321,7 @@ const program = Effect.gen(function* () {
                 files
                   .read(join(input.workDir, pack.specsDir, `${program}.md`))
                   .pipe(Effect.map((text) => text ?? "")),
-              query: input.prompt,
-              fingerprint: reviewFingerprint
+              query: input.prompt
             })
           }).pipe(Effect.provideService(FlowEvents, context.events))
         )

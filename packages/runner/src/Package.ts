@@ -1,3 +1,4 @@
+// @internal: the runner's own version stamp
 import { createRequire } from "node:module"
 import * as Schema from "effect/Schema"
 

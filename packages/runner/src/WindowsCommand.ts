@@ -1,3 +1,4 @@
+// @internal: Windows command resolution for NodeProcessExecutor
 import { existsSync } from "node:fs"
 // win32 semantics explicitly, never the host's: this module only ever
 // describes Windows, so it should not change meaning with the platform it

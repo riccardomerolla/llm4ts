@@ -15,7 +15,7 @@ import {
 import { describeFlowError } from "@llm4ts/flow/FlowError"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { readTrace } from "@llm4ts/flow/Replay"
-import { nodePlainFileStore } from "./NodePlainFileStore.ts"
+import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 
 /**
  * `llm4ts costs`: the budgeting view over every trace the runner wrote.
@@ -77,7 +77,7 @@ export class CostsResult extends Schema.Class<CostsResult>("CostsResult")({
   )
 }) {}
 
-export const makeCostsProgram = Effect.fn("@llm4ts/runner/Costs.make")(function* (
+export const makeCostsProgram = Effect.fn("@llm4ts/shell/Costs.make")(function* (
   options: CostsOptions,
   dependencies: CostsDependencies = nodeCostsDependencies()
 ): Effect.fn.Return<CostsResult> {

@@ -63,7 +63,7 @@ import {
   parseDomains,
   renderDomains
 } from "@llm4ts/flow/Domains"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { FlowEvents } from "@llm4ts/flow/FlowEvents"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { Task } from "@llm4ts/flow/Plan"

@@ -11,6 +11,7 @@ describe("fingerprintOf", () => {
   it("is stable, and tells apart parts that only differ in their split", () => {
     assert.strictEqual(fingerprintOf(["a", "b"]), fingerprintOf(["a", "b"]))
     assert.notStrictEqual(fingerprintOf(["ab", ""]), fingerprintOf(["a", "b"]))
+    assert.notStrictEqual(fingerprintOf(["ab", "c"]), fingerprintOf(["a", "bc"]))
     assert.match(fingerprintOf(["x"]), /^[0-9a-f]{64}$/)
   })
 })

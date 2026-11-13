@@ -22,6 +22,7 @@
     "judgment:replay": "tsx tools/judgment/replay-review.ts",
     "typecheck": "tsc -b tsconfig.json --pretty false",
     "unused": "node scripts/unused-modules.mjs",
+    "exports:write": "node scripts/unused-modules.mjs --write-exports",
     "version:set": "node scripts/set-version.mjs",
     "judgment:label": "tsx tools/judgment/label.ts",
     "judgment:eval": "tsx tools/judgment/eval.ts"

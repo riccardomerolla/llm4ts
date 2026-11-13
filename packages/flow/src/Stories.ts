@@ -21,16 +21,14 @@ import type { LlmError } from "@llm4ts/core/Errors"
 import { BoardItem, eventedBoard, type BoardSyncShape } from "./BoardSync.ts"
 import { makeChat } from "./Chat.ts"
 import { flowReviewer, implementPlanFlow, type TaskOverrides } from "./Flow.ts"
+import { storyGateLogDir, mergeGateLogDir, type GateLogDir } from "./Gates.ts"
 import {
   GateBaseline,
   baselineKey,
   ensureBaseline as ensureStoredBaseline,
   failingLinesOf,
-  storyGateLogDir,
-  mergeGateLogDir,
-  writeBaseline,
-  type GateLogDir
-} from "./Gates.ts"
+  writeBaseline
+} from "./GateTriage.ts"
 import type { ContextOptions, FlowContextShape } from "./FlowContext.ts"
 import {
   describeFlowError,

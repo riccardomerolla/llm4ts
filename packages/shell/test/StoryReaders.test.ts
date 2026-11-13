@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { UnknownStory } from "@llm4ts/flow/OperatorSchemas"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { isSafeStoryId, storyDetailOf, storyDiagnosisOf } from "@llm4ts/runner/StoryReaders"
+import { isSafeStoryId, storyDetailOf, storyDiagnosisOf } from "../src/StoryReaders.ts"
 import { seeded, stateDir, trace } from "./support/retroFixture.ts"
 
 const tracePath = "/repo/.llm4ts/runs/run-1/trace.jsonl"

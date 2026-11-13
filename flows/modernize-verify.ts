@@ -35,7 +35,7 @@ import {
 import { capped, renderTruncation, truncations, withShrink } from "@llm4ts/flow/Context"
 import { renderEquivReport, VectorVerdict } from "@llm4ts/flow/EquivReport"
 import { PlanParseError } from "@llm4ts/flow/FlowError"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { FlowEvents } from "@llm4ts/flow/FlowEvents"
 import type { Pack } from "@llm4ts/flow/Pack"
 import {

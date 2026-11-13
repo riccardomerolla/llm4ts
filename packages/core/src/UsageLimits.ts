@@ -1,3 +1,4 @@
+// @internal: usage-limit classification for the CLI connectors
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import { RateLimitError, UsageLimitError, type LlmError } from "./Errors.ts"

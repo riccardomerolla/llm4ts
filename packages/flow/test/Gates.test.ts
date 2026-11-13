@@ -6,24 +6,26 @@ import { ToolError } from "@llm4ts/core/Errors"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import {
+  compactGateArtifacts,
+  compactGateLog,
+  gateLogName,
+  gatesIn,
+  storyGateLogDir
+} from "@llm4ts/flow/Gates"
+import {
   GateBaseline,
   baselineKey,
   baselinesPath,
-  compactGateArtifacts,
-  compactGateLog,
   describeGateReason,
   failingLinesOf,
-  gateLogName,
   gateReasonLine,
   gateReasonOf,
-  gatesIn,
   normalizeGateOutput,
   readBaseline,
-  storyGateLogDir,
   testGateReasonOf,
   triageGates,
   writeBaseline
-} from "@llm4ts/flow/Gates"
+} from "@llm4ts/flow/GateTriage"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 

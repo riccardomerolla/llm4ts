@@ -40,7 +40,7 @@ import {
   stage
 } from "@llm4ts/runner"
 import { FlowEvents } from "@llm4ts/flow/FlowEvents"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { loadBenchRecords, renderBenchReport } from "@llm4ts/flow/BenchReport"
 import {
   type SurveyGraph,

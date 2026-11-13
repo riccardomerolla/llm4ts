@@ -20,7 +20,7 @@ import {
   unanswered,
   type BriefStatus
 } from "@llm4ts/flow/EpicBrief"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import {
   EpicBriefInvalid,
   EpicBriefNotApproved,
@@ -106,8 +106,6 @@ import {
   claude,
   judgmentConnectorFromEnvironment,
   pi,
-  coderFromEnvironment,
-  reasonerFromEnvironment as runnerReasonerFromEnvironment,
   seatsFromEnvironment
 } from "@llm4ts/runner/Connectors"
 import { FlowAborted, FlowLlmError, ReviewResult, ScriptUsage, lintCommand } from "@llm4ts/runner"
@@ -820,16 +818,6 @@ export const chooseEpic = (args: {
 }
 
 // ---- Seats --------------------------------------------------------------------
-
-/** The reasoning seat: `LLM4TS_REASONER`, any coder id, default claude. Unknown names fail typed. */
-export const reasonerFromEnvironment = (
-  environment: Readonly<Record<string, string | undefined>>
-): Effect.Effect<CliConnectorConfig, ScriptUsage> => runnerReasonerFromEnvironment(environment)
-
-/** The coder seat: `LLM4TS_CODER`, default pi — the cheap local typist under a stronger orchestrator. */
-export const storyCoderFromEnvironment = (
-  environment: Readonly<Record<string, string | undefined>>
-): Effect.Effect<CliConnectorConfig, ScriptUsage> => coderFromEnvironment(environment, pi)
 
 // ---- Seat flags and local servers --------------------------------------------------
 

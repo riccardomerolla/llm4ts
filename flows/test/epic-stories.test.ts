@@ -86,11 +86,9 @@ import {
   mergeRevisionsOption,
   taskConcurrencyOption,
   parseEpicArgs,
-  reasonerFromEnvironment,
   serverHealthUrl,
   setupAgentEnabled,
   setupIn,
-  storyCoderFromEnvironment,
   storyJudgeQuery,
   storyPlanInstructions,
   verifyBlockedOn,
@@ -363,19 +361,6 @@ describe("epic-stories flags and seats", () => {
       assert.isTrue(picked.list)
       assert.strictEqual((yield* parseEpicArgs(["--epic=carte"])).epic, "carte")
       assert.strictEqual((yield* Effect.flip(parseEpicArgs(["--epic"])))._tag, "ScriptUsage")
-    })
-  )
-
-  it.effect("defaults to claude as reasoner and pi as coder, refusing unknown names", () =>
-    Effect.gen(function* () {
-      assert.strictEqual((yield* reasonerFromEnvironment({})).connectorId.value, "claude-cli")
-      assert.strictEqual(
-        (yield* reasonerFromEnvironment({ LLM4TS_REASONER: "gemini" })).connectorId.value,
-        "gemini-cli"
-      )
-      assert.strictEqual((yield* storyCoderFromEnvironment({})).connectorId.value, "pi")
-      const bad = yield* Effect.flip(reasonerFromEnvironment({ LLM4TS_REASONER: "nope" }))
-      assert.include(bad.message, "unknown LLM4TS_REASONER")
     })
   )
 

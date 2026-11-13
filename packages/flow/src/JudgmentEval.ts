@@ -1,3 +1,4 @@
+// @internal: offline judgment evaluation for tools/judgment
 import * as Schema from "effect/Schema"
 import { expectedScore, truth, type Answer } from "@llm4ts/core/judgment/Schemas"
 import { decide, type Decision } from "./Judgment.ts"

@@ -14,7 +14,7 @@ import {
 } from "@llm4ts/flow/OperatorSchemas"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { readTrace } from "@llm4ts/flow/Replay"
-import { TraceUnreadable } from "@llm4ts/runner/RunReaders"
+import { TraceUnreadable } from "./RunReaders.ts"
 import type { OperatorConfig } from "./OperatorConfig.ts"
 import type { RunSupervisorShape } from "./RunSupervisor.ts"
 

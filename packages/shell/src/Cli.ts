@@ -10,12 +10,7 @@ import { FileSystem } from "effect/FileSystem"
 import * as Schema from "effect/Schema"
 import { Argument, Command, Flag } from "effect/cli"
 import { makeCliProgram } from "@llm4ts/runner/Cli"
-import {
-  CostsResult,
-  makeCostsProgram,
-  renderCostsResult,
-  type CostsOptions
-} from "@llm4ts/runner/Costs"
+import { CostsResult, makeCostsProgram, renderCostsResult, type CostsOptions } from "./Costs.ts"
 import { makeDoctorProgram } from "@llm4ts/runner/Doctor"
 import { makeGeminiBridgeProgram, type GeminiBridgeOptions } from "@llm4ts/runner/GeminiBridgeServe"
 import { nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
@@ -33,8 +28,8 @@ import {
   nodeTraceSources,
   nodeWatchDependencies,
   type WatchOptions
-} from "@llm4ts/runner/Watch"
-import { makeProfileProgram, type ProfileOptions } from "@llm4ts/runner/Profile"
+} from "./Watch.ts"
+import { makeProfileProgram, type ProfileOptions } from "./Profile.ts"
 import {
   makeGraphProgram,
   nodeGraphDependencies,

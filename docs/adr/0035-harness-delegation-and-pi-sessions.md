@@ -1,6 +1,11 @@
 # ADR 0035: Harness Delegation, pi Sessions, And Staying On The pi CLI
 
-Status: Proposed · Date: 2026-10-10 · Extends ADR 0010, ADR 0016 and ADR 0019
+Status: Superseded (4.0.0) · Date: 2026-10-10 · Extends ADR 0010, ADR 0016 and ADR 0019
+
+> **Superseded in 4.0.0.** Delegation is not planned for 4.x. The session
+> seam this ADR would have built on, `AgentSession` and
+> `providers/ClaudeAgentSession`, was deleted in 4.0.0. The pi-session part
+> was never implemented; bringing it back needs its own ADR.
 
 ## Context
 

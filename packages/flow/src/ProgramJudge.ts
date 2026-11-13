@@ -1,7 +1,7 @@
 import { reviewRulesPreamble } from "./Review.ts"
 import * as Effect from "effect/Effect"
-import { Sample, type Dimension, type EvalResult } from "@llm4ts/core/eval/Eval"
-import { makeEvaluator, type Evaluator } from "@llm4ts/core/eval/Evaluator"
+import { Sample, type Dimension, type EvalResult, type Evaluator } from "@llm4ts/core/eval/Eval"
+import { makeEvaluator } from "@llm4ts/core/eval/Evaluator"
 import { judgeWithJudgment } from "@llm4ts/core/eval/Judge"
 import type { JudgmentShape } from "@llm4ts/core/judgment/Judgment"
 import { capped, withShrink } from "./Context.ts"
@@ -18,7 +18,7 @@ import type { GitToolShape } from "./GitTool.ts"
 import type { Pack } from "./Pack.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
 import { ReviewIssue, ReviewResult, mergeReviewResults } from "./Review.ts"
-import { cachedReview } from "./ReviewCache.ts"
+import { cachedReview, fingerprintOf } from "./ReviewCache.ts"
 
 // Per-program spec-compliance judging, shared by the implement and review
 // phases. A whole-branch judge call carries every spec and every diff hunk in
@@ -71,8 +71,6 @@ export interface ProgramJudgeOptions {
   /** A program's spec text; the caller owns where specs live. */
   readonly specFor: (program: string) => Effect.Effect<string, FlowError>
   readonly query: string
-  /** Content fingerprint for the verdict cache (hashing lives outside flow). */
-  readonly fingerprint: (...parts: ReadonlyArray<string>) => string
 }
 
 /**
@@ -219,7 +217,7 @@ const judgeSlice = Effect.fn("@llm4ts/flow/ProgramJudge.judgeSlice")(function* (
   return yield* cachedReview(
     options.files,
     join(options.gateDir, `${label}.json`),
-    options.fingerprint(spec, diff, rubric, ...judgmentKey),
+    fingerprintOf([spec, diff, rubric, ...judgmentKey]),
     events.publish(Info.make({ message: `judging ${label}` })).pipe(
       Effect.andThen(
         withShrink(`judge[${label}]`, (cap) =>

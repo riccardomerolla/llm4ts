@@ -14,14 +14,16 @@ import {
 } from "@llm4ts/flow/FlowEvents"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import { digestedTags } from "@llm4ts/runner/EventPresentation"
 import {
   costsOfRun,
   foldTrace,
   meaningfulEventsAfter,
+  meaningfulKinds,
   runDiagnosisOf,
   runStatusOf,
   TraceUnreadable
-} from "@llm4ts/runner/RunReaders"
+} from "../src/RunReaders.ts"
 
 const t0 = 1_790_000_000_000
 
@@ -59,6 +61,10 @@ const storeOf = (initial: Readonly<Record<string, string>>) =>
   Effect.map(makeMemoryPlainFileStore(initial), (memory) => memory.store)
 
 describe("RunReaders", () => {
+  it("meaningful kinds are the digested ones plus the run's end", () => {
+    assert.deepStrictEqual([...meaningfulKinds].sort(), [...digestedTags, "RunEnded"].sort())
+  })
+
   it.effect("foldTrace seeds stories from the board and folds the trace", () =>
     Effect.gen(function* () {
       const files = yield* storeOf({

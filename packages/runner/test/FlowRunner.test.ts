@@ -46,6 +46,7 @@ import {
   flowMainSignals,
   interruptOnSignal,
   makeFlowRunnerContext,
+  runEmbedded,
   runIdentityFromEnvironment,
   runWithBundle
 } from "@llm4ts/runner/FlowRunner"
@@ -1602,6 +1603,48 @@ describe("seat usage metering", () => {
           assert.isFalse(yield* stamped({ LLM4TS_TIMESTAMPS: off }), off)
         }
         assert.isFalse(yield* stamped({}))
+      })
+    )
+  )
+
+  it.effect("refuses an unreadable environment value before the flow body runs", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { dependencies, options: base } = yield* setupWith(silent)
+        const ran = yield* Ref.make(false)
+        const options = {
+          ...base,
+          environment: {
+            LLM4TS_JUDGE_ROUNDS: "abc",
+            LLM4TS_TIMESTAMPS: "maybe",
+            LLM4TS_MCP_TOKEN: "s3cret"
+          }
+        }
+        const error = yield* Effect.flip(
+          runEmbedded(options, () => Ref.set(ran, true), dependencies)
+        )
+        assert.strictEqual(error._tag, "ScriptUsage")
+        assert.strictEqual(
+          error.message,
+          [
+            "the environment: LLM4TS_JUDGE_ROUNDS must be a positive integer; fix or unset it",
+            "the environment: LLM4TS_TIMESTAMPS must be on or off; fix or unset it"
+          ].join("\n")
+        )
+        assert.notInclude(error.message, "s3cret")
+        assert.isFalse(yield* Ref.get(ran))
+      })
+    )
+  )
+
+  it.effect("runs the flow body when every environment value reads", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { dependencies, options: base } = yield* setupWith(silent)
+        const ran = yield* Ref.make(false)
+        const options = { ...base, environment: { LLM4TS_JUDGE_ROUNDS: "3" } }
+        yield* runEmbedded(options, () => Ref.set(ran, true), dependencies)
+        assert.isTrue(yield* Ref.get(ran))
       })
     )
   )

@@ -1,7 +1,7 @@
 // The target's gates as a module (ADR 0027): run them in a directory with a
 // timeout and a log per gate, remember what they said on a base, and keep
 // only what matters when an epic lands. The pure half lives in
-// GateTriage.ts and is re-exported here.
+// GateTriage.ts.
 import { join } from "node:path"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -11,8 +11,6 @@ import type { FlowEventsShape } from "./FlowEvents.ts"
 import { baselinesPath, normalizeGateOutput } from "./GateTriage.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
 import { lintCommand, mergeReviewResults, type ReviewResult } from "./Review.ts"
-
-export * from "./GateTriage.ts"
 
 export interface GateLogDir {
   readonly files: PlainFileStoreShape

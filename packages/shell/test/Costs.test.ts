@@ -13,7 +13,7 @@ import {
   makeCostsProgram,
   renderCostsResult,
   type CostsDependencies
-} from "@llm4ts/runner/Costs"
+} from "../src/Costs.ts"
 
 const at = (iso: string): number => Date.parse(iso)
 

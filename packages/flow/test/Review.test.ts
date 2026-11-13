@@ -12,7 +12,7 @@ import { makeChat } from "@llm4ts/flow/Chat"
 import { ProcessError } from "@llm4ts/flow/FlowError"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import { makeCollectingFlowEvents, ReviewFinding } from "@llm4ts/flow/FlowEvents"
-import { Reviewer } from "@llm4ts/flow/Pack"
+import { Reviewer } from "@llm4ts/flow/Reviewer"
 import {
   ReviewIssue,
   ReviewResult,
@@ -30,7 +30,7 @@ import {
   reviewRulesPreamble,
   tagLens
 } from "@llm4ts/flow/Review"
-import { GateBaseline } from "@llm4ts/flow/Gates"
+import { GateBaseline } from "@llm4ts/flow/GateTriage"
 import { ReviewMemory } from "@llm4ts/flow/Recheck"
 import { diffChunks, remember } from "@llm4ts/flow/Recheck"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"

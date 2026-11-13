@@ -16,6 +16,7 @@ import {
   readSetting,
   settingFacts,
   settingNames,
+  unreadableInEnvironment,
   type Environment,
   type SettingFacts,
   type SettingName
@@ -259,9 +260,9 @@ export interface ResolveInput {
  * Pure: flag > environment > project file > global file. Judges each
  * assignment against the registry and keeps what each winner shadows. An
  * empty value counts as unset unless the grammar gives empty a meaning. A
- * value the grammar does not read is dropped from a flag or a file (an
- * error) and kept from the environment (a warning): an export keeps the
- * meaning it has today.
+ * value the grammar does not read is an error from every layer: dropped from
+ * a flag or a file, kept from the environment so `config show` can print
+ * where it comes from. A launch refuses on either.
  */
 export const resolveConfig = (input: ResolveInput): Resolution => {
   const known = new Map<string, SettingFacts>(input.facts.map((fact) => [fact.name, fact]))
@@ -324,9 +325,12 @@ export const resolveConfig = (input: ResolveInput): Resolution => {
     const read = readSetting(fact.name, value)
     if (Result.isFailure(read)) {
       problems.push({
-        severity: source.layer === "environment" ? "warning" : "error",
+        severity: "error",
         kind: "unreadable",
-        message: `${where}: ${name} must be ${read.failure}`,
+        message:
+          source.layer === "environment"
+            ? unreadableInEnvironment(fact.name)
+            : `${where}: ${name} must be ${read.failure}`,
         name,
         source
       })

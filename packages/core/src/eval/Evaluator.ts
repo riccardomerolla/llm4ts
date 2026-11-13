@@ -1,8 +1,6 @@
 import * as Effect from "effect/Effect"
 import { EvalResult, type Evaluator } from "./Eval.ts"
 
-export type { Evaluator }
-
 export const makeEvaluator = <In>(evaluate: Evaluator<In>["evaluate"]): Evaluator<In> => ({
   evaluate
 })

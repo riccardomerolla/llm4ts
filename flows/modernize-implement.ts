@@ -21,9 +21,8 @@
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { withContract } from "@llm4ts/flow/AutonomyContract"
-import { Dimension, Sample, type EvalResult } from "@llm4ts/core/eval/Eval"
+import { Dimension, Sample, type EvalResult, type Evaluator } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
-import type { Evaluator } from "@llm4ts/core/eval/Evaluator"
 import {
   FlowAborted,
   FlowLlmError,
@@ -44,7 +43,6 @@ import {
   openPack,
   resolveFlowInput,
   reviewAndFixLoop,
-  reviewFingerprint,
   runFlowMain,
   runNode,
   stage
@@ -469,8 +467,7 @@ const program = Effect.gen(function* () {
                         scope === undefined ? (text ?? "") : `${text ?? ""}\n\n${scope}`
                       )
                     ),
-                query: input.prompt,
-                fingerprint: reviewFingerprint
+                query: input.prompt
               })
               const trace = yield* files
                 .read(join(specsDirAbs, "traceability.md"))

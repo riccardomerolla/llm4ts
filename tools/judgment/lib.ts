@@ -31,7 +31,7 @@ import {
   prepareConnector
 } from "@llm4ts/runner/Connectors"
 import type { FlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
-import { nodeHttpClient } from "@llm4ts/runner/NodeHttpClient"
+import { nodeHttpClient } from "../../packages/runner/src/NodeHttpClient.ts"
 
 export class JudgmentToolError extends Schema.TaggedError<JudgmentToolError>()(
   "JudgmentToolError",
