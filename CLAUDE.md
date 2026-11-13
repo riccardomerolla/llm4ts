@@ -9,8 +9,10 @@ began as a port of `llm4zio`; parity with it is no longer a goal.
    the living design record.
 2. Read `docs/architecture.md` and `docs/api.md` for package boundaries and
    the public surface.
-3. For Effect work, consult `.repos/effect` and the repository Effect skill
-   before coding.
+3. For Effect work, consult the installed `effect` package (pinned at 4.0.0,
+   under `node_modules`) and the `effect-ts` and `effect-ts-conventions`
+   skills before coding. A local `.repos/effect` checkout, when present, may
+   lag the pin.
 
 `plan.md`, `docs/csp/`, `docs/CSP_STATUS.md` and `docs/parity.md` are
 historical, frozen at 2.54.1. Do not follow or update them.
@@ -51,7 +53,8 @@ Extend the existing seams instead of writing one-off variants:
 - Typed judgments: the `Judgment` service in `packages/core/src/judgment/`
   (ADR 0017); a new backend is a layer over it, a new decision is questions
   plus a `JudgmentPolicy` in flow, never a parsed prose reply. Connectors
-  reach probabilities only through `scoreLabels` (`LabelScoring.ts`)
+  reach probabilities only through `scoreLabels`
+  (`packages/core/src/LabelScoring.ts`)
 - Flow spine: `implementPlanFlow` (`packages/flow/src/Flow.ts`)
 - Node composition: `runNode` in `packages/runner/src/FlowRunner.ts` — the
   runner stays thin; policy belongs in core/flow
