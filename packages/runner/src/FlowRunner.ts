@@ -51,7 +51,7 @@ import {
   type FlowError
 } from "@llm4ts/flow/FlowError"
 import {
-  defaultDrainTimeout,
+  type DrainReport,
   FlowEvents,
   FlowEventsValues,
   Info,
@@ -987,6 +987,21 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   }
 })
 
+/** What the run prints when `drained` reports a consumer short. */
+export const drainShortfall = (report: DrainReport): string => {
+  const behind = report.behind.map(
+    (consumer) => `${consumer.name} was ${consumer.missing.toString()} event(s) behind`
+  )
+  const late = report.late.map(
+    (consumer) =>
+      `${consumer.name} started listening after ${consumer.missed.toString()} event(s) were published`
+  )
+  return (
+    `some run events were still unconsumed: ${[...late, ...behind].join("; ")}. ` +
+    "The totals below, the ledger, and the trace may be short"
+  )
+}
+
 /** `claude (coder·reviewer·judge ×3)` — how the run header names an executor. */
 const describeExecutor = (spec: ExecutorSpec): string =>
   `${spec.id} (${rolesOf(spec).join("·")} ×${spec.slots ?? 1})`
@@ -1159,33 +1174,13 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     Effect.provideService(FlowContext, context),
     Effect.andThen((value) => Effect.as(enforceBudget, value)),
     Effect.ensuring(
-      Effect.all(
-        [
-          terminal.awaitDrained(),
-          Effect.all(
-            [
-              tracker.awaitDrained(bundle.events),
-              recorder === undefined ? Effect.succeed(true) : recorder.awaitDrained(bundle.events),
-              bundle.judgmentLog === undefined
-                ? Effect.succeed(true)
-                : bundle.judgmentLog.awaitDrained(bundle.events)
-            ],
-            { concurrency: "unbounded" }
-          )
-        ],
-        { concurrency: "unbounded" }
-      ).pipe(
-        // A consumer that gave up before catching up leaves the totals below
-        // short. Say so rather than printing a quietly incomplete summary.
-        Effect.flatMap(([, accounted]) =>
-          accounted.every((drained) => drained)
-            ? Effect.void
-            : surface.log(
-                palette.fail(
-                  `some run events were still unconsumed after ${defaultDrainTimeout} — ` +
-                    "the totals below, the ledger, and the trace may be short"
-                )
-              )
+      // One wait for every consumer of the run: the terminal, the totals,
+      // the trace, the judgment log. A consumer that fell short leaves the
+      // totals below short, so the run names it instead of printing a
+      // quietly incomplete summary.
+      bundle.events.drained().pipe(
+        Effect.flatMap((report) =>
+          report.complete ? Effect.void : surface.log(palette.fail(drainShortfall(report)))
         ),
         Effect.andThen(tree === undefined ? Effect.void : tree.close),
         Effect.andThen(appendLedger),

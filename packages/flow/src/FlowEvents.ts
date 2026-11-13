@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer"
 import * as PubSub from "effect/PubSub"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import * as Semaphore from "effect/Semaphore"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
@@ -737,10 +738,62 @@ export const makeCollectingFlowEvents: Effect.Effect<CollectingFlowEvents> = Eff
   })
 )
 
+/** How a consumer stands against what the hub published; see `FlowEventHub.drained`. */
+export interface DrainReport {
+  /** Every consumer handled every event it was owed, and none joined late. */
+  readonly complete: boolean
+  /** Consumers still short when the wait ended, and by how many events. */
+  readonly behind: ReadonlyArray<{ readonly name: string; readonly missing: number }>
+  /**
+   * Consumers meant to see the whole run that subscribed after events were
+   * published: those events never reached them, however long anyone waits.
+   */
+  readonly late: ReadonlyArray<{ readonly name: string; readonly missed: number }>
+}
+
+export interface FlowEventConsumer {
+  readonly name: string
+  /** Whether this consumer alone handled everything it was owed, within `timeout`. */
+  readonly caughtUp: (timeout?: Duration.Input) => Effect.Effect<boolean>
+}
+
+export interface ConsumeOptions {
+  /**
+   * `start` (the default): the consumer accounts for the whole run, so
+   * joining after an event was published is reported by `drained`. `now`:
+   * it is owed only what is published from here on.
+   */
+  readonly from?: "start" | "now"
+}
+
 export interface FlowEventHub extends FlowEventsShape {
   readonly subscribe: Effect.Effect<PubSub.Subscription<FlowEvent>, never, Scope.Scope>
   readonly stream: Stream.Stream<FlowEvent>
   readonly publishedCount: Effect.Effect<number>
+  /**
+   * Runs `handle` on every event published from here on, in order, on a fiber
+   * of the scope. The one consumer loop: the hub counts what each consumer
+   * handled, so nobody keeps a counter of their own.
+   */
+  readonly consume: (
+    name: string,
+    handle: (event: FlowEvent) => Effect.Effect<void>,
+    options?: ConsumeOptions
+  ) => Effect.Effect<FlowEventConsumer, never, Scope.Scope>
+  /**
+   * Waits, at most `timeout`, for every live consumer to handle what it was
+   * owed, then says who fell short. A late subscriber ends the wait at once:
+   * no wait can bring back what it missed.
+   */
+  readonly drained: (timeout?: Duration.Input) => Effect.Effect<DrainReport>
+}
+
+interface ConsumerState {
+  readonly name: string
+  /** Events published before this consumer subscribed. */
+  readonly baseline: number
+  readonly wholeRun: boolean
+  readonly handled: Ref.Ref<number>
 }
 
 export const makeFlowEventHub = Effect.fn("@llm4ts/flow/FlowEvents.makeHub")(function* (
@@ -748,6 +801,40 @@ export const makeFlowEventHub = Effect.fn("@llm4ts/flow/FlowEvents.makeHub")(fun
 ): Effect.fn.Return<FlowEventHub> {
   const events = yield* PubSub.bounded<FlowEvent>(capacity)
   const published = yield* Ref.make(0)
+  const consumers = yield* Ref.make<ReadonlyArray<ConsumerState>>([])
+  // Held across a publish and its count, and across a subscription and the
+  // count it reads, so a consumer's baseline is exact: every event counted in
+  // it was published before the subscription, every later one reaches it.
+  const order = yield* Semaphore.make(1)
+
+  const missingOf = (consumer: ConsumerState, target: number): Effect.Effect<number> =>
+    Effect.map(Ref.get(consumer.handled), (handled) =>
+      Math.max(0, target - consumer.baseline - handled)
+    )
+
+  const waitFor = (
+    who: Effect.Effect<ReadonlyArray<ConsumerState>>,
+    timeout: Duration.Input
+  ): Effect.Effect<ReadonlyArray<{ readonly name: string; readonly missing: number }>> =>
+    Effect.gen(function* () {
+      const target = yield* Ref.get(published)
+      const behind = Effect.flatMap(who, (all) =>
+        Effect.forEach(all, (consumer) =>
+          Effect.map(missingOf(consumer, target), (missing) => ({ name: consumer.name, missing }))
+        ).pipe(Effect.map((rows) => rows.filter((row) => row.missing > 0)))
+      )
+      const poll: Effect.Effect<void> = Effect.suspend(() =>
+        Effect.flatMap(behind, (rows) =>
+          rows.length === 0 ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(poll))
+        )
+      )
+      // Bounded on purpose. A consumer can fall permanently short, a handler
+      // that never returns among the ways, and an unbounded wait then pegs a
+      // core forever and swallows the end of the run.
+      yield* Effect.timeoutOption(poll, timeout)
+      return yield* behind
+    })
+
   return {
     // Counted AFTER delivery, and only when the PubSub accepted the event.
     // Tallying first meant a publish interrupted while backpressured (a
@@ -755,15 +842,54 @@ export const makeFlowEventHub = Effect.fn("@llm4ts/flow/FlowEvents.makeHub")(fun
     // permanently above anything a consumer could ever reach, and every
     // drain waiting on it never finished.
     publish: (event) =>
-      PubSub.publish(events, event).pipe(
-        Effect.flatMap((accepted) =>
-          accepted ? Ref.update(published, (count) => count + 1) : Effect.void
-        ),
-        Effect.asVoid
+      order.withPermit(
+        PubSub.publish(events, event).pipe(
+          Effect.flatMap((accepted) =>
+            accepted ? Ref.update(published, (count) => count + 1) : Effect.void
+          ),
+          Effect.asVoid
+        )
       ),
     subscribe: PubSub.subscribe(events),
     stream: Stream.fromPubSub(events),
-    publishedCount: Ref.get(published)
+    publishedCount: Ref.get(published),
+    consume: (name, handle, options) =>
+      Effect.gen(function* () {
+        const handled = yield* Ref.make(0)
+        const [subscription, baseline] = yield* order.withPermit(
+          Effect.all([PubSub.subscribe(events), Ref.get(published)])
+        )
+        const state: ConsumerState = {
+          name,
+          baseline,
+          wholeRun: options?.from !== "now",
+          handled
+        }
+        yield* Ref.update(consumers, (all) => [...all, state])
+        yield* Stream.fromSubscription(subscription).pipe(
+          Stream.runForEach((event) =>
+            handle(event).pipe(Effect.andThen(Ref.update(handled, (count) => count + 1)))
+          ),
+          Effect.forkScoped
+        )
+        // A consumer whose scope closed handles nothing more: nobody waits on it.
+        yield* Effect.addFinalizer(() =>
+          Ref.update(consumers, (all) => all.filter((other) => other !== state))
+        )
+        return {
+          name,
+          caughtUp: (timeout = defaultDrainTimeout) =>
+            Effect.map(waitFor(Effect.succeed([state]), timeout), (rows) => rows.length === 0)
+        }
+      }),
+    drained: (timeout = defaultDrainTimeout) =>
+      Effect.gen(function* () {
+        const late = (yield* Ref.get(consumers))
+          .filter((consumer) => consumer.wholeRun && consumer.baseline > 0)
+          .map((consumer) => ({ name: consumer.name, missed: consumer.baseline }))
+        const behind = yield* waitFor(Ref.get(consumers), late.length === 0 ? timeout : 0)
+        return { complete: behind.length === 0 && late.length === 0, behind, late }
+      })
   }
 })
 
@@ -780,6 +906,9 @@ export const defaultDrainTimeout = "3 seconds"
  * In the runner that swallowed the end of a run: every stage printed and
  * ticked green, and no cost summary ever following, because the summary is
  * written only once every consumer reports drained.
+ *
+ * @deprecated Use `hub.consume`, which counts for the consumer, and
+ * `hub.drained` or the consumer's `caughtUp`.
  */
 export const awaitConsumed = (
   hub: FlowEventHub,

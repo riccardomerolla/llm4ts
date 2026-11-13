@@ -42,6 +42,7 @@ import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryTranscriptSink } from "@llm4ts/flow/Transcript"
 import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import {
+  drainShortfall,
   flowMainSignals,
   interruptOnSignal,
   makeFlowRunnerContext,
@@ -348,6 +349,65 @@ describe("startup notices", () => {
         )
         assert.match(trace, /CapabilityUnenforceable/)
         assert.isFalse(rendered.some((line) => line.includes("still unconsumed")))
+      })
+    )
+  )
+})
+
+describe("a consumer that fell short", () => {
+  it("is named in the warning, late subscribers first", () => {
+    assert.strictEqual(
+      drainShortfall({
+        complete: false,
+        behind: [{ name: "trace", missing: 3 }],
+        late: [{ name: "terminal", missed: 2 }]
+      }),
+      "some run events were still unconsumed: terminal started listening after 2 event(s) " +
+        "were published; trace was 3 event(s) behind. The totals below, the ledger, and the " +
+        "trace may be short"
+    )
+  })
+
+  // A caller that publishes on the bundle before the run starts: the terminal
+  // and the trace subscribe too late for that event. The run used to wait out
+  // the drain for it; now it says who missed it and moves on.
+  it.live("a run whose terminal subscribed late says so at once", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const process = yield* makeFakeProcessExecutor()
+        const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+        const output = yield* Ref.make<ReadonlyArray<string>>([])
+        const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+        const registry = makeConnectorRegistry([
+          { connectorId: ConnectorIds.Mock, kind: "Api", create: () => Effect.succeed(mock) }
+        ])
+        const surface: TerminalSurface = {
+          palette: plainTerminalPalette,
+          log: (line) => Ref.update(output, (current) => [...current, line]),
+          setStatus: (_label) => Effect.void,
+          suspend: (effect) => effect
+        }
+        const dependencies = { registry, process: process.executor, files: files(state) }
+        const options = {
+          workDir: "/repo",
+          workspace: "/repo",
+          userPrompt: "do it",
+          coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+          surface,
+          tracePath: "trace.jsonl",
+          runId: "run-1"
+        }
+        const bundle = yield* makeFlowRunnerContext(options, dependencies)
+        yield* bundle.events.publish(Info.make({ message: "published before the run" }))
+        const started = Date.now()
+        yield* runWithBundle(bundle, options, () => Effect.void, dependencies)
+        const rendered = yield* Ref.get(output)
+
+        assert.isBelow(Date.now() - started, 2000)
+        const warning = rendered.find((line) => line.includes("still unconsumed")) ?? ""
+        assert.include(warning, "terminal started listening after 1 event(s) were published")
+        assert.include(warning, "trace started listening after 1 event(s) were published")
+        assert.notInclude(warning, "cost tracker")
       })
     )
   )

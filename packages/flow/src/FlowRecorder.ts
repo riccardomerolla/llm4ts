@@ -5,10 +5,9 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
 import type * as Scope from "effect/Scope"
-import * as Stream from "effect/Stream"
 import type { StreamRecorder } from "@llm4ts/core/observability/StreamRecorder"
 import type { JsonValue } from "@llm4ts/core/providers/CliSupport"
-import { awaitConsumed, type FlowEvent, type FlowEventHub } from "./FlowEvents.ts"
+import type { FlowEvent, FlowEventHub } from "./FlowEvents.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
 
 export class TraceLine extends Schema.Class<TraceLine>("TraceLine")({
@@ -60,7 +59,6 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
   runId: string
 ): Effect.fn.Return<FlowRecorderShape> {
   const sequence = yield* Ref.make(0)
-  const consumed = yield* Ref.make(0)
   const lock = yield* Semaphore.make(1)
   // Set by the first failed write and never cleared: a disk that refused one
   // line is not asked again, but every line it then loses is counted, so
@@ -113,21 +111,14 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
         message
       }),
     consume: (hub) =>
-      Effect.gen(function* () {
-        const subscription = yield* hub.subscribe
-        yield* Stream.fromSubscription(subscription).pipe(
-          Stream.runForEach((event) =>
-            // Progress is for the screen; the call's TokensUsed is the record.
-            (event._tag === "UsageProgress" ? Effect.void : record(event)).pipe(
-              Effect.andThen(Ref.update(consumed, (count) => count + 1))
-            )
-          ),
-          Effect.forkScoped,
-          Effect.asVoid
+      Effect.asVoid(
+        // Progress is for the screen; the call's TokensUsed is the record.
+        hub.consume("trace", (event) =>
+          event._tag === "UsageProgress" ? Effect.void : record(event)
         )
-      }),
+      ),
     end: (outcome) => append("RunEnded", { outcome }),
-    awaitDrained: (hub, timeout) => awaitConsumed(hub, consumed, timeout)
+    awaitDrained: (hub, timeout) => Effect.map(hub.drained(timeout), (report) => report.complete)
   }
   return recorder
 })

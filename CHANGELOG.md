@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.4.0
+
+- **A run says which consumer missed events.** The event hub gains
+  `consume(name, handle)` and `drained()`. The terminal, the cost totals, the
+  trace, the judgment log, the agent tree and the bench tap each ran their
+  own subscription loop with their own counter; they now share the hub's.
+  When the end of a run finds a consumer short, the warning names it:
+  `terminal started listening after 2 event(s) were published`, or
+  `trace was 3 event(s) behind`. A consumer that subscribed late is reported
+  at once: no wait can bring back what it missed, and the run no longer sits
+  out three seconds for it.
+- `FlowEventHub` has two new members, so a hand-built hub needs them.
+  `awaitConsumed` is deprecated. `TerminalConsumer.consumed`, a counter that
+  only its own module read, is gone.
+- `pnpm unused` also fails on an import cycle among `packages/*/src`. The
+  three that existed are broken with no public name moved.
+- `@llm4ts/js` no longer declares `@llm4ts/flow`, which it never imported.
+
 ## 3.3.0
 
 Settings no longer have to be typed in front of every command (ADR 0049).
