@@ -1,0 +1,2 @@
+agent-tree, 7 min: 1 stories done, 2 active (payments, pi-lmstudio, Payments fake routes; overview, codex, story overview: setup), 1 failed (iban: failed · pi error: Connection error.), $0.38
+epic-stories, 7 min: 1 stories done, 2 active (payments, pi-lmstudio, Payments fake routes; overview, codex, story overview: setup), 1 failed (iban: failed · pi error: Connection error.), $0.38

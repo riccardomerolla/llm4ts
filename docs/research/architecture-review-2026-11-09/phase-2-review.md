@@ -191,3 +191,15 @@ function, what replaces it.
   repository was read.
 - The line counts and export counts were measured on `main` at 3.4.0.
 - Nothing in this page was built.
+
+## Phase 3, unit 15: dropped (2026-11-13)
+
+The shared run-state fold already exists: `reduceTree` in
+`packages/runner/src/AgentTree.ts` feeds the live dashboard
+(`AgentTreeSurface`), `llm4ts watch`, the run summary and the operator's run
+readers. Only `Terminal` and `Profile` fold on their own. Their overlap with
+the tree is about 20 lines of lane lifecycle in `Profile`. `Terminal` counts
+tokens differently (input and output, in flight, estimated), reads the clock
+rather than the event, and opens a lane on any laned event, so moving it onto
+the tree would change what it prints. Golden tests over three traces now pin
+what each run view prints (`RunViews.golden.test.ts` in runner and shell).

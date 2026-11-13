@@ -1,0 +1,22 @@
+llm4ts profile · 7m10s wall · 4 stories · estimated: this trace has no timings (before 2.22), model time is read from gaps
+
+Where the time goes
+  1. stories queued before starting (dependencies, free coder slots): 6m49s in all
+  2. accounts: model calls (estimated) 1m48s of 6m37s
+  3. payments: model calls (estimated) 28s of 7m06s
+
+Story time
+  category                             time  share
+  model + tools + gates (estimated)   2m16s    13%
+  coder tools                            0s     0%
+  gates                                  0s     0%
+  git + merge                            0s     0%
+  waiting                                0s     0%
+  unaccounted                        15m11s    87%
+
+Stories
+  story      status   wall  queued  model  tools  gates  git+merge  wait  other  turns  avg turn  steps/turn  model/step  prompt ×
+  accounts     done  6m37s      2s  1m48s     0s     0s         0s    0s  4m49s      3       36s                              1.0×
+  payments  running  7m06s      3s    28s     0s     0s         0s    0s  6m38s      1       28s                              1.0×
+  iban       failed  3m15s      4s     0s     0s     0s         0s    0s  3m15s      0        0s
+  overview  running    29s   6m40s     0s     0s     0s         0s    0s    29s      0        0s
