@@ -101,15 +101,15 @@ import {
   stage,
   withModel
 } from "@llm4ts/runner"
-import { claude, coderIds, judgmentConnectorFromEnvironment, pi } from "@llm4ts/runner/Connectors"
 import {
-  FlowAborted,
-  FlowLlmError,
-  ReviewResult,
-  ScriptUsage,
-  coderFor,
-  lintCommand
-} from "@llm4ts/runner"
+  claude,
+  judgmentConnectorFromEnvironment,
+  pi,
+  coderFromEnvironment,
+  reasonerFromEnvironment as runnerReasonerFromEnvironment,
+  seatsFromEnvironment
+} from "@llm4ts/runner/Connectors"
+import { FlowAborted, FlowLlmError, ReviewResult, ScriptUsage, lintCommand } from "@llm4ts/runner"
 
 // ---- Flags ------------------------------------------------------------------
 
@@ -823,34 +823,12 @@ export const chooseEpic = (args: {
 /** The reasoning seat: `LLM4TS_REASONER`, any coder id, default claude. Unknown names fail typed. */
 export const reasonerFromEnvironment = (
   environment: Readonly<Record<string, string | undefined>>
-): Effect.Effect<CliConnectorConfig, ScriptUsage> => {
-  const requested = (environment.LLM4TS_REASONER ?? "").trim()
-  if (requested.length === 0) {
-    return Effect.succeed(claude)
-  }
-  const preset = coderFor(requested)
-  return preset === undefined
-    ? ScriptUsage.make({
-        message: `unknown LLM4TS_REASONER '${requested}'; expected ${coderIds.join("|")}`
-      })
-    : Effect.succeed(preset)
-}
+): Effect.Effect<CliConnectorConfig, ScriptUsage> => runnerReasonerFromEnvironment(environment)
 
 /** The coder seat: `LLM4TS_CODER`, default pi — the cheap local typist under a stronger orchestrator. */
 export const storyCoderFromEnvironment = (
   environment: Readonly<Record<string, string | undefined>>
-): Effect.Effect<CliConnectorConfig, ScriptUsage> => {
-  const requested = (environment.LLM4TS_CODER ?? "").trim()
-  if (requested.length === 0) {
-    return Effect.succeed(pi)
-  }
-  const preset = coderFor(requested)
-  return preset === undefined
-    ? ScriptUsage.make({
-        message: `unknown LLM4TS_CODER '${requested}'; expected ${coderIds.join("|")}`
-      })
-    : Effect.succeed(preset)
-}
+): Effect.Effect<CliConnectorConfig, ScriptUsage> => coderFromEnvironment(environment, pi)
 
 // ---- Seat flags and local servers --------------------------------------------------
 
@@ -2418,18 +2396,13 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
       flowDir: import.meta.dirname
     })
     const coderFlags = flagsFromEnvironment(process.env.LLM4TS_CODER_FLAGS)
+    const seats = yield* seatsFromEnvironment({ coder: pi, reasoner: claude })
     const reasoning = withExtraFlags(
-      withOptionalModel(
-        yield* reasonerFromEnvironment(process.env),
-        process.env.LLM4TS_REASONING_MODEL
-      ),
+      withOptionalModel(seats.reasoning, process.env.LLM4TS_REASONING_MODEL),
       flagsFromEnvironment(process.env.LLM4TS_REASONING_FLAGS)
     )
     const coder = withExtraFlags(
-      withOptionalModel(
-        yield* storyCoderFromEnvironment(process.env),
-        process.env.LLM4TS_CODER_MODEL
-      ),
+      withOptionalModel(seats.coder, process.env.LLM4TS_CODER_MODEL),
       coderFlags
     )
     const localServer = localCoderServer(process.env.LLM4TS_CODER_MODEL, coderFlags, process.env)

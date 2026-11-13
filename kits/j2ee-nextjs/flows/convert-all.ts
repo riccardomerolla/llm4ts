@@ -32,7 +32,7 @@ import { describeFlowError } from "@llm4ts/flow/FlowError"
 import {
   Info,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   nodePlainFileStore,
   nodeProcessExecutor,
   resolveFlowInput,
@@ -54,7 +54,7 @@ import type { FlowError } from "@llm4ts/flow/FlowError"
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Convert the legacy estate into the destination SPA")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
 
   yield* runNode(
     {

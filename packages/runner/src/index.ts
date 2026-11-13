@@ -16,6 +16,9 @@ export {
   coderFor,
   coderFromEnv,
   mock,
+  coderFromEnvironment,
+  reasonerFromEnvironment,
+  seatsFromEnvironment,
   withModel,
   withTurnLimit
 } from "./Connectors.ts"

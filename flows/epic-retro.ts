@@ -28,15 +28,10 @@ import {
   runFlowMain,
   runNode
 } from "@llm4ts/runner"
+import { reasonerFromEnvironment } from "@llm4ts/runner/Connectors"
 import { loadTranscript, nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import { parseEpicRetroArgs, resolveRetroTarget, runRetro } from "./lib/epic-retro.ts"
-import {
-  chooseEpic,
-  defaultEpic,
-  epicsDir,
-  listEpics,
-  reasonerFromEnvironment
-} from "./lib/epic-stories.ts"
+import { chooseEpic, defaultEpic, epicsDir, listEpics } from "./lib/epic-stories.ts"
 
 const program = Effect.gen(function* () {
   const flags = yield* parseEpicRetroArgs(process.argv.slice(2))
@@ -53,7 +48,7 @@ const program = Effect.gen(function* () {
   const stateDir = join(epicsDir(given.workDir), epicDir)
   const target = yield* resolveRetroTarget(files, stateDir, flags.run)
   const transcriptDir = join(given.workDir, ".llm4ts", "transcripts", target.run.runId)
-  const reasoning = asReadOnly(yield* reasonerFromEnvironment(process.env))
+  const reasoning = asReadOnly(yield* reasonerFromEnvironment())
   const outcome = yield* runNode(
     {
       workDir: given.workDir,

@@ -50,13 +50,8 @@ import {
   renderOutcome,
   resolveDesignTarget
 } from "./lib/epic-design.ts"
-import {
-  epicDirs,
-  listBriefs,
-  listEpics,
-  loadBriefs,
-  reasonerFromEnvironment
-} from "./lib/epic-stories.ts"
+import { reasonerFromEnvironment } from "@llm4ts/runner/Connectors"
+import { epicDirs, listBriefs, listEpics, loadBriefs } from "./lib/epic-stories.ts"
 import { ModDir } from "./lib/modernize-extract.ts"
 
 const program = Effect.gen(function* () {
@@ -100,7 +95,7 @@ const program = Effect.gen(function* () {
   }
   const target = yield* resolveDesignTarget({ text: given.prompt, epic: flags.epic, briefs })
   const loaded = yield* loadBriefs(files, given.workDir, dirs)
-  const reasoning = asReadOnly(yield* reasonerFromEnvironment(process.env))
+  const reasoning = asReadOnly(yield* reasonerFromEnvironment())
 
   yield* runNode(
     {

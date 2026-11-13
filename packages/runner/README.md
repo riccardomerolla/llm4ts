@@ -38,7 +38,7 @@ const program = runNode(
 
 The mock connector needs no credentials. Swap in a real provider via
 `ApiConnectorConfig` (API keys are read from standard environment variables
-such as `ANTHROPIC_API_KEY`) or a CLI coding agent via `coderFromEnv`
+such as `ANTHROPIC_API_KEY`) or a CLI coding agent via `coderFromEnvironment`
 (`LLM4TS_CODER=claude|codex|gemini|...`).
 
 ## CLI

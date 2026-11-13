@@ -124,7 +124,7 @@ runFlowMain(program)
 No `npm install`: the shell resolves `@llm4ts/runner` and `effect` from its
 own installation. `runNode` wires HTTP, processes, temp files, persistence,
 and connectors, so you never assemble Effect layers; swap
-`apiConnectorFromEnvironment()` for `coderFromEnv(process.env)` and the same
+`apiConnectorFromEnvironment()` for `coderFromEnvironment()` and the same
 prompt goes to your coding agent. More:
 [chapter 3](docs/guide/03-your-first-flow.md).
 

@@ -30,7 +30,7 @@ import {
   Info,
   ReviewResult,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   implementTaskLoop,
   lintCommand,
   loadKitPatternCards,
@@ -235,7 +235,7 @@ const recordTruncations = (
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Implement the seeded modernization plan")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const planPath = join(input.workDir, ModDir, "plan.md")
 

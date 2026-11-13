@@ -77,7 +77,7 @@ import {
   Info,
   Plan,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   defaultPlanInstructions,
   makeNodeWorkspace,
   nodePlainFileStore,
@@ -109,7 +109,7 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
     "Refine the extracted spec pack: prune, deepen, and consolidate it before approval"
   )
-  const coder = withTurnLimit(coderFromEnv(process.env), analystTurns())
+  const coder = withTurnLimit(yield* coderFromEnvironment(), analystTurns())
   const files = nodePlainFileStore
   const modDirAbs = join(input.workDir, ModDir)
   const targetRepo = process.env.LLM4TS_TARGET_REPO?.trim()

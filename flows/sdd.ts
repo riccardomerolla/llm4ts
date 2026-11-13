@@ -6,7 +6,7 @@ import {
   FlowAborted,
   Plan,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   defaultPlanInstructions,
   defaultPlanPath,
   implementTaskLoop,
@@ -58,10 +58,7 @@ const program = Effect.gen(function* () {
     "Add due dates, mark overdue items in list output, and show items due today."
   )
   const explicitCoder = process.env.LLM4TS_CODER?.trim()
-  const coder =
-    explicitCoder === undefined || explicitCoder.length === 0
-      ? withModel(gemini, flashModel)
-      : coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment(process.env, withModel(gemini, flashModel))
   const reasoning =
     explicitCoder === undefined || explicitCoder.length === 0
       ? asReadOnly(withModel(gemini, proModel))

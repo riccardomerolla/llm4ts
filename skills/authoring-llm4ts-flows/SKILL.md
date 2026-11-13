@@ -81,12 +81,12 @@ npx -y @llm4ts/shell run <name> "<task>"      # mock provider: canned answer, ex
 ```
 
 To drive the user's coding agent instead of an API provider, replace the
-`coder` line and add `coderFromEnv` to the `@llm4ts/runner` import;
+`coder` line and add `coderFromEnvironment` to the `@llm4ts/runner` import;
 `LLM4TS_CODER` selects the CLI (`claude` default, `codex`, `gemini`, `pi`,
 `agy`, `grok`, `cursor`, `opencode`):
 
 ```ts
-const coder = coderFromEnv(process.env)
+const coder = yield * coderFromEnvironment()
 ```
 
 Do not run a coder-driven flow against the user's real repository as a

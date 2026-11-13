@@ -25,7 +25,7 @@ import { PersistenceError } from "@llm4ts/flow/FlowError"
 import {
   FlowAborted,
   Info,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   nodePlainFileStore,
   openPack,
@@ -92,6 +92,7 @@ const program = Effect.gen(function* () {
   const legacyRepo = process.env.LLM4TS_LEGACY_REPO?.trim()
   const files = nodePlainFileStore
 
+  const coder = yield* coderFromEnvironment()
   yield* runNode(
     {
       workDir: input.workDir,
@@ -99,7 +100,7 @@ const program = Effect.gen(function* () {
       userPrompt: input.prompt,
       // This phase makes no model call; the seat is wired only because the
       // runner composes one context shape for every flow.
-      coder: coderFromEnv(process.env),
+      coder,
       environment: process.env
     },
     (context) =>

@@ -25,7 +25,7 @@ import { AppliedMarkerPrefix, applyRuleEdit, retroApprovalOf } from "@llm4ts/flo
 import type { JsonSchema } from "@llm4ts/core/Models"
 import {
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   nodePlainFileStore,
   openPack,
@@ -93,7 +93,7 @@ const decodeAudit = Schema.decodeUnknownOption(Schema.fromJsonString(AuditRecord
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Audit the porting rulebook against sample sources")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const knobs = portEnv(process.env)
   const sampleSize = Math.max(

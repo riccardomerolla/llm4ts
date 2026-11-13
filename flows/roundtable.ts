@@ -43,7 +43,7 @@ import {
   runNode,
   stage
 } from "@llm4ts/runner"
-import { reasonerFromEnvironment } from "./lib/epic-stories.ts"
+import { reasonerFromEnvironment } from "@llm4ts/runner/Connectors"
 import {
   describePersonas,
   ejectPersonas,
@@ -180,7 +180,7 @@ const program = Effect.gen(function* () {
   const docs = yield* contextDocs(
     flags.context === undefined ? undefined : resolve(workDir, flags.context)
   )
-  const reasoning = asToolless(yield* reasonerFromEnvironment(process.env))
+  const reasoning = asToolless(yield* reasonerFromEnvironment())
 
   const outcome = yield* runNode(
     {

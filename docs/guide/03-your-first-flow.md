@@ -100,9 +100,9 @@ Replace one line, and add one name to the import:
 
 <!-- prettier-ignore -->
 ```ts
-import { coderFromEnv /* , ... */ } from "@llm4ts/runner"
+import { coderFromEnvironment /* , ... */ } from "@llm4ts/runner"
 // ...
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
 ```
 
 Now `llm4ts run hello "Summarise this repository in three lines"` sends the

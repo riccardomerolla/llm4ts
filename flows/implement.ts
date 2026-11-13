@@ -3,7 +3,6 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { withContract } from "@llm4ts/flow/AutonomyContract"
 import {
-  coderFromEnv,
   defaultPlanPath,
   implementPlanFlow,
   makePlanStore,
@@ -11,7 +10,8 @@ import {
   planFrom,
   resolveFlowInput,
   runFlowMain,
-  runNode
+  runNode,
+  coderFromEnvironment
 } from "@llm4ts/runner"
 
 const program = Effect.gen(function* () {
@@ -21,12 +21,13 @@ const program = Effect.gen(function* () {
   const planPath = join(input.workDir, defaultPlanPath(input.prompt))
   const store = makePlanStore(nodePlainFileStore)
 
+  const coder = yield* coderFromEnvironment()
   yield* runNode(
     {
       workDir: input.workDir,
       workspace: input.workspace,
       userPrompt: input.prompt,
-      coder: coderFromEnv(process.env),
+      coder,
       environment: process.env
     },
     (context) =>

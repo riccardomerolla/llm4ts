@@ -32,7 +32,7 @@ import { runQueue, type QueueOutcome, type Shard } from "@llm4ts/flow/WorkQueue"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import {
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   nodePlainFileStore,
   openPack,
@@ -93,7 +93,7 @@ interface PortShard extends Shard {
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Port every source file the pack matches to its target")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const knobs = portEnv(process.env)
   const stateDir = portStateDir(input.workDir)

@@ -39,7 +39,7 @@ import {
   Info,
   ReviewResult,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   defaultPlanInstructions,
   loadKitPatternCards,
   makeNodeWorkspace,
@@ -106,7 +106,7 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
     "Extract the complete behavioural spec pack for this legacy estate"
   )
-  const coder = withTurnLimit(coderFromEnv(process.env), analystTurns())
+  const coder = withTurnLimit(yield* coderFromEnvironment(), analystTurns())
   const files = nodePlainFileStore
   const modDirAbs = join(input.workDir, ModDir)
 

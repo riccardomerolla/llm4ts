@@ -22,7 +22,7 @@ import {
   FlowAborted,
   Info,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   resolveFlowInput,
   runFlowMain,
   runNode
@@ -32,7 +32,7 @@ import { convertPage, setupConversion } from "./lib/convert.ts"
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Convert one legacy page into the destination SPA")
   const page = input.prompt.trim().split(/\s+/)[0] ?? ""
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
 
   yield* runNode(
     {

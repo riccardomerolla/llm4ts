@@ -30,7 +30,7 @@ import {
   FlowAborted,
   Info,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   nodePlainFileStore,
   openPack,
@@ -191,7 +191,7 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
     "Survey the legacy estate and propose a migration wave plan"
   )
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
 
   yield* runNode(
     {

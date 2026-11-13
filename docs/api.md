@@ -212,7 +212,7 @@ export list; the following modules are the main entry points.
 ## Runner
 
 - `@llm4ts/runner` (root): the flow author's barrel — `runNode`,
-  `runFlowMain`, `resolveFlowInput`, `coderFromEnv`,
+  `runFlowMain`, `resolveFlowInput`, `coderFromEnvironment`, `reasonerFromEnvironment`, `seatsFromEnvironment`,
   `apiConnectorFromEnvironment`, `openPack`, and the flow verbs a script
   calls (`completeAndPublish`, `implementPlanFlow`, `stage`,
   `implementTaskLoop`, `reviewAndFixLoop`, `lintCommand`, `makePlanStore`,

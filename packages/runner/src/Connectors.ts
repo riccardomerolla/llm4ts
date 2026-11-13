@@ -247,35 +247,82 @@ export const coderFor = (name: string): CliConnectorConfig | undefined => {
   return connector === undefined ? undefined : presets[connector]
 }
 
-// Unchecked: an unrecognized name falls back to claude, which silently
-// runs a CLI the operator did not ask for. Prefer coderFromEnvironment,
-// which refuses and names the coders it knows.
-export const coderFromEnv = (
-  env: Readonly<Record<string, string | undefined>> = process.env
-): CliConnectorConfig => {
+export interface SeatDefaults {
+  /** The coder when `LLM4TS_CODER` is unset; claude when omitted. */
+  readonly coder?: CliConnectorConfig
+  /** The reasoner when `LLM4TS_REASONER` is unset; the coder seat when omitted. */
+  readonly reasoner?: CliConnectorConfig
+}
+
+export interface Seats {
+  readonly coder: CliConnectorConfig
+  readonly reasoning: CliConnectorConfig
+}
+
+type Environment = Readonly<Record<string, string | undefined>>
+
+const namedSeat = (
+  variable: "LLM4TS_CODER" | "LLM4TS_REASONER",
+  environment: Environment
+): Effect.Effect<CliConnectorConfig | undefined, ScriptUsage> => {
+  const requested = (environment[variable] ?? "").trim()
+  if (requested.length === 0) {
+    return Effect.succeed(undefined)
+  }
+  const preset = coderFor(requested)
+  return preset === undefined
+    ? Effect.fail(
+        ScriptUsage.make({
+          message: `unknown ${variable} '${requested}'; expected ${coderIds.join("|")}`
+        })
+      )
+    : Effect.succeed(preset)
+}
+
+/**
+ * The coder and reasoning seats of a flow that runs both, from `LLM4TS_CODER`
+ * and `LLM4TS_REASONER`. An unknown name is a usage error naming the accepted
+ * names, never another agent. A flow with one seat reads that one alone
+ * (`coderFromEnvironment`, `reasonerFromEnvironment`).
+ */
+export const seatsFromEnvironment = Effect.fn("@llm4ts/runner/Connectors.seatsFromEnvironment")(
+  function* (
+    defaults: SeatDefaults = {},
+    environment: Environment = process.env
+  ): Effect.fn.Return<Seats, ScriptUsage> {
+    const coder = (yield* namedSeat("LLM4TS_CODER", environment)) ?? defaults.coder ?? claude
+    const reasoner = yield* namedSeat("LLM4TS_REASONER", environment)
+    return { coder, reasoning: reasoner ?? defaults.reasoner ?? coder }
+  }
+)
+
+/**
+ * An unknown name runs claude, with nothing said about it.
+ *
+ * @deprecated Use `seatsFromEnvironment`, which refuses an unknown name. Removed in 4.0.0.
+ */
+export const coderFromEnv = (env: Environment = process.env): CliConnectorConfig => {
   const requested = (env.LLM4TS_CODER ?? "").trim()
   return (requested.length === 0 ? claude : coderFor(requested)) ?? claude
 }
 
-// The checked reading, matching apiConnectorFromEnvironment above: an
-// unset variable is the claude default, and an unknown one is a usage
-// error rather than a different coder than the one asked for.
-export const coderFromEnvironment = Effect.fn("@llm4ts/runner/Connectors.coderFromEnvironment")(
-  function* (
-    environment: Readonly<Record<string, string | undefined>> = process.env
-  ): Effect.fn.Return<CliConnectorConfig, ScriptUsage> {
-    const requested = (environment.LLM4TS_CODER ?? "").trim()
-    if (requested.length === 0) {
-      return claude
-    }
-    const preset = coderFor(requested)
-    return preset === undefined
-      ? yield* ScriptUsage.make({
-          message: `unknown LLM4TS_CODER '${requested}'; expected ${coderIds.join("|")}`
-        })
-      : preset
-  }
-)
+/**
+ * `LLM4TS_CODER` alone, for a flow that runs no separate reasoning seat. A
+ * flow answers only for the seats it uses: a bad `LLM4TS_REASONER` is not
+ * this flow's to refuse.
+ */
+export const coderFromEnvironment = (
+  environment: Environment = process.env,
+  fallback: CliConnectorConfig = claude
+): Effect.Effect<CliConnectorConfig, ScriptUsage> =>
+  Effect.map(namedSeat("LLM4TS_CODER", environment), (coder) => coder ?? fallback)
+
+/** `LLM4TS_REASONER` alone, for a flow that edits nothing. */
+export const reasonerFromEnvironment = (
+  environment: Environment = process.env,
+  fallback: CliConnectorConfig = claude
+): Effect.Effect<CliConnectorConfig, ScriptUsage> =>
+  Effect.map(namedSeat("LLM4TS_REASONER", environment), (reasoner) => reasoner ?? fallback)
 
 /**
  * The judgment seat from the environment (ADR 0017): `LLM4TS_JUDGMENT_PROVIDER`

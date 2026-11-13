@@ -84,7 +84,7 @@ export const settings = {
   LLM4TS_CODER: setting({
     group: "seats",
     scope: "global",
-    value: Value.text,
+    value: Value.oneOf(coderNames),
     fallback: fallback.perFlow("claude; pi in the epic flows"),
     doc: `The coding agent that edits files: ${Value.listed(offeredCoderNames)}.`
   }),

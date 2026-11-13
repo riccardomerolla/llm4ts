@@ -24,7 +24,7 @@ import { adversarialReviewer, reviewAndFixLoop } from "@llm4ts/flow/Review"
 import { runQueue } from "@llm4ts/flow/WorkQueue"
 import {
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   nodePlainFileStore,
   nodeProcessExecutor,
   openPack,
@@ -42,7 +42,7 @@ interface Unit {
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Fix every compiler diagnostic, one unit at a time")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const knobs = portEnv(process.env)
   const maxRounds = Math.max(

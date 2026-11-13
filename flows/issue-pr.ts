@@ -5,7 +5,7 @@ import { withContract } from "@llm4ts/flow/AutonomyContract"
 import {
   FlowAborted,
   ScriptUsage,
-  coderFromEnv,
+  coderFromEnvironment,
   implementPlanFlow,
   makePlanStore,
   nodePlainFileStore,
@@ -30,12 +30,13 @@ const program = Effect.gen(function* () {
   const store = makePlanStore(nodePlainFileStore)
   const planPath = join(input.workDir, `.llm4ts/issue-${issueRef.number}.md`)
 
+  const coder = yield* coderFromEnvironment()
   yield* runNode(
     {
       workDir: input.workDir,
       workspace: input.workspace,
       userPrompt: input.prompt,
-      coder: coderFromEnv(process.env),
+      coder,
       environment: process.env
     },
     (context) =>

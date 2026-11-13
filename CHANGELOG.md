@@ -29,12 +29,31 @@
   and menus offer, `offeredCoderNames` and `offeredApiProviderNames`. The
   factories and the runner's presets are records keyed by every connector
   name, so a connector without one does not compile.
-- **`LLM4TS_REASONER`, `LLM4TS_PROVIDER` and `LLM4TS_JUDGMENT_PROVIDER` name
-  their values.** `config show NAME` lists them. `config set`, `--set` and a
-  config file refuse another name, and an exported one draws a warning
-  before the flow refuses it as it always did. `LLM4TS_CODER` stays free
-  text: most flows read an unknown coder name as claude, and `--coder` must
-  not start refusing it in a minor release.
+- **A misspelled `LLM4TS_CODER` stops the run. It used to run claude.**
+  `LLM4TS_CODER=codx llm4ts run implement …` ran claude without a word;
+  every built-in flow and the j2ee-nextjs kit flows now stop before any
+  agent starts, with `unknown LLM4TS_CODER 'codx'; expected agy|…|pi`. The
+  same holds for `LLM4TS_REASONER` in the flows that run a reasoning seat. A
+  flow answers only for the seats it runs. `--coder`, `--set`, `config set`
+  and a config file refuse such a name too. If a run that worked now stops
+  with this message, the name was never read: write `claude` to keep what
+  ran, or the agent that was meant.
+- Checked seat readers in `@llm4ts/runner` and `@llm4ts/runner/Connectors`:
+  `coderFromEnvironment(environment?, fallback?)` for `LLM4TS_CODER`,
+  `reasonerFromEnvironment(environment?, fallback?)` for `LLM4TS_REASONER`,
+  and `seatsFromEnvironment(defaults?, environment?)` for a flow that runs
+  both, each failing with a typed `ScriptUsage` on an unknown name. The flow
+  authoring docs and the authoring skill show `coderFromEnvironment`.
+  `coderFromEnv` is deprecated and keeps its fallback.
+- `coderFromEnv` is deprecated and unchanged: a flow script that calls it
+  keeps running, and still reads an unknown name as claude. It goes in
+  4.0.0. `coderFromEnvironment`, and `reasonerFromEnvironment` and
+  `storyCoderFromEnvironment` in the epic flows' library, stay as one-seat
+  readers over the new one.
+- **`LLM4TS_CODER`, `LLM4TS_REASONER`, `LLM4TS_PROVIDER` and
+  `LLM4TS_JUDGMENT_PROVIDER` name their values.** `config show NAME` lists
+  them. `config set`, `--set` and a config file refuse another name, and an
+  exported one draws a warning before the flow refuses it.
 - **`llm4ts profile` knows how large a story's reviewed diff was.** A
   review's diff size was dropped when the event was stamped with its story's
   lane, which is the only place the profile reads it.

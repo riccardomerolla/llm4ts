@@ -42,7 +42,7 @@ import {
   FlowLlmError,
   Info,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   mergeReviewResults,
   nodePlainFileStore,
@@ -85,7 +85,7 @@ const program = Effect.gen(function* () {
     (input.prompt.trim().toLowerCase() === "report" ? "report" : "measure")
   const files = nodePlainFileStore
   const benchPath = join(input.workspace, BenchFile)
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const startedAt = new Date()
 
   if (mode === "report") {
