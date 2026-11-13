@@ -6,13 +6,12 @@ import { classifyUsageLimit, isGeminiQuota } from "@llm4ts/core/UsageLimits"
 const now = DateTime.makeUnsafe("2026-06-04T12:27:00Z")
 
 describe("UsageLimits", () => {
-  it("types an exhausted quota relayed by pi, antigravity or copilot, not their rate limits", () => {
+  it("types an exhausted quota relayed by pi or antigravity, not their rate limits", () => {
     for (const [provider, text] of [
       ["pi", "Codex error: The usage limit has been reached"],
       ["pi", "anthropic: You're out of extra usage"],
       ["pi", "Your credit balance is too low to access the Anthropic API"],
-      ["antigravity", "You have exceeded your current quota"],
-      ["copilot", "monthly usage limit reached"]
+      ["antigravity", "You have exceeded your current quota"]
     ] as const) {
       assert.strictEqual(
         classifyUsageLimit(provider, text, now, "UTC")?._tag,

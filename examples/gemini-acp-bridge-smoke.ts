@@ -33,6 +33,7 @@ import * as Effect from "effect/Effect"
 import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { completeAndPublish } from "@llm4ts/flow/Flow"
 import { FlowLlmError } from "@llm4ts/flow/FlowError"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { pi, prepareConnector } from "@llm4ts/runner/Connectors"
 import {
   bridgeModelProblem,
@@ -80,18 +81,17 @@ const program = Effect.scoped(
             `${bridgeable.map((entry) => `  ${entry.ref}`).join("\n")}\n`
     )
     const bridgeModel = yield* resolveModel(
-      resolveBridgeModel(modelsJson, port, process.env.LLM4TS_GEMINI_BRIDGE_MODEL),
+      resolveBridgeModel(modelsJson, port, settingValue("LLM4TS_GEMINI_BRIDGE_MODEL", process.env)),
       port
     )
     const input = yield* resolveFlowInput(defaultPrompt)
 
+    const geminiModel = settingValue("LLM4TS_GEMINI_MODEL", process.env)
     const bridge = yield* runGeminiAcpBridge({
       port: Number(port),
       cwd: input.workDir,
       executor: nodeProcessExecutor,
-      ...(process.env.LLM4TS_GEMINI_MODEL === undefined
-        ? {}
-        : { model: process.env.LLM4TS_GEMINI_MODEL })
+      ...(geminiModel === undefined ? {} : { model: geminiModel })
     }).pipe(Effect.mapError((error) => FlowLlmError.from(error)))
 
     process.stderr.write(

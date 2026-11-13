@@ -39,7 +39,7 @@ describe("connector names", () => {
     assert.deepStrictEqual(coderFor("claude")?.flags, { "permission-mode": "acceptEdits" })
     assert.deepStrictEqual(coderFor("codex")?.flags, { sandbox: "workspace-write" })
     assert.deepStrictEqual(coderFor("agy")?.flags, { mode: "accept-edits" })
-    for (const name of ["copilot", "mock", "openai", "lm-studio", ""]) {
+    for (const name of ["nope", "mock", "openai", "lm-studio", ""]) {
       assert.isUndefined(coderFor(name))
     }
   })
@@ -78,7 +78,7 @@ describe("connector names", () => {
       ]
     )
     assert.strictEqual(apiPresetFor(" LMStudio ")?.connectorId.value, "lm-studio")
-    for (const name of ["claude", "gemini-cli", "opencode", "copilot", "nope", ""]) {
+    for (const name of ["claude", "gemini-cli", "opencode", "nope", ""]) {
       assert.isUndefined(apiPresetFor(name))
     }
   })

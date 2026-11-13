@@ -17,7 +17,7 @@ describe("coder choices", () => {
 
   it("reads an offered token and falls back to claude for anything else", () => {
     assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: "agy" }), "agy")
-    assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: "copilot" }), "claude")
+    assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: "nope" }), "claude")
     assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: "claude-cli" }), "claude")
     assert.strictEqual(resolvedCoderToken({}), "claude")
     assert.strictEqual(resolvedCoderToken({ LLM4TS_CODER: " Grok " }), "grok")

@@ -1,5 +1,60 @@
 # Changelog
 
+## 4.1.0
+
+### Breaking
+
+A library break in a minor, decided for the copilot connector alone.
+
+- **The copilot connector is removed**: the subpath
+  `@llm4ts/core/providers/CopilotConnector` (`makeCopilotConnector`,
+  `buildCopilotArgv`), `ConnectorIds.Copilot`, the `Copilot` row of
+  `connectorTable` and the `"copilot"` connector id. The registry now
+  refuses that id with `Unknown connector: copilot`. No CLI path could
+  select it: its table row offered no coder name, so `LLM4TS_CODER`,
+  `LLM4TS_REASONER` and a roster `harness` never reached it, and only a
+  library caller building a `CliConnectorConfig` by hand could run it. No
+  replacement.
+
+### Fixed
+
+- **The flow help names every credential variable `doctor` checks.** It
+  listed only the first variable of each API provider (`OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`); it now reads `credentialVariables`
+  from the connector table, so `GOOGLE_API_KEY` appears as well.
+- **`JsProvider` accepts every name `LLM4TS_PROVIDER` reads.** The
+  `@llm4ts/js` client took the seven offered names; it now also takes the
+  aliases `apiPresetFor` already read (`gemini-api`, `lmstudio`, `mlxlm`,
+  `mlx`), listed after the offered ones, so `JsProvider.literals` keeps its
+  first seven entries in their order. Both read `apiProviderNames`.
+- **`toLlmConfig` reads the provider from the connector's row.** An
+  `ApiConnectorConfig` carrying the `gemini-cli` id now gives
+  `provider: "GeminiCli"`, the provider its row serves, instead of
+  `"OpenAI"`. An id whose row has no provider (`opencode` and the other CLI
+  connectors) and an id the table does not name still read as `"OpenAI"`.
+  No flow is affected: the registry builds an API connector only for an API
+  connector's id.
+
+### Changed
+
+- **`LLM4TS_CODER_MODEL` and `LLM4TS_REASONING_MODEL` now apply to every
+  flow.** Before, only the epic flows, `local` and `sdd` read them, so
+  `llm4ts config set LLM4TS_CODER_MODEL=…` changed nothing for `implement`
+  and sixteen other flow families. The runner now puts them on every flow's
+  seats, a flow script of your own included. A model the flow sets in code
+  still wins (`local` and `sdd` keep their defaults), and with a roster in
+  force the roster's executors still name their own.
+- **`LLM4TS_CODER_FLAGS` and `LLM4TS_REASONING_FLAGS` now apply to every
+  flow**, in the same `key=value; key=value` form; before, only the epic
+  flows read them. A flag the flow sets in code keeps its value; a flag the
+  preset sets is replaced, as in the epic flows.
+- **A reasoning, reviewer or judge seat that runs the coder's agent takes
+  the coder's model** when `LLM4TS_REASONING_MODEL` is unset. `implement`
+  with only `LLM4TS_CODER_MODEL` set now plans and reviews on that model
+  too, instead of on the agent's default; so does `sdd` with `LLM4TS_CODER`
+  named, and an epic run with `LLM4TS_REASONER` naming the coder's agent.
+  The coder's flags stay on the coder: a read-only seat never takes them.
+
 ## 4.0.0
 
 ### Breaking

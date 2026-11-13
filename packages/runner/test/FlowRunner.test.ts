@@ -1439,7 +1439,7 @@ describe("seat usage metering", () => {
       }
     })
 
-  // Antigravity, Copilot, and Cursor stream exactly like this: content, no usage.
+  // Antigravity and Cursor stream exactly like this: content, no usage.
   const silent: ConnectorShape = {
     ...mock(),
     executeStream: (_prompt: string) =>

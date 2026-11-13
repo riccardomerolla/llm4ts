@@ -31,7 +31,6 @@ import { makeAnthropicProvider } from "./AnthropicProvider.ts"
 import { makeAntigravityConnector } from "./AntigravityConnector.ts"
 import { makeClaudeCliConnector } from "./ClaudeCliConnector.ts"
 import { makeCodexConnector } from "./CodexConnector.ts"
-import { makeCopilotConnector } from "./CopilotConnector.ts"
 import { makeCursorConnector } from "./CursorConnector.ts"
 import { makeGeminiApiProvider } from "./GeminiApiProvider.ts"
 import {
@@ -112,7 +111,6 @@ const builders: {
     ),
   Codex: (config, { process, temporaryFiles }) =>
     makeCodexConnector(config, process, temporaryFiles),
-  Copilot: (config, { process }) => makeCopilotConnector(config, process),
   Pi: (config, { process }) => makePiConnector(config, process),
   AntigravityCli: (config, { process }) => makeAntigravityConnector(config, process),
   Grok: (config, { process }) => makeGrokCliConnector(config, process),

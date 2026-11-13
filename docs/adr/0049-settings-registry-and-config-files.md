@@ -307,3 +307,29 @@ inside a run that case no longer arises.
 
 A flow now refuses a bad name for a seat it never runs, as the shell does:
 the seat amendment's "the shell's to warn about" no longer holds.
+
+## Amendment, 2026-11-13: model and flag settings apply in every flow
+
+The seat amendment left `LLM4TS_CODER_MODEL`, `LLM4TS_REASONING_MODEL`,
+`LLM4TS_CODER_FLAGS` and `LLM4TS_REASONING_FLAGS` where they were read: the
+epic flows, `local` and `sdd`. A setting `config set` accepts for every flow
+did nothing for most of them. From 4.1.0 `runEmbedded` (so `runNode`) puts
+the four on the run's seats once, through `withSeatSettings` in
+`@llm4ts/runner/Connectors`, before the context is built. The seat functions
+were not the place: `implement` names no reasoning seat, the soap-ace flows
+and user flow scripts build seats without them, and the run banner is
+printed from the options `runEmbedded` holds.
+
+- The coder seat takes the coder settings. The reasoning seat, and a
+  reviewer or judge seat on the reasoning seat's agent, takes the reasoning
+  settings. A non-coder seat on the coder's agent with no model yet takes
+  `LLM4TS_CODER_MODEL`, because a model name is read only by its own agent.
+  The coder's flags never reach another seat: a read-only seat does not
+  inherit edit permissions.
+- A model the flow sets in code wins. A flag key the flow set to a value
+  other than its preset's keeps the flow's; a key at the preset's value takes
+  the setting's, which is what the epic flows did.
+- A roster in force ignores the flow's seats, and these settings with them.
+
+The epic flows' own copies are removed. `local` and `sdd` keep their reads:
+they name per-flow default models, which the rule above leaves to the flow.

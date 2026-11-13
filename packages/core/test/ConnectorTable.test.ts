@@ -36,7 +36,6 @@ same<
   | "GeminiCli"
   | "OpenCode"
   | "Codex"
-  | "Copilot"
   | "Pi"
   | "AntigravityCli"
   | "Grok"
@@ -45,15 +44,7 @@ same<
 >(true)
 same<
   CliConnectorName,
-  | "ClaudeCli"
-  | "GeminiCli"
-  | "OpenCode"
-  | "Codex"
-  | "Copilot"
-  | "Pi"
-  | "AntigravityCli"
-  | "Grok"
-  | "Cursor"
+  "ClaudeCli" | "GeminiCli" | "OpenCode" | "Codex" | "Pi" | "AntigravityCli" | "Grok" | "Cursor"
 >(true)
 same<
   ApiConnectorName,
@@ -135,7 +126,6 @@ describe("connector table", () => {
     assert.strictEqual(coderConnector("gemini"), "GeminiCli")
     assert.strictEqual(apiProviderConnector("gemini"), "GeminiApi")
     assert.strictEqual(apiProviderConnector("mlx"), "MlxLm")
-    assert.isUndefined(coderConnector("copilot"))
     assert.isUndefined(coderConnector("openai"))
     assert.isUndefined(apiProviderConnector("claude"))
   })
@@ -146,7 +136,6 @@ describe("connector table", () => {
       assert.isTrue(offered.length === 0 || offered.includes(row.id), row.id)
       assert.strictEqual(offered.join(), offered.join().toLowerCase())
     }
-    assert.deepStrictEqual(connectorTable.Copilot.names, [])
   })
 
   it("offers coders and providers in the order help and menus show", () => {
@@ -201,7 +190,6 @@ describe("connector table", () => {
       offeredCoders.map((name) => cliExecutable(name)),
       ["claude", "codex", "gemini", "pi", "agy", "grok", "cursor-agent", "opencode"]
     )
-    assert.strictEqual(cliExecutable("Copilot"), "gh")
   })
 
   it("keeps every provider's row under the provider's own name", () => {

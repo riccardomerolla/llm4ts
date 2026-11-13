@@ -49,7 +49,6 @@
     "./providers/CliSupport": "./dist/providers/CliSupport.js",
     "./providers/CodexConnector": "./dist/providers/CodexConnector.js",
     "./providers/ConnectorFactories": "./dist/providers/ConnectorFactories.js",
-    "./providers/CopilotConnector": "./dist/providers/CopilotConnector.js",
     "./providers/CursorConnector": "./dist/providers/CursorConnector.js",
     "./providers/GeminiAcpSession": "./dist/providers/GeminiAcpSession.js",
     "./providers/GeminiApiProvider": "./dist/providers/GeminiApiProvider.js",

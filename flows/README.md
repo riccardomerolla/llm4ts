@@ -392,7 +392,8 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi
   takes `provider/model`, e.g. `openai-codex/gpt-5.5`).
   `LLM4TS_CODER_FLAGS` / `LLM4TS_REASONING_FLAGS` add CLI flags to a seat
-  (`key=value;key`). `llm4ts run --pack` (or `LLM4TS_PACK`) makes that pack's
+  (`key=value;key`). The four apply in every flow, not only here (see
+  "Seat models and flags" in `docs/configuration.md`). `llm4ts run --pack` (or `LLM4TS_PACK`) makes that pack's
   `## Gates` the gate commands, in the order written; an empty section runs
   none. `LLM4TS_GATES="cmd; cmd"` overrides the pack. With no pack, the
   defaults are `pnpm typecheck`, `lint`, `test`, and `build` — each only when the

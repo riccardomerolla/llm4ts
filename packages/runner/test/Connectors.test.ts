@@ -276,24 +276,11 @@ describe("runner connector presets", () => {
         assert.strictEqual(usage._tag, "ScriptUsage")
         assert.strictEqual(usage.message, `unknown ${variable} 'Codx'; expected ${expected}`)
       }
-      // copilot is a connector, never a coder name.
-      assert.include(
-        (yield* Effect.flip(seatsFromEnvironment({}, { LLM4TS_CODER: "copilot" }))).message,
-        "unknown LLM4TS_CODER 'copilot'"
-      )
     })
   )
 
   it("the registry reads exactly the names the seat reader does", () => {
-    const written = [
-      ...coderNames,
-      " Claude ",
-      "GEMINI-CLI",
-      "codx",
-      "copilot",
-      "mock",
-      "claude code"
-    ]
+    const written = [...coderNames, " Claude ", "GEMINI-CLI", "codx", "mock", "claude code"]
     for (const setting of ["LLM4TS_CODER", "LLM4TS_REASONER"] as const) {
       for (const name of written) {
         assert.strictEqual(
@@ -311,7 +298,6 @@ describe("runner connector presets", () => {
     // Models.ts cannot leave a stale alias behind here.
     assert.strictEqual(coderFor("codex")?.connectorId.value, "codex")
     assert.strictEqual(coderFor("opencode")?.connectorId.value, "opencode")
-    assert.isUndefined(coderFor("copilot"))
   })
 })
 

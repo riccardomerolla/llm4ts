@@ -115,7 +115,7 @@ import { nodeGeminiCliExecutor } from "./NodeGeminiCliExecutor.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
 import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
-import { asReadOnly, prepareConnector } from "./Connectors.ts"
+import { asReadOnly, prepareConnector, withSeatSettings } from "./Connectors.ts"
 import {
   consumeTerminalEvents,
   formatDurationMs,
@@ -1271,9 +1271,11 @@ export const runEmbedded = Effect.fn("@llm4ts/runner/FlowRunner.runEmbedded")(fu
   body: (context: FlowContextShape) => Effect.Effect<A, E, R>,
   dependencies: FlowRunnerDependencies = nodeFlowRunnerDependencies()
 ): Effect.fn.Return<A, E | FlowError | ScriptUsage, R | Scope.Scope> {
-  yield* requireReadableEnvironment(options.environment ?? process.env)
-  const bundle = yield* makeFlowRunnerContext(options, dependencies)
-  return yield* runWithBundle(bundle, options, body, dependencies)
+  const environment = options.environment ?? process.env
+  yield* requireReadableEnvironment(environment)
+  const seated = withSeatSettings(options, environment)
+  const bundle = yield* makeFlowRunnerContext(seated, dependencies)
+  return yield* runWithBundle(bundle, seated, body, dependencies)
 })
 
 export const runNode = <A, E, R>(
