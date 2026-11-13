@@ -2,7 +2,7 @@
 import * as Effect from "effect/Effect"
 import { Dimension, Sample, repeat } from "@llm4ts/core/eval/Eval"
 import { judge } from "@llm4ts/core/eval/Judge"
-import { Info, coderFromEnv, resolveFlowInput, runFlowMain, runNode } from "@llm4ts/runner"
+import { Info, resolveFlowInput, runFlowMain, runNode, coderFromEnvironment } from "@llm4ts/runner"
 
 const dimensions = [
   Dimension.make({
@@ -23,7 +23,7 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
     "You can return an unopened item within 30 days with its receipt."
   )
-  const selected = coderFromEnv(process.env)
+  const selected = yield* coderFromEnvironment()
   yield* runNode(
     {
       workDir: input.workDir,

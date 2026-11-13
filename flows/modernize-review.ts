@@ -27,7 +27,7 @@ import {
   Plan,
   ReviewResult,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   makePlanStore,
   mergeReviewResults,
@@ -197,7 +197,7 @@ const recordTruncations = (
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Review the modernization increment against its spec pack")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const planPath = join(input.workDir, ModDir, "plan.md")
 

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { summariseToolArgs } from "@llm4ts/flow/Activity"
 import { TranscriptEntry, type TranscriptSink } from "@llm4ts/flow/Transcript"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { duration } from "./AgentTree.ts"
 
 /**
@@ -14,10 +15,10 @@ import { duration } from "./AgentTree.ts"
  * never fails the run.
  */
 
-/** `LLM4TS_TRANSCRIPT=on` (what `--transcript` sets); also `1`, `true`, `yes`. */
+/** `LLM4TS_TRANSCRIPT=on` (what `--transcript` sets). */
 export const transcriptsWanted = (
   environment: Readonly<Record<string, string | undefined>>
-): boolean => /^(on|1|true|yes)$/iu.test(environment.LLM4TS_TRANSCRIPT?.trim() ?? "")
+): boolean => settingValue("LLM4TS_TRANSCRIPT", environment) === true
 
 export const transcriptFileOf = (lane: string | undefined): string =>
   `${(lane ?? "run").replace(/[^A-Za-z0-9._-]/gu, "_")}.jsonl`

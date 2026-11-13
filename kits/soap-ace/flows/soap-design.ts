@@ -24,6 +24,7 @@
 import { readFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
 import * as Effect from "effect/Effect"
+import { settingText, settingValue } from "@llm4ts/flow/Settings"
 import {
   FlowAborted,
   Info,
@@ -71,11 +72,11 @@ const program = Effect.gen(function* () {
   const environment = process.env
   const drafting = command === "design" || command === "revise"
   const reasoner = drafting
-    ? coderFor((environment.LLM4TS_REASONER ?? "claude").trim() || "claude")
+    ? coderFor(settingText("LLM4TS_REASONER", environment) ?? "claude")
     : undefined
   if (drafting && reasoner === undefined) {
     return yield* ScriptUsage.make({
-      message: `unknown LLM4TS_REASONER '${environment.LLM4TS_REASONER ?? ""}'`
+      message: `unknown LLM4TS_REASONER '${settingText("LLM4TS_REASONER", environment) ?? ""}'`
     })
   }
 
@@ -92,16 +93,11 @@ const program = Effect.gen(function* () {
       Effect.gen(function* () {
         const say = (message: string) => context.events.publish(Info.make({ message }))
         const workspace = yield* makeNodeWorkspace(input.workDir)
-        const requested = environment.LLM4TS_SOAP_SERVICE?.trim()
+        const requested = settingValue("LLM4TS_SOAP_SERVICE", environment)
         const services = (yield* workspace.discover(".llm4ts/soap/*/catalog.json")).map(
           (path) => path.split("/")[2] ?? ""
         )
-        const service =
-          requested !== undefined && requested !== ""
-            ? requested
-            : services.length === 1
-              ? services[0]
-              : undefined
+        const service = requested ?? (services.length === 1 ? services[0] : undefined)
         if (service === undefined) {
           return yield* FlowAborted.make({
             message:

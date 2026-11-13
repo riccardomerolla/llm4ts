@@ -1,8 +1,9 @@
 import * as Effect from "effect/Effect"
 import type { ConnectorKind, HealthStatus } from "@llm4ts/core/Models"
-import { ConnectorIds } from "@llm4ts/core/Models"
+import { ConnectorIds, credentialVariables } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import { nodePreflightReport, type NodePreflightReport } from "@llm4ts/flow/NodePreflight"
+import { settingText, settingValue } from "@llm4ts/flow/Settings"
 import { nodeFlowRunnerDependencies } from "./FlowRunner.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
@@ -14,13 +15,6 @@ import {
 } from "./PiModels.ts"
 import { systemAdminPolicies, systemPolicyProblem } from "./NodeGeminiModelBridge.ts"
 import { otelConfig, otelDoctorLine, probeOtelEndpoint, type OtelConfig } from "./Otel.ts"
-
-const credentialKeys = [
-  "OPENAI_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY"
-] as const
 
 /**
  * How far a connector's health was verified: `"auth"` means the CLI's own
@@ -133,7 +127,7 @@ const wrap = (text: string, width: number, indent: string): ReadonlyArray<string
 }
 
 const selectedCoder = (environment: Readonly<Record<string, string | undefined>>): string =>
-  environment.LLM4TS_CODER ?? "claude (default)"
+  settingText("LLM4TS_CODER", environment) ?? "claude (default)"
 
 // Re-exported so `@llm4ts/runner/Doctor` stays the one place callers look
 // for pi-config questions, while the parsing itself has no dependency on
@@ -161,7 +155,7 @@ export const geminiBridgePrerequisites = (
   environment: Readonly<Record<string, string | undefined>>,
   modelsJson: string | undefined
 ): PrerequisiteReport | undefined => {
-  if (!truthy(environment.LLM4TS_GEMINI_BRIDGE)) {
+  if (!settingValue("LLM4TS_GEMINI_BRIDGE", environment)) {
     return undefined
   }
   const port = bridgePort(environment)
@@ -254,7 +248,11 @@ export const geminiModelModePrerequisites = (
   systemPolicies: ReadonlyArray<string>
 ): PrerequisiteReport | undefined => {
   const mode = geminiBridgeMode(environment)
-  if (!truthy(environment.LLM4TS_GEMINI_BRIDGE) || mode._tag !== "Mode" || mode.mode !== "model") {
+  if (
+    !settingValue("LLM4TS_GEMINI_BRIDGE", environment) ||
+    mode._tag !== "Mode" ||
+    mode.mode !== "model"
+  ) {
     return undefined
   }
   const detail = [
@@ -324,7 +322,7 @@ export const collectDoctorReport = (
       const lines: Array<string> = []
       lines.push("")
       lines.push("credentials:")
-      for (const key of credentialKeys) {
+      for (const key of credentialVariables) {
         const value = environment[key]
         lines.push(`  ${value === undefined || value.length === 0 ? "✖" : "✔"} ${key}`)
       }

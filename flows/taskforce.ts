@@ -49,8 +49,8 @@ import {
   stage,
   withTurnLimit
 } from "@llm4ts/runner"
-import { coderFromEnvironment } from "@llm4ts/runner/Connectors"
-import { reasonerFromEnvironment, worktreeRootFor } from "./lib/epic-stories.ts"
+import { claude, seatsFromEnvironment } from "@llm4ts/runner/Connectors"
+import { worktreeRootFor } from "./lib/epic-stories.ts"
 import {
   bundledLenses,
   commandsPath,
@@ -215,8 +215,9 @@ const program = Effect.gen(function* () {
     yield* files.read(join(workDir, "package.json")),
     yield* files.read(commandsPath(workDir))
   )
-  const reasoner = yield* reasonerFromEnvironment(process.env)
-  const coder = withTurnLimit(yield* coderFromEnvironment(process.env), flags.turns ?? 30)
+  const seats = yield* seatsFromEnvironment({ reasoner: claude })
+  const reasoner = seats.reasoning
+  const coder = withTurnLimit(seats.coder, flags.turns ?? 30)
   const worktreeRoot = worktreeRootFor(workDir, `taskforce-${runId}`, process.env)
 
   const outcome = yield* runNode(

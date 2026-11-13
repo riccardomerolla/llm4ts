@@ -1,13 +1,14 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { assert, describe, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
 import type { FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { completeAndPublish, implementPlanFlow } from "@llm4ts/flow/Flow"
 import { defaultPlanPath } from "@llm4ts/flow/Plan"
 import { makePlanStore } from "@llm4ts/flow/Persistence"
 import { planFrom } from "@llm4ts/flow/Planner"
-import { coderFromEnv } from "@llm4ts/runner/Connectors"
+import { coderFromEnvironment } from "@llm4ts/runner/Connectors"
 import { runNode } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
 
@@ -143,7 +144,7 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
       { modulePath: "packages/flow/src/Plan.ts", exportName: "defaultPlanPath" },
       { modulePath: "packages/flow/src/Planner.ts", exportName: "planFrom" },
       { modulePath: "packages/flow/src/Persistence.ts", exportName: "makePlanStore" },
-      { modulePath: "packages/runner/src/Connectors.ts", exportName: "coderFromEnv" },
+      { modulePath: "packages/runner/src/Connectors.ts", exportName: "coderFromEnvironment" },
       { modulePath: "packages/flow/src/Flow.ts", exportName: "implementPlanFlow" },
       { modulePath: "packages/runner/src/FlowRunner.ts", exportName: "runNode" },
       { modulePath: "packages/runner/src/NodePlainFileStore.ts", exportName: "nodePlainFileStore" }
@@ -164,27 +165,29 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
       readonly workDir: string
       readonly workspace: string
       readonly prompt: string
-    }) => {
-      const planPath = join(input.workDir, defaultPlanPath(input.prompt))
-      const store = makePlanStore(nodePlainFileStore)
+    }) =>
+      Effect.gen(function* () {
+        const planPath = join(input.workDir, defaultPlanPath(input.prompt))
+        const store = makePlanStore(nodePlainFileStore)
 
-      return runNode(
-        {
-          workDir: input.workDir,
-          workspace: input.workspace,
-          userPrompt: input.prompt,
-          coder: coderFromEnv(process.env),
-          environment: process.env
-        },
-        (context) =>
-          implementPlanFlow(context, {
-            store,
-            planPath,
-            plan: planFrom(context.reasoning, input.prompt),
-            system: "Implement one task at a time in the current repository."
-          })
-      )
-    }
+        const coder = yield* coderFromEnvironment()
+        return yield* runNode(
+          {
+            workDir: input.workDir,
+            workspace: input.workspace,
+            userPrompt: input.prompt,
+            coder,
+            environment: process.env
+          },
+          (context) =>
+            implementPlanFlow(context, {
+              store,
+              planPath,
+              plan: planFrom(context.reasoning, input.prompt),
+              system: "Implement one task at a time in the current repository."
+            })
+        )
+      })
     assert.isFunction(callsWithDocumentedShape)
   })
 
@@ -217,5 +220,20 @@ describe("docs/flow-authoring.md stays in sync with the codebase", () => {
       /"implement":\s*"node --experimental-strip-types implement\.ts"/,
       'flows/package.json no longer defines the "implement" script (or its command changed), referenced by docs/flow-authoring.md'
     )
+  })
+
+  it("every top-level flows/*.ts flow script has a script entry in flows/package.json", () => {
+    const packageJsonSource = readRepoFile("flows/package.json")
+    const flowNames = readdirSync(join(repositoryRoot, "flows"))
+      .filter((entry) => entry.endsWith(".ts"))
+      .map((entry) => entry.slice(0, -".ts".length))
+    assert.isNotEmpty(flowNames)
+    for (const name of flowNames) {
+      assert.include(
+        packageJsonSource,
+        `"${name}": "node --experimental-strip-types ${name}.ts"`,
+        `flows/package.json has no "${name}" script for flows/${name}.ts`
+      )
+    }
   })
 })

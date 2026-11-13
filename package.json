@@ -27,7 +27,7 @@
     "judgment:eval": "tsx tools/judgment/eval.ts"
   },
   "devDependencies": {
-    "@effect/language-service": "latest",
+    "@effect/language-service": "0.87.1",
     "@effect/vitest": "4.0.0",
     "@eslint/js": "^9.39.2",
     "@types/node": "^22.19.0",
@@ -38,6 +38,7 @@
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.7.4",
+    "tsx": "4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0"
   }

@@ -10,6 +10,7 @@ import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
 import type { Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards } from "@llm4ts/flow/Patterns"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { settingValue } from "@llm4ts/flow/Settings"
 import {
   PortEntry,
   linesOf,
@@ -203,16 +204,13 @@ export const portEnv = (
   /** Worktrees to spread `port-files` over; 0 (the default) works in the one checkout. */
   readonly shards: number
 } => {
-  const int = (raw: string | undefined, fallback: number, min = 1): number => {
-    const value = Number.parseInt(raw ?? "", 10)
-    return Number.isFinite(value) && value >= min ? value : fallback
-  }
+  const sourceChars = settingValue("LLM4TS_PORT_SOURCE_CHARS", environment)
   return {
-    pilot: int(environment.LLM4TS_PORT_PILOT, 0, 1),
-    concurrency: int(environment.LLM4TS_PORT_CONCURRENCY, 4),
-    batch: int(environment.LLM4TS_PORT_BATCH, 100),
-    votes: int(environment.LLM4TS_REVIEW_VOTES, 2),
-    sourceChars: int(environment.LLM4TS_PORT_SOURCE_CHARS, 120_000, 1_000),
-    shards: int(environment.LLM4TS_PORT_SHARDS, 0, 1)
+    pilot: settingValue("LLM4TS_PORT_PILOT", environment),
+    concurrency: settingValue("LLM4TS_PORT_CONCURRENCY", environment),
+    batch: settingValue("LLM4TS_PORT_BATCH", environment),
+    votes: settingValue("LLM4TS_REVIEW_VOTES", environment) ?? 2,
+    sourceChars: sourceChars >= 1_000 ? sourceChars : 120_000,
+    shards: settingValue("LLM4TS_PORT_SHARDS", environment)
   }
 }

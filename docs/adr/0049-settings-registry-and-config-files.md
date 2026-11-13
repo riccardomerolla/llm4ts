@@ -191,8 +191,15 @@ Off a terminal it exits with code 2.
   is the one way to start a flow with the files applied.
 - The shell cannot see flow arguments after `--`. A `--repo` passed there
   does not select the project file; the shell's own `--repo` does.
-- Readers still parse the environment themselves. Moving them behind
-  `settingValue` is later work, one area per change.
+- Every reader reads through the registry: `settingValue`, or `settingGiven`
+  and `settingText` where a reader keeps its own default or refuses a value
+  by name. That holds for `packages/*/src`, for `flows/` and for the flows
+  and tools of `kits/`. A rule beyond the grammar (a minimum above 1, a
+  per-flow default, a name pattern) stays in the reader, after the read.
+  `examples/test/settings-sync.test.ts` fails on any raw `LLM4TS_*` read in
+  those three areas, and on a call that hands a quoted setting name to
+  anything but a registry reader, which is how a by-name helper such as
+  `positiveEnvInt("LLM4TS_…", 48)` read the environment by hand.
 
 ## Alternatives rejected
 
@@ -236,3 +243,33 @@ Off a terminal it exits with code 2.
 The generated reference in `docs/configuration.md`, the runbooks without
 prefixes, moving the readers behind the registry, and refusing an
 unreadable environment value in 4.0.0.
+
+## Amendment, 2026-11-13: seat names are a fixed set
+
+`LLM4TS_CODER` was left as free text because `coderFromEnv`, which most
+built-in flows called, read an unknown name as claude. A registry stricter
+than its readers would have refused at `config set` what a run accepted.
+
+The readers now share one lookup in `packages/runner/src/Connectors.ts`,
+through the connector table's names. `coderFromEnvironment` reads
+`LLM4TS_CODER`, `reasonerFromEnvironment` reads `LLM4TS_REASONER`, and
+`seatsFromEnvironment` reads both for a flow that runs both seats; each takes
+the default its flow passes. Every built-in flow and the j2ee-nextjs kit
+flows call one of them before `runNode`, so an unknown name for a seat the
+flow runs is a `ScriptUsage` naming the accepted names, and no agent starts.
+A flow answers only for the seats it runs: a bad name for a seat it never
+uses is the shell's to warn about, as any other unreadable environment value
+is in 3.x.
+
+`coderFromEnv` is deprecated and keeps its fallback, so a user's flow script
+that calls it runs as before. It is removed in 4.0.0.
+
+`LLM4TS_CODER` is typed as one of the coder names, as `LLM4TS_REASONER` is.
+`--coder`, `--set`, `config set` and the config files refuse another name.
+This is a behaviour change inside a minor release: a misspelled name that
+ran claude now stops the run. It is taken because the old behaviour ran an
+agent the operator did not ask for.
+
+The soap-ace flows still read `LLM4TS_REASONER` themselves, only when their
+design step runs. They accept the same names. The model and flag settings
+are read where they were: this unit does not widen where they apply.

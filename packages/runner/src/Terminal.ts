@@ -5,18 +5,18 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
 import type * as Scope from "effect/Scope"
-import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
 import {
-  awaitConsumed,
+  eventLanes,
   type FlowEvent,
   type FlowEventHub,
+  laneOf,
+  type LaneRef,
   rosterEventMessage,
   type ReviewFindings
 } from "@llm4ts/flow/FlowEvents"
+import { atLeast, presentationOf, Verbosity } from "./EventPresentation.ts"
 
-export const Verbosity = Schema.Literals(["Quiet", "Normal", "Verbose", "Debug"])
-export type Verbosity = typeof Verbosity.Type
+export { Verbosity }
 
 export const parseVerbosity = (value: string | undefined): Verbosity => {
   switch (value?.trim().toLowerCase()) {
@@ -32,45 +32,10 @@ export const parseVerbosity = (value: string | undefined): Verbosity => {
 }
 
 export const rendersEvent = (verbosity: Verbosity, event: FlowEvent): boolean => {
-  switch (event._tag) {
-    // Advise mode publishes a separate Info event for the operator; progress
-    // feeds the status rows; a blackboard run is for the trace file; a lease
-    // ending is routine; the story's outcome already says whether the judge
-    // cleared it. None is a line of its own.
-    case "JudgmentObserved":
-    case "BlackboardRun":
-    case "UsageProgress":
-    case "ExecutorReleased":
-    case "StoryJudged":
-    case "RoundtableTurn":
-    case "BriefReported":
-    case "Timed":
-    case "TasksPlanned":
-    case "TaskStarted":
-    case "TaskCompleted":
-    case "StoryStatusChanged":
-      return false
-    // A gate or a setup may run for many minutes: its start is a line, so a
-    // long one reads as running, not stuck. Other work starts too often.
-    case "Began":
-      return event.kind === "gate" && verbosity !== "Quiet"
-    case "StageStarted":
-    case "StageCompleted":
-    case "StageFailed":
-    case "Aborted":
-    case "CapabilityDenied":
-    case "CapabilityUnenforceable":
-    case "EvidenceChecked":
-    case "ReviewFindingDemoted":
-      return true
-    // Every git read and gate command is a capability event: useful in a
-    // trace, noise on screen once several stories run.
-    case "TokensUsed":
-    case "CapabilityUsed":
-      return verbosity === "Verbose" || verbosity === "Debug"
-    default:
-      return verbosity !== "Quiet"
-  }
+  const { line } = presentationOf(event)
+  return typeof line === "function"
+    ? line(event, verbosity)
+    : line !== "never" && atLeast(verbosity, line)
 }
 
 export const terminalSafe = (value: string): string => {
@@ -548,7 +513,6 @@ export interface TerminalRunStats {
 }
 
 export interface TerminalConsumer {
-  readonly consumed: Ref.Ref<number>
   readonly stats: Effect.Effect<TerminalRunStats>
   readonly awaitDrained: (timeout?: Duration.Input) => Effect.Effect<void>
 }
@@ -562,33 +526,20 @@ interface OpenStage {
   readonly startedAt: number
 }
 
-/** The lane an event belongs to (a concurrent story), if it carries one. */
-export const laneOfEvent = (
-  event: FlowEvent
-): { readonly lane: string; readonly executor?: string } | undefined => {
-  switch (event._tag) {
-    case "StageStarted":
-    case "StageCompleted":
-    case "StageFailed":
-    case "Info":
-    case "ToolUse":
-    case "AssistantMessage":
-    case "TokensUsed":
-    case "UsageProgress":
-    case "ReviewFindings":
-    case "TasksPlanned":
-    case "TaskStarted":
-    case "TaskCompleted":
-      return event.lane === undefined
-        ? undefined
-        : {
-            lane: event.lane,
-            ...(event.executor === undefined ? {} : { executor: event.executor })
-          }
-    default:
-      return undefined
-  }
-}
+/**
+ * The lane an event belongs to on screen (a concurrent story), if it carries
+ * one. This is `laneOf` with two exclusions, both kept as they were:
+ * - an event whose producer names its lane (a verdict, a roundtable turn, an
+ *   evidence check, a parked item) prints, when it prints, as a line of the
+ *   run: only the events `withLane` stamps drive a lane's row;
+ * - `Timed` and `Began`: one arriving after its lane's last stage closed
+ *   would reopen a row that never closes (`UsageProgress` has the same
+ *   hazard and is guarded where the consumer reads it).
+ */
+export const laneOfEvent = (event: FlowEvent): LaneRef | undefined =>
+  eventLanes[event._tag].lane !== "stamped" || event._tag === "Timed" || event._tag === "Began"
+    ? undefined
+    : laneOf(event)
 
 /** `bonifici-list · lemonade-deepseek` — how a lane is named on screen. */
 export const laneLabel = (lane: string, executor: string | undefined): string =>
@@ -744,9 +695,7 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
   // Tokens of events outside any lane: the whole run, for a flow with one coder.
   const runTokens = emptyTally()
   const runInFlight = new Map<string, TokenTally>()
-  const consumed = yield* Ref.make(0)
   const statsRef = yield* Ref.make<TerminalRunStats>({ stagesCompleted: 0, stagesFailed: 0 })
-  const subscription = yield* events.subscribe
   const palette = surface.palette
   const timestampPrefix =
     options.timestamps === true
@@ -800,99 +749,93 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
       return `${line} ${palette.dim(`(${formatDurationMs(now - closed.startedAt)})`)}`
     })
 
-  yield* Stream.fromSubscription(subscription).pipe(
-    Stream.runForEach((event) =>
-      Effect.gen(function* () {
-        const tagged = laneOfEvent(event)
-        if (tagged !== undefined && event._tag === "UsageProgress" && !lanes.has(tagged.lane)) {
-          // A call that ends after its story's row closed: nothing to show.
-          yield* Ref.update(consumed, (count) => count + 1)
-          return
+  const consumer = yield* events.consume("terminal", (event) =>
+    Effect.gen(function* () {
+      const tagged = laneOfEvent(event)
+      if (tagged !== undefined && event._tag === "UsageProgress" && !lanes.has(tagged.lane)) {
+        // A call that ends after its story's row closed: nothing to show.
+        return
+      }
+      if (tagged !== undefined) {
+        const now = yield* Clock.currentTimeMillis
+        const state =
+          lanes.get(tagged.lane) ??
+          ({
+            index: lanes.size,
+            depth: 0,
+            stages: [],
+            tools: 0,
+            executor: undefined,
+            startedAt: now,
+            tokens: emptyTally(),
+            inFlight: new Map(),
+            lastTool: undefined
+          } satisfies LaneState)
+        lanes.set(tagged.lane, state)
+        if (tagged.executor !== undefined) {
+          state.executor = tagged.executor
         }
-        if (tagged !== undefined) {
-          const now = yield* Clock.currentTimeMillis
-          const state =
-            lanes.get(tagged.lane) ??
-            ({
-              index: lanes.size,
-              depth: 0,
-              stages: [],
-              tools: 0,
-              executor: undefined,
-              startedAt: now,
-              tokens: emptyTally(),
-              inFlight: new Map(),
-              lastTool: undefined
-            } satisfies LaneState)
-          lanes.set(tagged.lane, state)
-          if (tagged.executor !== undefined) {
-            state.executor = tagged.executor
-          }
-          let closed: OpenStage | undefined
-          if (closesChild(event)) {
-            state.depth = Math.max(0, state.depth - 1)
-          }
-          const lineDepth = state.depth
-          if (event._tag === "StageStarted") {
-            state.depth += 1
-            state.stages = [...state.stages, { name: terminalSafe(event.stage), startedAt: now }]
-          } else if (closesChild(event)) {
-            closed = state.stages.at(-1)
-            state.stages = state.stages.slice(0, -1)
-            yield* countStage(event)
-          } else if (event._tag === "ToolUse") {
-            state.tools += 1
-            state.lastTool = { tool: terminalSafe(event.tool), at: now }
-          }
-          addTokens(state.tokens, event)
-          trackProgress(state.inFlight, event)
-          if (state.stages.length === 0 && closesChild(event)) {
-            lanes.delete(tagged.lane)
-          }
-          if (rendersLanedEvent(verbosity, event)) {
-            const tag = palette.lane(state.index, `[${laneLabel(tagged.lane, state.executor)}]`)
-            const line = yield* withDuration(event, terminalLine(event, palette, verbosity), closed)
-            const prefix = yield* timestampPrefix
-            yield* surface.log(`${prefix}${tag} ${indentBlock(lineDepth, line)}`)
-          }
-          yield* refreshStatus
-          yield* Ref.update(consumed, (count) => count + 1)
-          return
+        let closed: OpenStage | undefined
+        if (closesChild(event)) {
+          state.depth = Math.max(0, state.depth - 1)
         }
-        if (event._tag === "TokensUsed" || event._tag === "UsageProgress") {
-          addTokens(runTokens, event)
-          trackProgress(runInFlight, event)
-          yield* refreshStatus
-        }
-        const currentDepth = closesChild(event)
-          ? yield* Ref.updateAndGet(depth, (value) => Math.max(0, value - 1))
-          : yield* Ref.get(depth)
-        let closedStage: OpenStage | undefined
+        const lineDepth = state.depth
         if (event._tag === "StageStarted") {
-          yield* Ref.update(depth, (value) => value + 1)
-          const active = terminalSafe(event.stage)
-          const startedAt = yield* Clock.currentTimeMillis
-          yield* Ref.update(stages, (current) => [...current, { name: active, startedAt }])
-          yield* refreshStatus
+          state.depth += 1
+          state.stages = [...state.stages, { name: terminalSafe(event.stage), startedAt: now }]
         } else if (closesChild(event)) {
-          closedStage = (yield* Ref.get(stages)).at(-1)
-          yield* Ref.update(stages, (current) => current.slice(0, -1))
-          yield* refreshStatus
+          closed = state.stages.at(-1)
+          state.stages = state.stages.slice(0, -1)
           yield* countStage(event)
+        } else if (event._tag === "ToolUse") {
+          state.tools += 1
+          state.lastTool = { tool: terminalSafe(event.tool), at: now }
         }
-        if (rendersEvent(verbosity, event)) {
-          const line = yield* withDuration(
-            event,
-            terminalLine(event, palette, verbosity),
-            closedStage
-          )
+        addTokens(state.tokens, event)
+        trackProgress(state.inFlight, event)
+        if (state.stages.length === 0 && closesChild(event)) {
+          lanes.delete(tagged.lane)
+        }
+        if (rendersLanedEvent(verbosity, event)) {
+          const tag = palette.lane(state.index, `[${laneLabel(tagged.lane, state.executor)}]`)
+          const line = yield* withDuration(event, terminalLine(event, palette, verbosity), closed)
           const prefix = yield* timestampPrefix
-          yield* surface.log(`${prefix}${indentBlock(currentDepth, line)}`)
+          yield* surface.log(`${prefix}${tag} ${indentBlock(lineDepth, line)}`)
         }
-        yield* Ref.update(consumed, (count) => count + 1)
-      })
-    ),
-    Effect.forkScoped
+        yield* refreshStatus
+        return
+      }
+      if (event._tag === "TokensUsed" || event._tag === "UsageProgress") {
+        addTokens(runTokens, event)
+        trackProgress(runInFlight, event)
+        yield* refreshStatus
+      }
+      const currentDepth = closesChild(event)
+        ? yield* Ref.updateAndGet(depth, (value) => Math.max(0, value - 1))
+        : yield* Ref.get(depth)
+      let closedStage: OpenStage | undefined
+      if (event._tag === "StageStarted") {
+        yield* Ref.update(depth, (value) => value + 1)
+        const active = terminalSafe(event.stage)
+        const startedAt = yield* Clock.currentTimeMillis
+        yield* Ref.update(stages, (current) => [...current, { name: active, startedAt }])
+        yield* refreshStatus
+      } else if (closesChild(event)) {
+        closedStage = (yield* Ref.get(stages)).at(-1)
+        yield* Ref.update(stages, (current) => current.slice(0, -1))
+        yield* refreshStatus
+        yield* countStage(event)
+      }
+      if (rendersEvent(verbosity, event)) {
+        const line = yield* withDuration(
+          event,
+          terminalLine(event, palette, verbosity),
+          closedStage
+        )
+        const prefix = yield* timestampPrefix
+        yield* surface.log(`${prefix}${indentBlock(currentDepth, line)}`)
+      }
+    })
   )
   // Elapsed time and "Running <tool>…" age between events too.
   yield* Effect.sleep("1 second").pipe(
@@ -901,8 +844,8 @@ export const consumeTerminalEvents = Effect.fn("@llm4ts/runner/Terminal.consume"
     Effect.forkScoped
   )
   // Display only, so a drain that gives up just means a trailing line was
-  // never printed; the shared helper already bounds the wait.
+  // never printed; the hub already bounds the wait.
   const awaitDrained = (timeout?: Duration.Input): Effect.Effect<void> =>
-    Effect.asVoid(awaitConsumed(events, consumed, timeout))
-  return { consumed, stats: Ref.get(statsRef), awaitDrained }
+    Effect.asVoid(consumer.caughtUp(timeout))
+  return { stats: Ref.get(statsRef), awaitDrained }
 })

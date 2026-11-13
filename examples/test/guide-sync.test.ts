@@ -108,11 +108,11 @@ describe("docs/guide stays in sync with the codebase", () => {
     const barrel = readRepoFile("packages/runner/src/index.ts")
     for (const name of [
       "apiConnectorFromEnvironment",
-      "coderFromEnv",
       "completeAndPublish",
       "resolveFlowInput",
       "runFlowMain",
-      "runNode"
+      "runNode",
+      "coderFromEnvironment"
     ]) {
       assert.match(
         barrel,

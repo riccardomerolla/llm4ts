@@ -11,6 +11,7 @@
     "epic-stories-board": "node --experimental-strip-types epic-stories-board.ts",
     "epic-draft": "node --experimental-strip-types epic-draft.ts",
     "epic-mvp": "node --experimental-strip-types epic-mvp.ts",
+    "epic-retro": "node --experimental-strip-types epic-retro.ts",
     "issue-pr": "node --experimental-strip-types issue-pr.ts",
     "modernize-survey": "node --experimental-strip-types modernize-survey.ts",
     "modernize-extract": "node --experimental-strip-types modernize-extract.ts",
@@ -22,6 +23,7 @@
     "modernize-review": "node --experimental-strip-types modernize-review.ts",
     "modernize-bench": "node --experimental-strip-types modernize-bench.ts",
     "modernize-pack-check": "node --experimental-strip-types modernize-pack-check.ts",
+    "pack-fork": "node --experimental-strip-types pack-fork.ts",
     "port-files": "node --experimental-strip-types port-files.ts",
     "port-compile": "node --experimental-strip-types port-compile.ts",
     "port-guide": "node --experimental-strip-types port-guide.ts",
@@ -29,7 +31,9 @@
     "port-tests": "node --experimental-strip-types port-tests.ts",
     "judge-suite": "node --experimental-strip-types judge-suite.ts",
     "local": "node --experimental-strip-types local.ts",
-    "sdd": "node --experimental-strip-types sdd.ts"
+    "roundtable": "node --experimental-strip-types roundtable.ts",
+    "sdd": "node --experimental-strip-types sdd.ts",
+    "taskforce": "node --experimental-strip-types taskforce.ts"
   },
   "dependencies": {
     "@llm4ts/core": "workspace:*",

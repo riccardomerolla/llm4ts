@@ -20,7 +20,7 @@ import { runQueue } from "@llm4ts/flow/WorkQueue"
 import type { JsonSchema } from "@llm4ts/core/Models"
 import {
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   nodePlainFileStore,
   openPack,
@@ -78,7 +78,7 @@ const refuteJson: JsonSchema = {
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Classify every unit the pack's ledger regex names")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const knobs = portEnv(process.env)
 

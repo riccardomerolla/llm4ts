@@ -158,10 +158,10 @@ describe("parseConfigFile", () => {
 
 describe("resolveConfig: precedence", () => {
   const layerValues = {
-    flag: "from-flag",
-    environment: "from-environment",
-    project: "from-project",
-    global: "from-global"
+    flag: "codex",
+    environment: "gemini",
+    project: "pi",
+    global: "grok"
   } as const
   const order = ["flag", "environment", "project", "global"] as const
 

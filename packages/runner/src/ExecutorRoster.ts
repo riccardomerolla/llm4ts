@@ -33,6 +33,7 @@ import {
   effortOf,
   type Role
 } from "@llm4ts/flow/Roster"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { apiPresetFor, asReadOnly, coderFor, withEnvironment, withModel } from "./Connectors.ts"
 
 type Environment = Readonly<Record<string, string | undefined>>
@@ -188,11 +189,11 @@ export interface RosterSource {
 export const loadRosterDocument = Effect.fn("@llm4ts/runner/ExecutorRoster.load")(function* (
   source: RosterSource
 ): Effect.fn.Return<RosterDocument | undefined, FlowError> {
-  const chosen = source.environment.LLM4TS_ROSTER?.trim()
+  const chosen = settingValue("LLM4TS_ROSTER", source.environment)
   if (chosen === "none") {
     return undefined
   }
-  const loaded = yield* chosen !== undefined && chosen.length > 0
+  const loaded = yield* chosen !== undefined
     ? Effect.flatMap(readRoster(source.files, chosen), (document) =>
         document === undefined
           ? Effect.fail(RosterInvalid.make({ path: chosen, violations: ["no roster file there"] }))
@@ -218,10 +219,7 @@ export const loadRosterDocument = Effect.fn("@llm4ts/runner/ExecutorRoster.load"
     return undefined
   }
   const { document, where } = loaded
-  const ids = (source.environment.LLM4TS_EXECUTORS ?? "")
-    .split(",")
-    .map((id) => id.trim())
-    .filter((id) => id.length > 0)
+  const ids = settingValue("LLM4TS_EXECUTORS", source.environment) ?? []
   const unknown = ids.filter((id) => !document.executors.some((spec) => spec.id === id))
   const narrowed = narrowRoster(document, ids)
   const violations = [

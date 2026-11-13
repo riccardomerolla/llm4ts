@@ -43,6 +43,7 @@ import {
 } from "@llm4ts/runner"
 import { coderFor } from "@llm4ts/runner/Connectors"
 import { terminalInteraction } from "@llm4ts/runner/TerminalInteraction"
+import { settingText, settingValue } from "@llm4ts/flow/Settings"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
 import { nodeSecretSource } from "./lib/soap/Auth.ts"
 import { callOperation } from "./lib/soap/Call.ts"
@@ -128,7 +129,7 @@ export const parseSampleFlags = (
 /** The service directory: LLM4TS_SOAP_SERVICE, or the only one discovered. */
 const pickService = (workspace: WorkspaceShape, requested: string | undefined) =>
   Effect.gen(function* () {
-    if (requested !== undefined && requested !== "") return requested
+    if (requested !== undefined) return requested
     const catalogs = yield* workspace.discover(".llm4ts/soap/*/catalog.json")
     const services = catalogs.map((path) => path.split("/")[2] ?? "")
     if (services.length === 1) return services[0] ?? ""
@@ -152,14 +153,14 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("list", flags.rest)
   const [command = "list", ...args] = input.prompt.trim().split(/\s+/)
   const environment = process.env
-  const env = flags.env ?? (environment.LLM4TS_SOAP_ENV?.trim() || undefined)
+  const env = flags.env ?? settingValue("LLM4TS_SOAP_ENV", environment)
   const reasoner =
     command === "propose"
-      ? coderFor((environment.LLM4TS_REASONER ?? "claude").trim() || "claude")
+      ? coderFor(settingText("LLM4TS_REASONER", environment) ?? "claude")
       : undefined
   if (command === "propose" && reasoner === undefined) {
     return yield* ScriptUsage.make({
-      message: `unknown LLM4TS_REASONER '${environment.LLM4TS_REASONER ?? ""}'`
+      message: `unknown LLM4TS_REASONER '${settingText("LLM4TS_REASONER", environment) ?? ""}'`
     })
   }
 
@@ -176,7 +177,10 @@ const program = Effect.gen(function* () {
       Effect.gen(function* () {
         const say = (message: string) => context.events.publish(Info.make({ message }))
         const workspace = yield* makeNodeWorkspace(input.workDir)
-        const service = yield* pickService(workspace, environment.LLM4TS_SOAP_SERVICE?.trim())
+        const service = yield* pickService(
+          workspace,
+          settingValue("LLM4TS_SOAP_SERVICE", environment)
+        )
         const catalog = yield* loadCatalog(workspace, service)
         const operations = yield* loadOperationsFile(workspace, service)
 
@@ -314,8 +318,7 @@ const program = Effect.gen(function* () {
                 message: `no profile at ${profilePath(service, env)}; write it first`
               })
             }
-            const stub = environment.LLM4TS_SOAP_STUB?.trim()
-            if (stub !== undefined && stub !== "") {
+            if (settingValue("LLM4TS_SOAP_STUB", environment) !== undefined) {
               return yield* FlowAborted.make({
                 message: "trust reads a real server; unset LLM4TS_SOAP_STUB"
               })
@@ -392,12 +395,12 @@ const program = Effect.gen(function* () {
                     secrets: nodeSecretSource(environment),
                     transport: makeNodeSoapTransport()
                   })
-            const stub = environment.LLM4TS_SOAP_STUB?.trim()
+            const stub = settingValue("LLM4TS_SOAP_STUB", environment)
             const transport =
-              stub === undefined || stub === ""
+              stub === undefined
                 ? makeNodeSoapTransport()
                 : makeDirectoryStubTransport(resolve(input.workspace, stub), catalog)
-            if (stub !== undefined && stub !== "")
+            if (stub !== undefined)
               yield* say(`LLM4TS_SOAP_STUB: answering from ${stub}, not the network`)
             const targets: Array<readonly [string, string]> = []
             const operationNames =

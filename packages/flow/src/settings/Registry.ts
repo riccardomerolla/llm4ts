@@ -1,4 +1,10 @@
 import * as Duration from "effect/Duration"
+import {
+  apiProviderNames,
+  coderNames,
+  offeredApiProviderNames,
+  offeredCoderNames
+} from "@llm4ts/core/Models"
 import * as Value from "./Value.ts"
 
 /** @internal */
@@ -78,14 +84,14 @@ export const settings = {
   LLM4TS_CODER: setting({
     group: "seats",
     scope: "global",
-    value: Value.text,
+    value: Value.oneOf(coderNames),
     fallback: fallback.perFlow("claude; pi in the epic flows"),
-    doc: "The coding agent that edits files: claude, codex, gemini, pi, agy, grok, cursor or opencode."
+    doc: `The coding agent that edits files: ${Value.listed(offeredCoderNames)}.`
   }),
   LLM4TS_REASONER: setting({
     group: "seats",
     scope: "global",
-    value: Value.text,
+    value: Value.oneOf(coderNames),
     fallback: fallback.perFlow("claude"),
     doc: "The agent that plans, reviews and judges in the epic, soap, roundtable and taskforce flows; any coder name."
   }),
@@ -127,9 +133,9 @@ export const settings = {
   LLM4TS_PROVIDER: setting({
     group: "seats",
     scope: "global",
-    value: Value.text,
+    value: Value.oneOf(apiProviderNames),
     fallback: fallback.value("mock", "mock"),
-    doc: "The API provider of provider-driven flows such as hello: mock, openai, anthropic, gemini, lm-studio, ollama or mlx-lm. Any provider but mock needs LLM4TS_MODEL."
+    doc: `The API provider of provider-driven flows such as hello: ${Value.listed(offeredApiProviderNames)}. Any provider but mock needs LLM4TS_MODEL.`
   }),
   LLM4TS_MODEL: setting({
     group: "seats",
@@ -141,7 +147,7 @@ export const settings = {
   LLM4TS_JUDGMENT_PROVIDER: setting({
     group: "seats",
     scope: "global",
-    value: Value.text,
+    value: Value.oneOf(apiProviderNames),
     fallback: fallback.off("the reasoning seat answers typed judgments"),
     doc: "The API provider of the judgment seat, named the way LLM4TS_PROVIDER is."
   }),
@@ -276,7 +282,7 @@ export const settings = {
     scope: "project",
     value: Value.positive,
     fallback: fallback.value(4000, "4000"),
-    doc: "How many characters of a red gate's output the fix prompt carries."
+    doc: "How many characters of a red gate's output the fix prompt carries; at least 500 in port-tests."
   }),
   LLM4TS_TEST_REPORT: setting({
     group: "gates",

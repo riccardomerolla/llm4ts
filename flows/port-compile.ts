@@ -21,10 +21,11 @@ import {
 import { FlowAborted, ProcessError, Stalled } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import { adversarialReviewer, reviewAndFixLoop } from "@llm4ts/flow/Review"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { runQueue } from "@llm4ts/flow/WorkQueue"
 import {
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   nodePlainFileStore,
   nodeProcessExecutor,
   openPack,
@@ -42,13 +43,10 @@ interface Unit {
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Fix every compiler diagnostic, one unit at a time")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const knobs = portEnv(process.env)
-  const maxRounds = Math.max(
-    1,
-    Number.parseInt(process.env.LLM4TS_PORT_COMPILE_ROUNDS ?? "6", 10) || 6
-  )
+  const maxRounds = settingValue("LLM4TS_PORT_COMPILE_ROUNDS", process.env)
   const stateDir = portStateDir(input.workDir)
 
   yield* runNode(

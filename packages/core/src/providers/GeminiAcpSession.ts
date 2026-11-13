@@ -16,6 +16,9 @@ import {
   type JsonRecord,
   type JsonValue
 } from "./CliSupport.ts"
+import { cliExecutable } from "../Models.ts"
+
+const executable = cliExecutable("GeminiCli")
 
 /**
  * ACP (Agent Client Protocol, `gemini --experimental-acp`) message shapes
@@ -28,7 +31,7 @@ import {
  * integration smoke test, not a substitute for that determinism.
  */
 export const geminiAcpArgv = (model: string | undefined): ReadonlyArray<string> => [
-  "gemini",
+  executable,
   "--experimental-acp",
   ...(model === undefined ? [] : ["-m", model])
 ]

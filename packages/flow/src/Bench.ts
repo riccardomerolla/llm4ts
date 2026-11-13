@@ -2,7 +2,6 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
-import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
 import type { FlowEvent, FlowEventHub, FlowEventsShape } from "./FlowEvents.ts"
 import { estimateCostUsd } from "./PriceList.ts"
@@ -298,7 +297,7 @@ export const makeBenchPhase = (
 }
 
 const isHub = (events: FlowEventsShape): events is FlowEventHub =>
-  "subscribe" in events && "publishedCount" in events && "stream" in events
+  "consume" in events && "drained" in events
 
 export interface BenchTap {
   readonly get: Effect.Effect<BenchObservation>
@@ -309,30 +308,18 @@ export const makeBenchTap = Effect.fn("@llm4ts/flow/Bench.makeTap")(function* (
   events: FlowEventsShape
 ): Effect.fn.Return<BenchTap, never, Scope.Scope> {
   const observation = yield* Ref.make(emptyBenchObservation())
-  const consumed = yield* Ref.make(0)
   if (!isHub(events)) {
     return {
       get: Ref.get(observation),
       reset: Ref.set(observation, emptyBenchObservation())
     }
   }
-  const subscription = yield* events.subscribe
-  const baseline = yield* events.publishedCount
-  yield* Stream.fromSubscription(subscription).pipe(
-    Stream.runForEach((event) =>
-      Ref.update(observation, (current) => observeBench(current, event)).pipe(
-        Effect.andThen(Ref.update(consumed, (count) => count + 1))
-      )
-    ),
-    Effect.forkScoped
+  const consumer = yield* events.consume(
+    "bench",
+    (event) => Ref.update(observation, (current) => observeBench(current, event)),
+    { from: "now" }
   )
-  const drain: Effect.Effect<void> = Effect.suspend(() =>
-    Effect.all([events.publishedCount, Ref.get(consumed)]).pipe(
-      Effect.flatMap(([published, seen]) =>
-        seen >= published - baseline ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(drain))
-      )
-    )
-  )
+  const drain = consumer.caughtUp()
   return {
     get: drain.pipe(Effect.andThen(Ref.get(observation))),
     reset: drain.pipe(Effect.andThen(Ref.set(observation, emptyBenchObservation())))

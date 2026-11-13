@@ -2,12 +2,14 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ConnectorCapabilities, ConnectorIds, LlmChunk } from "../Models.ts"
+import { ConnectorCapabilities, ConnectorIds, LlmChunk, cliExecutable } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { failClassifiedCliError } from "./CliSupport.ts"
 
+const executable = cliExecutable("Copilot")
+
 export const buildCopilotArgv = (prompt: string): ReadonlyArray<string> => [
-  "gh",
+  executable,
   "copilot",
   "suggest",
   "-t",
@@ -46,7 +48,7 @@ export const makeCopilotConnector = (
       readOnlyEnforcement: "ignored"
     }),
     buildArgv: (prompt, _context) => buildCopilotArgv(prompt),
-    buildInteractiveArgv: (_context) => ["gh", "copilot"],
+    buildInteractiveArgv: (_context) => [executable, "copilot"],
     complete,
     completeStream: (prompt) =>
       Stream.fromEffect(complete(prompt)).pipe(
@@ -55,6 +57,6 @@ export const makeCopilotConnector = (
     // No auth probe: `gh auth status` validates every stored token against
     // the GitHub API (and `gh auth token` would print the secret), so there
     // is no offline login check to run; the login stays Unknown.
-    versionProbe: { executor, binary: "gh", versionArgs: ["copilot", "--version"], cwd: "." }
+    versionProbe: { executor, binary: executable, versionArgs: ["copilot", "--version"], cwd: "." }
   })
 }

@@ -6,7 +6,9 @@ import {
   isSettingName,
   readSetting,
   settingFacts,
+  settingGiven,
   settingNames,
+  settingText,
   settingValue,
   type SettingName
 } from "@llm4ts/flow/Settings"
@@ -112,7 +114,8 @@ describe("setting grammars", () => {
       "pnpm typecheck",
       "pnpm test"
     ])
-    assert.isTrue(Result.isFailure(readSetting("LLM4TS_GATES", " ; ")))
+    // A lone ; is "run none", as the gates reader always took it.
+    assert.deepStrictEqual(read("LLM4TS_GATES", " ; "), [])
     assert.deepStrictEqual(read("LLM4TS_EXECUTORS", "pi-a, codex,,claude"), [
       "pi-a",
       "codex",
@@ -188,6 +191,34 @@ describe("settingValue", () => {
       400_000
     )
     assert.isUndefined(settingValue("LLM4TS_STALL_MINUTES", { LLM4TS_STALL_MINUTES: "soon" }))
+  })
+})
+
+describe("settingGiven and settingText", () => {
+  it("tells unset, read and unreadable apart, with no default applied", () => {
+    assert.deepStrictEqual(settingGiven("LLM4TS_ORIENTATION_CHARS", {}), { _tag: "Unset" })
+    assert.deepStrictEqual(
+      settingGiven("LLM4TS_ORIENTATION_CHARS", { LLM4TS_ORIENTATION_CHARS: " " }),
+      { _tag: "Unset" }
+    )
+    assert.deepStrictEqual(
+      settingGiven("LLM4TS_ORIENTATION_CHARS", { LLM4TS_ORIENTATION_CHARS: " 0 " }),
+      { _tag: "Read", value: 0 }
+    )
+    assert.deepStrictEqual(
+      settingGiven("LLM4TS_ORIENTATION_CHARS", { LLM4TS_ORIENTATION_CHARS: " lots " }),
+      { _tag: "Unreadable", text: "lots" }
+    )
+  })
+
+  it("spells a setting as its value, else as the text the grammar refused", () => {
+    assert.isUndefined(settingText("LLM4TS_PROVIDER", {}))
+    assert.strictEqual(settingText("LLM4TS_PROVIDER", { LLM4TS_PROVIDER: " OpenAI " }), "openai")
+    assert.strictEqual(settingText("LLM4TS_PROVIDER", { LLM4TS_PROVIDER: " Nope " }), "Nope")
+    assert.strictEqual(
+      settingText("LLM4TS_GEMINI_BRIDGE_PORT", { LLM4TS_GEMINI_BRIDGE_PORT: "09000" }),
+      "9000"
+    )
   })
 })
 

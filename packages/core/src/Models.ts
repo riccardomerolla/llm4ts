@@ -1,5 +1,6 @@
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Record from "effect/Record"
 import * as Schema from "effect/Schema"
 
 export const LlmProvider = Schema.Literals([
@@ -19,119 +20,263 @@ export class ConnectorId extends Schema.Class<ConnectorId>("ConnectorId")({
   value: Schema.String
 }) {}
 
-export const ConnectorIds = Object.freeze({
-  OpenAI: new ConnectorId({ value: "openai" }),
-  Anthropic: new ConnectorId({ value: "anthropic" }),
-  GeminiApi: new ConnectorId({ value: "gemini-api" }),
-  LmStudio: new ConnectorId({ value: "lm-studio" }),
-  Ollama: new ConnectorId({ value: "ollama" }),
-  MlxLm: new ConnectorId({ value: "mlx-lm" }),
-  ClaudeCli: new ConnectorId({ value: "claude-cli" }),
-  GeminiCli: new ConnectorId({ value: "gemini-cli" }),
-  OpenCode: new ConnectorId({ value: "opencode" }),
-  Codex: new ConnectorId({ value: "codex" }),
-  Copilot: new ConnectorId({ value: "copilot" }),
-  Pi: new ConnectorId({ value: "pi" }),
-  AntigravityCli: new ConnectorId({ value: "antigravity-cli" }),
-  Grok: new ConnectorId({ value: "grok" }),
-  Cursor: new ConnectorId({ value: "cursor" }),
-  Mock: new ConnectorId({ value: "mock" })
-})
+export const ConnectorKind = Schema.Literals(["Api", "Cli"])
+export type ConnectorKind = typeof ConnectorKind.Type
 
-export const apiConnectorIds: ReadonlyArray<ConnectorId> = Object.freeze([
-  ConnectorIds.OpenAI,
-  ConnectorIds.Anthropic,
-  ConnectorIds.GeminiApi,
-  ConnectorIds.LmStudio,
-  ConnectorIds.Ollama,
-  ConnectorIds.MlxLm
-])
+interface ConnectorIdentity {
+  readonly id: string
+  /** The `LlmConfig` provider it serves. Such a row sits under the provider's own name. */
+  readonly provider?: LlmProvider
+  readonly baseUrl?: string
+  /**
+   * What an operator may write for it: a coder name on a CLI row
+   * (`LLM4TS_CODER`, `LLM4TS_REASONER`), a provider name on an API row
+   * (`LLM4TS_PROVIDER`). The first is the one help and menus show. Empty
+   * means it is not offered under any name.
+   */
+  readonly names: ReadonlyArray<string>
+}
 
-export const cliConnectorIds: ReadonlyArray<ConnectorId> = Object.freeze([
-  ConnectorIds.ClaudeCli,
-  ConnectorIds.GeminiCli,
-  ConnectorIds.OpenCode,
-  ConnectorIds.Codex,
-  ConnectorIds.Copilot,
-  ConnectorIds.Pi,
-  ConnectorIds.AntigravityCli,
-  ConnectorIds.Grok,
-  ConnectorIds.Cursor
-])
+export interface ApiConnectorRow extends ConnectorIdentity {
+  readonly kind: "Api"
+  /** Environment variables that may hold its key; the first one set wins. */
+  readonly credentialVariables: ReadonlyArray<string>
+  /** Answers without a backend, so it is no part of `apiConnectorIds`. */
+  readonly simulated?: true
+}
+
+export interface CliConnectorRow extends ConnectorIdentity {
+  readonly kind: "Cli"
+  /** The program it spawns, and the one looked for on `PATH`. */
+  readonly executable: string
+}
+
+export type ConnectorRow = ApiConnectorRow | CliConnectorRow
+
+/**
+ * Every connector's identity, one row each. The id lists, the provider
+ * mappings and the names an operator may write are all read from here; the
+ * factories (`providers/ConnectorFactories.ts`) and the runner's presets are
+ * records keyed by these names, so a row without either does not compile.
+ */
+export const connectorTable = {
+  OpenAI: {
+    id: "openai",
+    kind: "Api",
+    provider: "OpenAI",
+    baseUrl: "https://api.openai.com/v1",
+    credentialVariables: ["OPENAI_API_KEY"],
+    names: ["openai"]
+  },
+  Anthropic: {
+    id: "anthropic",
+    kind: "Api",
+    provider: "Anthropic",
+    baseUrl: "https://api.anthropic.com",
+    credentialVariables: ["ANTHROPIC_API_KEY"],
+    names: ["anthropic"]
+  },
+  GeminiApi: {
+    id: "gemini-api",
+    kind: "Api",
+    provider: "GeminiApi",
+    baseUrl: "https://generativelanguage.googleapis.com",
+    credentialVariables: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+    names: ["gemini", "gemini-api"]
+  },
+  LmStudio: {
+    id: "lm-studio",
+    kind: "Api",
+    provider: "LmStudio",
+    baseUrl: "http://localhost:1234/v1",
+    credentialVariables: [],
+    names: ["lm-studio", "lmstudio"]
+  },
+  Ollama: {
+    id: "ollama",
+    kind: "Api",
+    provider: "Ollama",
+    baseUrl: "http://localhost:11434",
+    credentialVariables: [],
+    names: ["ollama"]
+  },
+  MlxLm: {
+    id: "mlx-lm",
+    kind: "Api",
+    provider: "MlxLm",
+    baseUrl: "http://localhost:8080",
+    credentialVariables: [],
+    names: ["mlx-lm", "mlxlm", "mlx"]
+  },
+  ClaudeCli: {
+    id: "claude-cli",
+    kind: "Cli",
+    executable: "claude",
+    names: ["claude", "claude-cli"]
+  },
+  GeminiCli: {
+    id: "gemini-cli",
+    kind: "Cli",
+    provider: "GeminiCli",
+    executable: "gemini",
+    names: ["gemini", "gemini-cli"]
+  },
+  OpenCode: {
+    id: "opencode",
+    kind: "Cli",
+    provider: "OpenCode",
+    baseUrl: "http://localhost:4096",
+    executable: "opencode",
+    names: ["opencode"]
+  },
+  Codex: { id: "codex", kind: "Cli", executable: "codex", names: ["codex"] },
+  Copilot: { id: "copilot", kind: "Cli", executable: "gh", names: [] },
+  Pi: { id: "pi", kind: "Cli", executable: "pi", names: ["pi"] },
+  AntigravityCli: {
+    id: "antigravity-cli",
+    kind: "Cli",
+    executable: "agy",
+    names: ["agy", "antigravity", "antigravity-cli"]
+  },
+  Grok: { id: "grok", kind: "Cli", executable: "grok", names: ["grok"] },
+  Cursor: { id: "cursor", kind: "Cli", executable: "cursor-agent", names: ["cursor"] },
+  Mock: {
+    id: "mock",
+    kind: "Api",
+    provider: "Mock",
+    credentialVariables: [],
+    simulated: true,
+    names: ["mock"]
+  }
+} as const satisfies Readonly<Record<string, ConnectorRow>>
+
+export type ConnectorName = keyof typeof connectorTable
+type RowOf<K extends ConnectorName> = (typeof connectorTable)[K]
+
+export type CliConnectorName = {
+  [K in ConnectorName]: RowOf<K>["kind"] extends "Cli" ? K : never
+}[ConnectorName]
+export type ApiConnectorName = Exclude<ConnectorName, CliConnectorName>
+
+/** Every name `LLM4TS_CODER` and `LLM4TS_REASONER` read. */
+export type CoderName = RowOf<CliConnectorName>["names"][number]
+/** Every name `LLM4TS_PROVIDER` and `LLM4TS_JUDGMENT_PROVIDER` read. */
+export type ApiProviderName = RowOf<ApiConnectorName>["names"][number]
+
+type OfferedCoder = {
+  [K in CliConnectorName]: RowOf<K>["names"] extends readonly [] ? never : K
+}[CliConnectorName]
+
+const rows: Readonly<Record<ConnectorName, ConnectorRow>> = connectorTable
+const providerRows: { readonly [P in LlmProvider]: ConnectorRow & { readonly provider: P } } =
+  connectorTable
+const names = Record.keys(connectorTable)
+
+export const isCliConnectorName = (name: ConnectorName): name is CliConnectorName =>
+  rows[name].kind === "Cli"
+
+export const ConnectorIds: Readonly<Record<ConnectorName, ConnectorId>> = Object.freeze(
+  Record.map(connectorTable, (row) => new ConnectorId({ value: row.id }))
+)
+
+const idsWhere = (keep: (row: ConnectorRow) => boolean): ReadonlyArray<ConnectorId> =>
+  Object.freeze(names.filter((name) => keep(rows[name])).map((name) => ConnectorIds[name]))
+
+export const apiConnectorIds: ReadonlyArray<ConnectorId> = idsWhere(
+  (row) => row.kind === "Api" && row.simulated !== true
+)
+
+export const cliConnectorIds: ReadonlyArray<ConnectorId> = idsWhere((row) => row.kind === "Cli")
 
 export const connectorIds: ReadonlyArray<ConnectorId> = Object.freeze([
   ...apiConnectorIds,
   ...cliConnectorIds,
-  ConnectorIds.Mock
+  ...idsWhere((row) => row.kind === "Api" && row.simulated === true)
 ])
 
-export const defaultBaseUrl = (provider: LlmProvider): string | undefined => {
-  switch (provider) {
-    case "GeminiCli":
-    case "Mock":
-      return undefined
-    case "GeminiApi":
-      return "https://generativelanguage.googleapis.com"
-    case "OpenAI":
-      return "https://api.openai.com/v1"
-    case "Anthropic":
-      return "https://api.anthropic.com"
-    case "LmStudio":
-      return "http://localhost:1234/v1"
-    case "Ollama":
-      return "http://localhost:11434"
-    case "MlxLm":
-      return "http://localhost:8080"
-    case "OpenCode":
-      return "http://localhost:4096"
-  }
-}
+const rowsById = new Map<string, ConnectorRow>(names.map((name) => [rows[name].id, rows[name]]))
 
-const connectorProviderTable: Readonly<Record<string, LlmProvider>> = {
-  openai: "OpenAI",
-  anthropic: "Anthropic",
-  "gemini-api": "GeminiApi",
-  "lm-studio": "LmStudio",
-  ollama: "Ollama",
-  "mlx-lm": "MlxLm",
-  opencode: "OpenCode",
-  "gemini-cli": "GeminiCli",
-  mock: "Mock"
-}
+export const connectorRow = (id: ConnectorId): ConnectorRow | undefined => rowsById.get(id.value)
+
+export const defaultBaseUrl = (provider: LlmProvider): string | undefined =>
+  providerRows[provider].baseUrl
 
 export const connectorProvider = (id: ConnectorId): LlmProvider | undefined =>
-  connectorProviderTable[id.value]
+  connectorRow(id)?.provider
 
-export const connectorDefaultBaseUrl = (id: ConnectorId): string | undefined => {
-  const provider = connectorProvider(id)
-  return provider === undefined ? undefined : defaultBaseUrl(provider)
-}
+export const connectorDefaultBaseUrl = (id: ConnectorId): string | undefined =>
+  connectorRow(id)?.baseUrl
 
-export const providerConnectorId = (provider: LlmProvider): ConnectorId => {
-  switch (provider) {
-    case "GeminiCli":
-      return ConnectorIds.GeminiCli
-    case "GeminiApi":
-      return ConnectorIds.GeminiApi
-    case "OpenAI":
-      return ConnectorIds.OpenAI
-    case "Anthropic":
-      return ConnectorIds.Anthropic
-    case "LmStudio":
-      return ConnectorIds.LmStudio
-    case "Ollama":
-      return ConnectorIds.Ollama
-    case "MlxLm":
-      return ConnectorIds.MlxLm
-    case "OpenCode":
-      return ConnectorIds.OpenCode
-    case "Mock":
-      return ConnectorIds.Mock
-  }
-}
+export const providerConnectorId = (provider: LlmProvider): ConnectorId => ConnectorIds[provider]
 
-export const ConnectorKind = Schema.Literals(["Api", "Cli"])
-export type ConnectorKind = typeof ConnectorKind.Type
+const namedConnectors = <K extends ConnectorName>(keys: ReadonlyArray<K>): ReadonlyMap<string, K> =>
+  new Map(keys.flatMap((key) => rows[key].names.map((name) => [name, key] as const)))
+
+const cliNames = names.filter(isCliConnectorName)
+const apiNames = names.filter((name) => !isCliConnectorName(name))
+const coderConnectors = namedConnectors(cliNames)
+const apiProviderConnectors = namedConnectors(apiNames)
+
+/** The CLI connector a coder name stands for; the name as written, lower case. */
+export const coderConnector = (name: string): CliConnectorName | undefined =>
+  coderConnectors.get(name)
+
+/** The API connector a provider name stands for; the name as written, lower case. */
+export const apiProviderConnector = (name: string): ApiConnectorName | undefined =>
+  apiProviderConnectors.get(name)
+
+export const coderNames: ReadonlyArray<CoderName> = cliNames.flatMap(
+  (name) => connectorTable[name].names
+)
+
+export const apiProviderNames: ReadonlyArray<ApiProviderName> = apiNames.flatMap(
+  (name) => connectorTable[name].names
+)
+
+/** Every variable an API connector reads its key from. Names only, never a value. */
+export const credentialVariables: ReadonlyArray<string> = apiNames.flatMap(
+  (name) => connectorTable[name].credentialVariables
+)
+
+export const cliExecutable = <K extends CliConnectorName>(name: K): RowOf<K>["executable"] =>
+  connectorTable[name].executable
+
+const inOrder =
+  <All extends string>() =>
+  <const L extends ReadonlyArray<All>>(
+    list: L,
+    ..._missing: [Exclude<All, L[number]>] extends [never] ? [] : [missing: Exclude<All, L[number]>]
+  ): L =>
+    list
+
+/** The coding agents help and menus offer, in the order they show them. */
+export const offeredCoders = inOrder<OfferedCoder>()([
+  "ClaudeCli",
+  "Codex",
+  "GeminiCli",
+  "Pi",
+  "AntigravityCli",
+  "Grok",
+  "Cursor",
+  "OpenCode"
+])
+
+/** The API providers help and errors offer, in the order they show them. */
+export const offeredApiProviders = inOrder<ApiConnectorName>()([
+  "Mock",
+  "OpenAI",
+  "Anthropic",
+  "GeminiApi",
+  "LmStudio",
+  "Ollama",
+  "MlxLm"
+])
+
+export const offeredCoderNames = offeredCoders.map((name) => connectorTable[name].names[0])
+
+export const offeredApiProviderNames = offeredApiProviders.map(
+  (name) => connectorTable[name].names[0]
+)
 
 export const MessageRole = Schema.Literals(["System", "User", "Assistant", "Tool"])
 export type MessageRole = typeof MessageRole.Type

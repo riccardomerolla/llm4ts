@@ -62,6 +62,8 @@ describe("Context.budget", () => {
     assert.strictEqual(budget({ LLM4TS_CONTEXT_BUDGET: "0" }), defaultContextBudget)
     assert.strictEqual(budget({ LLM4TS_CONTEXT_BUDGET: "-3" }), defaultContextBudget)
     assert.strictEqual(budget({ LLM4TS_CONTEXT_BUDGET: "many" }), defaultContextBudget)
+    assert.strictEqual(budget({ LLM4TS_CONTEXT_BUDGET: "12abc" }), defaultContextBudget)
+    assert.strictEqual(budget({ LLM4TS_CONTEXT_BUDGET: " 1000 " }), 1000)
   })
 })
 

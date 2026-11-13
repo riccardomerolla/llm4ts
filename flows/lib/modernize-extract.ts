@@ -21,22 +21,19 @@ import { ReviewIssue } from "@llm4ts/flow/Review"
 import { cachedReview } from "@llm4ts/flow/ReviewCache"
 import { FlowLlmError, Info, ReviewResult, makeChat, reviewFingerprint } from "@llm4ts/runner"
 import { packageVersion } from "@llm4ts/flow/Package"
+import { settingValue } from "@llm4ts/flow/Settings"
 
 export const ModDir = "docs/modernization"
 
-export const positiveEnvInt = (name: string, fallback: number): number => {
-  const raw = Number.parseInt(process.env[name] ?? "", 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : fallback
-}
-
 // Per-program turn budget — bounds a wedged agent, generous for real work.
-export const analystTurns = (): number => positiveEnvInt("LLM4TS_ANALYST_TURNS", 48)
+export const analystTurns = (): number => settingValue("LLM4TS_ANALYST_TURNS", process.env)
 
 /**
  * Max files named in one program's include closure. A program pulling more
  * than this gets a bounded, visible subset rather than an unbounded read.
  */
-export const maxClosureFiles = (): number => positiveEnvInt("LLM4TS_MAX_CLOSURE_FILES", 40)
+export const maxClosureFiles = (): number =>
+  settingValue("LLM4TS_MAX_CLOSURE_FILES", process.env) ?? 40
 
 /** The program's bounded closure as a diagram, placed above the analyst's spec (ADR 0030). */
 export const closureSection = (graph: SurveyGraph, program: string): string => {

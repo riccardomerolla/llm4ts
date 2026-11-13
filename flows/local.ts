@@ -1,5 +1,6 @@
 // Local-first flow: an LM Studio reasoner drafts the plan, a local pi agent implements it.
 import * as Effect from "effect/Effect"
+import { settingValue } from "@llm4ts/flow/Settings"
 import {
   AssistantMessage,
   Info,
@@ -11,8 +12,8 @@ import {
 } from "@llm4ts/runner"
 import { lmStudio, pi, withTimeoutSeconds } from "@llm4ts/runner/Connectors"
 
-const reasoningModel = process.env.LLM4TS_REASONING_MODEL ?? "qwen/qwen3-coder-30b"
-const coderModel = process.env.LLM4TS_CODER_MODEL ?? reasoningModel
+const reasoningModel = settingValue("LLM4TS_REASONING_MODEL", process.env) ?? "qwen/qwen3-coder-30b"
+const coderModel = settingValue("LLM4TS_CODER_MODEL", process.env) ?? reasoningModel
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(

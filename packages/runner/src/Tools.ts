@@ -7,6 +7,7 @@ import { builtinTools } from "@llm4ts/flow/tools/Builtin"
 import type { ToolReport, ToolSpec } from "@llm4ts/flow/tools/Tool"
 import { isToolName, renderUsage, specOf, type ToolShape } from "@llm4ts/flow/tools/Tool"
 import type { ToolPreset } from "@llm4ts/flow/Pack"
+import { settingValue } from "@llm4ts/flow/Settings"
 import type { DiscoveredKit } from "./Kits.ts"
 
 /**
@@ -177,7 +178,7 @@ export const toolBrief = (
   specs: ReadonlyMap<string, ToolSpec>,
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): string | undefined => {
-  if (environment.LLM4TS_TOOL_BRIEF?.trim().toLowerCase() === "off") {
+  if (!settingValue("LLM4TS_TOOL_BRIEF", environment)) {
     return undefined
   }
   const lines = [

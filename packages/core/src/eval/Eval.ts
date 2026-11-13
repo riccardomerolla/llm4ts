@@ -1,7 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type { LlmError } from "../Errors.ts"
-import type { Evaluator } from "./Evaluator.ts"
 
 export class Dimension extends Schema.Class<Dimension>("Dimension")({
   name: Schema.String,
@@ -86,6 +85,10 @@ export class RepeatedEval extends Schema.Class<RepeatedEval>("RepeatedEval")({
 
 const median = (sorted: ReadonlyArray<number>): number =>
   sorted.length === 0 ? 0 : (sorted[Math.floor((sorted.length - 1) / 2)] ?? 0)
+
+export interface Evaluator<in In> {
+  readonly evaluate: (input: In) => Effect.Effect<EvalResult, LlmError>
+}
 
 export const repeat = Effect.fn("@llm4ts/core/eval/Eval.repeat")(function* <In>(
   evaluator: Evaluator<In>,

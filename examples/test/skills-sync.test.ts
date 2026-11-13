@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -41,11 +48,15 @@ describe("skills stay in sync with the guide and the codebase", () => {
   const packSkill = readRepoFile("skills/authoring-llm4ts-packs/SKILL.md")
   const packTemplate = readRepoFile("skills/authoring-llm4ts-packs/references/pack-template.md")
 
-  it("both skills are registered in the marketplace with matching front matter", () => {
+  it("every shipped skill is registered in the marketplace with matching front matter", () => {
     const marketplace = Schema.decodeUnknownSync(Schema.fromJsonString(Marketplace))(
       readRepoFile(".claude-plugin/marketplace.json")
     )
-    for (const name of ["using-llm4ts", "authoring-llm4ts-flows", "authoring-llm4ts-packs"]) {
+    const skillNames = readdirSync(join(repositoryRoot, "skills")).filter((name) =>
+      existsSync(join(repositoryRoot, "skills", name, "SKILL.md"))
+    )
+    assert.isNotEmpty(skillNames)
+    for (const name of skillNames) {
       const entry = marketplace.plugins.find((plugin) => plugin.name === name)
       assert.isDefined(entry, `${name} is not registered in .claude-plugin/marketplace.json`)
       assert.strictEqual(entry.source, `./skills/${name}`)

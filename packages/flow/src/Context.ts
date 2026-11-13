@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import { FlowLlmError, type FlowError } from "./FlowError.ts"
 import { FlowEvents, Info } from "./FlowEvents.ts"
+import { settingValue } from "./Settings.ts"
 import { isContextOverflow, isContextOverflowMessage } from "./TransientRetry.ts"
 
 // Context budgeting for LLM prompts: bound what a call ships, and make every
@@ -47,14 +48,7 @@ export const defaultContextBudget = 400_000
 /** The default character budget: `LLM4TS_CONTEXT_BUDGET`, else 400_000. */
 export const budget = (
   environment: Readonly<Record<string, string | undefined>> = process.env
-): number => {
-  const raw = environment["LLM4TS_CONTEXT_BUDGET"]
-  if (raw === undefined) {
-    return defaultContextBudget
-  }
-  const parsed = Number.parseInt(raw.trim(), 10)
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : defaultContextBudget
-}
+): number => settingValue("LLM4TS_CONTEXT_BUDGET", environment)
 
 /**
  * Which kind of shrinking produced a truncation — the two are NOT

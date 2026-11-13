@@ -6,7 +6,11 @@ export list; the following modules are the main entry points.
 ## Core
 
 - `@llm4ts/core/Models`: messages, chunks, responses, usage, configuration,
-  connector identifiers, health.
+  health, and connector identity. `connectorTable` has one row per connector
+  (id, kind, provider, default base URL, credential variables, the names an
+  operator may write, the executable of a CLI connector); `ConnectorIds`, the
+  id lists, `coderNames`, `apiProviderNames` and the lookups
+  (`connectorRow`, `coderConnector`, `apiProviderConnector`) are read from it.
 - `@llm4ts/core/LlmService`: backend-neutral LLM service.
 - `@llm4ts/core/ConnectorConfig` and `ConnectorRegistry`: connector selection.
 - `@llm4ts/core/providers/*`: API and CLI connector implementations.
@@ -203,12 +207,15 @@ export list; the following modules are the main entry points.
   `SettingName` is the union of the names; `settingFacts` gives a setting's
   group, scope, value grammar, default and doc; `readSetting` and
   `settingValue` decode a raw value or an environment with the setting's
-  grammar; `closestSettingName` names the setting a misspelled name meant.
+  grammar; `settingGiven` tells unset, read and unreadable apart with no
+  default applied, and `settingText` spells a setting for a reader that
+  refuses a value by name; `closestSettingName` names the setting a
+  misspelled name meant.
 
 ## Runner
 
 - `@llm4ts/runner` (root): the flow author's barrel — `runNode`,
-  `runFlowMain`, `resolveFlowInput`, `coderFromEnv`,
+  `runFlowMain`, `resolveFlowInput`, `coderFromEnvironment`, `reasonerFromEnvironment`, `seatsFromEnvironment`,
   `apiConnectorFromEnvironment`, `openPack`, and the flow verbs a script
   calls (`completeAndPublish`, `implementPlanFlow`, `stage`,
   `implementTaskLoop`, `reviewAndFixLoop`, `lintCommand`, `makePlanStore`,
@@ -239,6 +246,8 @@ export list; the following modules are the main entry points.
   repositories into a `CostReport`, skipping and naming unreadable traces;
   `llm4ts costs` is its command.
 - `@llm4ts/runner/McpStdio`: JSON-RPC MCP stdio transport.
+- `@llm4ts/runner/EventPresentation`: `eventPresentation`, one entry per
+  event: the verbosity it prints at, its kind in a profile gap, its digest line.
 
 ## JavaScript
 

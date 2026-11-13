@@ -67,6 +67,13 @@ runFlowMain(program)
   `llm4ts run` forwards; `input.workDir` is the target repository.
 - `apiConnectorFromEnvironment()` reads `LLM4TS_PROVIDER` (default `mock`,
   no credentials) and `LLM4TS_MODEL`.
+- Read a setting llm4ts defines with
+  `settingValue("LLM4TS_JUDGE_ROUNDS", process.env) ?? 2` from
+  `@llm4ts/flow/Settings`, never with `process.env.LLM4TS_…`: it applies the
+  setting's grammar and default, and a name the registry lacks does not
+  compile. The `LLM4TS_` namespace belongs to that registry. A setting of
+  the flow's own takes its own prefix (`ACME_BATCH_SIZE`), read and parsed
+  from `process.env` by the flow.
 - `runNode(input, body)` wires HTTP, processes, temp files, persistence, and
   connectors; `body` receives `context` with `coder`, `reasoning`,
   `reviewers`, `events`, `git`, `workspace`. Never build Effect layers.
@@ -81,12 +88,12 @@ npx -y @llm4ts/shell run <name> "<task>"      # mock provider: canned answer, ex
 ```
 
 To drive the user's coding agent instead of an API provider, replace the
-`coder` line and add `coderFromEnv` to the `@llm4ts/runner` import;
+`coder` line and add `coderFromEnvironment` to the `@llm4ts/runner` import;
 `LLM4TS_CODER` selects the CLI (`claude` default, `codex`, `gemini`, `pi`,
 `agy`, `grok`, `cursor`, `opencode`):
 
 ```ts
-const coder = coderFromEnv(process.env)
+const coder = yield * coderFromEnvironment()
 ```
 
 Do not run a coder-driven flow against the user's real repository as a

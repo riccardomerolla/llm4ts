@@ -3,6 +3,7 @@ import { FlowLlmError, type FlowError } from "@llm4ts/flow/FlowError"
 import { AssistantMessage } from "@llm4ts/flow/FlowEvents"
 import { collect } from "@llm4ts/core/Streaming"
 import { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { coderFromEnvironment } from "./Connectors.ts"
 import { parseFlowArgs, readFlowPrompt, resolveFlowRepo, type ScriptUsage } from "./FlowArgs.ts"
 import { runNode } from "./FlowRunner.ts"
@@ -33,7 +34,7 @@ export const makeCliProgram = (
         workspace,
         userPrompt: prompt,
         coder,
-        verbosity: parseVerbosity(environment.LLM4TS_VERBOSITY),
+        verbosity: parseVerbosity(settingValue("LLM4TS_VERBOSITY", environment)),
         runId: timestamp.toString()
       },
       (context) =>

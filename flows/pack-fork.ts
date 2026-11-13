@@ -40,7 +40,7 @@ import type { OpenedPack } from "@llm4ts/runner/Packs"
 import {
   asReadOnly,
   asToolless,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   nodePlainFileStore,
   openPack,
@@ -127,7 +127,8 @@ const program = Effect.gen(function* () {
   const targetKind = yield* parseTargetKind(process.env)
   const forkAs = yield* parseForkAs(process.env)
   const feedback = parseFeedback(process.env)
-  const coder = asReadOnly(coderFromEnv(process.env))
+  const selected = yield* coderFromEnvironment()
+  const coder = asReadOnly(selected)
   const files = nodePlainFileStore
 
   yield* runNode(
@@ -143,7 +144,7 @@ const program = Effect.gen(function* () {
       // ("empty response … no text to parse as structured output"). A
       // read-only coder still offers a read tool over some connectors
       // (pi in particular); asToolless offers none.
-      reasoning: asToolless(coderFromEnv(process.env)),
+      reasoning: asToolless(selected),
       environment: process.env
     },
     (context) =>

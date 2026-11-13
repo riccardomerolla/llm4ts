@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliAuthProbe, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ConnectorCapabilities, ConnectorIds, LlmChunk } from "../Models.ts"
+import { ConnectorCapabilities, ConnectorIds, LlmChunk, cliExecutable } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   failClassifiedCliError,
@@ -18,6 +18,8 @@ import {
   toolEventChunk,
   type JsonValue
 } from "./CliSupport.ts"
+
+const executable = cliExecutable("Cursor")
 
 /**
  * `cursor-agent status --format json` (alias `whoami`) answers
@@ -84,7 +86,7 @@ export const makeCursorConnector = (
   const cwd = config.workingDir ?? "."
   const extraArgs = cursorExtraArgs(config)
   const buildArgv = (prompt: string): ReadonlyArray<string> => [
-    "cursor-agent",
+    executable,
     ...extraArgs,
     "-p",
     prompt
@@ -107,7 +109,7 @@ export const makeCursorConnector = (
   const completeStream = (prompt: string) =>
     executor
       .runStreaming(
-        ["cursor-agent", "--output-format", "stream-json", ...extraArgs, "-p", prompt],
+        [executable, "--output-format", "stream-json", ...extraArgs, "-p", prompt],
         cwd,
         config.envVars
       )
@@ -133,9 +135,9 @@ export const makeCursorConnector = (
       readOnlyEnforcement: "ignored"
     }),
     buildArgv: (prompt, _context) => buildArgv(prompt),
-    buildInteractiveArgv: (_context) => ["cursor-agent", ...extraArgs],
+    buildInteractiveArgv: (_context) => [executable, ...extraArgs],
     complete,
     completeStream,
-    versionProbe: { executor, binary: "cursor-agent", cwd, authProbe: cursorAuthProbe }
+    versionProbe: { executor, binary: executable, cwd, authProbe: cursorAuthProbe }
   })
 }

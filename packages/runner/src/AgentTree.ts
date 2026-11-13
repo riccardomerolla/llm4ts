@@ -1,10 +1,18 @@
+import * as Duration from "effect/Duration"
 import type { TokenUsage } from "@llm4ts/core/Models"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { toolCategory } from "@llm4ts/flow/Activity"
-import { FlowEvent, cloneName } from "@llm4ts/flow/FlowEvents"
+import {
+  FlowEvent,
+  cloneName,
+  laneClosed,
+  laneOpened,
+  type LaneKind
+} from "@llm4ts/flow/FlowEvents"
 import type { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { estimateCostUsd } from "@llm4ts/flow/PriceList"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { formatCount } from "./Terminal.ts"
 
 /**
@@ -26,8 +34,7 @@ export type TreeInput =
 
 export type LaneStatus = "running" | "done" | "failed"
 
-/** What a lane stands for: a story's coder (ADR 0022), a roundtable attendee (ADR 0046), or a taskforce specialist (ADR 0047). */
-export type LaneKind = "story" | "attendee" | "specialist"
+export type { LaneKind }
 
 export interface TreeLane {
   readonly id: string
@@ -236,16 +243,8 @@ export interface TreeOptions {
 export const defaultIdleAfterMs = 120_000
 
 /** `LLM4TS_IDLE_AFTER`: `90s`, `5m`, `1h` (a bare number is seconds); two minutes otherwise. */
-export const idleAfterFrom = (
-  environment: Readonly<Record<string, string | undefined>>
-): number => {
-  const match = /^(\d+)\s*(s|m|h)?$/u.exec(environment.LLM4TS_IDLE_AFTER?.trim() ?? "")
-  if (match === null) {
-    return defaultIdleAfterMs
-  }
-  const unit = match[2] === "h" ? 3_600_000 : match[2] === "m" ? 60_000 : 1_000
-  return Number(match[1]) * unit
-}
+export const idleAfterFrom = (environment: Readonly<Record<string, string | undefined>>): number =>
+  Duration.toMillis(settingValue("LLM4TS_IDLE_AFTER", environment))
 
 export const emptyTree = (options: TreeOptions = {}): TreeState => ({
   title: options.title ?? "flow",
@@ -279,8 +278,6 @@ const logged = (state: TreeState, entry: TreeLogEntry): TreeState => ({
   log: [...state.log, entry]
 })
 
-/** The stage that opens a lane: a story's, a roundtable attendee's or a taskforce specialist's (names may hold spaces). */
-const laneStage = /^(story|attendee|specialist) (.+)$/u
 const expandedTools = 20
 
 const updateLane = (
@@ -424,15 +421,9 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
         }
   switch (event._tag) {
     case "StageStarted": {
-      const opened = laneStage.exec(event.stage)
-      const story = opened?.[2]
-      if (story !== undefined && event.lane === story) {
-        const kind: LaneKind =
-          opened?.[1] === "attendee"
-            ? "attendee"
-            : opened?.[1] === "specialist"
-              ? "specialist"
-              : "story"
+      const opened = laneOpened(event)
+      if (opened !== undefined) {
+        const { id: story, kind } = opened
         const fresh: TreeLane = {
           id: story,
           kind,
@@ -477,7 +468,7 @@ const reduceEvent = (state: TreeState, at: number, event: FlowEvent): TreeState 
     }
     case "StageCompleted":
     case "StageFailed": {
-      if (lane !== undefined && event.stage === `${lane.kind} ${lane.id}`) {
+      if (lane !== undefined && laneClosed(event)?.kind === lane.kind) {
         const status: LaneStatus = event._tag === "StageFailed" ? "failed" : "done"
         const closed = updateLane(current, lane.id, (open) => ({
           ...open,

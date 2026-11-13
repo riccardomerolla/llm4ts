@@ -5,7 +5,7 @@ import * as Ref from "effect/Ref"
 import type * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
-import { awaitConsumed, type FlowEventHub } from "@llm4ts/flow/FlowEvents"
+import type { FlowEventHub } from "@llm4ts/flow/FlowEvents"
 import {
   emptyTree,
   initialView,
@@ -108,17 +108,12 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
   const state = yield* Ref.make(emptyTree(idleAfterMs === undefined ? {} : { idleAfterMs }))
   const view = yield* Ref.make<TreeView>(initialView)
   const active = yield* Ref.make(true)
-  const consumed = yield* Ref.make(0)
   const lock = yield* Semaphore.make(1)
 
-  const subscription = yield* hub.subscribe
-  yield* Stream.fromSubscription(subscription).pipe(
-    Stream.runForEach((event) =>
-      Effect.flatMap(Clock.currentTimeMillis, (at) =>
-        Ref.update(state, (current) => reduceTree(current, { _tag: "Event", at, event }))
-      ).pipe(Effect.andThen(Ref.update(consumed, (count) => count + 1)))
-    ),
-    Effect.forkScoped
+  const consumer = yield* hub.consume("agent tree", (event) =>
+    Effect.flatMap(Clock.currentTimeMillis, (at) =>
+      Ref.update(state, (current) => reduceTree(current, { _tag: "Event", at, event }))
+    )
   )
 
   const render = (rows: number | undefined): Effect.Effect<ReadonlyArray<string>> =>
@@ -210,7 +205,7 @@ export const makeAgentTreeHost = Effect.fn("@llm4ts/runner/AgentTreeSurface.make
 
   return {
     surface,
-    close: Effect.andThen(awaitConsumed(hub, consumed), leave(true))
+    close: Effect.andThen(consumer.caughtUp(), leave(true))
   }
 })
 

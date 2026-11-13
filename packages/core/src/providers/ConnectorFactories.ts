@@ -1,10 +1,12 @@
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Record from "effect/Record"
 import {
   ApiConnectorConfig,
   CliConnectorConfig,
   toLlmConfig,
-  type ConnectorConfig
+  type ConnectorConfig,
+  type ConnectorConfigOf
 } from "../ConnectorConfig.ts"
 import {
   ConnectorRegistry,
@@ -15,7 +17,14 @@ import {
 import type { ConnectorShape } from "../Connector.ts"
 import { ConfigError, type LlmError } from "../Errors.ts"
 import { HttpClient, type HttpClientShape } from "../HttpClient.ts"
-import { ConnectorIds, LlmConfig, type ConnectorId, type ConnectorKind } from "../Models.ts"
+import {
+  ConnectorIds,
+  LlmConfig,
+  isCliConnectorName,
+  type ConnectorId,
+  type ConnectorKind,
+  type ConnectorName
+} from "../Models.ts"
 import { ProcessExecutor, type ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { TemporaryFiles, type TemporaryFilesShape } from "../TemporaryFiles.ts"
 import { makeAnthropicProvider } from "./AnthropicProvider.ts"
@@ -76,58 +85,51 @@ const cliFactory = (
       : Effect.fail(expectedConfig("Cli", id))
 })
 
+// A connector without an entry here does not compile. The registry lists
+// them in this order.
+const builders: {
+  readonly [K in ConnectorName]: (
+    config: ConnectorConfigOf<K>,
+    dependencies: ConnectorFactoryDependencies
+  ) => ConnectorShape
+} = {
+  OpenAI: (config, { http }) => makeOpenAIProvider(toLlmConfig(config), http),
+  Anthropic: (config, { http }) => makeAnthropicProvider(toLlmConfig(config), http),
+  GeminiApi: (config, { http }) => makeGeminiApiProvider(toLlmConfig(config), http),
+  LmStudio: (config, { http }) => makeLmStudioProvider(toLlmConfig(config), http),
+  Ollama: (config, { http }) => makeOllamaProvider(toLlmConfig(config), http),
+  MlxLm: (config, { http }) => makeMlxLmProvider(toLlmConfig(config), http),
+  ClaudeCli: (config, { process }) => makeClaudeCliConnector(config, process),
+  OpenCode: (config, { process }) => makeOpenCodeCliConnector(config, process),
+  GeminiCli: (config, { geminiCli }) =>
+    makeGeminiCliProvider(
+      LlmConfig.make({
+        provider: "GeminiCli",
+        model: config.model ?? "gemini-2.5-flash"
+      }),
+      geminiCli,
+      geminiCliExecutionContextFrom(config)
+    ),
+  Codex: (config, { process, temporaryFiles }) =>
+    makeCodexConnector(config, process, temporaryFiles),
+  Copilot: (config, { process }) => makeCopilotConnector(config, process),
+  Pi: (config, { process }) => makePiConnector(config, process),
+  AntigravityCli: (config, { process }) => makeAntigravityConnector(config, process),
+  Grok: (config, { process }) => makeGrokCliConnector(config, process),
+  Cursor: (config, { process }) => makeCursorConnector(config, process),
+  Mock: (config) => makeMockProvider(toLlmConfig(config))
+}
+
 export const createConnectorRegistry = (
   dependencies: ConnectorFactoryDependencies
 ): ConnectorRegistryShape =>
-  makeConnectorRegistry([
-    apiFactory(ConnectorIds.OpenAI, (config) =>
-      makeOpenAIProvider(toLlmConfig(config), dependencies.http)
-    ),
-    apiFactory(ConnectorIds.Anthropic, (config) =>
-      makeAnthropicProvider(toLlmConfig(config), dependencies.http)
-    ),
-    apiFactory(ConnectorIds.GeminiApi, (config) =>
-      makeGeminiApiProvider(toLlmConfig(config), dependencies.http)
-    ),
-    apiFactory(ConnectorIds.LmStudio, (config) =>
-      makeLmStudioProvider(toLlmConfig(config), dependencies.http)
-    ),
-    apiFactory(ConnectorIds.Ollama, (config) =>
-      makeOllamaProvider(toLlmConfig(config), dependencies.http)
-    ),
-    apiFactory(ConnectorIds.MlxLm, (config) =>
-      makeMlxLmProvider(toLlmConfig(config), dependencies.http)
-    ),
-    cliFactory(ConnectorIds.ClaudeCli, (config) =>
-      makeClaudeCliConnector(config, dependencies.process)
-    ),
-    cliFactory(ConnectorIds.OpenCode, (config) =>
-      makeOpenCodeCliConnector(config, dependencies.process)
-    ),
-    cliFactory(ConnectorIds.GeminiCli, (config) =>
-      makeGeminiCliProvider(
-        LlmConfig.make({
-          provider: "GeminiCli",
-          model: config.model ?? "gemini-2.5-flash"
-        }),
-        dependencies.geminiCli,
-        geminiCliExecutionContextFrom(config)
-      )
-    ),
-    cliFactory(ConnectorIds.Codex, (config) =>
-      makeCodexConnector(config, dependencies.process, dependencies.temporaryFiles)
-    ),
-    cliFactory(ConnectorIds.Copilot, (config) =>
-      makeCopilotConnector(config, dependencies.process)
-    ),
-    cliFactory(ConnectorIds.Pi, (config) => makePiConnector(config, dependencies.process)),
-    cliFactory(ConnectorIds.AntigravityCli, (config) =>
-      makeAntigravityConnector(config, dependencies.process)
-    ),
-    cliFactory(ConnectorIds.Grok, (config) => makeGrokCliConnector(config, dependencies.process)),
-    cliFactory(ConnectorIds.Cursor, (config) => makeCursorConnector(config, dependencies.process)),
-    apiFactory(ConnectorIds.Mock, (config) => makeMockProvider(toLlmConfig(config)))
-  ])
+  makeConnectorRegistry(
+    Record.keys(builders).map((name) =>
+      isCliConnectorName(name)
+        ? cliFactory(ConnectorIds[name], (config) => builders[name](config, dependencies))
+        : apiFactory(ConnectorIds[name], (config) => builders[name](config, dependencies))
+    )
+  )
 
 export const ConnectorRegistryLive = Layer.effect(
   ConnectorRegistry,

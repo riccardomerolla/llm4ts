@@ -1,5 +1,84 @@
 # Changelog
 
+## 3.4.0
+
+- **A run says which consumer missed events.** The event hub gains
+  `consume(name, handle)` and `drained()`. The terminal, the cost totals, the
+  trace, the judgment log, the agent tree and the bench tap each ran their
+  own subscription loop with their own counter; they now share the hub's.
+  When the end of a run finds a consumer short, the warning names it:
+  `terminal started listening after 2 event(s) were published`, or
+  `trace was 3 event(s) behind`. A consumer that subscribed late is reported
+  at once: no wait can bring back what it missed, and the run no longer sits
+  out three seconds for it.
+- `FlowEventHub` has two new members, so a hand-built hub needs them.
+  `awaitConsumed` is deprecated. `TerminalConsumer.consumed`, a counter that
+  only its own module read, is gone.
+- `pnpm unused` also fails on an import cycle among `packages/*/src`. The
+  three that existed are broken with no public name moved.
+- `@llm4ts/js` no longer declares `@llm4ts/flow`, which it never imported.
+- `llm4ts profile` shows roundtable attendee lanes and taskforce specialist
+  lanes, and names them so. It opened a lane only for a story.
+- **One connector table.** `connectorTable` in `@llm4ts/core/Models` holds
+  each connector's id, kind, provider, default base URL, credential
+  variables, the names an operator may write for it and the executable a
+  CLI connector spawns. `ConnectorIds`, the id lists and the provider
+  mappings are read from it with the values they had. New beside them:
+  `coderNames`, `apiProviderNames`, `coderConnector`, `apiProviderConnector`,
+  `connectorRow`, `credentialVariables`, `cliExecutable`, and the names help
+  and menus offer, `offeredCoderNames` and `offeredApiProviderNames`. The
+  factories and the runner's presets are records keyed by every connector
+  name, so a connector without one does not compile.
+- **A misspelled `LLM4TS_CODER` stops the run. It used to run claude.**
+  `LLM4TS_CODER=codx llm4ts run implement …` ran claude without a word;
+  every built-in flow and the j2ee-nextjs kit flows now stop before any
+  agent starts, with `unknown LLM4TS_CODER 'codx'; expected agy|…|pi`. The
+  same holds for `LLM4TS_REASONER` in the flows that run a reasoning seat. A
+  flow answers only for the seats it runs. `--coder`, `--set`, `config set`
+  and a config file refuse such a name too. If a run that worked now stops
+  with this message, the name was never read: write `claude` to keep what
+  ran, or the agent that was meant.
+- Checked seat readers in `@llm4ts/runner` and `@llm4ts/runner/Connectors`:
+  `coderFromEnvironment(environment?, fallback?)` for `LLM4TS_CODER`,
+  `reasonerFromEnvironment(environment?, fallback?)` for `LLM4TS_REASONER`,
+  and `seatsFromEnvironment(defaults?, environment?)` for a flow that runs
+  both, each failing with a typed `ScriptUsage` on an unknown name. The flow
+  authoring docs and the authoring skill show `coderFromEnvironment`.
+  `coderFromEnv` is deprecated and keeps its fallback.
+- `coderFromEnv` is deprecated and unchanged: a flow script that calls it
+  keeps running, and still reads an unknown name as claude. It goes in
+  4.0.0. `coderFromEnvironment`, and `reasonerFromEnvironment` and
+  `storyCoderFromEnvironment` in the epic flows' library, stay as one-seat
+  readers over the new one.
+- **`LLM4TS_CODER`, `LLM4TS_REASONER`, `LLM4TS_PROVIDER` and
+  `LLM4TS_JUDGMENT_PROVIDER` name their values.** `config show NAME` lists
+  them. `config set`, `--set` and a config file refuse another name, and an
+  exported one draws a warning before the flow refuses it.
+- **`llm4ts profile` knows how large a story's reviewed diff was.** A
+  review's diff size was dropped when the event was stamped with its story's
+  lane, which is the only place the profile reads it.
+- **Every toggle the packages read takes the same eight spellings.**
+  `1`, `true`, `on`, `yes` turn a toggle on and `0`, `false`, `off`, `no` turn
+  it off, in any case. Three readers took fewer: `LLM4TS_TIMESTAMPS` read
+  only `1` and `true`, `llm4ts doctor` did not read `LLM4TS_GEMINI_BRIDGE=on`
+  though a run did, and `LLM4TS_TOOL_BRIEF` was dropped only by `off`. The
+  readers under `packages/*/src` now go through the settings registry, so a
+  number with text after it (`LLM4TS_CONTEXT_BUDGET=12abc`,
+  `LLM4TS_ORIENTATION_CHARS=1e3`) counts as unset, as the launch warning
+  already said, and an empty `LLM4TS_PROVIDER` means mock.
+- **The flows and kits read their settings through the registry too.** Five
+  toggles take more spellings: `LLM4TS_MARK_DEEPEN`, `LLM4TS_REGROUP` and
+  `LLM4TS_FAIL_FAST` read only `1`, `LLM4TS_PORT_GUIDE_TRIAL` was turned off
+  only by `off`, and `LLM4TS_GRAPH_REFINE` was not turned off by `no`. A
+  number with text after it (`LLM4TS_JUDGE_ROUNDS=3x`,
+  `LLM4TS_STALL_MINUTES=20m`), a sign or a fraction counts as unset in the
+  flows as well, where the leading digits used to be read; so does an empty
+  value, and a URL setting (`LLM4TS_CODER_HEALTH_URL`, `LLM4TS_ADO_ORG_URL`)
+  that is not an http or https URL. `LLM4TS_GATES=";"` still runs no gates,
+  and `llm4ts config set` now accepts it. The epic flows' library drops `flagsFromEnvironment`, and
+  the extraction and conversion libraries drop `positiveEnvInt`:
+  `settingValue` from `@llm4ts/flow/Settings` reads the same settings.
+
 ## 3.3.0
 
 Settings no longer have to be typed in front of every command (ADR 0049).

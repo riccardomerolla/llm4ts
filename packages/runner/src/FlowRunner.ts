@@ -27,6 +27,7 @@ import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactori
 import { ConnectorIds } from "@llm4ts/core/Models"
 import { ProviderError } from "@llm4ts/core/Errors"
 import { makeCostTracker, type CostTracker } from "@llm4ts/flow/CostTracker"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { runGeminiAcpBridge } from "./NodeGeminiAcpBridge.ts"
 import { runGeminiModelBridge } from "./NodeGeminiModelBridge.ts"
 import {
@@ -51,7 +52,7 @@ import {
   type FlowError
 } from "@llm4ts/flow/FlowError"
 import {
-  defaultDrainTimeout,
+  type DrainReport,
   FlowEvents,
   FlowEventsValues,
   Info,
@@ -264,12 +265,6 @@ export interface FlowRunnerBundle {
   readonly announceStartupNotices: Effect.Effect<void>
 }
 
-const truthy = (value: string | undefined): boolean =>
-  value !== undefined && ["1", "true", "on", "yes"].includes(value.trim().toLowerCase())
-
-const switchedOff = (value: string | undefined): boolean =>
-  value !== undefined && ["0", "false", "no", "off"].includes(value.trim().toLowerCase())
-
 const isPiSeat = (config: ConnectorConfig | undefined): config is CliConnectorConfig =>
   config instanceof CliConnectorConfig && config.connectorId.value === ConnectorIds.Pi.value
 
@@ -289,7 +284,7 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
   environment: Readonly<Record<string, string | undefined>>
 ): Effect.fn.Return<(config: ConnectorConfig) => ConnectorConfig, FlowError, Scope.Scope> {
   const identity = (config: ConnectorConfig): ConnectorConfig => config
-  if (!truthy(environment.LLM4TS_GEMINI_BRIDGE)) {
+  if (!settingValue("LLM4TS_GEMINI_BRIDGE", environment)) {
     return identity
   }
   // The reasoning seat defaults to the coder, so a pi coder makes this a pi
@@ -304,7 +299,7 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
   const resolution = resolveBridgeModel(
     readPiModelsJson(),
     port,
-    environment.LLM4TS_GEMINI_BRIDGE_MODEL
+    settingValue("LLM4TS_GEMINI_BRIDGE_MODEL", environment)
   )
   const problem = bridgeModelProblem(resolution, port)
   if (problem !== undefined || resolution._tag !== "Resolved") {
@@ -322,8 +317,9 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
       })
     )
   }
-  const geminiModel =
-    environment.LLM4TS_GEMINI_MODEL === undefined ? {} : { model: environment.LLM4TS_GEMINI_MODEL }
+  const requestModel = settingValue("LLM4TS_GEMINI_MODEL", environment)
+  const geminiModel = requestModel === undefined ? {} : { model: requestModel }
+  const token = settingValue("LLM4TS_GEMINI_BRIDGE_TOKEN", environment)
   if (mode.mode === "model") {
     // ADR 0037: one locked-down `gemini` call per request, in an empty
     // directory so no project GEMINI.md reaches the model.
@@ -337,10 +333,7 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
       executor: dependencies.process,
       temporaryFiles: dependencies.temporaryFiles ?? nodeTemporaryFiles,
       ...geminiModel,
-      ...(environment.LLM4TS_GEMINI_BRIDGE_TOKEN === undefined ||
-      environment.LLM4TS_GEMINI_BRIDGE_TOKEN.length === 0
-        ? {}
-        : { token: environment.LLM4TS_GEMINI_BRIDGE_TOKEN })
+      ...(token === undefined ? {} : { token })
     }).pipe(Effect.mapError(FlowLlmError.from))
   } else {
     yield* runGeminiAcpBridge({
@@ -368,8 +361,8 @@ export const runIdentityFromEnvironment = (
   options: Pick<FlowRunnerOptions, "runId" | "tracePath">,
   environment: Readonly<Record<string, string | undefined>>
 ): { readonly runId?: string; readonly tracePath?: string } => {
-  const runId = nonBlank(options.runId) ?? nonBlank(environment["LLM4TS_RUN_ID"])
-  const tracePath = nonBlank(options.tracePath) ?? nonBlank(environment["LLM4TS_TRACE_PATH"])
+  const runId = nonBlank(options.runId) ?? settingValue("LLM4TS_RUN_ID", environment)
+  const tracePath = nonBlank(options.tracePath) ?? settingValue("LLM4TS_TRACE_PATH", environment)
   return {
     ...(runId === undefined ? {} : { runId }),
     ...(tracePath === undefined ? {} : { tracePath })
@@ -521,7 +514,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   // notably the judgment seat and the worktree seats `contextFor` rebinds.
   const runEnvironment = options.environment ?? process.env
   const estimateOptions = estimatedUsageOptionsFromEnv(runEnvironment)
-  const meterUsage = options.estimateUsage ?? !switchedOff(runEnvironment.LLM4TS_ESTIMATE_USAGE)
+  const meterUsage = options.estimateUsage ?? settingValue("LLM4TS_ESTIMATE_USAGE", runEnvironment)
   // Every seat's spans (ADR 0026): content only when asked, an estimate on a
   // call the backend reports no usage for, and who served it when known.
   const seatOptions = (executor?: Effect.Effect<string | undefined>): TimedSeatOptions => ({
@@ -578,11 +571,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     seatConfig: ConnectorConfig,
     environment: Readonly<Record<string, string | undefined>>
   ): Effect.Effect<JudgmentShape, FlowError> => {
-    const backend =
-      options.judgmentBackend ??
-      (environment.LLM4TS_JUDGMENT_BACKEND?.trim().toLowerCase() === "typesafe"
-        ? "typesafe"
-        : "llm")
+    const backend = options.judgmentBackend ?? settingValue("LLM4TS_JUDGMENT_BACKEND", environment)
     if (backend !== "typesafe") {
       return Effect.succeed(
         makeLlmJudgment(
@@ -592,7 +581,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             ...(seatConfig.model === undefined ? {} : { model: seatConfig.model }),
             // LLM4TS_JUDGMENT_BATCHING=shared-prefix sends each request's state
             // once with every question; anything else keeps them independent.
-            ...(environment.LLM4TS_JUDGMENT_BATCHING?.trim().toLowerCase() === "shared-prefix"
+            ...(settingValue("LLM4TS_JUDGMENT_BATCHING", environment) === "shared-prefix"
               ? { batching: "shared-prefix" as const }
               : {})
           }),
@@ -987,6 +976,21 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   }
 })
 
+/** What the run prints when `drained` reports a consumer short. */
+export const drainShortfall = (report: DrainReport): string => {
+  const behind = report.behind.map(
+    (consumer) => `${consumer.name} was ${consumer.missing.toString()} event(s) behind`
+  )
+  const late = report.late.map(
+    (consumer) =>
+      `${consumer.name} started listening after ${consumer.missed.toString()} event(s) were published`
+  )
+  return (
+    `some run events were still unconsumed: ${[...late, ...behind].join("; ")}. ` +
+    "The totals below, the ledger, and the trace may be short"
+  )
+}
+
 /** `claude (coder·reviewer·judge ×3)` — how the run header names an executor. */
 const describeExecutor = (spec: ExecutorSpec): string =>
   `${spec.id} (${rolesOf(spec).join("·")} ×${spec.slots ?? 1})`
@@ -1004,7 +1008,8 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   const dependencies = withRunStateIgnore(given)
   const startedAt = yield* Clock.currentTimeMillis
   const environment = options.environment ?? process.env
-  const verbosity = options.verbosity ?? parseVerbosity(environment.LLM4TS_VERBOSITY)
+  const verbosity =
+    options.verbosity ?? parseVerbosity(settingValue("LLM4TS_VERBOSITY", environment))
   const persistRun = options.persistRun ?? true
   // OpenTelemetry export (ADR 0026): decided from the environment, built once
   // per run, flushed when the run's scope closes.
@@ -1043,7 +1048,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   const surface = tree?.surface ?? classic
   const palette = surface.palette
   const terminal = yield* consumeTerminalEvents(bundle.events, surface, verbosity, {
-    timestamps: environment.LLM4TS_TIMESTAMPS === "1" || environment.LLM4TS_TIMESTAMPS === "true"
+    timestamps: settingValue("LLM4TS_TIMESTAMPS", environment)
   })
   if (verbosity !== "Quiet") {
     const reviewers = options.reviewers ?? []
@@ -1130,10 +1135,11 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     tracePath === undefined
       ? bundle.context
       : { ...bundle.context, trace: { runId: bundle.runId, path: tracePath } }
+  const flow = settingValue("LLM4TS_FLOW", environment)
   const runAttributes: Record<string, unknown> = {
     [attr.run]: bundle.runId,
     [attr.session]: bundle.runId,
-    ...(environment.LLM4TS_FLOW === undefined ? {} : { [attr.flow]: environment.LLM4TS_FLOW })
+    ...(flow === undefined ? {} : { [attr.flow]: flow })
   }
   // The run is a CHAIN span every other span descends from or links to; its
   // attributes ride on all of them. Effect's own function spans stay
@@ -1159,33 +1165,13 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     Effect.provideService(FlowContext, context),
     Effect.andThen((value) => Effect.as(enforceBudget, value)),
     Effect.ensuring(
-      Effect.all(
-        [
-          terminal.awaitDrained(),
-          Effect.all(
-            [
-              tracker.awaitDrained(bundle.events),
-              recorder === undefined ? Effect.succeed(true) : recorder.awaitDrained(bundle.events),
-              bundle.judgmentLog === undefined
-                ? Effect.succeed(true)
-                : bundle.judgmentLog.awaitDrained(bundle.events)
-            ],
-            { concurrency: "unbounded" }
-          )
-        ],
-        { concurrency: "unbounded" }
-      ).pipe(
-        // A consumer that gave up before catching up leaves the totals below
-        // short. Say so rather than printing a quietly incomplete summary.
-        Effect.flatMap(([, accounted]) =>
-          accounted.every((drained) => drained)
-            ? Effect.void
-            : surface.log(
-                palette.fail(
-                  `some run events were still unconsumed after ${defaultDrainTimeout} — ` +
-                    "the totals below, the ledger, and the trace may be short"
-                )
-              )
+      // One wait for every consumer of the run: the terminal, the totals,
+      // the trace, the judgment log. A consumer that fell short leaves the
+      // totals below short, so the run names it instead of printing a
+      // quietly incomplete summary.
+      bundle.events.drained().pipe(
+        Effect.flatMap((report) =>
+          report.complete ? Effect.void : surface.log(palette.fail(drainShortfall(report)))
         ),
         Effect.andThen(tree === undefined ? Effect.void : tree.close),
         Effect.andThen(appendLedger),
@@ -1254,7 +1240,7 @@ const wantsAgentTree = (
   output: { readonly isTTY?: boolean; readonly columns?: number },
   input: { readonly isTTY?: boolean }
 ): boolean =>
-  environment.LLM4TS_UI === "tree" &&
+  settingValue("LLM4TS_UI", environment) === "tree" &&
   environment.NO_COLOR === undefined &&
   output.isTTY === true &&
   input.isTTY === true &&

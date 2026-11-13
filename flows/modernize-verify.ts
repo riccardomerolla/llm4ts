@@ -43,7 +43,7 @@ import {
   Info,
   Plan,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   makePlanStore,
   nodePlainFileStore,
@@ -310,7 +310,7 @@ const specPrograms = Effect.fn("modernize-verify.specPrograms")(function* (
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Prove the implementation equivalent to its spec pack")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const planPath = join(input.workDir, ModDir, "plan.md")
   const vectorsDir = join(input.workDir, ModDir, "vectors")

@@ -43,6 +43,7 @@ import {
   matchingFiles,
   specSchemaIssues
 } from "@llm4ts/flow/SpecChecks"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import {
   FlowAborted,
@@ -71,7 +72,7 @@ const program = Effect.gen(function* () {
   )
   const files = nodePlainFileStore
   const modDirAbs = join(input.workDir, ModDir)
-  const markDeepen = process.env.LLM4TS_MARK_DEEPEN?.trim() === "1"
+  const markDeepen = settingValue("LLM4TS_MARK_DEEPEN", process.env)
 
   yield* runNode(
     {

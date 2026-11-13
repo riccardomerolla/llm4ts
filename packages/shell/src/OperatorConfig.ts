@@ -3,6 +3,7 @@ import { basename, join, resolve } from "node:path"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { ShellUsageError } from "./ShellErrors.ts"
 
 export interface McpFlags {
@@ -89,7 +90,7 @@ const httpTransport = (
   readFile: (path: string) => Effect.Effect<string | undefined>
 ): Effect.Effect<OperatorConfig["transport"], ShellUsageError> =>
   Effect.gen(function* () {
-    const fromEnvironment = environment.LLM4TS_MCP_TOKEN?.trim() ?? ""
+    const fromEnvironment = settingValue("LLM4TS_MCP_TOKEN", environment) ?? ""
     const fromFile =
       fromEnvironment.length === 0 && Option.isSome(flags.tokenFile)
         ? ((yield* readFile(resolve(cwd, flags.tokenFile.value)))?.trim() ?? "")

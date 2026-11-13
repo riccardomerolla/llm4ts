@@ -55,6 +55,12 @@ describe("EstimatedUsage", () => {
     assert.strictEqual(fromEnv.charsPerToken, 5)
     assert.strictEqual(defaults.referenceModel, "claude-sonnet-4")
     assert.isUndefined(defaults.charsPerToken)
+    assert.isUndefined(
+      estimatedUsageOptionsFromEnv({ LLM4TS_ESTIMATE_CHARS_PER_TOKEN: "few" }).charsPerToken
+    )
+    assert.isUndefined(
+      estimatedUsageOptionsFromEnv({ LLM4TS_ESTIMATE_CHARS_PER_TOKEN: "0" }).charsPerToken
+    )
   })
 
   it.effect("appends a labelled synthetic usage chunk when the backend reports none", () =>

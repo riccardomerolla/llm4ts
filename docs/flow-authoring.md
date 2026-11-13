@@ -226,7 +226,6 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { withContract } from "@llm4ts/flow/AutonomyContract"
 import {
-  coderFromEnv,
   defaultPlanPath,
   implementPlanFlow,
   makePlanStore,
@@ -234,7 +233,8 @@ import {
   planFrom,
   resolveFlowInput,
   runFlowMain,
-  runNode
+  runNode,
+  coderFromEnvironment
 } from "@llm4ts/runner"
 
 const program = Effect.gen(function* () {
@@ -244,12 +244,13 @@ const program = Effect.gen(function* () {
   const planPath = join(input.workDir, defaultPlanPath(input.prompt))
   const store = makePlanStore(nodePlainFileStore)
 
+  const coder = yield* coderFromEnvironment()
   yield* runNode(
     {
       workDir: input.workDir,
       workspace: input.workspace,
       userPrompt: input.prompt,
-      coder: coderFromEnv(process.env),
+      coder,
       environment: process.env
     },
     (context) =>
@@ -303,19 +304,40 @@ llm4ts run implement --coder codex --repo /path/to/repository "Add a multiply fu
   `Plan#render` — human-readable and diffable, not a private binary or JSON
   blob.
 
-- **`coderFromEnv(process.env)`** — from `@llm4ts/runner/Connectors`, reads
-  `LLM4TS_CODER` and returns the matching CLI
-  connector config (`claude` by default). This is the same `coder` slot rung
-  1 filled with `ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock })`
-  — here it resolves to a CLI coding agent instead of an HTTP provider.
+- **`coderFromEnvironment()`** — from `@llm4ts/runner/Connectors`, reads
+  `LLM4TS_CODER` and returns the matching CLI connector config (`claude` by
+  default). A name it does not know stops the flow with the accepted names
+  before anything runs. This is the same
+  `coder` slot rung 1 filled with
+  `ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock })` — here it
+  resolves to a CLI coding agent instead of an HTTP provider. A flow that
+  only reasons reads `LLM4TS_REASONER` with `reasonerFromEnvironment()`, and
+  a flow that runs both seats reads both at once, as the epic flows do with
+  `seatsFromEnvironment({ coder: pi, reasoner: claude })`. A flow answers
+  only for the seats it runs.
 
   A flow reads its settings from `process.env`. `llm4ts run` resolves the
   flags, the environment and the settings files first, then starts the flow
-  with the result in its environment, so the flow needs no file reader. The
-  built-in flows still parse each variable themselves.
-  `settingValue(name, process.env)` from `@llm4ts/flow/Settings` reads one
-  registered setting with its grammar and default, and a flow may use it for
-  the names the registry holds.
+  with the result in its environment, so the flow needs no file reader.
+  Read a registered setting with `settingValue(name, process.env)` from
+  `@llm4ts/flow/Settings`, never with `process.env.LLM4TS_…`: it applies the
+  setting's grammar and returns its default, or `undefined` where the default
+  is the flow's own to give.
+
+  ```ts
+  import { settingValue } from "@llm4ts/flow/Settings"
+
+  const rounds = settingValue("LLM4TS_JUDGE_ROUNDS", process.env) ?? 2
+  const failFast = settingValue("LLM4TS_FAIL_FAST", process.env)
+  ```
+
+  Every built-in flow and kit flow reads this way, so a toggle takes the same
+  eight spellings everywhere and a value the grammar does not read counts as
+  unset. `settingGiven` tells unset from unreadable, for a flow that refuses
+  a bad value by name. The `LLM4TS_` namespace belongs to the registry: the
+  name must be one it holds, or the call does not compile. A setting of your
+  own flow takes your own prefix (`ACME_BATCH_SIZE`), and you read and parse
+  it yourself from `process.env`.
 
 - **`planFrom(context.reasoning, input.prompt)`** — from
   `@llm4ts/flow/Planner`, is called immediately here, but calling it only

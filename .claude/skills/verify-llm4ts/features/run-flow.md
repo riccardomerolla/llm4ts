@@ -33,7 +33,7 @@ Preconditions:
 
 - Without `--roster none` the run reads a roster from `HOME`. The sandbox `HOME` is empty, but keep the flag so the command is the same one a user would need on a machine with a global roster.
 - A healthy run prints three `✖ capability unenforceable: 'claude-cli' is asked to keep out of .llm4ts/**` lines at the start. They are warnings about the harness, not failures.
-- `✖ some run events were still unconsumed after 3 seconds` means a consumer missed events. A healthy run does not print it. Treat it as a defect.
+- `✖ some run events were still unconsumed: …` names each consumer that missed events and by how many. A healthy run does not print it. Treat it as a defect.
 - The menu entry point needs a terminal and is not driven by this harness. Report it as unverified.
 - The stub answers every reviewer with a clean report. A change to review handling needs a responder that returns issues.
 - A second `run implement` in the same sandbox starts from the `calculator` branch the first run left. Use a new run for an independent proof.

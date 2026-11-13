@@ -16,6 +16,7 @@ import {
 } from "@llm4ts/flow/Decisions"
 import { Domains, parseDomains, renderDomains } from "@llm4ts/flow/Domains"
 import { approveMarkdown } from "@llm4ts/flow/Approval"
+import { settingValue } from "@llm4ts/flow/Settings"
 
 // Kept on the published `@llm4ts/shell/Refine` subpath.
 export { approveMarkdown }
@@ -86,8 +87,8 @@ export const saveDomains = (modDir: string, domains: Domains) =>
 
 /** The decision signature: LLM4TS_APPROVER, else the OS user. */
 export const signer = (environment: Readonly<Record<string, string | undefined>>): string => {
-  const approver = environment.LLM4TS_APPROVER?.trim()
-  if (approver !== undefined && approver.length > 0) {
+  const approver = settingValue("LLM4TS_APPROVER", environment)
+  if (approver !== undefined) {
     return approver
   }
   try {

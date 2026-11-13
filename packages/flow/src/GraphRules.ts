@@ -3,7 +3,6 @@ import * as Schema from "effect/Schema"
 import { PlanParseError } from "./FlowError.ts"
 import { fingerprintOf } from "./ReviewCache.ts"
 import type { CoverageRule } from "./SpecChecks.ts"
-import type { JoinMatch } from "./Survey.ts"
 
 /**
  * The pack's graph vocabulary (ADR 0030). A `## Node:` rule names a sub-file
@@ -38,6 +37,10 @@ export class EdgeRule extends Schema.Class<EdgeRule>("EdgeRule")({
    */
   unknown: Schema.optionalKey(Schema.Literals(["keep", "drop"]))
 }) {}
+
+/** How a survey edge's target was reached from what the source names. */
+export const JoinMatch = Schema.Literals(["exact", "prefix", "extension"])
+export type JoinMatch = typeof JoinMatch.Type
 
 /**
  * `exact`: trimmed string equality. `exact-ci`: the same ignoring case (an EL

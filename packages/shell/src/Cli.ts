@@ -58,6 +58,7 @@ import {
   resolvedEnvironment,
   type FlagAssignment
 } from "./Config.ts"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { configCommand, configView, parseAssignment, renderDoctorConfig } from "./ConfigCommand.ts"
 import { launchFlow } from "./FlowLaunch.ts"
 import { mcpOptionsFrom } from "./OperatorConfig.ts"
@@ -1039,7 +1040,8 @@ export const geminiBridgeOptionsFrom = (
         message: `--mode is "${mode}"; use model (OpenAI chat completions) or acp (Anthropic Messages)`
       })
     }
-    const token = Option.getOrUndefined(flags.token) ?? environment.LLM4TS_GEMINI_BRIDGE_TOKEN
+    const token =
+      Option.getOrUndefined(flags.token) ?? settingValue("LLM4TS_GEMINI_BRIDGE_TOKEN", environment)
     return {
       port,
       mode,

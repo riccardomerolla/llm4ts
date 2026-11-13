@@ -31,6 +31,7 @@ import { join, resolve } from "node:path"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import { budget, cap } from "@llm4ts/flow/Context"
+import { settingValue } from "@llm4ts/flow/Settings"
 import {
   Info,
   ScriptUsage,
@@ -50,13 +51,8 @@ import {
   renderOutcome,
   resolveDesignTarget
 } from "./lib/epic-design.ts"
-import {
-  epicDirs,
-  listBriefs,
-  listEpics,
-  loadBriefs,
-  reasonerFromEnvironment
-} from "./lib/epic-stories.ts"
+import { reasonerFromEnvironment } from "@llm4ts/runner/Connectors"
+import { epicDirs, listBriefs, listEpics, loadBriefs } from "./lib/epic-stories.ts"
 import { ModDir } from "./lib/modernize-extract.ts"
 
 const program = Effect.gen(function* () {
@@ -69,8 +65,8 @@ const program = Effect.gen(function* () {
     yield* Console.log(renderBriefList(briefs))
     return
   }
-  const legacyGiven = process.env.LLM4TS_LEGACY_REPO?.trim()
-  if (legacyGiven === undefined || legacyGiven.length === 0) {
+  const legacyGiven = settingValue("LLM4TS_LEGACY_REPO", process.env)
+  if (legacyGiven === undefined) {
     return yield* ScriptUsage.make({
       message:
         "LLM4TS_LEGACY_REPO is not set: point it at the legacy repository holding docs/modernization/"
@@ -100,7 +96,7 @@ const program = Effect.gen(function* () {
   }
   const target = yield* resolveDesignTarget({ text: given.prompt, epic: flags.epic, briefs })
   const loaded = yield* loadBriefs(files, given.workDir, dirs)
-  const reasoning = asReadOnly(yield* reasonerFromEnvironment(process.env))
+  const reasoning = asReadOnly(yield* reasonerFromEnvironment())
 
   yield* runNode(
     {
@@ -120,7 +116,7 @@ const program = Effect.gen(function* () {
           24_000
         ).text
         const packNote =
-          (process.env.LLM4TS_PACK ?? "").trim().length === 0
+          settingValue("LLM4TS_PACK", process.env) === undefined
             ? undefined
             : yield* stage(
                 context.events,

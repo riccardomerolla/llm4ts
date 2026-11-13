@@ -32,7 +32,7 @@ import { describeFlowError } from "@llm4ts/flow/FlowError"
 import {
   Info,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   nodePlainFileStore,
   nodeProcessExecutor,
   resolveFlowInput,
@@ -51,10 +51,11 @@ import {
   type MigrationRow
 } from "./lib/convert.ts"
 import type { FlowError } from "@llm4ts/flow/FlowError"
+import { settingValue } from "@llm4ts/flow/Settings"
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Convert the legacy estate into the destination SPA")
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
 
   yield* runNode(
     {
@@ -75,16 +76,16 @@ const program = Effect.gen(function* () {
         const boards: Array<BoardSyncShape> = [
           makeLocalBoardSync(files, join(input.workDir, ".llm4ts", "convert"), boardTitle)
         ]
-        const orgUrl = process.env.LLM4TS_ADO_ORG_URL?.trim()
-        const project = process.env.LLM4TS_ADO_PROJECT?.trim()
-        if (orgUrl !== undefined && orgUrl.length > 0 && project !== undefined) {
+        const orgUrl = settingValue("LLM4TS_ADO_ORG_URL", process.env)
+        const project = settingValue("LLM4TS_ADO_PROJECT", process.env)
+        if (orgUrl !== undefined && project !== undefined) {
           // az CLI owns the credentials (`az devops login` / AZURE_DEVOPS_EXT_PAT);
           // no PAT ever passes through llm4ts configuration.
           const ado = makeAzureDevOpsTool(
             AdoConfig.make({
               orgUrl,
               project,
-              repository: process.env.LLM4TS_ADO_REPO?.trim() || project
+              repository: settingValue("LLM4TS_ADO_REPO", process.env) ?? project
             }),
             nodeProcessExecutor,
             input.workDir,
@@ -180,7 +181,7 @@ const program = Effect.gen(function* () {
         )
 
         const baseBranch = yield* context.git.currentBranch
-        const failFast = process.env.LLM4TS_FAIL_FAST === "1"
+        const failFast = settingValue("LLM4TS_FAIL_FAST", process.env)
 
         for (const item of items) {
           const snapshot = yield* board.snapshot

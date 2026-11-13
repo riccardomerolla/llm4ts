@@ -7,6 +7,7 @@ import type { PlanParseError } from "@llm4ts/flow/FlowError"
 import { loadPack, type Pack } from "@llm4ts/flow/Pack"
 import { loadPatternCards, type PatternCard } from "@llm4ts/flow/Patterns"
 import type { WorkspaceError, WorkspaceShape } from "@llm4ts/flow/Workspace"
+import { settingValue } from "@llm4ts/flow/Settings"
 import {
   builtinKitsDir,
   discoverKits,
@@ -108,7 +109,7 @@ export const openPack = Effect.fn("@llm4ts/runner/Packs.openPack")(function* (op
   /** Kit tiers to search; defaults to the standard tiers around `launchDir` and `flowDir`. */
   readonly kits?: KitTierPaths
 }): Effect.fn.Return<OpenedPack, PackNotFound | WorkspaceError | PlanParseError> {
-  const reference = options.environment.LLM4TS_PACK?.trim() || defaultPackName
+  const reference = settingValue("LLM4TS_PACK", options.environment) ?? defaultPackName
   const builtinDir = builtinKitsDir(options.flowDir)
   const tiers =
     options.kits ??

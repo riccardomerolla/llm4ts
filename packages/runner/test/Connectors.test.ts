@@ -2,7 +2,9 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Duration from "effect/Duration"
 import * as Redacted from "effect/Redacted"
 import { ApiConnectorConfig, CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
-import { ConnectorIds } from "@llm4ts/core/Models"
+import { ConnectorIds, coderNames } from "@llm4ts/core/Models"
+import { readSetting } from "@llm4ts/flow/Settings"
+import * as Result from "effect/Result"
 import * as Effect from "effect/Effect"
 import {
   anthropic,
@@ -28,6 +30,7 @@ import {
   opencode,
   pi,
   prepareConnector,
+  seatsFromEnvironment,
   withEnvironment,
   withModel,
   withTimeoutSeconds,
@@ -189,6 +192,100 @@ describe("runner connector presets", () => {
       assert.include(usage.message, "gemini-cli")
     })
   )
+
+  it.effect("reads both seats through every name and alias the connector table holds", () =>
+    Effect.gen(function* () {
+      for (const name of coderNames) {
+        const seats = yield* seatsFromEnvironment({}, { LLM4TS_CODER: name, LLM4TS_REASONER: name })
+        assert.strictEqual(seats.coder, coderFor(name), name)
+        assert.strictEqual(seats.reasoning, coderFor(name), name)
+      }
+      const mixed = yield* seatsFromEnvironment(
+        {},
+        { LLM4TS_CODER: " Gemini-CLI ", LLM4TS_REASONER: "\tCODEX\n" }
+      )
+      assert.strictEqual(mixed.coder, gemini)
+      assert.strictEqual(mixed.reasoning, codex)
+    })
+  )
+
+  it.effect("falls back to the flow's defaults for an unset or blank seat", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* seatsFromEnvironment({}, {}), {
+        coder: claude,
+        reasoning: claude
+      })
+      assert.deepStrictEqual(yield* seatsFromEnvironment({ coder: pi }, {}), {
+        coder: pi,
+        reasoning: pi
+      })
+      assert.deepStrictEqual(yield* seatsFromEnvironment({ reasoner: gemini }, {}), {
+        coder: claude,
+        reasoning: gemini
+      })
+      assert.deepStrictEqual(
+        yield* seatsFromEnvironment(
+          { coder: pi, reasoner: claude },
+          { LLM4TS_CODER: "  ", LLM4TS_REASONER: "" }
+        ),
+        { coder: pi, reasoning: claude }
+      )
+      // Unnamed, the reasoner follows the coder asked for; named, it does not.
+      assert.strictEqual(
+        (yield* seatsFromEnvironment({}, { LLM4TS_CODER: "codex" })).reasoning,
+        codex
+      )
+      assert.strictEqual(
+        (yield* seatsFromEnvironment({ reasoner: claude }, { LLM4TS_CODER: "codex" })).reasoning,
+        claude
+      )
+      assert.deepStrictEqual(
+        yield* seatsFromEnvironment({ coder: pi }, { LLM4TS_REASONER: "grok" }),
+        { coder: pi, reasoning: grok }
+      )
+    })
+  )
+
+  it.effect("refuses an unknown name for either seat, with the names it reads", () =>
+    Effect.gen(function* () {
+      const expected =
+        "agy|antigravity|antigravity-cli|claude|claude-cli|codex|cursor|gemini|gemini-cli|grok|opencode|pi"
+      for (const variable of ["LLM4TS_CODER", "LLM4TS_REASONER"]) {
+        const usage = yield* Effect.flip(
+          seatsFromEnvironment({ coder: pi, reasoner: claude }, { [variable]: " Codx " })
+        )
+        assert.strictEqual(usage._tag, "ScriptUsage")
+        assert.strictEqual(usage.message, `unknown ${variable} 'Codx'; expected ${expected}`)
+      }
+      // copilot is a connector, never a coder name.
+      assert.include(
+        (yield* Effect.flip(seatsFromEnvironment({}, { LLM4TS_CODER: "copilot" }))).message,
+        "unknown LLM4TS_CODER 'copilot'"
+      )
+    })
+  )
+
+  it("the registry reads exactly the names the seat reader does", () => {
+    const written = [
+      ...coderNames,
+      " Claude ",
+      "GEMINI-CLI",
+      "codx",
+      "copilot",
+      "mock",
+      "claude code"
+    ]
+    for (const setting of ["LLM4TS_CODER", "LLM4TS_REASONER"] as const) {
+      for (const name of written) {
+        assert.strictEqual(
+          Result.isSuccess(readSetting(setting, name)),
+          coderFor(name) !== undefined,
+          `${setting}=${name}`
+        )
+      }
+      assert.isTrue(Result.isFailure(readSetting(setting, "nope")))
+    }
+  })
 
   it("keeps the coder list free of drift", () => {
     // The ids come from the presets themselves, so a connector renamed in

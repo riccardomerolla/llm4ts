@@ -10,19 +10,16 @@ import {
   RateLimitError,
   TimeoutError
 } from "@llm4ts/core/Errors"
-import { ConnectorIds, type ConnectorId } from "@llm4ts/core/Models"
+import {
+  ConnectorIds,
+  apiProviderConnector,
+  offeredApiProviderNames,
+  type ConnectorId
+} from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 import { nodeFlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
 
-export const JsProvider = Schema.Literals([
-  "mock",
-  "openai",
-  "anthropic",
-  "gemini",
-  "lm-studio",
-  "ollama",
-  "mlx-lm"
-])
+export const JsProvider = Schema.Literals(offeredApiProviderNames)
 export type JsProvider = typeof JsProvider.Type
 
 export class ClientConfig extends Schema.Class<ClientConfig>("ClientConfig")({
@@ -85,25 +82,6 @@ export interface LlmClient {
   readonly health: (options?: CallOptions) => Promise<ClientHealth>
 }
 
-const connectorId = (provider: JsProvider): ConnectorId => {
-  switch (provider) {
-    case "mock":
-      return ConnectorIds.Mock
-    case "openai":
-      return ConnectorIds.OpenAI
-    case "anthropic":
-      return ConnectorIds.Anthropic
-    case "gemini":
-      return ConnectorIds.GeminiApi
-    case "lm-studio":
-      return ConnectorIds.LmStudio
-    case "ollama":
-      return ConnectorIds.Ollama
-    case "mlx-lm":
-      return ConnectorIds.MlxLm
-  }
-}
-
 const categoryOf = (error: unknown): ErrorCategory =>
   error instanceof ConfigError
     ? "Configuration"
@@ -154,6 +132,14 @@ const decodeConfig = (input: unknown): ClientConfig => {
       error
     )
   }
+}
+
+const connectorId = (provider: JsProvider): ConnectorId => {
+  const connector = apiProviderConnector(provider)
+  if (connector === undefined) {
+    throw new Llm4tsError("Configuration", `invalid client configuration: provider ${provider}`)
+  }
+  return ConnectorIds[connector]
 }
 
 const apiConfig = (config: ClientConfig): ApiConnectorConfig =>

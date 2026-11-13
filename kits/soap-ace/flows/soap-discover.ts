@@ -21,6 +21,7 @@
 // Bearer, mTLS; references only) authenticates every document request.
 import { isAbsolute, resolve } from "node:path"
 import * as Effect from "effect/Effect"
+import { settingValue } from "@llm4ts/flow/Settings"
 import {
   Info,
   makeNodeWorkspace,
@@ -42,7 +43,7 @@ const program = Effect.gen(function* () {
   const raw = input.prompt.trim()
   const location = isUrl(raw) || isAbsolute(raw) ? raw : resolve(input.workspace, raw)
   const judgment = yield* judgmentConnectorFromEnvironment()
-  const service = process.env.LLM4TS_SOAP_SERVICE?.trim()
+  const service = settingValue("LLM4TS_SOAP_SERVICE", process.env)
 
   yield* runNode(
     {
@@ -59,12 +60,12 @@ const program = Effect.gen(function* () {
         const say = (message: string) => context.events.publish(Info.make({ message }))
         const workspace = yield* makeNodeWorkspace(input.workDir)
         const profile =
-          service === undefined || service === ""
+          service === undefined
             ? undefined
             : yield* loadAuthProfile(
                 workspace,
                 service,
-                process.env.LLM4TS_SOAP_ENV?.trim() || undefined
+                settingValue("LLM4TS_SOAP_ENV", process.env)
               )
         if (isUrl(location) && profile === undefined) {
           yield* say(

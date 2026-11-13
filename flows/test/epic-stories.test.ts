@@ -58,7 +58,6 @@ import {
   epicIdFor,
   selectedPack,
   gateListMessage,
-  flagsFromEnvironment,
   fixPromptOptions,
   gateCommands,
   gateTailChars,
@@ -380,16 +379,7 @@ describe("epic-stories flags and seats", () => {
     })
   )
 
-  it("parses seat flags and recognises a local single-model server", () => {
-    assert.deepStrictEqual(
-      flagsFromEnvironment("config=model_provider=lmstudio; profile=fast;yolo"),
-      {
-        config: "model_provider=lmstudio",
-        profile: "fast",
-        yolo: ""
-      }
-    )
-    assert.deepStrictEqual(flagsFromEnvironment(undefined), {})
+  it("recognises a local single-model server", () => {
     assert.strictEqual(localCoderServer("lmstudio/qwen/qwen3.6-35b-a3b:medium", {}, {}), "lmstudio")
     assert.strictEqual(localCoderServer("ollama/qwen3", {}, {}), "ollama")
     assert.strictEqual(
@@ -404,6 +394,16 @@ describe("epic-stories flags and seats", () => {
     assert.isUndefined(
       localCoderServer(undefined, {}, { ANTHROPIC_BASE_URL: "https://api.anthropic.com" })
     )
+  })
+
+  // The one way to say "run no gates": an empty value means "not set", and
+  // the pack's or the default gates would then run.
+  it("a lone ; in LLM4TS_GATES runs no gates, and an empty value is unset", () => {
+    const scripts = new Set(["typecheck"])
+    assert.deepStrictEqual(gateCommands({ LLM4TS_GATES: ";" }, scripts), [])
+    assert.deepStrictEqual(gateCommands({ LLM4TS_GATES: " ; ; " }, scripts), [])
+    assert.deepStrictEqual(gateCommands({ LLM4TS_GATES: "" }, scripts), gateCommands({}, scripts))
+    assert.isAbove(gateCommands({}, scripts).length, 0)
   })
 
   it("derives a readable, stable epic id and lists the gates", () => {

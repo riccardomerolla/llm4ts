@@ -19,7 +19,6 @@ import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { withContract } from "@llm4ts/flow/AutonomyContract"
 import {
-  coderFromEnv,
   defaultPlanPath,
   implementPlanFlow,
   makePlanStore,
@@ -27,7 +26,8 @@ import {
   planFrom,
   resolveFlowInput,
   runFlowMain,
-  runNode
+  runNode,
+  coderFromEnvironment
 } from "@llm4ts/runner"
 
 const program = Effect.gen(function* () {
@@ -37,12 +37,13 @@ const program = Effect.gen(function* () {
   const planPath = join(input.workDir, defaultPlanPath(input.prompt))
   const store = makePlanStore(nodePlainFileStore)
 
+  const coder = yield* coderFromEnvironment()
   yield* runNode(
     {
       workDir: input.workDir,
       workspace: input.workspace,
       userPrompt: input.prompt,
-      coder: coderFromEnv(process.env),
+      coder,
       environment: process.env
     },
     (context) =>
@@ -65,7 +66,7 @@ runFlowMain(program)
    text always finds its own plan.
 2. **A store.** `makePlanStore(nodePlainFileStore)` reads and writes that
    plan file; swap the file store in tests for an in-memory one.
-3. **`runNode`** with `coderFromEnv`, exactly the swap chapter 3 made.
+3. **`runNode`** with `coderFromEnvironment`, exactly the swap chapter 3 made.
 4. **`planFrom(context.reasoning, prompt)`** asks the reasoning seat for a
    task list, but only when no plan exists yet; otherwise the file wins.
 5. **`implementPlanFlow(context, options)`** is the loop from chapter 2's

@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type { PersistenceError } from "./FlowError.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
-import { ReviewIssue, ReviewResult } from "./Review.ts"
+import { ReviewIssue, ReviewResult } from "./ReviewModel.ts"
 import { fingerprintOf } from "./ReviewCache.ts"
 
 export const GateClass = Schema.Literals(["red", "hang", "crash"])

@@ -195,12 +195,15 @@ export const commandOrNone: SettingValue<string> = make(
   { runs: true, empty: "value" }
 )
 
-/** `cmd; cmd`. */
+/**
+ * `cmd; cmd`. A lone `;` is the empty list: the way to say "run none" where
+ * an empty value means "not set" and the default commands would run.
+ */
 export const commands: SettingValue<ReadonlyArray<string>> = make(
-  "command lines separated by ;",
+  "command lines separated by ; (a lone ; for none)",
   Schema.Array(Schema.String),
-  listOf(";"),
-  (value) => value.join("; "),
+  (text) => listOf(";")(text) ?? (text.includes(";") ? [] : undefined),
+  (value) => (value.length === 0 ? ";" : value.join("; ")),
   { runs: true }
 )
 
@@ -232,10 +235,14 @@ export const cliFlags: SettingValue<Readonly<Record<string, string>>> = make(
       .join(";")
 )
 
+/** `a, b or c`. */
+export const listed = (words: ReadonlyArray<string>): string =>
+  words.join(", ").replace(/, ([^,]*)$/u, " or $1")
+
 /** One of `choices`, any case; choices are written in lower case. */
 export const oneOf = <const L extends ReadonlyArray<string>>(choices: L): SettingValue<L[number]> =>
   make<L[number]>(
-    choices.join(", ").replace(/, ([^,]*)$/u, " or $1"),
+    listed(choices),
     Schema.Literals(choices),
     (value) => choices.find((choice) => choice === value.toLowerCase()),
     (value) => value,

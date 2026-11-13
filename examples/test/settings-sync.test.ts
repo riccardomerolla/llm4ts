@@ -98,6 +98,84 @@ describe("the settings registry stays in sync with the code", () => {
 })
 
 /**
+ * A setting is read through `settingValue`, `settingGiven` or `settingText`,
+ * so its grammar and default are the registry's (ADR 0049). A raw read is
+ * `<object>.LLM4TS_X` or `<object>["LLM4TS_X"]` in production code outside
+ * the registry itself; no area has one left. A helper that takes the name as
+ * a string and reads it by hand is the same read in disguise, so a quoted
+ * setting name may only be the argument of a registry reader.
+ */
+const rawRead = /\.LLM4TS_[A-Z0-9_]+|\[\s*["'`]LLM4TS_[A-Z0-9_]+["'`]\s*\]/gu
+const registryCode = /^packages\/flow\/src\/(?:Settings\.ts$|settings\/)/u
+const areas = ["packages", "flows", "kits"] as const
+
+const rawReadsIn = (text: string): number => [...text.matchAll(rawRead)].length
+
+/** `namedSeat` is the runner's seat resolver: it takes a `SettingName` and reads it with `settingText`. */
+const registryReaders = new Set(["settingValue", "settingGiven", "settingText", "namedSeat"])
+const namedInCall = /([A-Za-z_$][\w$]*)\(\s*(?:[\w$.]+\s*,\s*)?["'`]LLM4TS_[A-Z0-9_]+["'`]\s*[,)]/gu
+
+const readsByNameIn = (text: string): number =>
+  [...text.matchAll(namedInCall)].filter(([, callee]) => !registryReaders.has(callee ?? "")).length
+
+const linesWith = (
+  area: (typeof areas)[number],
+  count: (text: string) => number
+): ReadonlyArray<string> =>
+  scannedFiles
+    .filter(
+      (file) =>
+        file.startsWith(`${area}/`) && /\.[cm]?[jt]sx?$/u.test(file) && !registryCode.test(file)
+    )
+    .flatMap((file) =>
+      readFileSync(join(repositoryRoot, file), "utf8")
+        .split("\n")
+        .flatMap((text, index) =>
+          Array.from({ length: count(text) }, () => `${file}:${index + 1} ${text.trim()}`)
+        )
+    )
+
+describe("settings are read through the registry", () => {
+  it("counts member and bracket reads, not writes of an environment or lists of names", () => {
+    assert.strictEqual(rawReadsIn("const a = environment.LLM4TS_PACK?.trim()"), 1)
+    assert.strictEqual(rawReadsIn('process.env["LLM4TS_RUN_ID"] ?? env.LLM4TS_FLOW'), 2)
+    assert.strictEqual(rawReadsIn('settingValue("LLM4TS_PACK", environment)'), 0)
+    assert.strictEqual(rawReadsIn('launch({ LLM4TS_REGROUP: "1" })'), 0)
+    assert.strictEqual(rawReadsIn('const seats = ["LLM4TS_CODER", "LLM4TS_REASONER"]'), 0)
+  })
+
+  it("counts a helper handed a setting name, not a registry reader", () => {
+    assert.strictEqual(readsByNameIn('positiveEnvInt("LLM4TS_ANALYST_TURNS", 48)'), 1)
+    assert.strictEqual(readsByNameIn('positiveEnvInt(environment, "LLM4TS_JUDGE_ROUNDS", 2)'), 1)
+    assert.strictEqual(readsByNameIn('settingValue("LLM4TS_PACK", environment) ?? fallback'), 0)
+    assert.strictEqual(readsByNameIn('settingGiven("LLM4TS_GATES", process.env)._tag'), 0)
+    assert.strictEqual(readsByNameIn('yield* namedSeat("LLM4TS_CODER", environment)'), 0)
+    assert.strictEqual(readsByNameIn('const seats = ["LLM4TS_CODER", "LLM4TS_REASONER"]'), 0)
+    assert.strictEqual(readsByNameIn('Info.make({ message: "LLM4TS_GRAPH_REFINE=off" })'), 0)
+  })
+
+  for (const area of areas) {
+    it(`${area}: no raw LLM4TS_* read`, () => {
+      const found = linesWith(area, rawReadsIn)
+      assert.deepStrictEqual(
+        found,
+        [],
+        `read these through settingValue from @llm4ts/flow/Settings:\n${found.join("\n")}\n`
+      )
+    })
+
+    it(`${area}: no helper reads a setting by its name`, () => {
+      const found = linesWith(area, readsByNameIn)
+      assert.deepStrictEqual(
+        found,
+        [],
+        `call settingValue, settingGiven or settingText with the name instead:\n${found.join("\n")}\n`
+      )
+    })
+  }
+})
+
+/**
  * The documentation a user reads today. The frozen records (`plan.md`,
  * `docs/csp/`, `docs/CSP_STATUS.md`, `docs/parity.md`), the ADRs, the research
  * notes and the changelog describe the past and are left out.

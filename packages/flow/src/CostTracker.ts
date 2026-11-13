@@ -2,10 +2,9 @@ import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import type * as Scope from "effect/Scope"
-import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
 import { CostCell } from "./CostLedger.ts"
-import { awaitConsumed, type FlowEvent, type FlowEventHub } from "./FlowEvents.ts"
+import type { FlowEvent, FlowEventHub } from "./FlowEvents.ts"
 import { estimateCostUsd, PricesAsOf } from "./PriceList.ts"
 
 interface CostState {
@@ -130,7 +129,6 @@ const renderSummary = (state: CostState): string => {
 export const makeCostTracker = Effect.fn("@llm4ts/flow/CostTracker.make")(
   function* (): Effect.fn.Return<CostTracker> {
     const state = yield* Ref.make<CostState>(emptyState)
-    const consumed = yield* Ref.make(0)
     const record = (event: FlowEvent): Effect.Effect<void> =>
       Ref.update(state, (current) => updateCostState(current, event))
     return {
@@ -166,18 +164,8 @@ export const makeCostTracker = Effect.fn("@llm4ts/flow/CostTracker.make")(
         )
       ),
       summary: Ref.get(state).pipe(Effect.map(renderSummary)),
-      consume: (hub) =>
-        Effect.gen(function* () {
-          const subscription = yield* hub.subscribe
-          yield* Stream.fromSubscription(subscription).pipe(
-            Stream.runForEach((event) =>
-              record(event).pipe(Effect.andThen(Ref.update(consumed, (count) => count + 1)))
-            ),
-            Effect.forkScoped,
-            Effect.asVoid
-          )
-        }),
-      awaitDrained: (hub, timeout) => awaitConsumed(hub, consumed, timeout)
+      consume: (hub) => Effect.asVoid(hub.consume("cost tracker", record)),
+      awaitDrained: (hub, timeout) => Effect.map(hub.drained(timeout), (report) => report.complete)
     }
   }
 )

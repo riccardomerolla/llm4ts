@@ -3,7 +3,7 @@
 // its plan entry says it may. Deterministic, from the diff and the gate
 // output; a violation is a gate failure the fix round can undo.
 import * as Schema from "effect/Schema"
-import { ReviewIssue } from "./Review.ts"
+import { ReviewIssue } from "./ReviewModel.ts"
 
 export class OracleRules extends Schema.Class<OracleRules>("OracleRules")({
   /** Regex source: a path matching it is a test file. */

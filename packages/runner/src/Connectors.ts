@@ -4,10 +4,22 @@ import * as Redacted from "effect/Redacted"
 import {
   ApiConnectorConfig,
   CliConnectorConfig,
-  type ConnectorConfig
+  type ConnectorConfig,
+  type ConnectorConfigOf
 } from "@llm4ts/core/ConnectorConfig"
-import { ConnectorIds, connectorDefaultBaseUrl } from "@llm4ts/core/Models"
+import {
+  ConnectorIds,
+  apiProviderConnector,
+  coderConnector,
+  coderNames,
+  connectorDefaultBaseUrl,
+  connectorRow,
+  connectorTable,
+  offeredApiProviderNames,
+  type ConnectorName
+} from "@llm4ts/core/Models"
 import { runStateDeniedPaths } from "@llm4ts/flow/RunState"
+import { settingText, settingValue } from "@llm4ts/flow/Settings"
 import { ScriptUsage } from "./FlowArgs.ts"
 
 export const claude = CliConnectorConfig.make({
@@ -53,12 +65,12 @@ export const opencode = CliConnectorConfig.make({
 
 export const lmStudio = ApiConnectorConfig.make({
   connectorId: ConnectorIds.LmStudio,
-  baseUrl: "http://localhost:1234/v1"
+  baseUrl: connectorTable.LmStudio.baseUrl
 })
 
 export const mlxLm = ApiConnectorConfig.make({
   connectorId: ConnectorIds.MlxLm,
-  baseUrl: "http://localhost:8080"
+  baseUrl: connectorTable.MlxLm.baseUrl
 })
 
 export const openAI = ApiConnectorConfig.make({
@@ -81,6 +93,26 @@ export const mock = ApiConnectorConfig.make({
   connectorId: ConnectorIds.Mock,
   model: "mock"
 })
+
+// A connector without a preset here does not compile.
+const presets: { readonly [K in ConnectorName]: ConnectorConfigOf<K> } = {
+  OpenAI: openAI,
+  Anthropic: anthropic,
+  GeminiApi: geminiApi,
+  LmStudio: lmStudio,
+  Ollama: ollama,
+  MlxLm: mlxLm,
+  ClaudeCli: claude,
+  GeminiCli: gemini,
+  OpenCode: opencode,
+  Codex: codex,
+  Copilot: CliConnectorConfig.make({ connectorId: ConnectorIds.Copilot }),
+  Pi: pi,
+  AntigravityCli: antigravity,
+  Grok: grok,
+  Cursor: cursor,
+  Mock: mock
+}
 
 export function withModel(config: CliConnectorConfig, model: string): CliConnectorConfig
 export function withModel(config: ApiConnectorConfig, model: string): ApiConnectorConfig
@@ -134,16 +166,12 @@ const environmentApiKey = (
   config: ApiConnectorConfig,
   environment: Readonly<Record<string, string | undefined>>
 ): string | undefined => {
-  switch (config.connectorId.value) {
-    case "openai":
-      return environment.OPENAI_API_KEY
-    case "anthropic":
-      return environment.ANTHROPIC_API_KEY
-    case "gemini-api":
-      return environment.GEMINI_API_KEY ?? environment.GOOGLE_API_KEY
-    default:
-      return undefined
-  }
+  const row = connectorRow(config.connectorId)
+  return row?.kind === "Api"
+    ? row.credentialVariables
+        .map((variable) => environment[variable])
+        .find((value) => value !== undefined)
+    : undefined
 }
 
 export const enrichApiConnector = (
@@ -163,9 +191,6 @@ export const enrichApiConnector = (
   })
 }
 
-const switchedOn = (value: string | undefined): boolean =>
-  value !== undefined && ["1", "true", "on", "yes"].includes(value.trim().toLowerCase())
-
 export const prepareConnector = (
   config: ConnectorConfig,
   workDir: string,
@@ -179,7 +204,7 @@ export const prepareConnector = (
         workingDir: workDir,
         // `LLM4TS_ISOLATED=1` asks every CLI seat of the run to leave the
         // repository's own harness material unloaded (ADR 0029).
-        ...(switchedOn(environment.LLM4TS_ISOLATED) ? { isolated: true } : {}),
+        ...(settingValue("LLM4TS_ISOLATED", environment) ? { isolated: true } : {}),
         // Every CLI seat keeps out of the run's own state unless the seat
         // (or the run) says otherwise; the connector maps it to a deny
         // rule where its harness has one (`capabilities.pathDeny`).
@@ -188,109 +213,123 @@ export const prepareConnector = (
 
 /** The API provider a name stands for (`LLM4TS_PROVIDER`, a roster executor's `harness`). */
 export const apiPresetFor = (name: string): ApiConnectorConfig | undefined => {
-  switch (name.trim().toLowerCase()) {
-    case "mock":
-      return mock
-    case "openai":
-      return openAI
-    case "anthropic":
-      return anthropic
-    case "gemini":
-    case "gemini-api":
-      return geminiApi
-    case "lm-studio":
-    case "lmstudio":
-      return lmStudio
-    case "ollama":
-      return ollama
-    case "mlx-lm":
-    case "mlxlm":
-    case "mlx":
-      return mlxLm
-    default:
-      return undefined
-  }
+  const connector = apiProviderConnector(name.trim().toLowerCase())
+  return connector === undefined ? undefined : presets[connector]
 }
+
+const apiConnectorNamed = Effect.fnUntraced(function* (
+  named: string,
+  model: string | undefined
+): Effect.fn.Return<ApiConnectorConfig, ScriptUsage> {
+  const provider = named.toLowerCase()
+  const preset = apiPresetFor(provider)
+  if (preset === undefined) {
+    return yield* ScriptUsage.make({
+      message: `unknown LLM4TS_PROVIDER '${provider}'; expected ${offeredApiProviderNames.join("|")}`
+    })
+  }
+  if (provider !== "mock" && model === undefined) {
+    return yield* ScriptUsage.make({
+      message: `LLM4TS_MODEL is required for provider '${provider}' (e.g. LLM4TS_MODEL=gpt-4o-mini)`
+    })
+  }
+  return model === undefined ? preset : withModel(preset, model)
+})
 
 export const apiConnectorFromEnvironment = Effect.fn(
   "@llm4ts/runner/Connectors.apiConnectorFromEnvironment"
 )(function* (
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): Effect.fn.Return<ApiConnectorConfig, ScriptUsage> {
-  const provider = environment.LLM4TS_PROVIDER?.trim().toLowerCase() ?? "mock"
-  const preset = apiPresetFor(provider)
-  if (preset === undefined) {
-    return yield* ScriptUsage.make({
-      message:
-        `unknown LLM4TS_PROVIDER '${provider}'; expected ` +
-        "mock|openai|anthropic|gemini|lm-studio|ollama|mlx-lm"
-    })
-  }
-  const model = environment.LLM4TS_MODEL?.trim()
-  if (provider !== "mock" && (model === undefined || model.length === 0)) {
-    return yield* ScriptUsage.make({
-      message: `LLM4TS_MODEL is required for provider '${provider}' (e.g. LLM4TS_MODEL=gpt-4o-mini)`
-    })
-  }
-  return model === undefined || model.length === 0 ? preset : withModel(preset, model)
+  return yield* apiConnectorNamed(
+    settingText("LLM4TS_PROVIDER", environment) ?? "mock",
+    settingValue("LLM4TS_MODEL", environment)
+  )
 })
 
-// Every coding CLI, with the names an operator may write for it. The
-// connector's own id is always one of them, derived rather than repeated:
-// `gemini-cli` is the string llm4ts prints in events, traces and errors,
-// so it is the name an operator has actually seen — it must not resolve to
-// a different vendor's CLI.
-const coderAliases: ReadonlyArray<readonly [CliConnectorConfig, ReadonlyArray<string>]> = [
-  [claude, ["claude"]],
-  [codex, ["codex"]],
-  [gemini, ["gemini"]],
-  [pi, ["pi"]],
-  [antigravity, ["agy", "antigravity"]],
-  [grok, ["grok"]],
-  [cursor, ["cursor"]],
-  [opencode, ["opencode"]]
-]
+export const coderIds: ReadonlyArray<string> = Object.freeze([...coderNames].sort())
 
-const coders = new Map<string, CliConnectorConfig>(
-  coderAliases.flatMap(([preset, aliases]) =>
-    [...aliases, preset.connectorId.value].map((name) => [name, preset] as const)
-  )
-)
-
-export const coderIds: ReadonlyArray<string> = Object.freeze([...coders.keys()].sort())
-
-export const coderFor = (name: string): CliConnectorConfig | undefined =>
-  coders.get(name.trim().toLowerCase())
-
-// Unchecked: an unrecognized name falls back to claude, which silently
-// runs a CLI the operator did not ask for. Prefer coderFromEnvironment,
-// which refuses and names the coders it knows.
-export const coderFromEnv = (
-  env: Readonly<Record<string, string | undefined>> = process.env
-): CliConnectorConfig => {
-  const requested = (env.LLM4TS_CODER ?? "").trim()
-  return (requested.length === 0 ? claude : coderFor(requested)) ?? claude
+export const coderFor = (name: string): CliConnectorConfig | undefined => {
+  const connector = coderConnector(name.trim().toLowerCase())
+  return connector === undefined ? undefined : presets[connector]
 }
 
-// The checked reading, matching apiConnectorFromEnvironment above: an
-// unset variable is the claude default, and an unknown one is a usage
-// error rather than a different coder than the one asked for.
-export const coderFromEnvironment = Effect.fn("@llm4ts/runner/Connectors.coderFromEnvironment")(
-  function* (
-    environment: Readonly<Record<string, string | undefined>> = process.env
-  ): Effect.fn.Return<CliConnectorConfig, ScriptUsage> {
-    const requested = (environment.LLM4TS_CODER ?? "").trim()
-    if (requested.length === 0) {
-      return claude
-    }
-    const preset = coderFor(requested)
-    return preset === undefined
-      ? yield* ScriptUsage.make({
-          message: `unknown LLM4TS_CODER '${requested}'; expected ${coderIds.join("|")}`
+export interface SeatDefaults {
+  /** The coder when `LLM4TS_CODER` is unset; claude when omitted. */
+  readonly coder?: CliConnectorConfig
+  /** The reasoner when `LLM4TS_REASONER` is unset; the coder seat when omitted. */
+  readonly reasoner?: CliConnectorConfig
+}
+
+export interface Seats {
+  readonly coder: CliConnectorConfig
+  readonly reasoning: CliConnectorConfig
+}
+
+type Environment = Readonly<Record<string, string | undefined>>
+
+const namedSeat = (
+  variable: "LLM4TS_CODER" | "LLM4TS_REASONER",
+  environment: Environment
+): Effect.Effect<CliConnectorConfig | undefined, ScriptUsage> => {
+  const requested = settingText(variable, environment)
+  if (requested === undefined) {
+    return Effect.succeed(undefined)
+  }
+  const preset = coderFor(requested)
+  return preset === undefined
+    ? Effect.fail(
+        ScriptUsage.make({
+          message: `unknown ${variable} '${requested}'; expected ${coderIds.join("|")}`
         })
-      : preset
+      )
+    : Effect.succeed(preset)
+}
+
+/**
+ * The coder and reasoning seats of a flow that runs both, from `LLM4TS_CODER`
+ * and `LLM4TS_REASONER`. An unknown name is a usage error naming the accepted
+ * names, never another agent. A flow with one seat reads that one alone
+ * (`coderFromEnvironment`, `reasonerFromEnvironment`).
+ */
+export const seatsFromEnvironment = Effect.fn("@llm4ts/runner/Connectors.seatsFromEnvironment")(
+  function* (
+    defaults: SeatDefaults = {},
+    environment: Environment = process.env
+  ): Effect.fn.Return<Seats, ScriptUsage> {
+    const coder = (yield* namedSeat("LLM4TS_CODER", environment)) ?? defaults.coder ?? claude
+    const reasoner = yield* namedSeat("LLM4TS_REASONER", environment)
+    return { coder, reasoning: reasoner ?? defaults.reasoner ?? coder }
   }
 )
+
+/**
+ * An unknown name runs claude, with nothing said about it.
+ *
+ * @deprecated Use `seatsFromEnvironment`, which refuses an unknown name. Removed in 4.0.0.
+ */
+export const coderFromEnv = (env: Environment = process.env): CliConnectorConfig => {
+  const requested = settingValue("LLM4TS_CODER", env)
+  return (requested === undefined ? claude : coderFor(requested)) ?? claude
+}
+
+/**
+ * `LLM4TS_CODER` alone, for a flow that runs no separate reasoning seat. A
+ * flow answers only for the seats it uses: a bad `LLM4TS_REASONER` is not
+ * this flow's to refuse.
+ */
+export const coderFromEnvironment = (
+  environment: Environment = process.env,
+  fallback: CliConnectorConfig = claude
+): Effect.Effect<CliConnectorConfig, ScriptUsage> =>
+  Effect.map(namedSeat("LLM4TS_CODER", environment), (coder) => coder ?? fallback)
+
+/** `LLM4TS_REASONER` alone, for a flow that edits nothing. */
+export const reasonerFromEnvironment = (
+  environment: Environment = process.env,
+  fallback: CliConnectorConfig = claude
+): Effect.Effect<CliConnectorConfig, ScriptUsage> =>
+  Effect.map(namedSeat("LLM4TS_REASONER", environment), (reasoner) => reasoner ?? fallback)
 
 /**
  * The judgment seat from the environment (ADR 0017): `LLM4TS_JUDGMENT_PROVIDER`
@@ -302,13 +341,8 @@ export const judgmentConnectorFromEnvironment = Effect.fn(
 )(function* (
   environment: Readonly<Record<string, string | undefined>> = process.env
 ): Effect.fn.Return<ApiConnectorConfig | undefined, ScriptUsage> {
-  const provider = environment.LLM4TS_JUDGMENT_PROVIDER?.trim()
-  if (provider === undefined || provider.length === 0) {
-    return undefined
-  }
-  return yield* apiConnectorFromEnvironment({
-    ...environment,
-    LLM4TS_PROVIDER: provider,
-    LLM4TS_MODEL: environment.LLM4TS_JUDGMENT_MODEL
-  })
+  const provider = settingText("LLM4TS_JUDGMENT_PROVIDER", environment)
+  return provider === undefined
+    ? undefined
+    : yield* apiConnectorNamed(provider, settingValue("LLM4TS_JUDGMENT_MODEL", environment))
 })

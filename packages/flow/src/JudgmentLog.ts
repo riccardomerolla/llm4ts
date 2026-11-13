@@ -5,8 +5,7 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
 import type * as Scope from "effect/Scope"
-import * as Stream from "effect/Stream"
-import { awaitConsumed, JudgmentObserved, type FlowEvent, type FlowEventHub } from "./FlowEvents.ts"
+import { JudgmentObserved, type FlowEvent, type FlowEventHub } from "./FlowEvents.ts"
 import type { PlainFileStoreShape } from "./Persistence.ts"
 
 export class JudgmentObservation extends Schema.Class<JudgmentObservation>("JudgmentObservation")({
@@ -42,7 +41,6 @@ export const makeJudgmentLog = Effect.fn("@llm4ts/flow/JudgmentLog.make")(functi
   readonly root: string
   readonly runId: string
 }): Effect.fn.Return<JudgmentLogShape> {
-  const consumed = yield* Ref.make(0)
   const degraded = yield* Ref.make(false)
   const lock = yield* Semaphore.make(1)
   const record = (event: FlowEvent): Effect.Effect<void> =>
@@ -66,23 +64,17 @@ export const makeJudgmentLog = Effect.fn("@llm4ts/flow/JudgmentLog.make")(functi
         )
 
   const awaitDrained = (hub: FlowEventHub, timeout?: Duration.Input): Effect.Effect<boolean> =>
-    awaitConsumed(hub, consumed, timeout)
+    Effect.map(hub.drained(timeout), (report) => report.complete)
 
   return {
     record,
     awaitDrained,
     consume: (hub) =>
       Effect.gen(function* () {
-        yield* Ref.set(consumed, yield* hub.publishedCount)
-        const subscription = yield* hub.subscribe
-        yield* Stream.fromSubscription(subscription).pipe(
-          Stream.runForEach((event) =>
-            record(event).pipe(Effect.andThen(Ref.update(consumed, (count) => count + 1)))
-          ),
-          Effect.forkScoped
-        )
+        // A judgment log may be attached to a run already under way.
+        const consumer = yield* hub.consume("judgment log", record, { from: "now" })
         // Registered after the consumer fiber: drain before scope interrupts it.
-        yield* Effect.addFinalizer(() => awaitDrained(hub))
+        yield* Effect.addFinalizer(() => consumer.caughtUp())
       })
   }
 })

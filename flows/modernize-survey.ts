@@ -30,7 +30,7 @@ import {
   FlowAborted,
   Info,
   asReadOnly,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   nodePlainFileStore,
   openPack,
@@ -71,6 +71,7 @@ import {
 import { wholeView } from "@llm4ts/flow/GraphQuery"
 import { renderClusterDiagrams, renderEntryPaths, renderGraphDot } from "@llm4ts/flow/GraphRender"
 import type { Pack } from "@llm4ts/flow/Pack"
+import { settingValue } from "@llm4ts/flow/Settings"
 
 const ModDir = "docs/modernization"
 
@@ -182,16 +183,11 @@ const renderWavePlan = (
   )
 }
 
-const refineDisabled = (environment: Readonly<Record<string, string | undefined>>): boolean => {
-  const value = environment.LLM4TS_GRAPH_REFINE?.trim().toLowerCase()
-  return value === "off" || value === "0" || value === "false"
-}
-
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
     "Survey the legacy estate and propose a migration wave plan"
   )
-  const coder = coderFromEnv(process.env)
+  const coder = yield* coderFromEnvironment()
 
   yield* runNode(
     {
@@ -258,7 +254,7 @@ const program = Effect.gen(function* () {
         const refined = yield* stage(
           context.events,
           "graph refine",
-          refineDisabled(process.env)
+          !settingValue("LLM4TS_GRAPH_REFINE", process.env)
             ? context.events
                 .publish(
                   Info.make({ message: "LLM4TS_GRAPH_REFINE=off — regex graph ships unrefined" })

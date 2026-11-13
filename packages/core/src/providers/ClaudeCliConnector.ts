@@ -11,7 +11,8 @@ import {
   ConnectorIds,
   LlmChunk,
   TokenUsage,
-  type JsonSchema
+  type JsonSchema,
+  cliExecutable
 } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { collect } from "../Streaming.ts"
@@ -36,6 +37,8 @@ import {
   jsonBooleanField,
   jsonObjectEntries
 } from "./CliSupport.ts"
+
+const executable = cliExecutable("ClaudeCli")
 
 /**
  * `claude auth status --json` reads the credential store and answers
@@ -243,7 +246,7 @@ export const makeClaudeCliConnector = (
     prompt: string
   ) {
     const result = yield* executor.runWithStdin(
-      ["claude", "--print", ...extraArgs],
+      [executable, "--print", ...extraArgs],
       cwd,
       config.envVars,
       prompt
@@ -269,7 +272,7 @@ export const makeClaudeCliConnector = (
         ([model, said]) =>
           executor
             .runStreamingWithStdin(
-              ["claude", "--print", "--output-format", "stream-json", "--verbose", ...extraArgs],
+              [executable, "--print", "--output-format", "stream-json", "--verbose", ...extraArgs],
               cwd,
               config.envVars,
               prompt
@@ -341,11 +344,11 @@ export const makeClaudeCliConnector = (
       // another way are not), so the grade is partial.
       pathDeny: "partial"
     }),
-    buildArgv: (prompt, _context) => ["claude", "--print", ...extraArgs, prompt],
-    buildInteractiveArgv: (_context) => ["claude", ...extraArgs],
+    buildArgv: (prompt, _context) => [executable, "--print", ...extraArgs, prompt],
+    buildInteractiveArgv: (_context) => [executable, ...extraArgs],
     complete,
     completeStream,
-    versionProbe: { executor, binary: "claude", cwd, authProbe: claudeAuthProbe }
+    versionProbe: { executor, binary: executable, cwd, authProbe: claudeAuthProbe }
   })
 
   const executeStructuredWithUsage = <A, E, RD, RE>(

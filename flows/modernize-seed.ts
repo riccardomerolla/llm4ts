@@ -25,7 +25,7 @@ import { PersistenceError } from "@llm4ts/flow/FlowError"
 import {
   FlowAborted,
   Info,
-  coderFromEnv,
+  coderFromEnvironment,
   makeNodeWorkspace,
   nodePlainFileStore,
   openPack,
@@ -41,6 +41,7 @@ import { matchingFiles } from "@llm4ts/flow/SpecChecks"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
 import { requireApproval } from "@llm4ts/flow/Approval"
 import { Decisions, filterFeature, parseDecisions } from "@llm4ts/flow/Decisions"
+import { settingValue } from "@llm4ts/flow/Settings"
 
 const ModDir = "docs/modernization"
 const skipped = new Set([".git", "target", "node_modules", "dist"])
@@ -89,9 +90,10 @@ const copyFile = Effect.fn("modernize-seed.copyFile")(function* (
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Seed the target repository from the approved spec pack")
-  const legacyRepo = process.env.LLM4TS_LEGACY_REPO?.trim()
+  const legacyRepo = settingValue("LLM4TS_LEGACY_REPO", process.env)
   const files = nodePlainFileStore
 
+  const coder = yield* coderFromEnvironment()
   yield* runNode(
     {
       workDir: input.workDir,
@@ -99,12 +101,12 @@ const program = Effect.gen(function* () {
       userPrompt: input.prompt,
       // This phase makes no model call; the seat is wired only because the
       // runner composes one context shape for every flow.
-      coder: coderFromEnv(process.env),
+      coder,
       environment: process.env
     },
     (context) =>
       Effect.gen(function* () {
-        if (legacyRepo === undefined || legacyRepo.length === 0) {
+        if (legacyRepo === undefined) {
           return yield* FlowAborted.make({
             message:
               "set LLM4TS_LEGACY_REPO to the legacy repository holding the approved spec pack"
@@ -278,7 +280,7 @@ const program = Effect.gen(function* () {
                     try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Seats))(seatsText),
                     catch: () => undefined
                   }).pipe(Effect.orElseSucceed((): Readonly<Record<string, string>> => ({})))
-            const approver = process.env.LLM4TS_APPROVER?.trim()
+            const approver = settingValue("LLM4TS_APPROVER", process.env)
             yield* provenance.write(
               join(input.workDir, ModDir, "provenance.json"),
               Provenance.make({
@@ -286,9 +288,7 @@ const program = Effect.gen(function* () {
                 pack: pack.name,
                 llm4tsVersion: packageVersion,
                 createdAt: new Date().toISOString(),
-                ...(approver === undefined || approver.length === 0
-                  ? {}
-                  : { approvedBy: approver }),
+                ...(approver === undefined ? {} : { approvedBy: approver }),
                 seats,
                 specs,
                 gateVerdicts: Object.fromEntries(

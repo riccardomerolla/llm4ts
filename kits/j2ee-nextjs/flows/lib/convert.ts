@@ -55,15 +55,7 @@ import {
   workspaceLimitsFromEnv,
   type WorkspaceShape
 } from "@llm4ts/flow/Workspace"
-
-export const positiveEnvInt = (
-  environment: Readonly<Record<string, string | undefined>>,
-  name: string,
-  fallback: number
-): number => {
-  const raw = Number.parseInt(environment[name] ?? "", 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : fallback
-}
+import { settingValue } from "@llm4ts/flow/Settings"
 
 /** Sums the coder and reasoning meters into one per-run estimate. */
 export const combineTotals = (
@@ -322,7 +314,7 @@ const legacyEvidence = Effect.fn("convert.legacyEvidence")(function* (
   const closure = closureFor(
     graph,
     page,
-    positiveEnvInt(deps.environment, "LLM4TS_MAX_CLOSURE_FILES", 12)
+    settingValue("LLM4TS_MAX_CLOSURE_FILES", deps.environment) ?? 12
   )
   const parts: Array<string> = []
   if (sourcePath !== undefined) {
@@ -486,7 +478,7 @@ const runConversion = Effect.fn("convert.run")(function* (
     "judge",
     Effect.gen(function* () {
       const complianceJudge = judge(context.reasoning, conversionDimensions)
-      const rounds = positiveEnvInt(environment, "LLM4TS_JUDGE_ROUNDS", 2)
+      const rounds = settingValue("LLM4TS_JUDGE_ROUNDS", environment) ?? 2
       const specOf = new Map(unit.judged.map((entry) => [entry.name, entry.spec]))
       for (let round = 1; round <= rounds; round += 1) {
         const base = yield* context.git.defaultBase
@@ -757,13 +749,13 @@ export const setupConversion = Effect.fn("convert.setup")(function* (
   environment: Readonly<Record<string, string | undefined>>,
   flowDir: string
 ): Effect.fn.Return<ConvertPageDeps, FlowError | PackNotFound> {
-  const legacyRaw = environment.LLM4TS_LEGACY_REPO
-  if (legacyRaw === undefined || legacyRaw.trim().length === 0) {
+  const legacyRepo = settingValue("LLM4TS_LEGACY_REPO", environment)
+  if (legacyRepo === undefined) {
     return yield* FlowAborted.make({
       message: "set LLM4TS_LEGACY_REPO to the extracted legacy repository path"
     })
   }
-  const legacyDir = resolve(input.workspace, legacyRaw.trim())
+  const legacyDir = resolve(input.workspace, legacyRepo)
   const estimateOptions = estimatedUsageOptionsFromEnv(environment)
   const coderMeter = yield* makeEstimatedUsageMeter(context.coder, estimateOptions)
   const reasoningMeter = yield* makeEstimatedUsageMeter(context.reasoning, estimateOptions)
@@ -791,7 +783,7 @@ export const setupConversion = Effect.fn("convert.setup")(function* (
     openPack({
       environment: {
         ...environment,
-        LLM4TS_PACK: environment.LLM4TS_PACK ?? "j2ee-nextjs-spa"
+        LLM4TS_PACK: settingValue("LLM4TS_PACK", environment) ?? "j2ee-nextjs-spa"
       },
       launchDir: input.workspace,
       flowDir

@@ -1,10 +1,7 @@
 import * as Effect from "effect/Effect"
-import type { LlmError } from "../Errors.ts"
-import { EvalResult } from "./Eval.ts"
+import { EvalResult, type Evaluator } from "./Eval.ts"
 
-export interface Evaluator<in In> {
-  readonly evaluate: (input: In) => Effect.Effect<EvalResult, LlmError>
-}
+export type { Evaluator }
 
 export const makeEvaluator = <In>(evaluate: Evaluator<In>["evaluate"]): Evaluator<In> => ({
   evaluate
