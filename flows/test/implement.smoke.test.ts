@@ -1,5 +1,5 @@
 import { describe, it, assert } from "@effect/vitest"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
   commitAll,
@@ -70,6 +70,58 @@ describe("implement flow smoke", () => {
       // Every consumer saw every event: the seats' startup notices included.
       assert.notInclude(result.stdout, "still unconsumed", failureReport("implement", result))
       assert.isTrue(existsSync(join(fixture.target, "calculator.txt")))
+    },
+    smokeTimeout
+  )
+})
+
+describe("implement flow seat settings", () => {
+  // Until 4.1.0 only the epic flows, local and sdd read the model settings.
+  it(
+    "hands LLM4TS_CODER_MODEL to every claude call and LLM4TS_CODER_FLAGS to the coder's",
+    () => {
+      const fixture = makeFixture()
+      initRepo(fixture.target)
+      write(fixture.target, "README.md", "# calculator\n")
+      commitAll(fixture.target, "init")
+      const argvLog = join(fixture.root, "claude-argv.jsonl")
+      const recording = responder.replace(
+        "(prompt) => {",
+        `(prompt) => {\n  fs.appendFileSync(${JSON.stringify(argvLog)}, JSON.stringify(process.argv.slice(2)) + "\\n")`
+      )
+      installStub(fixture, stubProgram(recording))
+
+      const result = runFlow(
+        fixture,
+        "implement",
+        fixture.target,
+        { LLM4TS_CODER_MODEL: "some-model", LLM4TS_CODER_FLAGS: "allowedTools=Edit" },
+        "Add a multiply function"
+      )
+
+      assert.strictEqual(result.status, 0, failureReport("implement", result))
+      const calls = readFileSync(argvLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line): ReadonlyArray<string> => JSON.parse(line))
+      const valueOf = (argv: ReadonlyArray<string>, flag: string) => {
+        const at = argv.indexOf(flag)
+        return at < 0 ? undefined : argv[at + 1]
+      }
+      assert.isAbove(calls.length, 2)
+      for (const argv of calls) {
+        assert.strictEqual(valueOf(argv, "--model"), "some-model", JSON.stringify(argv))
+      }
+      // A read-only seat is the one claude gets a restricted tool list for.
+      const editing = calls.filter((argv) => !argv.includes("--tools"))
+      assert.isNotEmpty(editing)
+      for (const argv of calls) {
+        assert.strictEqual(
+          valueOf(argv, "--allowedTools"),
+          editing.includes(argv) ? "Edit" : undefined,
+          JSON.stringify(argv)
+        )
+      }
     },
     smokeTimeout
   )

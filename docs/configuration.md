@@ -154,24 +154,24 @@ executes.
 
 ### Seats and models
 
-| Setting                    | Value                                                                                                          | Default                                                      | Belongs in   | Meaning                                                                                                                                                            |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `LLM4TS_CODER`             | claude, claude-cli, gemini, gemini-cli, opencode, codex, pi, agy, antigravity, antigravity-cli, grok or cursor | claude; pi in the epic flows                                 | global file  | The coding agent that edits files: claude, codex, gemini, pi, agy, grok, cursor or opencode.                                                                       |
-| `LLM4TS_REASONER`          | claude, claude-cli, gemini, gemini-cli, opencode, codex, pi, agy, antigravity, antigravity-cli, grok or cursor | claude                                                       | global file  | The agent that plans, reviews and judges in the epic, soap, roundtable and taskforce flows; any coder name.                                                        |
-| `LLM4TS_CODER_MODEL`       | text                                                                                                           | the agent's own default; the local and sdd flows name theirs | global file  | The coder seat's model. pi takes provider/model, such as openai-codex/gpt-5.5.                                                                                     |
-| `LLM4TS_REASONING_MODEL`   | text                                                                                                           | the agent's own default; the local and sdd flows name theirs | global file  | The reasoning seat's model.                                                                                                                                        |
-| `LLM4TS_CODER_FLAGS`       | key=value pairs separated by ;                                                                                 | none                                                         | global file  | Extra CLI flags for the coder seat in the epic flows, on top of its preset's own.                                                                                  |
-| `LLM4TS_REASONING_FLAGS`   | key=value pairs separated by ;                                                                                 | none                                                         | global file  | Extra CLI flags for the reasoning seat in the epic flows.                                                                                                          |
-| `LLM4TS_CODER_HEALTH_URL`  | an http or https URL                                                                                           | the local server's model list at its default address         | global file  | The URL polled until a local serving engine answers again after it went down.                                                                                      |
-| `LLM4TS_PROVIDER`          | openai, anthropic, gemini, gemini-api, lm-studio, lmstudio, ollama, mlx-lm, mlxlm, mlx or mock                 | mock                                                         | global file  | The API provider of provider-driven flows such as hello: mock, openai, anthropic, gemini, lm-studio, ollama or mlx-lm. Any provider but mock needs `LLM4TS_MODEL`. |
-| `LLM4TS_MODEL`             | text                                                                                                           | none; required unless the provider is mock                   | global file  | The model `LLM4TS_PROVIDER` serves.                                                                                                                                |
-| `LLM4TS_JUDGMENT_PROVIDER` | openai, anthropic, gemini, gemini-api, lm-studio, lmstudio, ollama, mlx-lm, mlxlm, mlx or mock                 | the reasoning seat answers typed judgments                   | global file  | The API provider of the judgment seat, named the way `LLM4TS_PROVIDER` is.                                                                                         |
-| `LLM4TS_JUDGMENT_MODEL`    | text                                                                                                           | none; required with a judgment provider other than mock      | global file  | The model `LLM4TS_JUDGMENT_PROVIDER` serves.                                                                                                                       |
-| `LLM4TS_JUDGMENT_BACKEND`  | llm or typesafe                                                                                                | llm                                                          | global file  | What answers typed judgments: an LLM seat, or the TypeSafe API (needs `TYPESAFE_API_KEY`).                                                                         |
-| `LLM4TS_JUDGMENT_BATCHING` | independent or shared-prefix                                                                                   | independent                                                  | global file  | shared-prefix sends the questions of one judgment request behind one shared prompt prefix, for a local model that caches it.                                       |
-| `LLM4TS_ISOLATED`          | on or off                                                                                                      | off                                                          | project file | Asks every CLI seat to leave the repository's own hooks, MCP servers, settings and instruction files unloaded.                                                     |
-| `LLM4TS_ROSTER`            | text                                                                                                           | the user's and the repository's roster.json, merged          | project file | The executor roster in place of the roster.json files: a roster file, or none for one executor per seat. Flag: `--roster`.                                         |
-| `LLM4TS_EXECUTORS`         | names separated by commas                                                                                      | every executor of the roster                                 | per run      | Narrows the roster to these executor ids. Flag: `--executors`.                                                                                                     |
+| Setting                    | Value                                                                                                          | Default                                                      | Belongs in   | Meaning                                                                                                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_CODER`             | claude, claude-cli, gemini, gemini-cli, opencode, codex, pi, agy, antigravity, antigravity-cli, grok or cursor | claude; pi in the epic flows                                 | global file  | The coding agent that edits files: claude, codex, gemini, pi, agy, grok, cursor or opencode.                                                                           |
+| `LLM4TS_REASONER`          | claude, claude-cli, gemini, gemini-cli, opencode, codex, pi, agy, antigravity, antigravity-cli, grok or cursor | claude                                                       | global file  | The agent that plans, reviews and judges in the epic, soap, roundtable and taskforce flows; any coder name.                                                            |
+| `LLM4TS_CODER_MODEL`       | text                                                                                                           | the agent's own default; the local and sdd flows name theirs | global file  | The coder seat's model in every flow, unless the flow names one. pi takes provider/model, such as openai-codex/gpt-5.5.                                                |
+| `LLM4TS_REASONING_MODEL`   | text                                                                                                           | the agent's own default; the local and sdd flows name theirs | global file  | The model of the reasoning seat and of every reviewer or judge on its agent, unless the flow names one. Unset, a seat on the coder's agent takes `LLM4TS_CODER_MODEL`. |
+| `LLM4TS_CODER_FLAGS`       | key=value pairs separated by ;                                                                                 | none                                                         | global file  | Extra CLI flags for the coder seat in every flow, on top of its preset's own. A flag the flow sets keeps its value.                                                    |
+| `LLM4TS_REASONING_FLAGS`   | key=value pairs separated by ;                                                                                 | none                                                         | global file  | Extra CLI flags for the reasoning seat and every reviewer or judge on its agent, as `LLM4TS_CODER_FLAGS` does for the coder.                                           |
+| `LLM4TS_CODER_HEALTH_URL`  | an http or https URL                                                                                           | the local server's model list at its default address         | global file  | The URL polled until a local serving engine answers again after it went down.                                                                                          |
+| `LLM4TS_PROVIDER`          | openai, anthropic, gemini, gemini-api, lm-studio, lmstudio, ollama, mlx-lm, mlxlm, mlx or mock                 | mock                                                         | global file  | The API provider of provider-driven flows such as hello: mock, openai, anthropic, gemini, lm-studio, ollama or mlx-lm. Any provider but mock needs `LLM4TS_MODEL`.     |
+| `LLM4TS_MODEL`             | text                                                                                                           | none; required unless the provider is mock                   | global file  | The model `LLM4TS_PROVIDER` serves.                                                                                                                                    |
+| `LLM4TS_JUDGMENT_PROVIDER` | openai, anthropic, gemini, gemini-api, lm-studio, lmstudio, ollama, mlx-lm, mlxlm, mlx or mock                 | the reasoning seat answers typed judgments                   | global file  | The API provider of the judgment seat, named the way `LLM4TS_PROVIDER` is.                                                                                             |
+| `LLM4TS_JUDGMENT_MODEL`    | text                                                                                                           | none; required with a judgment provider other than mock      | global file  | The model `LLM4TS_JUDGMENT_PROVIDER` serves.                                                                                                                           |
+| `LLM4TS_JUDGMENT_BACKEND`  | llm or typesafe                                                                                                | llm                                                          | global file  | What answers typed judgments: an LLM seat, or the TypeSafe API (needs `TYPESAFE_API_KEY`).                                                                             |
+| `LLM4TS_JUDGMENT_BATCHING` | independent or shared-prefix                                                                                   | independent                                                  | global file  | shared-prefix sends the questions of one judgment request behind one shared prompt prefix, for a local model that caches it.                                           |
+| `LLM4TS_ISOLATED`          | on or off                                                                                                      | off                                                          | project file | Asks every CLI seat to leave the repository's own hooks, MCP servers, settings and instruction files unloaded.                                                         |
+| `LLM4TS_ROSTER`            | text                                                                                                           | the user's and the repository's roster.json, merged          | project file | The executor roster in place of the roster.json files: a roster file, or none for one executor per seat. Flag: `--roster`.                                             |
+| `LLM4TS_EXECUTORS`         | names separated by commas                                                                                      | every executor of the roster                                 | per run      | Narrows the roster to these executor ids. Flag: `--executors`.                                                                                                         |
 
 ### Repositories, packs and worktrees
 
@@ -376,6 +376,50 @@ seat's input and output under `.llm4ts/transcripts/`, for `llm4ts watch
 refine-planning run therefore leaves a small transcript of the planner's call
 too — and `--land` compacts them to their shape (calls, tools, timings; no
 content).
+
+### Seat models and flags
+
+`LLM4TS_CODER_MODEL`, `LLM4TS_REASONING_MODEL`, `LLM4TS_CODER_FLAGS` and
+`LLM4TS_REASONING_FLAGS` apply in every flow, a flow script of your own
+included: the runner puts them on the seats once, before any seat starts
+(`withSeatSettings` in `@llm4ts/runner/Connectors`). No flow reads them.
+
+```sh
+llm4ts config set LLM4TS_CODER_MODEL=claude-sonnet-4-5
+llm4ts run implement "Add a multiply function"   # every claude call gets --model claude-sonnet-4-5
+llm4ts run implement --set LLM4TS_CODER_FLAGS='allowedTools=Bash(git:*),Edit' "…"
+```
+
+Which seat takes which setting:
+
+- The coder seat takes `LLM4TS_CODER_MODEL` and `LLM4TS_CODER_FLAGS`.
+- The reasoning seat, and every reviewer or judge seat that runs the same
+  agent, takes `LLM4TS_REASONING_MODEL` and `LLM4TS_REASONING_FLAGS`.
+- A reviewer, judge or reasoning seat that runs the coder's agent and still
+  has no model takes `LLM4TS_CODER_MODEL`. So `implement`, whose reasoning
+  seat is a read-only copy of the coder, plans and reviews on the coder's
+  model unless `LLM4TS_REASONING_MODEL` says otherwise. A model name is
+  read only by the agent it belongs to, so a seat that runs neither agent
+  takes neither setting.
+- The coder's flags stay on the coder. A read-only seat never inherits its
+  edit permissions.
+
+The value of a model or flag setting is resolved like any other setting:
+`--set` (and `--coder` for `LLM4TS_CODER`), then the environment, then the
+project file, then the global file. For one seat, the order is:
+
+1. A model or flag the flow sets in code, such as `withModel(gemini, …)` in
+   `sdd` and `local`, or a flag a flow adds to a preset.
+2. The setting, from wherever it was resolved above.
+3. The Gemini bridge's model for a `pi` seat (`LLM4TS_GEMINI_BRIDGE`).
+4. The preset's own flags, and the agent's own default model.
+
+A flag setting adds keys to the preset's flags and replaces the value of a
+key the preset sets (`LLM4TS_CODER_FLAGS=permission-mode=bypassPermissions`
+replaces claude's `acceptEdits`). A key the flow set to another value keeps
+the flow's. With a roster in force (ADR 0019) the flow's seats are not used,
+so these settings do not apply: each executor names its own model and flags
+in the roster.
 
 With a Google Cloud project and a **Vertex AI service-account key** as the
 only model access, see `vertex-service-account.md`: which harnesses accept
@@ -595,8 +639,8 @@ elsewhere), and `LLM4TS_EXCLUDE_DIRS` (replaces the pruned directory list).
 ## Usage estimates
 
 Every seat the runner resolves is metered, so a run always accounts for its
-tokens even when the backend reports none (Antigravity, Copilot, and Cursor on
-the [capability matrix](provider-capabilities.md)). The estimate counts
+tokens even when the backend reports none (Antigravity and Cursor on the
+[capability matrix](provider-capabilities.md)). The estimate counts
 characters on both sides of a request and is published under the model label
 `estimated:<model>`, which keeps it in its own column of `llm4ts costs` and out
 of any measured total. Measured usage always wins: the estimate only fills a

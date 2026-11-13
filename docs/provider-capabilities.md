@@ -14,17 +14,16 @@ connector. Runtime availability and authentication are reported separately by
 | Gemini CLI                    | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  enforced | ignored                                    | partial           |
 | Antigravity CLI               | CLI  |       yes |               yes |              no |               yes |        no |       no |       no |  advisory | ignored                                    | ignored           |
 | OpenCode, Grok CLI            | CLI  |       yes |               yes |             yes |                no |        no |       no |       no |  advisory | ignored                                    | ignored           |
-| Copilot, Cursor CLI           | CLI  |       yes |               yes |              no |                no |        no |       no |       no |   ignored | ignored                                    | ignored           |
+| Cursor CLI                    | CLI  |       yes |               yes |              no |                no |        no |       no |       no |   ignored | ignored                                    | ignored           |
 
 The OpenCode HTTP compatibility provider exists as a direct API adapter, but the
 stable `opencode` registry identifier deliberately resolves to the CLI connector
 to match the reference release.
 
 Prompt transport is provider-specific. Claude, Codex, Pi, and Gemini execution
-use stdin. Copilot, Antigravity, OpenCode, Grok, and Cursor retain positional
-prompts because their source-compatible headless commands require them. Secrets
-remain in environment variables or HTTP headers and are never rendered into
-argv.
+use stdin. Antigravity, OpenCode, Grok, and Cursor retain positional prompts
+because their source-compatible headless commands require them. Secrets remain
+in environment variables or HTTP headers and are never rendered into argv.
 
 Usage reporting means the connector parses token counts from its backend and
 attaches them to streamed chunks; flows publish them as `TokensUsed` events,
@@ -64,8 +63,8 @@ connector's `readOnly` mapping restricts its harness (ADR 0010):
   Antigravity `mode: plan`). Upgrading a connector to enforced requires
   observing the harness's advertised tool list, or its policy, with and
   without the flag, not the flag's name.
-- **ignored** — the flag reaches no argv (Copilot), or maps only to an
-  approval default indistinguishable from ignored in headless runs (Cursor).
+- **ignored** — the flag maps only to an approval default indistinguishable
+  from ignored in headless runs (Cursor).
 
 Requesting `readOnly` from a non-enforced connector publishes a
 `CapabilityUnenforceable` flow event naming the connector and its grade, so

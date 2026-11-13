@@ -8,8 +8,8 @@ import { LabelDistribution, LlmChunk, TokenUsage, type Message } from "@llm4ts/c
 import { estimateCostUsd } from "./PriceList.ts"
 import { settingGiven, settingValue } from "./Settings.ts"
 
-// ESTIMATED token accounting for connectors that report none (Antigravity,
-// Copilot, and Cursor on the capability matrix; every backend whose
+// ESTIMATED token accounting for connectors that report none (Antigravity
+// and Cursor on the capability matrix; every backend whose
 // `usageReporting` is false). The decorator counts characters on both sides
 // of each request and, when the backend reported nothing, carries the
 // estimate back on the value the caller already reads — a synthetic final

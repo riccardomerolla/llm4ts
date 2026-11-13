@@ -99,14 +99,14 @@ import {
   openPack,
   resolveFlowInput,
   runNode,
-  stage,
-  withModel
+  stage
 } from "@llm4ts/runner"
 import {
   claude,
   judgmentConnectorFromEnvironment,
   pi,
-  seatsFromEnvironment
+  seatsFromEnvironment,
+  withSeatSettings
 } from "@llm4ts/runner/Connectors"
 import { FlowAborted, FlowLlmError, ReviewResult, ScriptUsage, lintCommand } from "@llm4ts/runner"
 
@@ -2239,25 +2239,6 @@ export const epicRunnerOptions = Effect.fn("epic-stories.runnerOptions")(functio
   }
 })
 
-/** `LLM4TS_CODER_MODEL` / `LLM4TS_REASONING_MODEL`: pi takes `provider/model` (e.g. `openai-codex/gpt-5.5`). */
-const withOptionalModel = (
-  config: CliConnectorConfig,
-  model: string | undefined
-): CliConnectorConfig => (model === undefined ? config : withModel(config, model))
-
-/**
- * Extra CLI flags on top of a preset's own (`LLM4TS_CODER_FLAGS`,
- * `LLM4TS_REASONING_FLAGS`). A value may itself carry `=`:
- * `config=model_provider=lmstudio` is codex's `--config model_provider=lmstudio`.
- */
-const withExtraFlags = (
-  config: CliConnectorConfig,
-  flags: Readonly<Record<string, string>> | undefined
-): CliConnectorConfig =>
-  flags === undefined
-    ? config
-    : CliConnectorConfig.make({ ...config, flags: { ...config.flags, ...flags } })
-
 export const defaultEpic =
   "Add the retail customer's current account (Conto) with balance and movements, and wire " +
   "transfers (Bonifico) with beneficiary, review, SCA confirmation, and history."
@@ -2339,15 +2320,14 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
       launchDir: given.workspace,
       flowDir: import.meta.dirname
     })
-    const coderFlags = settingValue("LLM4TS_CODER_FLAGS", process.env)
-    const coderModel = settingValue("LLM4TS_CODER_MODEL", process.env)
-    const seats = yield* seatsFromEnvironment({ coder: pi, reasoner: claude })
-    const reasoning = withExtraFlags(
-      withOptionalModel(seats.reasoning, settingValue("LLM4TS_REASONING_MODEL", process.env)),
-      settingValue("LLM4TS_REASONING_FLAGS", process.env)
+    const { coder, reasoning } = yield* seatsFromEnvironment({ coder: pi, reasoner: claude })
+    // The runner puts the model and flag settings on the seats; this asks what the coder ends up as.
+    const seated = withSeatSettings({ coder }, process.env).coder
+    const localServer = localCoderServer(
+      seated.model,
+      seated instanceof CliConnectorConfig ? seated.flags : {},
+      process.env
     )
-    const coder = withExtraFlags(withOptionalModel(seats.coder, coderModel), coderFlags)
-    const localServer = localCoderServer(coderModel, coderFlags ?? {}, process.env)
     // A new epic's id (and state folder) is derived from its text; an existing
     // one keeps its folder, whatever text is on the command line.
     const epicId =

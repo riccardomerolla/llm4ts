@@ -107,7 +107,7 @@ describe("the settings registry stays in sync with the code", () => {
  */
 const rawRead = /\.LLM4TS_[A-Z0-9_]+|\[\s*["'`]LLM4TS_[A-Z0-9_]+["'`]\s*\]/gu
 const registryCode = /^packages\/flow\/src\/(?:Settings\.ts$|settings\/)/u
-const areas = ["packages", "flows", "kits"] as const
+const areas = ["packages", "flows", "kits", "examples", "tools"] as const
 
 const rawReadsIn = (text: string): number => [...text.matchAll(rawRead)].length
 

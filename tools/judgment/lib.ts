@@ -9,6 +9,7 @@ import {
   effectReviewer
 } from "@llm4ts/flow/Review"
 import type { Reviewer } from "@llm4ts/flow/Reviewer"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { relative, resolve, sep } from "node:path"
@@ -42,8 +43,7 @@ export class JudgmentToolError extends Schema.TaggedError<JudgmentToolError>()(
 
 export const backendFromEnvironment = (
   environment: Readonly<Record<string, string | undefined>>
-): JudgmentBackend =>
-  environment.LLM4TS_JUDGMENT_BACKEND?.trim().toLowerCase() === "typesafe" ? "typesafe" : "llm"
+): JudgmentBackend => settingValue("LLM4TS_JUDGMENT_BACKEND", environment)
 
 export const judgmentBackend = Effect.fn("JudgmentTool.backend")(function* (
   backend: JudgmentBackend,
@@ -96,10 +96,7 @@ export const judgmentBackend = Effect.fn("JudgmentTool.backend")(function* (
 /** `LLM4TS_JUDGMENT_BATCHING=shared-prefix` selects the batched local path, as in the runner. */
 export const batchingFromEnvironment = (
   environment: Readonly<Record<string, string | undefined>>
-): Batching =>
-  environment.LLM4TS_JUDGMENT_BATCHING?.trim().toLowerCase() === "shared-prefix"
-    ? "shared-prefix"
-    : "independent"
+): Batching => settingValue("LLM4TS_JUDGMENT_BATCHING", environment)
 
 // Explicit allowlist: only presence is captured, never credential values or endpoint URLs.
 const provenanceEnvironment = [

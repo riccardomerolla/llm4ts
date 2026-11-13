@@ -101,28 +101,28 @@ export const settings = {
     scope: "global",
     value: Value.text,
     fallback: fallback.perFlow("the agent's own default; the local and sdd flows name theirs"),
-    doc: "The coder seat's model. pi takes provider/model, such as openai-codex/gpt-5.5."
+    doc: "The coder seat's model in every flow, unless the flow names one. pi takes provider/model, such as openai-codex/gpt-5.5."
   }),
   LLM4TS_REASONING_MODEL: setting({
     group: "seats",
     scope: "global",
     value: Value.text,
     fallback: fallback.perFlow("the agent's own default; the local and sdd flows name theirs"),
-    doc: "The reasoning seat's model."
+    doc: "The model of the reasoning seat and of every reviewer or judge on its agent, unless the flow names one. Unset, a seat on the coder's agent takes LLM4TS_CODER_MODEL."
   }),
   LLM4TS_CODER_FLAGS: setting({
     group: "seats",
     scope: "global",
     value: Value.cliFlags,
     fallback: fallback.off("none"),
-    doc: "Extra CLI flags for the coder seat in the epic flows, on top of its preset's own."
+    doc: "Extra CLI flags for the coder seat in every flow, on top of its preset's own. A flag the flow sets keeps its value."
   }),
   LLM4TS_REASONING_FLAGS: setting({
     group: "seats",
     scope: "global",
     value: Value.cliFlags,
     fallback: fallback.off("none"),
-    doc: "Extra CLI flags for the reasoning seat in the epic flows."
+    doc: "Extra CLI flags for the reasoning seat and every reviewer or judge on its agent, as LLM4TS_CODER_FLAGS does for the coder."
   }),
   LLM4TS_CODER_HEALTH_URL: setting({
     group: "seats",

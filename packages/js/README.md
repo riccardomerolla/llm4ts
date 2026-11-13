@@ -25,8 +25,9 @@ console.log(response.content)
 ```
 
 Swap in a real provider by name (`openai`, `anthropic`, `gemini`,
-`lm-studio`, `ollama`) — API keys are read from the standard environment
-variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`):
+`lm-studio`, `ollama`, `mlx-lm`, or an alias such as `gemini-api`) — API keys
+are read from the standard environment variables (`OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, falling back to `GOOGLE_API_KEY`):
 
 ```js
 const client = createClient({

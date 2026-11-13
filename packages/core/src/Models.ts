@@ -122,7 +122,6 @@ export const connectorTable = {
   },
   OpenCode: { id: "opencode", kind: "Cli", executable: "opencode", names: ["opencode"] },
   Codex: { id: "codex", kind: "Cli", executable: "codex", names: ["codex"] },
-  Copilot: { id: "copilot", kind: "Cli", executable: "gh", names: [] },
   Pi: { id: "pi", kind: "Cli", executable: "pi", names: ["pi"] },
   AntigravityCli: {
     id: "antigravity-cli",

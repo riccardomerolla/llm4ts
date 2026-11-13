@@ -6,7 +6,7 @@ import {
   ConnectorIds,
   Effort,
   LlmConfig,
-  connectorRow,
+  connectorProvider,
   type CliConnectorName,
   type ConnectorName,
   type LlmProvider
@@ -121,11 +121,11 @@ export type ConnectorConfigOf<K extends ConnectorName> = K extends CliConnectorN
   ? CliConnectorConfig
   : ApiConnectorConfig
 
-// An id that names no API connector reads as OpenAI, the wire most servers speak.
-const providerForConnector = (connectorId: ConnectorId): LlmProvider => {
-  const row = connectorRow(connectorId)
-  return row?.kind === "Api" ? (row.provider ?? "OpenAI") : "OpenAI"
-}
+// The provider the connector's row serves. An id with none (one the table
+// does not name, or a CLI row such as opencode) reads as OpenAI, the wire
+// most servers speak; the registry never builds an API connector for a CLI id.
+const providerForConnector = (connectorId: ConnectorId): LlmProvider =>
+  connectorProvider(connectorId) ?? "OpenAI"
 
 export const toLlmConfig = (config: ApiConnectorConfig): LlmConfig =>
   new LlmConfig({

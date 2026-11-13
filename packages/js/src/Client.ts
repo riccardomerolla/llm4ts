@@ -13,13 +13,20 @@ import {
 import {
   ConnectorIds,
   apiProviderConnector,
+  apiProviderNames,
   offeredApiProviderNames,
   type ConnectorId
 } from "@llm4ts/core/Models"
 import { collect } from "@llm4ts/core/Streaming"
 import { nodeFlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
 
-export const JsProvider = Schema.Literals(offeredApiProviderNames)
+const offeredProviders: ReadonlySet<string> = new Set(offeredApiProviderNames)
+
+/** Every name `LLM4TS_PROVIDER` reads: the offered ones first, then their aliases. */
+export const JsProvider = Schema.Literals([
+  ...offeredApiProviderNames,
+  ...apiProviderNames.filter((name) => !offeredProviders.has(name))
+])
 export type JsProvider = typeof JsProvider.Type
 
 export class ClientConfig extends Schema.Class<ClientConfig>("ClientConfig")({

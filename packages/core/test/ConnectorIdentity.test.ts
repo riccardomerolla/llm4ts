@@ -29,7 +29,6 @@ describe("connector identity", () => {
         ["GeminiCli", "gemini-cli"],
         ["OpenCode", "opencode"],
         ["Codex", "codex"],
-        ["Copilot", "copilot"],
         ["Pi", "pi"],
         ["AntigravityCli", "antigravity-cli"],
         ["Grok", "grok"],
@@ -54,7 +53,6 @@ describe("connector identity", () => {
       "gemini-cli",
       "opencode",
       "codex",
-      "copilot",
       "pi",
       "antigravity-cli",
       "grok",
@@ -69,7 +67,7 @@ describe("connector identity", () => {
     assert.isTrue(Object.isFrozen(cliConnectorIds))
     assert.isTrue(Object.isFrozen(connectorIds))
     assert.strictEqual(apiConnectorIds[0], ConnectorIds.OpenAI)
-    assert.strictEqual(connectorIds[15], ConnectorIds.Mock)
+    assert.strictEqual(connectorIds[14], ConnectorIds.Mock)
   })
 
   it("keeps every provider's default base URL and connector", () => {
@@ -107,7 +105,6 @@ describe("connector identity", () => {
         ["gemini-cli", "GeminiCli", undefined],
         ["opencode", undefined, undefined],
         ["codex", undefined, undefined],
-        ["copilot", undefined, undefined],
         ["pi", undefined, undefined],
         ["antigravity-cli", undefined, undefined],
         ["grok", undefined, undefined],

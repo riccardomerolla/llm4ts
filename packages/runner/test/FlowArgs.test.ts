@@ -3,7 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
-import { parseFlowArgs, readFlowPrompt, resolveFlowRepo } from "@llm4ts/runner/FlowArgs"
+import { credentialVariables } from "@llm4ts/core/Models"
+import { FlowHelp, parseFlowArgs, readFlowPrompt, resolveFlowRepo } from "@llm4ts/runner/FlowArgs"
 
 const temporaryDirectory = Effect.acquireRelease(
   Effect.promise(() => mkdtemp(join(tmpdir(), "llm4ts-args-"))),
@@ -11,6 +12,19 @@ const temporaryDirectory = Effect.acquireRelease(
 )
 
 describe("flow CLI arguments", () => {
+  it("names every credential variable doctor checks", () => {
+    assert.include(
+      FlowHelp,
+      `  ${credentialVariables.join(", ")}\n                          credentials for API providers`
+    )
+    assert.deepStrictEqual(credentialVariables, [
+      "OPENAI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      "GEMINI_API_KEY",
+      "GOOGLE_API_KEY"
+    ])
+  })
+
   it("accepts the package-manager argument separator", () => {
     assert.deepStrictEqual(parseFlowArgs(["--", "do it", "--repo", "target"]), {
       ok: true,

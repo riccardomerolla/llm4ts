@@ -4,6 +4,7 @@ import * as Redacted from "effect/Redacted"
 import {
   ApiConnectorConfig,
   CliConnectorConfig,
+  defaultReasoningConfig,
   type ConnectorConfig,
   type ConnectorConfigOf
 } from "@llm4ts/core/ConnectorConfig"
@@ -106,7 +107,6 @@ const presets: { readonly [K in ConnectorName]: ConnectorConfigOf<K> } = {
   GeminiCli: gemini,
   OpenCode: opencode,
   Codex: codex,
-  Copilot: CliConnectorConfig.make({ connectorId: ConnectorIds.Copilot }),
   Pi: pi,
   AntigravityCli: antigravity,
   Grok: grok,
@@ -116,6 +116,7 @@ const presets: { readonly [K in ConnectorName]: ConnectorConfigOf<K> } = {
 
 export function withModel(config: CliConnectorConfig, model: string): CliConnectorConfig
 export function withModel(config: ApiConnectorConfig, model: string): ApiConnectorConfig
+export function withModel(config: ConnectorConfig, model: string): ConnectorConfig
 export function withModel(
   config: CliConnectorConfig | ApiConnectorConfig,
   model: string
@@ -320,6 +321,79 @@ export const reasonerFromEnvironment = (
   fallback: CliConnectorConfig = claude
 ): Effect.Effect<CliConnectorConfig, ScriptUsage> =>
   Effect.map(namedSeat("LLM4TS_REASONER", environment), (reasoner) => reasoner ?? fallback)
+
+const presetFlags = new Map<string, Readonly<Record<string, string>>>(
+  Object.values(presets).flatMap((preset) =>
+    preset instanceof CliConnectorConfig ? [[preset.connectorId.value, preset.flags]] : []
+  )
+)
+
+const withModelUnlessSet = (config: ConnectorConfig, model: string | undefined): ConnectorConfig =>
+  model === undefined || config.model !== undefined ? config : withModel(config, model)
+
+/**
+ * A key the seat carries with its preset's value takes the setting's value; a
+ * key the flow set to something else keeps the flow's.
+ */
+const withFlagsUnlessSet = (
+  config: ConnectorConfig,
+  flags: Readonly<Record<string, string>> | undefined
+): ConnectorConfig => {
+  if (flags === undefined || !(config instanceof CliConnectorConfig)) {
+    return config
+  }
+  const preset = presetFlags.get(config.connectorId.value) ?? {}
+  const added = Object.entries(flags).filter(
+    ([key]) => config.flags[key] === undefined || config.flags[key] === preset[key]
+  )
+  return CliConnectorConfig.make({
+    ...config,
+    flags: { ...config.flags, ...Object.fromEntries(added) }
+  })
+}
+
+export interface SeatConfigs {
+  readonly coder: ConnectorConfig
+  readonly reasoning?: ConnectorConfig
+  readonly reviewers?: ReadonlyArray<ConnectorConfig>
+  readonly judgment?: ConnectorConfig
+}
+
+/**
+ * `LLM4TS_CODER_MODEL`, `LLM4TS_CODER_FLAGS`, `LLM4TS_REASONING_MODEL` and
+ * `LLM4TS_REASONING_FLAGS` on a flow's seats, so no flow reads them itself.
+ *
+ * The coder seat takes the coder settings. Every other seat (the reasoning
+ * seat, reviewers, an explicit judgment seat) takes the reasoning settings
+ * when it runs the reasoning seat's agent, then the coder's model when it runs
+ * the coder's agent and still names none: a model name means something only to
+ * its own agent. The coder's flags stay on the coder: a read-only seat never
+ * inherits edit permissions. A model or a flag the flow set in code wins.
+ */
+export const withSeatSettings = <S extends SeatConfigs>(seats: S, environment: Environment): S => {
+  const coderModel = settingValue("LLM4TS_CODER_MODEL", environment)
+  const reasoningModel = settingValue("LLM4TS_REASONING_MODEL", environment)
+  const reasoningFlags = settingValue("LLM4TS_REASONING_FLAGS", environment)
+  const reasoning = defaultReasoningConfig(seats.coder, seats.reasoning)
+  const runs = (config: ConnectorConfig, seat: ConnectorConfig) =>
+    config.connectorId.value === seat.connectorId.value
+  const other = (config: ConnectorConfig): ConnectorConfig => {
+    const asReasoner = runs(config, reasoning)
+      ? withModelUnlessSet(withFlagsUnlessSet(config, reasoningFlags), reasoningModel)
+      : config
+    return runs(config, seats.coder) ? withModelUnlessSet(asReasoner, coderModel) : asReasoner
+  }
+  return {
+    ...seats,
+    coder: withModelUnlessSet(
+      withFlagsUnlessSet(seats.coder, settingValue("LLM4TS_CODER_FLAGS", environment)),
+      coderModel
+    ),
+    reasoning: other(reasoning),
+    ...(seats.reviewers === undefined ? {} : { reviewers: seats.reviewers.map(other) }),
+    ...(seats.judgment === undefined ? {} : { judgment: other(seats.judgment) })
+  }
+}
 
 /**
  * The judgment seat from the environment (ADR 0017): `LLM4TS_JUDGMENT_PROVIDER`

@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { ApiConnectorConfig, CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { makeHttpClient } from "@llm4ts/core/HttpClient"
-import { ConnectorIds } from "@llm4ts/core/Models"
+import { ConnectorId, ConnectorIds } from "@llm4ts/core/Models"
 import { ProcessResult, makeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
 import { makeFakeTemporaryFiles } from "@llm4ts/core/TemporaryFiles"
 import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactories"
@@ -44,7 +44,7 @@ describe("ConnectorFactories", () => {
         })
       )
 
-      assert.strictEqual(ids.length, 16)
+      assert.strictEqual(ids.length, 15)
       assert.deepStrictEqual(
         new Set(ids.map((id) => id.value)),
         new Set([
@@ -58,7 +58,6 @@ describe("ConnectorFactories", () => {
           "opencode",
           "gemini-cli",
           "codex",
-          "copilot",
           "pi",
           "antigravity-cli",
           "grok",
@@ -68,6 +67,12 @@ describe("ConnectorFactories", () => {
       )
       assert.strictEqual(opencode.kind, "Cli")
       assert.strictEqual(mock.kind, "Api")
+      const removed = yield* Effect.flip(
+        registry.resolveCli(
+          CliConnectorConfig.make({ connectorId: new ConnectorId({ value: "copilot" }) })
+        )
+      )
+      assert.strictEqual(removed.message, "Unknown connector: copilot")
     })
   )
 
@@ -97,9 +102,6 @@ describe("ConnectorFactories", () => {
           connectorId: ConnectorIds.AntigravityCli
         })
       )
-      const copilot = yield* registry.resolveCli(
-        CliConnectorConfig.make({ connectorId: ConnectorIds.Copilot })
-      )
       const mock = yield* registry.resolveApi(
         ApiConnectorConfig.make({
           connectorId: ConnectorIds.Mock,
@@ -115,19 +117,17 @@ describe("ConnectorFactories", () => {
       assert.isFalse(gemini.capabilities.askUser)
       assert.isTrue(antigravity.capabilities.interactiveSessions)
       assert.isFalse(antigravity.capabilities.approval)
-      assert.isFalse(copilot.capabilities.interactiveSessions)
       assert.isTrue(mock.capabilities.streaming)
       assert.isTrue(mock.capabilities.structuredOutput)
       assert.isTrue(mock.capabilities.usageReporting)
 
       // Read-only enforcement grades (ADR 0010): claude's --tools allowlist
       // is a real removal; gemini/antigravity lean on unverified plan modes;
-      // copilot ignores the flag; API providers execute no tools at all.
+      // API providers execute no tools at all.
       assert.strictEqual(claude.capabilities.readOnlyEnforcement, "enforced")
       // Plan mode is a policy-engine deny from gemini 0.37.0; older CLIs refuse the seat.
       assert.strictEqual(gemini.capabilities.readOnlyEnforcement, "enforced")
       assert.strictEqual(antigravity.capabilities.readOnlyEnforcement, "advisory")
-      assert.strictEqual(copilot.capabilities.readOnlyEnforcement, "ignored")
       assert.strictEqual(mock.capabilities.readOnlyEnforcement, "enforced")
     })
   )
