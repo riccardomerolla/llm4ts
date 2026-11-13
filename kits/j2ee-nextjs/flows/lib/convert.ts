@@ -24,7 +24,6 @@ import {
   nodePlainFileStore,
   nodeProcessExecutor,
   openPack,
-  reviewFingerprint,
   stage
 } from "@llm4ts/runner"
 import type { FlowContextShape, PackNotFound, ReviewResult } from "@llm4ts/runner"
@@ -492,8 +491,7 @@ const runConversion = Effect.fn("convert.run")(function* (
           base,
           programs: unit.judged.map((entry) => entry.name),
           specFor: (program) => Effect.succeed(specOf.get(program) ?? ""),
-          query: context.userPrompt,
-          fingerprint: reviewFingerprint
+          query: context.userPrompt
         })
         if (verdict.isClean) {
           return yield* context.events.publish(

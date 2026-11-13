@@ -175,7 +175,7 @@ usage its provider reported, so a node calling it directly contributes
 nothing to the run's cost summary and the flow ends with "cost: no usage
 reported" however many tokens it actually spent. Use
 `structuredAndPublish(service, events, prompt, schema, jsonSchema, agent?)`
-(from `@llm4ts/flow/Usage`, re-exported by `@llm4ts/flow/Flow`) instead: it
+(from `@llm4ts/flow/Usage`) instead: it
 asks for the usage-bearing result, publishes a `TokensUsed` event when the
 backend reported counts, and returns the same decoded value.
 
@@ -332,9 +332,12 @@ llm4ts run implement --coder codex --repo /path/to/repository "Add a multiply fu
   ```
 
   Every built-in flow and kit flow reads this way, so a toggle takes the same
-  eight spellings everywhere and a value the grammar does not read counts as
-  unset. `settingGiven` tells unset from unreadable, for a flow that refuses
-  a bad value by name. The `LLM4TS_` namespace belongs to the registry: the
+  eight spellings everywhere. A value the grammar does not read never reaches
+  a run: `llm4ts run`, `runFlowMain` and `runNode` refuse it before the flow
+  starts. `settingValue` itself counts it as unset, so a library caller
+  outside the runner stays lenient; `settingGiven` tells unset from
+  unreadable, and `unreadableEnvironment` lists the refusals the launch
+  makes. The `LLM4TS_` namespace belongs to the registry: the
   name must be one it holds, or the call does not compile. A setting of your
   own flow takes your own prefix (`ACME_BATCH_SIZE`), and you read and parse
   it yourself from `process.env`.

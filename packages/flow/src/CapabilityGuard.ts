@@ -1,3 +1,4 @@
+// @internal: the capability check behind the git and forge tools
 import * as Effect from "effect/Effect"
 import { allows, currentGrants, type Capability } from "@llm4ts/core/Capability"
 import { FlowCapabilityDenied } from "./FlowError.ts"

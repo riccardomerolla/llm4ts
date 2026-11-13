@@ -12,8 +12,6 @@ import { makeOpenPointsCollector, OpenPoint } from "./Decisions.ts"
 import { PlanInvalid, ReportInvalid } from "./FlowError.ts"
 import type { Persona } from "./Roundtable.ts"
 
-export { ToolGrade } from "./Roundtable.ts"
-
 const dash = " — "
 const headerLine = /^([A-Za-z][A-Za-z ]*):\s*(.*)$/
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim()

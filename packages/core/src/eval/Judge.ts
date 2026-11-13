@@ -6,8 +6,8 @@ import { score, type ScoreQuestion, type State } from "../judgment/Schemas.ts"
 import type { LlmServiceShape } from "../LlmService.ts"
 import type { JsonSchema } from "../Models.ts"
 import { DimensionScore, EvalResult } from "./Eval.ts"
-import type { Dimension, Sample } from "./Eval.ts"
-import { makeEvaluator, type Evaluator } from "./Evaluator.ts"
+import type { Dimension, Evaluator, Sample } from "./Eval.ts"
+import { makeEvaluator } from "./Evaluator.ts"
 
 export class JudgeResponse extends Schema.Class<JudgeResponse>("JudgeResponse")({
   scores: Schema.Array(DimensionScore)

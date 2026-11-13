@@ -67,10 +67,23 @@ with code 2 and points at `config set`.
 
 `config set` and `--set` refuse an unknown name and a value the setting's
 grammar does not read. A malformed line in a file stops the launch and names
-`path:line`. The environment only warns: an unknown `LLM4TS_*` export that is
-close to a real name prints the name it probably meant. A flow that lacks a
-setting it requires exits with code 2 before it starts, and names the
-setting.
+`path:line`. An exported value the grammar does not read stops the launch
+too, with or without the shell:
+
+```text
+the environment: LLM4TS_JUDGE_ROUNDS must be a positive integer; fix or unset it
+```
+
+The message names the setting and its grammar, never the value. `llm4ts run`
+exits with code 2 before the flow starts. A flow started without the shell
+(`node flows/implement.ts`, a flow script of your own under `tsx`) exits
+with code 1 from `runFlowMain` before its program starts, and `runNode`
+fails with `ScriptUsage` before the run starts. `llm4ts config show` lists
+the value and where it comes from; `doctor` and the other in-process verbs
+print it and go on. An unknown `LLM4TS_*` export only warns, and only when
+it is close to a real name: it prints the name it probably meant. A flow
+that lacks a setting it requires exits with code 2 before it starts, and
+names the setting.
 
 Three kinds of setting never come from a file. A file line that names one is
 ignored with a warning.

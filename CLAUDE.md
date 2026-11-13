@@ -82,6 +82,9 @@ importer; remove it, use it, or list it in `scripts/unused-modules.mjs` with
 the reason it stays.
 It also fails on an import cycle among those modules, type-only imports
 included: move the shared type or value into a module both can depend on.
+A module is a public subpath unless its first line is `// @internal: <reason>`
+(ADR 0050); the check fails when an `exports` map drifts from that (run
+`pnpm exports:write`) or anything outside a package imports an internal module.
 
 `pnpm build && node scripts/pack-smoke.mjs` additionally verifies the
 published artifacts resolve for an external consumer.

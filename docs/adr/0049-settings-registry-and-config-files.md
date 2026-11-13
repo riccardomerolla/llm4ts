@@ -242,7 +242,8 @@ Off a terminal it exits with code 2.
 
 The generated reference in `docs/configuration.md`, the runbooks without
 prefixes, moving the readers behind the registry, and refusing an
-unreadable environment value in 4.0.0.
+unreadable environment value in 4.0.0 (decided in the 2026-11-13 amendment
+below).
 
 ## Amendment, 2026-11-13: seat names are a fixed set
 
@@ -273,3 +274,36 @@ agent the operator did not ask for.
 The soap-ace flows still read `LLM4TS_REASONER` themselves, only when their
 design step runs. They accept the same names. The model and flag settings
 are read where they were: this unit does not widen where they apply.
+
+## Amendment, 2026-11-13: 4.0.0 refuses an unreadable environment value
+
+"The environment only warns in 3.x" ends in 4.0.0. An exported `LLM4TS_*`
+value that its grammar does not read stops the launch on both paths, with
+one message per value that names the setting and its grammar and never the
+value:
+
+```text
+the environment: LLM4TS_JUDGE_ROUNDS must be a positive integer; fix or unset it
+```
+
+- **Shell.** `resolveConfig` marks the value an error, as it already did for
+  a flag or a file, and keeps it in the resolution so `config show` prints
+  where it comes from. `prepareLaunch` refuses on any error, so `run`,
+  `refine`, the menu and the MCP operator's `start` exit before a child is
+  spawned. `doctor` and the other in-process verbs print it and go on.
+- **Without the shell.** `unreadableEnvironment` in `@llm4ts/flow/Settings`
+  checks a whole environment against the registry. The runner calls it once
+  at each entry: `runFlowMain` on `process.env` before the flow's program
+  starts, and `runEmbedded` (so `runNode`) on the run's environment before
+  the run context is built. A refusal is `ScriptUsage`, the runner's usage
+  failure, not a defect.
+
+One check of the whole environment at the start, rather than a strict flag
+the readers consult, covers every setting a flow can read: each `LLM4TS_*`
+reader goes through the registry, and the registry is the list checked. The
+readers stay as they are. `settingValue` still counts an unreadable value as
+unset, so a library caller outside the runner keeps the lenient reading;
+inside a run that case no longer arises.
+
+A flow now refuses a bad name for a seat it never runs, as the shell does:
+the seat amendment's "the shell's to warn about" no longer holds.

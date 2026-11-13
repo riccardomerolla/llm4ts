@@ -13,7 +13,6 @@ import {
   CapabilityUnenforceable,
   CapabilityUsedEvent,
   CriterionChecked,
-  Declassified,
   EvidenceChecked,
   ExecutorExcluded,
   ExecutorHandedOver,
@@ -44,7 +43,6 @@ import {
   laneOf
 } from "@llm4ts/flow/FlowEvents"
 import { digestedTags, presentationOf, type Verbosity } from "@llm4ts/runner/EventPresentation"
-import { meaningfulKinds } from "@llm4ts/runner/RunReaders"
 import { laneOfEvent, rendersEvent } from "@llm4ts/runner/Terminal"
 
 const usage = TokenUsage.make({ prompt: 10, completion: 5, total: 15 })
@@ -134,7 +132,6 @@ const cases: {
     "1111",
     "a review finding demoted"
   ],
-  Declassified: [Declassified.make({ label: "plan" }), "0111", "an event"],
   ExecutorLeased: [
     ExecutorLeased.make({ executor: "codex", role: "coder" }),
     "0111",
@@ -264,8 +261,8 @@ describe("eventPresentation", () => {
     )
   })
 
-  it("digests show the kinds the meaningfulKinds list named", () => {
-    assert.deepStrictEqual([...meaningfulKinds].sort(), [
+  it("digests the kinds an operator reads in a run's recent events", () => {
+    assert.deepStrictEqual([...digestedTags].sort(), [
       "Aborted",
       "Began",
       "CapabilityUnenforceable",
@@ -273,12 +270,10 @@ describe("eventPresentation", () => {
       "ExecutorExcluded",
       "ExecutorHandedOver",
       "Parked",
-      "RunEnded",
       "StageFailed",
       "StoryJudged",
       "StoryStatusChanged"
     ])
-    assert.strictEqual(digestedTags.length, 10)
     assert.deepStrictEqual(presentationOf(cases.StageFailed[0]).digest?.(cases.StageFailed[0]), {
       text: "branch failed: red",
       lane: "home"

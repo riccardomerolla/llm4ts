@@ -1,3 +1,4 @@
+// @internal: the settings table; Settings is the public face
 import * as Duration from "effect/Duration"
 import {
   apiProviderNames,

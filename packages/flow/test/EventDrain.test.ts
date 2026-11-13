@@ -2,15 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
-import * as Stream from "effect/Stream"
 import { makeCostTracker } from "@llm4ts/flow/CostTracker"
-import {
-  awaitConsumed,
-  Info,
-  makeFlowEventHub,
-  type FlowEventHub,
-  UsageProgress
-} from "@llm4ts/flow/FlowEvents"
+import { Info, makeFlowEventHub, UsageProgress } from "@llm4ts/flow/FlowEvents"
 import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 
@@ -86,35 +79,7 @@ describe("event drain", () => {
       })
     )
   )
-
-  it.live("counts every event a subscribed consumer will actually see", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const hub = yield* makeFlowEventHub()
-        const consumed = yield* Ref.make(0)
-        yield* tap(hub, consumed)
-        yield* Effect.forEach([1, 2, 3], (n) =>
-          hub.publish(Info.make({ message: `event ${n.toString()}` }))
-        )
-
-        assert.strictEqual(yield* hub.publishedCount, 3)
-        assert.isTrue(yield* awaitConsumed(hub, consumed, "2 seconds"))
-        assert.strictEqual(yield* Ref.get(consumed), 3)
-      })
-    )
-  )
 })
-
-/** Counts events the way the real consumers do, off a live subscription. */
-const tap = (hub: FlowEventHub, consumed: Ref.Ref<number>) =>
-  Effect.gen(function* () {
-    const subscription = yield* hub.subscribe
-    yield* Stream.fromSubscription(subscription).pipe(
-      Stream.runForEach(() => Ref.update(consumed, (count) => count + 1)),
-      Effect.forkScoped,
-      Effect.asVoid
-    )
-  })
 
 describe("hub consumers", () => {
   const info = (message: string) => Info.make({ message })

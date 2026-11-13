@@ -2,8 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import { lengthBetween, matches, noPii, validJson } from "@llm4ts/core/eval/Checks"
-import { DimensionScore, EvalResult, Sample, repeat } from "@llm4ts/core/eval/Eval"
-import { all, contramap, makeEvaluator, type Evaluator } from "@llm4ts/core/eval/Evaluator"
+import { DimensionScore, EvalResult, Sample, repeat, type Evaluator } from "@llm4ts/core/eval/Eval"
+import { all, contramap, makeEvaluator } from "@llm4ts/core/eval/Evaluator"
 import { run } from "@llm4ts/core/eval/EvalSuite"
 
 const one = (name: string, score: number): EvalResult =>

@@ -48,7 +48,6 @@ import {
   nodePlainFileStore,
   openPack,
   resolveFlowInput,
-  reviewFingerprint,
   runFlowMain,
   runNode,
   stage
@@ -59,6 +58,7 @@ import { coverage, coverageUnits, features, matchingFiles } from "@llm4ts/flow/S
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import { ProgramArtifacts, ProgramUnit, extractProgramsResumably } from "@llm4ts/flow/Artifacts"
 import { settingValue } from "@llm4ts/flow/Settings"
+import { fingerprintOf } from "@llm4ts/flow/ReviewCache"
 
 const ModDir = "docs/modernization"
 const BenchFile = "bench-results.jsonl"
@@ -326,11 +326,11 @@ const program = Effect.gen(function* () {
 
           // The fingerprint groups records of the SAME estate so the report can
           // compare providers rather than mixing unrelated fixtures.
-          const fingerprint = reviewFingerprint(
+          const fingerprint = fingerprintOf([
             pack.name,
             ...[...programs].sort(),
             String(quality.sourceLines)
-          ).slice(0, 16)
+          ]).slice(0, 16)
 
           const finishedAt = new Date()
           const record = BenchRecord.make({

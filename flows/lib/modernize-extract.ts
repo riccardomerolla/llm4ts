@@ -18,8 +18,8 @@ import type { Pack } from "@llm4ts/flow/Pack"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import type { SurveyGraph } from "@llm4ts/flow/Survey"
 import { ReviewIssue } from "@llm4ts/flow/Review"
-import { cachedReview } from "@llm4ts/flow/ReviewCache"
-import { FlowLlmError, Info, ReviewResult, makeChat, reviewFingerprint } from "@llm4ts/runner"
+import { cachedReview, fingerprintOf } from "@llm4ts/flow/ReviewCache"
+import { FlowLlmError, Info, ReviewResult, makeChat } from "@llm4ts/runner"
 import { packageVersion } from "@llm4ts/flow/Package"
 import { settingValue } from "@llm4ts/flow/Settings"
 
@@ -310,7 +310,7 @@ export const makeProgramJudge = (deps: ProgramJudgeDeps) => {
       return yield* cachedReview(
         files,
         join(modDirAbs, "gate", `${unit.name}.json`),
-        reviewFingerprint(source, spec, feature, rubric),
+        fingerprintOf([source, spec, feature, rubric]),
         context.events.publish(Info.make({ message: `judging ${unit.name}` })).pipe(
           Effect.andThen(judgeWithShrink(unit.name, spec, feature, source)),
           Effect.map((scored) => judgeIssues(pack, scored, unit.name))

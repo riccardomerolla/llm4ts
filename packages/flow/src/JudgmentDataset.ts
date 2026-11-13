@@ -1,3 +1,4 @@
+// @internal: dataset reader for JudgmentEval and tools/judgment
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { State, ScoreQuestion, TruthQuestion, truth } from "@llm4ts/core/judgment/Schemas"

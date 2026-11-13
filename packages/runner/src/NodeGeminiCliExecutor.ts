@@ -1,3 +1,4 @@
+// @internal: Gemini CLI executor wired by FlowRunner
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"

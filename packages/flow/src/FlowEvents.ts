@@ -1,7 +1,6 @@
 import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import * as Layer from "effect/Layer"
 import * as PubSub from "effect/PubSub"
 import * as Ref from "effect/Ref"
@@ -201,10 +200,6 @@ export class EvidenceChecked extends Schema.TaggedClass<EvidenceChecked>()("Evid
   /** The run kept no tool transcript for this coder (an API seat), so nothing was checked. */
   unchecked: Schema.optionalKey(Schema.Boolean),
   lane: Schema.optionalKey(Schema.String)
-}) {}
-
-export class Declassified extends Schema.TaggedClass<Declassified>()("Declassified", {
-  label: Schema.String
 }) {}
 
 /** A blackboard ruleset ran (ADR 0020): its board, trace and failures, for the trace file. */
@@ -520,7 +515,6 @@ export const FlowEvent = Schema.Union([
   CapabilityUnenforceable,
   EvidenceChecked,
   ReviewFindingDemoted,
-  Declassified,
   ExecutorLeased,
   ExecutorReleased,
   ExecutorExcluded,
@@ -546,8 +540,7 @@ export const FlowEventsValues = Object.freeze({
   CapabilityDenied: (capability: string, operation: string): CapabilityDeniedEvent =>
     new CapabilityDeniedEvent({ capability, operation }),
   CapabilityUnenforceable: (detail: string): CapabilityUnenforceable =>
-    new CapabilityUnenforceable({ detail }),
-  Declassified: (label: string): Declassified => new Declassified({ label })
+    new CapabilityUnenforceable({ detail })
 })
 
 export interface FlowEventsShape {
@@ -698,7 +691,6 @@ const laneRules = {
   CapabilityUnenforceable: unlaned,
   EvidenceChecked: carried,
   ReviewFindingDemoted: carried,
-  Declassified: unlaned,
   ExecutorLeased: unlaned,
   ExecutorReleased: unlaned,
   ExecutorExcluded: unlaned,
@@ -1032,34 +1024,3 @@ export const makeFlowEventHub = Effect.fn("@llm4ts/flow/FlowEvents.makeHub")(fun
 
 /** How long a consumer waits to catch up before the run moves on regardless. */
 export const defaultDrainTimeout = "3 seconds"
-
-/**
- * The shared drain: wait until `consumed` has caught up with everything the
- * hub published, and report whether it did.
- *
- * Bounded on purpose, and the single copy of this loop. A consumer can fall
- * permanently short of the count — a subscription torn down early, an
- * event the PubSub refused — and an unbounded wait then pegs a core forever.
- * In the runner that swallowed the end of a run: every stage printed and
- * ticked green, and no cost summary ever following, because the summary is
- * written only once every consumer reports drained.
- *
- * @deprecated Use `hub.consume`, which counts for the consumer, and
- * `hub.drained` or the consumer's `caughtUp`.
- */
-export const awaitConsumed = (
-  hub: FlowEventHub,
-  consumed: Ref.Ref<number>,
-  timeout: Duration.Input = defaultDrainTimeout
-): Effect.Effect<boolean> =>
-  Effect.gen(function* () {
-    const target = yield* hub.publishedCount
-    const drain: Effect.Effect<void> = Effect.suspend(() =>
-      Ref.get(consumed).pipe(
-        Effect.flatMap((count) =>
-          count >= target ? Effect.void : Effect.yieldNow.pipe(Effect.andThen(drain))
-        )
-      )
-    )
-    return Option.isSome(yield* Effect.timeoutOption(drain, timeout))
-  })

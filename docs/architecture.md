@@ -10,7 +10,15 @@ core → flow → runner → js
 No package imports another package's `src` directory. `@llm4ts/runner`'s
 root export is the flow author's barrel: re-exports of the runner and flow
 verbs a flow script uses, with the subpath exports staying the contract for
-everything else.
+everything else. `pnpm unused` fails when a package's source or tests import
+a package above it in this order; `js` and `shell` share a layer, so the
+runner knows nothing of the shell.
+
+The public surface is decided in the sources (ADR 0050). A module whose
+first line is `// @internal: <reason>` has no subpath; every other module
+under `packages/<pkg>/src` has one. `pnpm unused` derives each `exports` map
+from that and fails on drift, on an import of an internal module from outside
+its package, and on `export *`; `pnpm exports:write` rewrites the maps.
 
 ## Core
 
@@ -30,7 +38,7 @@ process effects remain injected.
 
 `@llm4ts/runner` is the Node composition edge. It provides live Node
 implementations, connector registration, scoped terminal/trace/cost consumers,
-CLI parsing, and MCP stdio. Protocol stdout is isolated from terminal output.
+and CLI parsing. Protocol stdout is isolated from terminal output.
 
 ## Modernization phases and kits
 
@@ -52,13 +60,19 @@ engine flows.
 
 ## Shell
 
-`@llm4ts/shell` is the `llm4ts` CLI and interactive menu (ADR 0006): it
+`@llm4ts/shell` is the `llm4ts` CLI and interactive menu (ADR 0006). Its
+package is the bin only: it exports no module (ADR 0050). It
 discovers flows and kits across the three tiers and launches a flow as a
 child `node` process with type stripping, resolving `@llm4ts/*` from its own
 installation when the project pins none. It also owns the config files (ADR
 0049): `Config.ts` layers `~/.config/llm4ts/config.env` and
 `<repo>/.llm4ts/config.env` under the environment and the `run` flags, and
-every launcher hands the child the `FlowEnvironment` it returns.
+every launcher hands the child the `FlowEnvironment` it returns. The offline
+readers of finished and running runs live here too:
+`Costs`, `Profile`, `Watch`, `RunReaders` and `StoryReaders` back
+`llm4ts costs`, `profile`, `watch` and the operator's run and story views.
+They read traces and boards with `@llm4ts/flow` and present events with
+`@llm4ts/runner/EventPresentation`.
 
 ## JavaScript facade
 

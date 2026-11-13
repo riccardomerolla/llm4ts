@@ -27,7 +27,8 @@ import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactori
 import { ConnectorIds } from "@llm4ts/core/Models"
 import { ProviderError } from "@llm4ts/core/Errors"
 import { makeCostTracker, type CostTracker } from "@llm4ts/flow/CostTracker"
-import { settingValue } from "@llm4ts/flow/Settings"
+import { settingValue, unreadableEnvironment, type Environment } from "@llm4ts/flow/Settings"
+import { ScriptUsage } from "./FlowArgs.ts"
 import { runGeminiAcpBridge } from "./NodeGeminiAcpBridge.ts"
 import { runGeminiModelBridge } from "./NodeGeminiModelBridge.ts"
 import {
@@ -120,9 +121,9 @@ import {
   formatDurationMs,
   makeTerminalSurface,
   parseVerbosity,
-  type TerminalSurface,
-  type Verbosity
+  type TerminalSurface
 } from "./Terminal.ts"
+import type { Verbosity } from "./EventPresentation.ts"
 
 const describeSeat = (config: ConnectorConfig): string => {
   const model = config.model === undefined ? "" : ` (${config.model})`
@@ -1253,11 +1254,24 @@ const runOutcomeOf = <A, E>(exit: Exit.Exit<A, E>): RunOutcome =>
       ? "interrupted"
       : "failed"
 
+/**
+ * The shell's launch check for a run that did not come through it: an
+ * environment value the settings registry cannot read stops the run before
+ * anything starts, instead of reading as unset.
+ */
+const requireReadableEnvironment = (environment: Environment): Effect.Effect<void, ScriptUsage> => {
+  const problems = unreadableEnvironment(environment)
+  return problems.length === 0
+    ? Effect.void
+    : Effect.fail(ScriptUsage.make({ message: problems.join("\n") }))
+}
+
 export const runEmbedded = Effect.fn("@llm4ts/runner/FlowRunner.runEmbedded")(function* <A, E, R>(
   options: FlowRunnerOptions,
   body: (context: FlowContextShape) => Effect.Effect<A, E, R>,
   dependencies: FlowRunnerDependencies = nodeFlowRunnerDependencies()
-): Effect.fn.Return<A, E | FlowError, R | Scope.Scope> {
+): Effect.fn.Return<A, E | FlowError | ScriptUsage, R | Scope.Scope> {
+  yield* requireReadableEnvironment(options.environment ?? process.env)
   const bundle = yield* makeFlowRunnerContext(options, dependencies)
   return yield* runWithBundle(bundle, options, body, dependencies)
 })
@@ -1265,7 +1279,7 @@ export const runEmbedded = Effect.fn("@llm4ts/runner/FlowRunner.runEmbedded")(fu
 export const runNode = <A, E, R>(
   options: FlowRunnerOptions,
   body: (context: FlowContextShape) => Effect.Effect<A, E, R>
-): Effect.Effect<A, E | FlowError, R> => Effect.scoped(runEmbedded(options, body))
+): Effect.Effect<A, E | FlowError | ScriptUsage, R> => Effect.scoped(runEmbedded(options, body))
 
 const mainErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message.length > 0 ? error.message : String(error)
@@ -1345,9 +1359,15 @@ const processSignals: SignalSource = {
   exit: (code) => process.exit(code)
 }
 
+/**
+ * A flow script's entry point. An environment value the settings registry
+ * cannot read stops it before `program` starts, as `llm4ts run` would have;
+ * any failure is printed and exits 1.
+ */
 export const runFlowMain = <E>(program: Effect.Effect<void, E>): void => {
   const fiber = Effect.runFork(
-    program.pipe(
+    requireReadableEnvironment(process.env).pipe(
+      Effect.andThen(program),
       Effect.match({
         onFailure: (error) =>
           Effect.sync(() => {

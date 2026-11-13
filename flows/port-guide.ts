@@ -34,7 +34,7 @@ import {
   runNode,
   stage
 } from "@llm4ts/runner"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { settingValue } from "@llm4ts/flow/Settings"
 import {
   asPortingPack,

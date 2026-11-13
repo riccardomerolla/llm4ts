@@ -1,3 +1,4 @@
+// @internal: review values; Review re-exports them
 /**
  * What a review answers: findings and their result. Kept apart from
  * `Review.ts` so modules that `Review.ts` imports can build schemas over them

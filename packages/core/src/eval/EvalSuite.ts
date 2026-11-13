@@ -1,8 +1,7 @@
 import * as Effect from "effect/Effect"
 import type { LlmError } from "../Errors.ts"
 import { repeat } from "./Eval.ts"
-import type { EvalResult, RepeatedEval } from "./Eval.ts"
-import type { Evaluator } from "./Evaluator.ts"
+import type { EvalResult, Evaluator, RepeatedEval } from "./Eval.ts"
 
 export interface EvalCase<In> {
   readonly name: string

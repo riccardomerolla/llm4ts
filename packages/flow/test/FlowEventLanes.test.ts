@@ -14,7 +14,6 @@ import {
   CapabilityUnenforceable,
   CapabilityUsedEvent,
   CriterionChecked,
-  Declassified,
   EvidenceChecked,
   ExecutorExcluded,
   ExecutorHandedOver,
@@ -220,7 +219,6 @@ const cases: {
       reason: "not in the diff"
     })
   },
-  Declassified: { event: Declassified.make({ label: "plan" }) },
   ExecutorLeased: { event: ExecutorLeased.make({ executor: "codex", role: "coder", clone: 1 }) },
   ExecutorReleased: { event: ExecutorReleased.make({ executor: "codex", role: "coder" }) },
   ExecutorExcluded: {
@@ -399,8 +397,8 @@ const through = (lane: Lane, event: FlowEvent): Effect.Effect<FlowEvent | undefi
 const allCases = Object.values(cases)
 
 describe("withLane stamps each event as the stamped switch did", () => {
-  it("covers the fourteen events it stamps and leaves the other twenty alone", () => {
-    assert.strictEqual(allCases.length, 34)
+  it("covers the fourteen events it stamps and leaves the other nineteen alone", () => {
+    assert.strictEqual(allCases.length, 33)
     assert.strictEqual(allCases.filter((entry) => entry.stamped !== undefined).length, 14)
   })
 
@@ -624,7 +622,7 @@ describe("laneOf", () => {
       "RoundtableTurn",
       "StoryJudged"
     ])
-    assert.strictEqual(by("none").length, 13)
+    assert.strictEqual(by("none").length, 12)
   })
 })
 

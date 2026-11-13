@@ -4,8 +4,12 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { JudgmentBackend } from "@llm4ts/core/judgment/Schemas"
-import { DatasetDecision, readDataset } from "@llm4ts/flow/JudgmentDataset"
-import { evaluateJudgments, renderEvalReport, type EvalItem } from "@llm4ts/flow/JudgmentEval"
+import { DatasetDecision, readDataset } from "../../packages/flow/src/JudgmentDataset.ts"
+import {
+  evaluateJudgments,
+  renderEvalReport,
+  type EvalItem
+} from "../../packages/flow/src/JudgmentEval.ts"
 import { nodeFlowRunnerDependencies } from "@llm4ts/runner/FlowRunner"
 import {
   argValue,

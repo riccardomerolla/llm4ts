@@ -1,3 +1,4 @@
+// @internal: setting value grammars; Settings is the public face
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"

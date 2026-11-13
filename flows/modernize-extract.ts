@@ -32,7 +32,7 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
 import { budget, capped } from "@llm4ts/flow/Context"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { FlowEvents } from "@llm4ts/flow/FlowEvents"
 import {
   FlowAborted,

@@ -304,16 +304,6 @@ export const seatsFromEnvironment = Effect.fn("@llm4ts/runner/Connectors.seatsFr
 )
 
 /**
- * An unknown name runs claude, with nothing said about it.
- *
- * @deprecated Use `seatsFromEnvironment`, which refuses an unknown name. Removed in 4.0.0.
- */
-export const coderFromEnv = (env: Environment = process.env): CliConnectorConfig => {
-  const requested = settingValue("LLM4TS_CODER", env)
-  return (requested === undefined ? claude : coderFor(requested)) ?? claude
-}
-
-/**
  * `LLM4TS_CODER` alone, for a flow that runs no separate reasoning seat. A
  * flow answers only for the seats it uses: a bad `LLM4TS_REASONER` is not
  * this flow's to refuse.

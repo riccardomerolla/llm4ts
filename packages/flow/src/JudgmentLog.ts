@@ -50,11 +50,8 @@ export const makeJudgmentLog = Effect.fn("@llm4ts/flow/JudgmentLog.make")(functi
           Effect.gen(function* () {
             if (yield* Ref.get(degraded)) return
             const at = yield* Clock.currentTimeMillis
-            // Classified remains sealed until an explicit, audited declassify.
-            // Text uses its toString; JSON uses its toJSON. Serialize before
-            // schema traversal so even nested sealed values use that redaction,
-            // never their private payload. Already declassified plain text has
-            // no taint metadata; callers must retain the wrapper for secrets.
+            // Serialize before schema traversal, so a value's own toJSON
+            // decides what is written, never the fields behind it.
             const observation = yield* Schema.decodeUnknownEffect(codec)(
               JSON.stringify({ ...event, runId: options.runId, at })
             )

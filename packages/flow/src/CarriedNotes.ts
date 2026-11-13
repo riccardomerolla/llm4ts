@@ -1,3 +1,4 @@
+// @internal: carried findings for Flow and Stories
 // What a story's earlier tasks learned, carried into the next task's prompt.
 // With one chat per task (ADR 0003) every task starts cold; without this a
 // six-task story explores the repository six times. The coder ends each task

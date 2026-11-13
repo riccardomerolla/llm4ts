@@ -30,7 +30,6 @@ export const GraphMechanism = Schema.Literals([
   "codegraph"
 ])
 export type GraphMechanism = typeof GraphMechanism.Type
-export { JoinMatch }
 
 export class GraphEvidence extends Schema.Class<GraphEvidence>("GraphEvidence")({
   file: Schema.String,

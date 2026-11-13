@@ -5,7 +5,7 @@ import * as Ref from "effect/Ref"
 import * as Stream from "effect/Stream"
 import { appendEpicRun, EpicRun } from "@llm4ts/flow/EpicRuns"
 import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { makeWatchProgram, type WatchDependencies } from "@llm4ts/runner/Watch"
+import { makeWatchProgram, type WatchDependencies } from "../src/Watch.ts"
 import { TranscriptEntry } from "@llm4ts/flow/Transcript"
 import * as Schema from "effect/Schema"
 

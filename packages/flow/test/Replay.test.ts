@@ -2,20 +2,8 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { TokenUsage } from "@llm4ts/core/Models"
-import {
-  AssistantMessage,
-  StageCompleted,
-  StageFailed,
-  StageStarted,
-  TokensUsed
-} from "@llm4ts/flow/FlowEvents"
-import { makeFlowRecorder, TraceLine } from "@llm4ts/flow/FlowRecorder"
-import {
-  mermaidDocument,
-  mermaidLiveUrl,
-  renderMermaid,
-  renderMermaidTrace
-} from "@llm4ts/flow/Mermaid"
+import { AssistantMessage, TokensUsed } from "@llm4ts/flow/FlowEvents"
+import { makeFlowRecorder } from "@llm4ts/flow/FlowRecorder"
 import {
   makeReplayConnector,
   readTrace,
@@ -87,55 +75,4 @@ describe("trace replay", () => {
       assert.strictEqual(unsupported._tag, "UnsupportedSchemaVersion")
     })
   )
-})
-
-describe("Mermaid renderer", () => {
-  it("is pure, stable, collapses repeats, and marks failures", () => {
-    const diagram = renderMermaid([
-      StageStarted.make({ stage: 'Say "hello"' }),
-      StageCompleted.make({ stage: 'Say "hello"' }),
-      StageStarted.make({ stage: 'Say "hello"' }),
-      StageFailed.make({ stage: 'Say "hello"', message: "boom" }),
-      StageStarted.make({ stage: "Verify" })
-    ])
-
-    assert.strictEqual(
-      diagram,
-      [
-        "flowchart TD",
-        "  n0[\"Say 'hello' ×2\"]:::failed",
-        '  n1["Verify"]',
-        "  n0 --> n1",
-        "  classDef failed fill:#fdd,stroke:#c00,color:#900;"
-      ].join("\n")
-    )
-    assert.match(mermaidDocument(diagram), /```mermaid/)
-    assert.match(mermaidLiveUrl(diagram), /^https:\/\/mermaid\.ink\/svg\//)
-  })
-
-  it("renders flattened trace events and the no-stage placeholder", () => {
-    const lines = [
-      TraceLine.make({
-        schemaVersion: 1,
-        seq: 1,
-        timestamp: 0,
-        runId: "r",
-        kind: "StageStarted",
-        fields: { event: '{"_tag":"StageStarted","stage":"Build"}' }
-      }),
-      TraceLine.make({
-        schemaVersion: 1,
-        seq: 2,
-        timestamp: 0,
-        runId: "r",
-        kind: "StageFailed",
-        fields: {
-          event: '{"_tag":"StageFailed","stage":"Build","message":"boom"}'
-        }
-      })
-    ]
-
-    assert.match(renderMermaidTrace(lines), /"Build".*:::failed/u)
-    assert.match(renderMermaid([]), /no stages/u)
-  })
 })

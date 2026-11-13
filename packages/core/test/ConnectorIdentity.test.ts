@@ -87,7 +87,6 @@ describe("connector identity", () => {
         ["LmStudio", "http://localhost:1234/v1", "lm-studio"],
         ["Ollama", "http://localhost:11434", "ollama"],
         ["MlxLm", "http://localhost:8080", "mlx-lm"],
-        ["OpenCode", "http://localhost:4096", "opencode"],
         ["Mock", undefined, "mock"]
       ]
     )
@@ -106,7 +105,7 @@ describe("connector identity", () => {
         ["mlx-lm", "MlxLm", "http://localhost:8080"],
         ["claude-cli", undefined, undefined],
         ["gemini-cli", "GeminiCli", undefined],
-        ["opencode", "OpenCode", "http://localhost:4096"],
+        ["opencode", undefined, undefined],
         ["codex", undefined, undefined],
         ["copilot", undefined, undefined],
         ["pi", undefined, undefined],

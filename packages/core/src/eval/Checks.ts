@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
-import { DimensionScore, EvalResult } from "./Eval.ts"
-import { makeEvaluator, type Evaluator } from "./Evaluator.ts"
+import { DimensionScore, EvalResult, type Evaluator } from "./Eval.ts"
+import { makeEvaluator } from "./Evaluator.ts"
 
 const piiPatterns: ReadonlyArray<readonly [label: string, pattern: RegExp]> = [
   ["email", /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/],

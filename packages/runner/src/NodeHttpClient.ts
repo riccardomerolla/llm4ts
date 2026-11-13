@@ -1,3 +1,4 @@
+// @internal: the Node HTTP client FlowRunner provides
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"

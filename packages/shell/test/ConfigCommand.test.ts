@@ -128,7 +128,7 @@ describe("config show", () => {
           "  TYPESAFE_API_KEY    unset",
           "",
           "warnings",
-          "  the environment: LLM4TS_STALL_MINUTES must be a positive number of minutes",
+          "  the environment: LLM4TS_STALL_MINUTES must be a positive number of minutes; fix or unset it",
           "  the environment: unknown setting LLM4TS_EXTRACT_CONCURENCY; did you mean LLM4TS_EXTRACT_CONCURRENCY?",
           "  the environment: unknown setting LLM4TS_MY_FLOW_KNOB",
           "",

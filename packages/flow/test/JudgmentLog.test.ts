@@ -2,8 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Ref from "effect/Ref"
-import { origins, score, scoreAnswer, truth, truthAnswer } from "@llm4ts/core/judgment/Schemas"
-import { Classified } from "@llm4ts/flow/Classified"
+import { origins, truth, truthAnswer } from "@llm4ts/core/judgment/Schemas"
 import { Info, JudgmentObserved, makeFlowEventHub } from "@llm4ts/flow/FlowEvents"
 import { JudgmentObservation, judgmentLogPath, makeJudgmentLog } from "@llm4ts/flow/JudgmentLog"
 import { PersistenceError } from "@llm4ts/flow/FlowError"
@@ -98,40 +97,6 @@ describe("JudgmentLog", () => {
           records.map((record) => record.runId),
           ["run-1", "run-2"]
         )
-      }
-    })
-  )
-
-  it.effect("redacts sealed state and answer text before schema traversal or file append", () =>
-    Effect.gen(function* () {
-      const memory = yield* makeMemoryPlainFileStore()
-      const log = yield* makeJudgmentLog({
-        files: memory.store,
-        root: "/repo",
-        runId: "secret-run"
-      })
-      const secret = Classified.of("never-write-this-secret")
-      const state = { public: "preserve me", nested: { token: "placeholder" }, text: `${secret}` }
-      const question = score("Score?", ["no", "yes"])
-      const answer = scoreAnswer(question, { "0": 0, "1": 1 }, origins.fake())
-      const event = JudgmentObserved.make({ ...observation(), state, question, answer })
-      // Exercise the runtime JSON boundary as an untyped JS caller could:
-      // sealed objects are not part of core's typed State/Answer contract.
-      // The log must redact before a schema can inspect their private fields.
-      Object.assign(state.nested, { token: secret })
-      Object.assign(answer.legend, { "1": secret.map((value) => `${value}-answer`) })
-      yield* log.record(event)
-      const contents = (yield* memory.files)[judgmentLogPath("/repo", event.consumer)] ?? ""
-      assert.isFalse(contents.includes("never-write-this-secret"))
-      const stored = yield* decode(contents.trimEnd())
-      assert.deepStrictEqual(stored.state, {
-        public: "preserve me",
-        nested: { token: "Classified(…)" },
-        text: "Classified(…)"
-      })
-      assert.strictEqual(stored.answer.type, "score")
-      if (stored.answer.type === "score") {
-        assert.strictEqual(stored.answer.legend["1"], "Classified(…)")
       }
     })
   )

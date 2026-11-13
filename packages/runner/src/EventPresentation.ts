@@ -77,7 +77,6 @@ export const eventPresentation: {
   },
   EvidenceChecked: { line: "Quiet", kind: "an evidence check" },
   ReviewFindingDemoted: { line: "Quiet", kind: "a review finding demoted" },
-  Declassified: { line: "Normal", kind: other },
   ExecutorLeased: { line: "Normal", kind: roster },
   // A lease ending is routine.
   ExecutorReleased: { line: "never", kind: roster },

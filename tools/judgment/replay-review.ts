@@ -29,7 +29,7 @@ import {
   replayEvalItems,
   replayMissesAgree,
   type EvalItem
-} from "@llm4ts/flow/JudgmentEval"
+} from "../../packages/flow/src/JudgmentEval.ts"
 import * as Effect from "effect/Effect"
 import { TokensUsed, makeCollectingFlowEvents, type FlowEvent } from "@llm4ts/flow/FlowEvents"
 import { prescreenReviewers, reviewWith, type ReviewResult } from "@llm4ts/flow/Review"

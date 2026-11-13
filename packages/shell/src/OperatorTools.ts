@@ -30,10 +30,10 @@ import { readRetroIndex, retroApprovalOf, retroPaths } from "@llm4ts/flow/Retro"
 import { rolesOf } from "@llm4ts/flow/Roster"
 import { makeStoryPlanStore } from "@llm4ts/flow/StoryPlan"
 import { emptyTree, treeInputsOfTrace } from "@llm4ts/runner/AgentTree"
-import { CostsResult, makeCostsProgram } from "@llm4ts/runner/Costs"
+import { CostsResult, makeCostsProgram } from "./Costs.ts"
 import type { DoctorReport } from "@llm4ts/runner/Doctor"
 import type { RosterReport } from "@llm4ts/runner/ExecutorRoster"
-import { ProfileReport, profileOf } from "@llm4ts/runner/Profile"
+import { ProfileReport, profileOf } from "./Profile.ts"
 import {
   TraceUnreadable,
   costsOfRun,
@@ -42,8 +42,8 @@ import {
   runDiagnosisOf,
   runStatusOf,
   type RunSources
-} from "@llm4ts/runner/RunReaders"
-import { storyDetailOf, storyDiagnosisOf } from "@llm4ts/runner/StoryReaders"
+} from "./RunReaders.ts"
+import { storyDetailOf, storyDiagnosisOf } from "./StoryReaders.ts"
 import { loadTranscript, tailLinesOf, type TranscriptFiles } from "@llm4ts/runner/Transcripts"
 import type { DiscoveredFlow } from "./FlowCatalog.ts"
 import type { OperatorConfig } from "./OperatorConfig.ts"

@@ -1,3 +1,4 @@
+// @internal: Gemini bridge wiring for FlowRunner, Doctor and the bridge server
 import { existsSync, readdirSync } from "node:fs"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { join } from "node:path"

@@ -55,10 +55,35 @@ try {
     )
   )
 
+  // Every src module either resolves through the packed exports map or is
+  // refused by it (ADR 0050): internal modules and the whole shell.
+  const surface = packages.flatMap((name) => {
+    const exported = JSON.parse(
+      readFileSync(path.join(repoRoot, "packages", name, "package.json"), "utf8")
+    ).exports
+    const sourceDir = path.join(repoRoot, "packages", name, "src")
+    const walk = (dir) =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? walk(path.join(dir, entry.name))
+          : entry.name.endsWith(".ts")
+            ? [path.relative(sourceDir, path.join(dir, entry.name)).replace(/\.ts$/, "")]
+            : []
+      )
+    return walk(sourceDir)
+      .filter((subpath) => subpath !== "index")
+      .map((subpath) => ({
+        specifier: `@llm4ts/${name}/${subpath}`,
+        open: `./${subpath}` in exported
+      }))
+  })
+  writeFileSync(path.join(workDir, "surface.json"), JSON.stringify(surface))
+
   writeFileSync(
     path.join(workDir, "smoke.mjs"),
     `
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { ConnectorIds, Message } from "@llm4ts/core/Models"
 import { ApiConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import { collect } from "@llm4ts/core/Streaming"
@@ -79,14 +104,12 @@ import { verbalizedScoreLabels } from "@llm4ts/core/LabelScoring"
 import { makeMlxLmProvider } from "@llm4ts/core/providers/MlxLmProvider"
 import { decide, defaultJudgmentPolicy } from "@llm4ts/flow/Judgment"
 import { createClient } from "@llm4ts/js"
-import { parseFlowDescription } from "@llm4ts/shell/FlowCatalog"
 
 assert.equal(typeof runNode, "function")
 assert.equal(typeof runFlowMain, "function")
 assert.equal(typeof resolveFlowInput, "function")
 assert.equal(typeof completeAndPublish, "function")
 assert.equal(typeof requireApproval, "function")
-assert.equal(parseFlowDescription("// a demo flow\\n"), "a demo flow")
 assert.equal(typeof collect, "function")
 assert.ok(ConnectorIds.Mock)
 assert.ok(Message)
@@ -116,7 +139,24 @@ assert.ok(response.content.length > 0)
 const health = await client.health()
 assert.ok(health.availability)
 
+const surface = JSON.parse(readFileSync(new URL("./surface.json", import.meta.url), "utf8"))
+for (const { specifier, open } of surface) {
+  let code = "resolved"
+  try {
+    import.meta.resolve(specifier)
+  } catch (error) {
+    code = error.code
+  }
+  assert.equal(code, open ? "resolved" : "ERR_PACKAGE_PATH_NOT_EXPORTED", specifier)
+}
+const closed = surface.filter(({ open }) => !open)
+assert.ok(closed.some(({ specifier }) => specifier.startsWith("@llm4ts/shell/")))
+await assert.rejects(import(closed[0].specifier), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" })
+
 console.log("pack smoke: all imports resolved, mock completion succeeded")
+console.log(
+  \`pack smoke: \${surface.length - closed.length} public subpaths resolve, \${closed.length} internal ones are refused\`
+)
 `
   )
 

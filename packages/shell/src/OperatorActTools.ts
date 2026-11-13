@@ -27,7 +27,7 @@ import {
   meaningfulEventsAfter,
   runStatusOf,
   type TraceFold
-} from "@llm4ts/runner/RunReaders"
+} from "./RunReaders.ts"
 import { FlowLaunchError } from "./FlowProcess.ts"
 import { resolveRepo, type OperatorDeps } from "./OperatorTools.ts"
 import {

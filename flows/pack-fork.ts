@@ -30,7 +30,7 @@
 import { basename, join, relative as relativePath, resolve as resolvePath } from "node:path"
 import { rmSync } from "node:fs"
 import * as Effect from "effect/Effect"
-import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { FlowEvents, Info } from "@llm4ts/flow/FlowEvents"
 import { capped, withShrink } from "@llm4ts/flow/Context"
 import { withDraftApproval } from "@llm4ts/flow/Approval"

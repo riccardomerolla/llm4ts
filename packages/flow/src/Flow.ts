@@ -55,8 +55,6 @@ import type { Reviewer } from "./Reviewer.ts"
 import { withContract } from "./AutonomyContract.ts"
 import type { StallOptions } from "./Stall.ts"
 
-export { publishUsage, structuredAndPublish } from "./Usage.ts"
-
 export const flowReviewer = (context: FlowContextShape): LlmServiceShape =>
   context.reviewers[0] ?? context.reasoning
 

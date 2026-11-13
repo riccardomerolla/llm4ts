@@ -373,7 +373,7 @@ describe("resolveConfig: problems", () => {
     assert.isFalse(resolution.settings.get("LLM4TS_WAVE")?.secret)
   })
 
-  it("a value the grammar does not read: error from a flag or a file, warning from the environment", () => {
+  it("a value the grammar does not read is an error from every layer; the environment's stays shown", () => {
     const resolution = resolve({
       flags: [set("LLM4TS_VERBOSITY", "loud", "--verbose")],
       environment: { LLM4TS_JUDGE_ROUNDS: "many" },
@@ -385,7 +385,10 @@ describe("resolveConfig: problems", () => {
         .map((problem) => [problem.severity, problem.message]),
       [
         ["error", "--verbose: LLM4TS_VERBOSITY must be quiet, normal, verbose or debug"],
-        ["warning", "the environment: LLM4TS_JUDGE_ROUNDS must be a positive integer"],
+        [
+          "error",
+          "the environment: LLM4TS_JUDGE_ROUNDS must be a positive integer; fix or unset it"
+        ],
         ["error", `${projectPath}:2: LLM4TS_ISOLATED must be on or off`]
       ]
     )
@@ -989,15 +992,50 @@ describe("prepareLaunch", () => {
         flow: "implement",
         base: {
           LLM4TS_VERBOSTY: "verbose",
-          LLM4TS_MY_OWN_FLOW_KNOB: "1",
-          LLM4TS_STALL_MINUTES: "soon"
+          LLM4TS_MY_OWN_FLOW_KNOB: "1"
         }
       })
       assert.deepStrictEqual(plan.notices, [
-        "warning: the environment: LLM4TS_STALL_MINUTES must be a positive number of minutes",
         "warning: the environment: unknown setting LLM4TS_VERBOSTY; did you mean LLM4TS_VERBOSITY?"
       ])
       assert.strictEqual(plan.environment.LLM4TS_VERBOSTY, "verbose")
+    })
+  )
+
+  it.effect(
+    "refuses an unreadable environment value, naming it and its grammar, never a value",
+    () =>
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(
+          launch({
+            flow: "implement",
+            base: {
+              LLM4TS_JUDGE_ROUNDS: "abc",
+              LLM4TS_STALL_MINUTES: "soon",
+              LLM4TS_MCP_TOKEN: "s3cret",
+              LLM4TS_GEMINI_BRIDGE_TOKEN: "t0ken"
+            }
+          })
+        )
+        assert.strictEqual(error._tag, "ShellUsage")
+        assert.strictEqual(
+          error.message,
+          [
+            "the environment: LLM4TS_JUDGE_ROUNDS must be a positive integer; fix or unset it",
+            "the environment: LLM4TS_STALL_MINUTES must be a positive number of minutes; fix or unset it"
+          ].join("\n")
+        )
+        for (const value of ["abc", "soon", "s3cret", "t0ken"]) {
+          assert.notInclude(error.message, value)
+        }
+      })
+  )
+
+  it.effect("launches with the same environment value once it reads", () =>
+    Effect.gen(function* () {
+      const plan = yield* launch({ flow: "implement", base: { LLM4TS_JUDGE_ROUNDS: "3" } })
+      assert.deepStrictEqual(plan.notices, [])
+      assert.strictEqual(plan.environment.LLM4TS_JUDGE_ROUNDS, "3")
     })
   )
 

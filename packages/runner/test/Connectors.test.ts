@@ -14,7 +14,6 @@ import {
   antigravity,
   claude,
   coderFor,
-  coderFromEnv,
   coderFromEnvironment,
   coderIds,
   codex,
@@ -30,6 +29,7 @@ import {
   opencode,
   pi,
   prepareConnector,
+  reasonerFromEnvironment,
   seatsFromEnvironment,
   withEnvironment,
   withModel,
@@ -151,34 +151,53 @@ describe("runner connector presets", () => {
     assert.deepStrictEqual(denied(prepareConnector(codex, "/work/repo", {}, [])), [])
   })
 
-  it("selects from LLM4TS_CODER, retains the legacy name, and defaults to Claude", () => {
-    assert.strictEqual(coderFromEnv({}), claude)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "codex" }), codex)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "pi", LLM4ZIO_CODER: "codex" }), pi)
-    // 2.0: the llm4zio-era name is no longer read — the default wins.
-    assert.strictEqual(coderFromEnv({ LLM4ZIO_CODER: "codex" }), claude)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "codex" }), codex)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "gemini" }), gemini)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "agy" }), antigravity)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "grok" }), grok)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "cursor" }), cursor)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "opencode" }), opencode)
-    assert.strictEqual(coderFromEnv({ LLM4ZIO_CODER: "unknown" }), claude)
-  })
+  it.effect("selects from LLM4TS_CODER, ignores the legacy name, and defaults to Claude", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* coderFromEnvironment({}), claude)
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "codex" }), codex)
+      assert.strictEqual(
+        yield* coderFromEnvironment({ LLM4TS_CODER: "pi", LLM4ZIO_CODER: "codex" }),
+        pi
+      )
+      // 2.0: the llm4zio-era name is no longer read — the default wins.
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4ZIO_CODER: "codex" }), claude)
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "gemini" }), gemini)
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "agy" }), antigravity)
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "grok" }), grok)
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "cursor" }), cursor)
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "opencode" }), opencode)
+      assert.strictEqual(yield* coderFromEnvironment({}, pi), pi)
+    })
+  )
 
-  it("answers to a connector's own id, not only its short name", () => {
-    // `gemini-cli` is what llm4ts calls this connector everywhere it prints
-    // one — events, traces, errors. Accepting only `gemini` meant an
-    // operator who wrote the name they had seen got claude instead, with
-    // nothing said about it.
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "gemini-cli" }), gemini)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "claude-cli" }), claude)
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: "antigravity-cli" }), antigravity)
-    // Whitespace and casing are an operator's, not an identity.
-    assert.strictEqual(coderFromEnv({ LLM4TS_CODER: " Gemini-CLI " }), gemini)
-    assert.include(coderIds, "gemini-cli")
-    assert.include(coderIds, "gemini")
-  })
+  it.effect("answers to a connector's own id, not only its short name", () =>
+    Effect.gen(function* () {
+      // `gemini-cli` is what llm4ts calls this connector everywhere it prints
+      // one — events, traces, errors. Accepting only `gemini` meant an
+      // operator who wrote the name they had seen got claude instead, with
+      // nothing said about it.
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "gemini-cli" }), gemini)
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: "claude-cli" }), claude)
+      assert.strictEqual(
+        yield* coderFromEnvironment({ LLM4TS_CODER: "antigravity-cli" }),
+        antigravity
+      )
+      // Whitespace and casing are an operator's, not an identity.
+      assert.strictEqual(yield* coderFromEnvironment({ LLM4TS_CODER: " Gemini-CLI " }), gemini)
+      assert.include(coderIds, "gemini-cli")
+      assert.include(coderIds, "gemini")
+    })
+  )
+
+  it.effect("reads the reasoning seat alone, defaulting to Claude and refusing unknown names", () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* reasonerFromEnvironment({}), claude)
+      assert.strictEqual(yield* reasonerFromEnvironment({ LLM4TS_REASONER: "gemini" }), gemini)
+      assert.strictEqual(yield* reasonerFromEnvironment({ LLM4TS_CODER: "codex" }), claude)
+      const bad = yield* Effect.flip(reasonerFromEnvironment({ LLM4TS_REASONER: "nope" }))
+      assert.include(bad.message, "unknown LLM4TS_REASONER")
+    })
+  )
 
   it.effect("refuses an unknown coder instead of running a different one", () =>
     Effect.gen(function* () {

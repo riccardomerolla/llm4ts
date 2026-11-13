@@ -1,3 +1,4 @@
+// @internal: fabricated-status checks for Stories
 // Evidence, not assertion (ADR 0027, decision 6): what a task's reply claims
 // to have verified, checked against the commands the transcript shows it
 // ran. Pure; the story executor supplies the tool calls.
