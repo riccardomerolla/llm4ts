@@ -22,7 +22,8 @@ import {
   TokenUsage,
   type JsonSchema,
   type LlmConfig,
-  type Message
+  type Message,
+  cliExecutable
 } from "../Models.ts"
 import { collect } from "../Streaming.ts"
 import { jsonCandidates, parseFromText, withSchemaHint } from "../StructuredOutput.ts"
@@ -40,6 +41,8 @@ import {
   versionTriple,
   type JsonValue
 } from "./CliSupport.ts"
+
+const executable = cliExecutable("GeminiCli")
 
 export class GeminiCliLogLine extends Schema.TaggedClass<GeminiCliLogLine>()("LogLine", {
   line: Schema.String
@@ -1005,14 +1008,14 @@ export const makeGeminiCliProvider = (
     id: ConnectorIds.GeminiCli,
     interactionSupport: "InteractiveStdin",
     buildArgv: (prompt, context) => [
-      "gemini",
+      executable,
       "--yolo",
       ...(context.repoPath.length === 0 ? [] : ["--include-directories", context.repoPath]),
       "-p",
       prompt
     ],
     buildInteractiveArgv: (context) => [
-      "gemini",
+      executable,
       "--yolo",
       ...(context.repoPath.length === 0 ? [] : ["--include-directories", context.repoPath])
     ],

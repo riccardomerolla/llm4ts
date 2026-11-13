@@ -7,7 +7,8 @@
 //   node scripts/settings-docs.mjs --check   exit 1 when the region differs
 //
 // It imports the TypeScript source, so it needs a Node that strips types
-// (22.18 or later). examples/test/settings-sync.test.ts makes the same
+// (22.18 or later), and the registry reads the connector names from
+// @llm4ts/core, so core must be built (`pnpm build`). examples/test/settings-sync.test.ts makes the same
 // comparison in `pnpm test`.
 import { readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"

@@ -2,9 +2,17 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ConnectorCapabilities, ConnectorIds, HealthStatus, LlmChunk } from "../Models.ts"
+import {
+  ConnectorCapabilities,
+  ConnectorIds,
+  HealthStatus,
+  LlmChunk,
+  cliExecutable
+} from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { failClassifiedCliError, optionalModelArgs, sortedFlagArgs } from "./CliSupport.ts"
+
+const executable = cliExecutable("AntigravityCli")
 
 // `agy --version` proves the install, not the login: the CLI offers no offline
 // login check, so the auth status stays Unknown rather than claiming a session.
@@ -33,14 +41,14 @@ export const antigravityExtraArgs = (config: CliConnectorConfig): ReadonlyArray<
 export const buildAntigravityArgv = (
   config: CliConnectorConfig,
   prompt: string
-): ReadonlyArray<string> => ["agy", ...antigravityExtraArgs(config), "--print", prompt]
+): ReadonlyArray<string> => [executable, ...antigravityExtraArgs(config), "--print", prompt]
 
 export const makeAntigravityConnector = (
   config: CliConnectorConfig,
   executor: ProcessExecutorShape
 ): CliConnectorShape => {
   const cwd = config.workingDir ?? "."
-  const healthCheck = executor.run(["agy", "--version"], cwd, {}).pipe(
+  const healthCheck = executor.run([executable, "--version"], cwd, {}).pipe(
     Effect.map((result) => (result.exitCode === 0 ? healthy : unhealthy)),
     Effect.catch(() => Effect.succeed(unhealthy))
   )
@@ -75,7 +83,7 @@ export const makeAntigravityConnector = (
     // therefore cost summaries and budgets) cannot include it.
     capabilities: ConnectorCapabilities.make({ interactiveSessions: true, usageReporting: false }),
     buildArgv: (prompt, _context) => buildAntigravityArgv(config, prompt),
-    buildInteractiveArgv: (_context) => ["agy", ...antigravityExtraArgs(config)],
+    buildInteractiveArgv: (_context) => [executable, ...antigravityExtraArgs(config)],
     complete,
     completeStream,
     healthCheck

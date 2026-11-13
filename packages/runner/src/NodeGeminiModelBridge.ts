@@ -34,6 +34,9 @@ import {
   requestPath,
   writeJson
 } from "./NodeGeminiAcpBridge.ts"
+import { cliExecutable } from "@llm4ts/core/Models"
+
+const executable = cliExecutable("GeminiCli")
 
 /**
  * The bridge's model route (ADR 0037): `/v1/chat/completions` in OpenAI's
@@ -131,7 +134,7 @@ const geminiTurn = (
         config.executor
           .runStreamingWithStdin(
             [
-              "gemini",
+              executable,
               // Bound to its flag, so it can never read as a flag of its own.
               `--model=${model}`,
               "--output-format",

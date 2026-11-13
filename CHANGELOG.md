@@ -19,6 +19,22 @@
 - `@llm4ts/js` no longer declares `@llm4ts/flow`, which it never imported.
 - `llm4ts profile` shows roundtable attendee lanes and taskforce specialist
   lanes, and names them so. It opened a lane only for a story.
+- **One connector table.** `connectorTable` in `@llm4ts/core/Models` holds
+  each connector's id, kind, provider, default base URL, credential
+  variables, the names an operator may write for it and the executable a
+  CLI connector spawns. `ConnectorIds`, the id lists and the provider
+  mappings are read from it with the values they had. New beside them:
+  `coderNames`, `apiProviderNames`, `coderConnector`, `apiProviderConnector`,
+  `connectorRow`, `credentialVariables`, `cliExecutable`, and the names help
+  and menus offer, `offeredCoderNames` and `offeredApiProviderNames`. The
+  factories and the runner's presets are records keyed by every connector
+  name, so a connector without one does not compile.
+- **`LLM4TS_REASONER`, `LLM4TS_PROVIDER` and `LLM4TS_JUDGMENT_PROVIDER` name
+  their values.** `config show NAME` lists them. `config set`, `--set` and a
+  config file refuse another name, and an exported one draws a warning
+  before the flow refuses it as it always did. `LLM4TS_CODER` stays free
+  text: most flows read an unknown coder name as claude, and `--coder` must
+  not start refusing it in a minor release.
 - **`llm4ts profile` knows how large a story's reviewed diff was.** A
   review's diff size was dropped when the event was stamped with its story's
   lane, which is the only place the profile reads it.

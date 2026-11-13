@@ -120,10 +120,10 @@ export const seatSettings: ReadonlyArray<SettingName> = ["LLM4TS_CODER", "LLM4TS
 export const valuePrompt = (fact: SettingFacts): ValuePrompt =>
   fact.toggle
     ? { kind: "toggle" }
-    : fact.choices.length > 0
-      ? { kind: "choices", choices: fact.choices }
-      : seatSettings.includes(fact.name)
-        ? { kind: "seat" }
+    : seatSettings.includes(fact.name)
+      ? { kind: "seat" }
+      : fact.choices.length > 0
+        ? { kind: "choices", choices: fact.choices }
         : { kind: "text" }
 
 /**

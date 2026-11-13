@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
 import type { ConnectorKind, HealthStatus } from "@llm4ts/core/Models"
-import { ConnectorIds } from "@llm4ts/core/Models"
+import { ConnectorIds, credentialVariables } from "@llm4ts/core/Models"
 import type { ConnectorRegistryShape } from "@llm4ts/core/ConnectorRegistry"
 import { nodePreflightReport, type NodePreflightReport } from "@llm4ts/flow/NodePreflight"
 import { nodeFlowRunnerDependencies } from "./FlowRunner.ts"
@@ -14,13 +14,6 @@ import {
 } from "./PiModels.ts"
 import { systemAdminPolicies, systemPolicyProblem } from "./NodeGeminiModelBridge.ts"
 import { otelConfig, otelDoctorLine, probeOtelEndpoint, type OtelConfig } from "./Otel.ts"
-
-const credentialKeys = [
-  "OPENAI_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY"
-] as const
 
 /**
  * How far a connector's health was verified: `"auth"` means the CLI's own
@@ -324,7 +317,7 @@ export const collectDoctorReport = (
       const lines: Array<string> = []
       lines.push("")
       lines.push("credentials:")
-      for (const key of credentialKeys) {
+      for (const key of credentialVariables) {
         const value = environment[key]
         lines.push(`  ${value === undefined || value.length === 0 ? "✖" : "✔"} ${key}`)
       }

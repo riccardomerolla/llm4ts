@@ -232,10 +232,14 @@ export const cliFlags: SettingValue<Readonly<Record<string, string>>> = make(
       .join(";")
 )
 
+/** `a, b or c`. */
+export const listed = (words: ReadonlyArray<string>): string =>
+  words.join(", ").replace(/, ([^,]*)$/u, " or $1")
+
 /** One of `choices`, any case; choices are written in lower case. */
 export const oneOf = <const L extends ReadonlyArray<string>>(choices: L): SettingValue<L[number]> =>
   make<L[number]>(
-    choices.join(", ").replace(/, ([^,]*)$/u, " or $1"),
+    listed(choices),
     Schema.Literals(choices),
     (value) => choices.find((choice) => choice === value.toLowerCase()),
     (value) => value,

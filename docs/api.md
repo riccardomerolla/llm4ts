@@ -6,7 +6,11 @@ export list; the following modules are the main entry points.
 ## Core
 
 - `@llm4ts/core/Models`: messages, chunks, responses, usage, configuration,
-  connector identifiers, health.
+  health, and connector identity. `connectorTable` has one row per connector
+  (id, kind, provider, default base URL, credential variables, the names an
+  operator may write, the executable of a CLI connector); `ConnectorIds`, the
+  id lists, `coderNames`, `apiProviderNames` and the lookups
+  (`connectorRow`, `coderConnector`, `apiProviderConnector`) are read from it.
 - `@llm4ts/core/LlmService`: backend-neutral LLM service.
 - `@llm4ts/core/ConnectorConfig` and `ConnectorRegistry`: connector selection.
 - `@llm4ts/core/providers/*`: API and CLI connector implementations.

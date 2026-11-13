@@ -3,7 +3,13 @@ import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliAuthProbe, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
 import { InvalidRequestError, ProviderError, type LlmError } from "../Errors.ts"
-import { ConnectorCapabilities, ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
+import {
+  ConnectorCapabilities,
+  ConnectorIds,
+  LlmChunk,
+  TokenUsage,
+  cliExecutable
+} from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   atLeastVersion,
@@ -25,6 +31,8 @@ import {
   versionTriple,
   statusChunk
 } from "./CliSupport.ts"
+
+const executable = cliExecutable("Pi")
 
 /**
  * `pi auth check --model <model> --no-refresh --json` says whether pi holds
@@ -235,7 +243,7 @@ export const makePiConnector = (
   const checkFloorOnce: Effect.Effect<void, LlmError> = Effect.suspend(() =>
     floorChecked
       ? Effect.void
-      : Effect.flatMap(executor.run(["pi", "--version"], cwd, config.envVars), (result) => {
+      : Effect.flatMap(executor.run([executable, "--version"], cwd, config.envVars), (result) => {
           const problem = piReadOnlyProblem([...result.stdout, ...result.stderr].join("\n"))
           return problem === undefined
             ? Effect.sync(() => {
@@ -250,7 +258,7 @@ export const makePiConnector = (
   ) {
     yield* checkFloorOnce
     const result = yield* executor.runWithStdin(
-      ["pi", "-p", ...extraArgs],
+      [executable, "-p", ...extraArgs],
       cwd,
       config.envVars,
       prompt
@@ -273,7 +281,7 @@ export const makePiConnector = (
       Stream.drain,
       Stream.concat(
         executor.runStreamingWithStdin(
-          ["pi", "-p", "--mode", "json", ...extraArgs],
+          [executable, "-p", "--mode", "json", ...extraArgs],
           cwd,
           config.envVars,
           prompt
@@ -306,13 +314,13 @@ export const makePiConnector = (
     }),
     // `--` ends the options (pi >= 0.84.3): a prompt starting with a dash
     // is a prompt, not a flag. Stdin paths need no separator.
-    buildArgv: (prompt, _context) => ["pi", "-p", ...extraArgs, "--", prompt],
-    buildInteractiveArgv: (_context) => ["pi", ...extraArgs],
+    buildArgv: (prompt, _context) => [executable, "-p", ...extraArgs, "--", prompt],
+    buildInteractiveArgv: (_context) => [executable, ...extraArgs],
     complete,
     completeStream,
     versionProbe: {
       executor,
-      binary: "pi",
+      binary: executable,
       cwd,
       ...(config.model === undefined ? {} : { authProbe: piAuthProbe(config.model) })
     }

@@ -48,8 +48,9 @@ Extend the existing seams instead of writing one-off variants:
 
 - API providers: `makeApiConnector` (`packages/core/src/Connector.ts`)
 - CLI coding agents: `makeCliConnector` + `versionProbe` (same module)
-- Connector identity: the id/provider/baseUrl table in
-  `packages/core/src/Models.ts`
+- Connector identity: `connectorTable` in `packages/core/src/Models.ts`, one
+  row per connector; every id list, name list and lookup derives from it, and
+  the factories and presets are records keyed by it
 - Typed judgments: the `Judgment` service in `packages/core/src/judgment/`
   (ADR 0017); a new backend is a layer over it, a new decision is questions
   plus a `JudgmentPolicy` in flow, never a parsed prose reply. Connectors

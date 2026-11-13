@@ -10,7 +10,8 @@ import {
   ConnectorIds,
   LlmChunk,
   TokenUsage,
-  type JsonSchema
+  type JsonSchema,
+  cliExecutable
 } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import { collect } from "../Streaming.ts"
@@ -32,6 +33,8 @@ import {
   usageEventChunk,
   type JsonValue
 } from "./CliSupport.ts"
+
+const executable = cliExecutable("Codex")
 
 export const codexExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => {
   const effectiveFlags = config.readOnly
@@ -251,7 +254,7 @@ export const makeCodexConnector = (
     prompt: string
   ) {
     const result = yield* executor.runWithStdin(
-      ["codex", "exec", ...extraArgs],
+      [executable, "exec", ...extraArgs],
       cwd,
       config.envVars,
       prompt
@@ -265,7 +268,7 @@ export const makeCodexConnector = (
   })
 
   const completeStream = (prompt: string) =>
-    rawStream(["codex", "exec", "--json", ...extraArgs], prompt).pipe(
+    rawStream([executable, "exec", "--json", ...extraArgs], prompt).pipe(
       Stream.mapEffect(failCodexChunk)
     )
 
@@ -279,11 +282,11 @@ export const makeCodexConnector = (
       effort: "mapped",
       isolatedHeadless: "partial"
     }),
-    buildArgv: (prompt, _context) => ["codex", "exec", ...extraArgs, prompt],
-    buildInteractiveArgv: (_context) => ["codex", ...extraArgs],
+    buildArgv: (prompt, _context) => [executable, "exec", ...extraArgs, prompt],
+    buildInteractiveArgv: (_context) => [executable, ...extraArgs],
     complete,
     completeStream,
-    versionProbe: { executor, binary: "codex", cwd, authProbe: codexAuthProbe }
+    versionProbe: { executor, binary: executable, cwd, authProbe: codexAuthProbe }
   })
 
   const executeStructuredWithUsage = <A, E, RD, RE>(
@@ -308,7 +311,7 @@ export const makeCodexConnector = (
           jsonText(codexStrictSchema(jsonSchema))
         )
         const reply = yield* collect(
-          rawStream(["codex", "exec", "--json", "--output-schema", path, ...extraArgs], prompt)
+          rawStream([executable, "exec", "--json", "--output-schema", path, ...extraArgs], prompt)
         )
         if (reply.metadata.codexError !== undefined) {
           return yield* failClassifiedCliError("codex", "codex error", reply.metadata.codexError)

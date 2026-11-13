@@ -2,6 +2,7 @@ import { readFile, stat } from "node:fs/promises"
 import { resolve } from "node:path"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { connectorTable, offeredCoderNames } from "@llm4ts/core/Models"
 
 export interface FlowArgs {
   readonly promptText?: string
@@ -10,6 +11,10 @@ export interface FlowArgs {
   readonly help?: boolean
   readonly version?: boolean
 }
+
+const firstCredentialVariables = Object.values(connectorTable).flatMap((row) =>
+  row.kind === "Api" ? row.credentialVariables.slice(0, 1) : []
+)
 
 export const FlowUsage =
   'usage: llm4ts ["<prompt>" | --prompt-file <path> | @<path>] [--repo <path>] | llm4ts doctor'
@@ -30,13 +35,13 @@ commands:
   doctor                  check connector availability and credentials
 
 environment:
-  LLM4TS_CODER            coding agent: claude|codex|gemini|pi|agy|grok|cursor|opencode (default: claude)
+  LLM4TS_CODER            coding agent: ${offeredCoderNames.join("|")} (default: claude)
   LLM4TS_VERBOSITY        terminal verbosity: quiet|normal|verbose
   LLM4TS_UI               tree: the full-screen agent tree (ADR 0022; q returns to the classic view)
   LLM4TS_TRANSCRIPT       on: record each seat's input and output under .llm4ts/transcripts/
   LLM4TS_OTEL             on: export spans over OTLP (a local Phoenix at localhost:6006 unless OTEL_* says otherwise)
   LLM4TS_OTEL_CONTENT     on|full: prompts, replies and tool I/O travel too (off by default)
-  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY
+  ${firstCredentialVariables.join(", ")}
                           credentials for API providers
 
 A trace of each run is written under .llm4ts/ in the target repository.

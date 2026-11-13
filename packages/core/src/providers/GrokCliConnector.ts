@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
+import { ConnectorIds, LlmChunk, TokenUsage, cliExecutable } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   failClassifiedCliError,
@@ -15,6 +15,8 @@ import {
   sortedFlagArgs,
   usageEventChunk
 } from "./CliSupport.ts"
+
+const executable = cliExecutable("Grok")
 
 export const grokCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => [
   ...optionalModelArgs(config.model),
@@ -75,7 +77,12 @@ export const makeGrokCliConnector = (
 ): CliConnectorShape => {
   const cwd = config.workingDir ?? "."
   const extraArgs = grokCliExtraArgs(config)
-  const buildArgv = (prompt: string): ReadonlyArray<string> => ["grok", ...extraArgs, "-p", prompt]
+  const buildArgv = (prompt: string): ReadonlyArray<string> => [
+    executable,
+    ...extraArgs,
+    "-p",
+    prompt
+  ]
 
   const complete = Effect.fn("@llm4ts/core/providers/GrokCliConnector.complete")(function* (
     prompt: string
@@ -91,7 +98,7 @@ export const makeGrokCliConnector = (
   const completeStream = (prompt: string) =>
     executor
       .runStreaming(
-        ["grok", "--output-format", "streaming-json", ...extraArgs, "-p", prompt],
+        [executable, "--output-format", "streaming-json", ...extraArgs, "-p", prompt],
         cwd,
         config.envVars
       )
@@ -109,10 +116,10 @@ export const makeGrokCliConnector = (
     id: ConnectorIds.Grok,
     interactionSupport: "ContinuationOnly",
     buildArgv: (prompt, _context) => buildArgv(prompt),
-    buildInteractiveArgv: (_context) => ["grok", ...extraArgs],
+    buildInteractiveArgv: (_context) => [executable, ...extraArgs],
     complete,
     completeStream,
     // No auth probe: grok offers `login` but no status subcommand; Unknown.
-    versionProbe: { executor, binary: "grok", cwd }
+    versionProbe: { executor, binary: executable, cwd }
   })
 }

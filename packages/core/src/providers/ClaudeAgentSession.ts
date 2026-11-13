@@ -16,7 +16,7 @@ import {
   type SessionEvent
 } from "../AgentSession.ts"
 import { ProviderError, type LlmError } from "../Errors.ts"
-import { TokenUsage } from "../Models.ts"
+import { TokenUsage, cliExecutable } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   jsonArray,
@@ -30,11 +30,13 @@ import {
   type JsonValue
 } from "./CliSupport.ts"
 
+const executable = cliExecutable("ClaudeCli")
+
 export const claudeSessionArgv = (
   model: string | undefined,
   extraFlags: ReadonlyArray<string>
 ): ReadonlyArray<string> => [
-  "claude",
+  executable,
   "--print",
   "--input-format",
   "stream-json",

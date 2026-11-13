@@ -19,6 +19,9 @@ import {
 } from "@llm4ts/core/providers/GeminiCliProvider"
 import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
 import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
+import { cliExecutable } from "@llm4ts/core/Models"
+
+const executable = cliExecutable("GeminiCli")
 
 const failure = (message: string): ProviderError => ProviderError.make({ message })
 
@@ -47,7 +50,7 @@ export const makeNodeGeminiCliExecutor = (
   const supportsAdminPolicy: Effect.Effect<boolean> = Effect.suspend(() =>
     adminPolicy !== undefined
       ? Effect.succeed(adminPolicy)
-      : executor.run(["gemini", "--help"], process.cwd(), {}).pipe(
+      : executor.run([executable, "--help"], process.cwd(), {}).pipe(
           Effect.map((result) =>
             geminiSupportsAdminPolicy([...result.stdout, ...result.stderr].join("\n"))
           ),
@@ -75,7 +78,7 @@ export const makeNodeGeminiCliExecutor = (
     )
   return {
     checkGeminiInstalled: executor
-      .run(["gemini", "--version"], process.cwd(), {})
+      .run([executable, "--version"], process.cwd(), {})
       .pipe(
         Effect.flatMap((result) =>
           result.exitCode === 0
@@ -89,7 +92,7 @@ export const makeNodeGeminiCliExecutor = (
           const environment = yield* environmentFor(context)
           const args = yield* argsFor(config, context, "json")
           const result = yield* executor.runWithStdin(
-            ["gemini", ...args],
+            [executable, ...args],
             context.cwd ?? process.cwd(),
             environment,
             prompt
@@ -111,7 +114,7 @@ export const makeNodeGeminiCliExecutor = (
             ([environment, args]) =>
               executor
                 .runStreamingWithStdin(
-                  ["gemini", ...args],
+                  [executable, ...args],
                   context.cwd ?? process.cwd(),
                   environment,
                   prompt

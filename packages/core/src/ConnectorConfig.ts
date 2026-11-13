@@ -1,7 +1,16 @@
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { ConnectorId, ConnectorIds, Effort, LlmConfig, type LlmProvider } from "./Models.ts"
+import {
+  ConnectorId,
+  ConnectorIds,
+  Effort,
+  LlmConfig,
+  connectorRow,
+  type CliConnectorName,
+  type ConnectorName,
+  type LlmProvider
+} from "./Models.ts"
 
 export class DockerSandbox extends Schema.TaggedClass<DockerSandbox>()("Docker", {
   image: Schema.String,
@@ -107,23 +116,15 @@ export class CliConnectorConfig extends Schema.TaggedClass<CliConnectorConfig>()
 export const ConnectorConfig = Schema.Union([ApiConnectorConfig, CliConnectorConfig])
 export type ConnectorConfig = typeof ConnectorConfig.Type
 
+/** The config class the connector named `K` takes, by its kind in `connectorTable`. */
+export type ConnectorConfigOf<K extends ConnectorName> = K extends CliConnectorName
+  ? CliConnectorConfig
+  : ApiConnectorConfig
+
+// An id that names no API connector reads as OpenAI, the wire most servers speak.
 const providerForConnector = (connectorId: ConnectorId): LlmProvider => {
-  switch (connectorId.value) {
-    case "anthropic":
-      return "Anthropic"
-    case "gemini-api":
-      return "GeminiApi"
-    case "lm-studio":
-      return "LmStudio"
-    case "ollama":
-      return "Ollama"
-    case "mlx-lm":
-      return "MlxLm"
-    case "mock":
-      return "Mock"
-    default:
-      return "OpenAI"
-  }
+  const row = connectorRow(connectorId)
+  return row?.kind === "Api" ? (row.provider ?? "OpenAI") : "OpenAI"
 }
 
 export const toLlmConfig = (config: ApiConnectorConfig): LlmConfig =>

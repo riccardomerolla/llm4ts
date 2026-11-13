@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { makeCliConnector, type CliConnectorShape } from "../Connector.ts"
 import type { CliConnectorConfig } from "../ConnectorConfig.ts"
-import { ConnectorIds, LlmChunk, TokenUsage } from "../Models.ts"
+import { ConnectorIds, LlmChunk, TokenUsage, cliExecutable } from "../Models.ts"
 import type { ProcessExecutorShape } from "../ProcessExecutor.ts"
 import {
   failClassifiedCliError,
@@ -16,6 +16,8 @@ import {
   toolEventChunk,
   usageEventChunk
 } from "./CliSupport.ts"
+
+const executable = cliExecutable("OpenCode")
 
 export const openCodeCliExtraArgs = (config: CliConnectorConfig): ReadonlyArray<string> => [
   ...optionalModelArgs(config.model),
@@ -98,7 +100,7 @@ export const makeOpenCodeCliConnector = (
   const cwd = config.workingDir ?? "."
   const extraArgs = openCodeCliExtraArgs(config)
   const buildArgv = (prompt: string): ReadonlyArray<string> => [
-    "opencode",
+    executable,
     "run",
     ...extraArgs,
     prompt
@@ -122,7 +124,7 @@ export const makeOpenCodeCliConnector = (
   const completeStream = (prompt: string) =>
     executor
       .runStreaming(
-        ["opencode", "run", "--format", "json", ...extraArgs, prompt],
+        [executable, "run", "--format", "json", ...extraArgs, prompt],
         cwd,
         config.envVars
       )
@@ -142,11 +144,11 @@ export const makeOpenCodeCliConnector = (
     id: ConnectorIds.OpenCode,
     interactionSupport: "ContinuationOnly",
     buildArgv: (prompt, _context) => buildArgv(prompt),
-    buildInteractiveArgv: (_context) => ["opencode"],
+    buildInteractiveArgv: (_context) => [executable],
     complete,
     completeStream,
     // No auth probe: `opencode auth list` lists stored credentials by
     // provider, not whether the provider this seat runs has any; Unknown.
-    versionProbe: { executor, binary: "opencode", cwd }
+    versionProbe: { executor, binary: executable, cwd }
   })
 }
