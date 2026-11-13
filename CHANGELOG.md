@@ -65,8 +65,19 @@
   readers under `packages/*/src` now go through the settings registry, so a
   number with text after it (`LLM4TS_CONTEXT_BUDGET=12abc`,
   `LLM4TS_ORIENTATION_CHARS=1e3`) counts as unset, as the launch warning
-  already said, and an empty `LLM4TS_PROVIDER` means mock. The flows and kits
-  still read their own settings as before.
+  already said, and an empty `LLM4TS_PROVIDER` means mock.
+- **The flows and kits read their settings through the registry too.** Five
+  toggles take more spellings: `LLM4TS_MARK_DEEPEN`, `LLM4TS_REGROUP` and
+  `LLM4TS_FAIL_FAST` read only `1`, `LLM4TS_PORT_GUIDE_TRIAL` was turned off
+  only by `off`, and `LLM4TS_GRAPH_REFINE` was not turned off by `no`. A
+  number with text after it (`LLM4TS_JUDGE_ROUNDS=3x`,
+  `LLM4TS_STALL_MINUTES=20m`), a sign or a fraction counts as unset in the
+  flows as well, where the leading digits used to be read; so does an empty
+  value, and a URL setting (`LLM4TS_CODER_HEALTH_URL`, `LLM4TS_ADO_ORG_URL`)
+  that is not an http or https URL. `LLM4TS_GATES=";"` still runs no gates,
+  and `llm4ts config set` now accepts it. The epic flows' library drops `flagsFromEnvironment`, and
+  the extraction and conversion libraries drop `positiveEnvInt`:
+  `settingValue` from `@llm4ts/flow/Settings` reads the same settings.
 
 ## 3.3.0
 

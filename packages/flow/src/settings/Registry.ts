@@ -282,7 +282,7 @@ export const settings = {
     scope: "project",
     value: Value.positive,
     fallback: fallback.value(4000, "4000"),
-    doc: "How many characters of a red gate's output the fix prompt carries."
+    doc: "How many characters of a red gate's output the fix prompt carries; at least 500 in port-tests."
   }),
   LLM4TS_TEST_REPORT: setting({
     group: "gates",

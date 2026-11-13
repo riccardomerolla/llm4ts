@@ -61,14 +61,12 @@ import { ReviewIssue } from "@llm4ts/flow/Review"
 import { checkWall, wallBreachMessage } from "@llm4ts/flow/Wall"
 import { parseDecisions } from "@llm4ts/flow/Decisions"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { settingValue } from "@llm4ts/flow/Settings"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
 
 const ModDir = "docs/modernization"
 
-const judgeRounds = (): number => {
-  const raw = Number.parseInt(process.env.LLM4TS_JUDGE_ROUNDS ?? "", 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : 2
-}
+const judgeRounds = (): number => settingValue("LLM4TS_JUDGE_ROUNDS", process.env) ?? 2
 
 const complianceDimensions = [
   Dimension.make({

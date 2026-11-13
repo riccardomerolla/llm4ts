@@ -35,6 +35,7 @@ import {
   stage
 } from "@llm4ts/runner"
 import { structuredAndPublish } from "@llm4ts/flow/Flow"
+import { settingValue } from "@llm4ts/flow/Settings"
 import {
   asPortingPack,
   implementerPrompt,
@@ -96,11 +97,8 @@ const program = Effect.gen(function* () {
   const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const knobs = portEnv(process.env)
-  const sampleSize = Math.max(
-    1,
-    Number.parseInt(process.env.LLM4TS_PORT_GUIDE_SAMPLE ?? "3", 10) || 3
-  )
-  const trialOn = process.env.LLM4TS_PORT_GUIDE_TRIAL?.trim().toLowerCase() !== "off"
+  const sampleSize = settingValue("LLM4TS_PORT_GUIDE_SAMPLE", process.env)
+  const trialOn = settingValue("LLM4TS_PORT_GUIDE_TRIAL", process.env)
   const stateDir = portStateDir(input.workDir)
   const reportPath = join(stateDir, "guide-audit.md")
   const recordPath = join(stateDir, "guide-audit.json")

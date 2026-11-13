@@ -13,9 +13,9 @@ import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import type { FlowError } from "@llm4ts/flow/FlowError"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { readTrace } from "@llm4ts/flow/Replay"
+import { settingValue } from "@llm4ts/flow/Settings"
 import {
   RetroProposal,
-  defaultRetroChars,
   loadEpicFiles,
   loadStoryFiles,
   renderRetroDigest,
@@ -136,11 +136,6 @@ export type RetroOutcome =
       readonly summary: ReadonlyArray<string>
     }
 
-const retroChars = (environment: Readonly<Record<string, string | undefined>>): number => {
-  const value = Number.parseInt(environment.LLM4TS_RETRO_CHARS ?? "", 10)
-  return Number.isInteger(value) && value > 0 ? value : defaultRetroChars
-}
-
 /** The whole retro: evidence, one structured call, validation, the files. */
 export const runRetro = Effect.fn("epic-retro.run")(function* (
   deps: RetroDeps
@@ -160,7 +155,7 @@ export const runRetro = Effect.fn("epic-retro.run")(function* (
     report: epic.report,
     board: epic.board,
     stories,
-    budget: retroChars(deps.environment)
+    budget: settingValue("LLM4TS_RETRO_CHARS", deps.environment)
   }
   const candidates = retroCandidates(withoutTranscripts)
   if (candidates.length === 0) {

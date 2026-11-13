@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { nodeSecretSource } from "@llm4ts/flow/endpoint/Auth"
 import { SoapTransport } from "@llm4ts/flow/endpoint/Transport"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { ToolContext, ToolError, defineTool, report } from "@llm4ts/flow/tools/Tool"
 import { makeNodeWorkspace } from "@llm4ts/runner/NodeWorkspace"
 import { runToolMain } from "@llm4ts/runner/ToolMain"
@@ -93,9 +94,9 @@ export const soapCall = defineTool({
         return yield* fail(`no profile at ${profilePath(input.service, input.env)}`)
       }
       // `LLM4TS_SOAP_STUB=<dir>` answers from recorded responses, as soap-sample does.
-      const stub = context.environment.LLM4TS_SOAP_STUB?.trim()
+      const stub = settingValue("LLM4TS_SOAP_STUB", context.environment)
       const transport =
-        stub === undefined || stub === ""
+        stub === undefined
           ? live
           : makeDirectoryStubTransport(resolve(context.projectRoot, stub), catalog)
       const secrets = nodeSecretSource(context.environment)

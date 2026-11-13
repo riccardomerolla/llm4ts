@@ -114,7 +114,8 @@ describe("setting grammars", () => {
       "pnpm typecheck",
       "pnpm test"
     ])
-    assert.isTrue(Result.isFailure(readSetting("LLM4TS_GATES", " ; ")))
+    // A lone ; is "run none", as the gates reader always took it.
+    assert.deepStrictEqual(read("LLM4TS_GATES", " ; "), [])
     assert.deepStrictEqual(read("LLM4TS_EXECUTORS", "pi-a, codex,,claude"), [
       "pi-a",
       "codex",

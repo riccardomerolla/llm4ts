@@ -7,6 +7,7 @@ import type { FlowError, PersistenceError } from "@llm4ts/flow/FlowError"
 import { Info } from "@llm4ts/flow/FlowEvents"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { countNotPlanned } from "@llm4ts/flow/RefineRound"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { lastStoryVerdict, type EpicReport } from "@llm4ts/flow/Stories"
 import { ScriptUsage } from "@llm4ts/runner"
 import {
@@ -188,8 +189,7 @@ export const parseStoriesFlags = (
 ): Effect.Effect<StoriesFlags, ScriptUsage> =>
   Effect.gen(function* () {
     const deferTests =
-      argv.includes("--defer-tests") ||
-      /^(1|true|on|yes)$/i.test(environment.LLM4TS_DEFER_TESTS?.trim() ?? "")
+      argv.includes("--defer-tests") || settingValue("LLM4TS_DEFER_TESTS", environment)
     const harden = argv.includes("--harden")
     if (deferTests && harden) {
       return yield* ScriptUsage.make({

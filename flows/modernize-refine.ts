@@ -71,6 +71,7 @@ import { coverageUnits, matchingFiles } from "@llm4ts/flow/SpecChecks"
 import { SurveyGraph, closureFor } from "@llm4ts/flow/Survey"
 import { freshGraph, graphCachePath } from "@llm4ts/flow/GraphCache"
 import { withDraftApproval } from "@llm4ts/flow/Approval"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import {
   FlowAborted,
@@ -112,8 +113,8 @@ const program = Effect.gen(function* () {
   const coder = withTurnLimit(yield* coderFromEnvironment(), analystTurns())
   const files = nodePlainFileStore
   const modDirAbs = join(input.workDir, ModDir)
-  const targetRepo = process.env.LLM4TS_TARGET_REPO?.trim()
-  const regroup = process.env.LLM4TS_REGROUP?.trim() === "1"
+  const targetRepo = settingValue("LLM4TS_TARGET_REPO", process.env)
+  const regroup = settingValue("LLM4TS_REGROUP", process.env)
 
   yield* runNode(
     {
@@ -347,7 +348,7 @@ const program = Effect.gen(function* () {
                 spec: packState.specs[name] ?? "",
                 feature: packState.features[name] ?? ""
               }))
-              const targetMounted = targetRepo !== undefined && targetRepo.length > 0
+              const targetMounted = targetRepo !== undefined
               if (!targetMounted) {
                 yield* say(
                   "no LLM4TS_TARGET_REPO — the proposal cannot claim anything is provided by the target"

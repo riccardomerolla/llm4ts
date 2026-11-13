@@ -30,6 +30,7 @@ import {
   reviewAndFixLoop
 } from "@llm4ts/flow/Review"
 import { matchingFiles } from "@llm4ts/flow/SpecChecks"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { runQueue } from "@llm4ts/flow/WorkQueue"
 import {
   asReadOnly,
@@ -58,14 +59,8 @@ const program = Effect.gen(function* () {
   const coder = yield* coderFromEnvironment()
   const files = nodePlainFileStore
   const knobs = portEnv(process.env)
-  const maxRounds = Math.max(
-    1,
-    Number.parseInt(process.env.LLM4TS_PORT_TEST_ROUNDS ?? "4", 10) || 4
-  )
-  const tailChars = Math.max(
-    500,
-    Number.parseInt(process.env.LLM4TS_GATE_TAIL_CHARS ?? "4000", 10) || 4000
-  )
+  const maxRounds = settingValue("LLM4TS_PORT_TEST_ROUNDS", process.env)
+  const tailChars = Math.max(500, settingValue("LLM4TS_GATE_TAIL_CHARS", process.env))
   const stateDir = join(portStateDir(input.workDir), "tests")
 
   yield* runNode(

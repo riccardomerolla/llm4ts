@@ -24,6 +24,7 @@ import { readdir, readFile } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Effect from "effect/Effect"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { makeStoryPlanStore } from "@llm4ts/flow/StoryPlan"
 import {
   FlowAborted,
@@ -159,16 +160,11 @@ const program = Effect.gen(function* () {
           )
 
         const workspace = yield* makeNodeWorkspace(input.workDir)
-        const requested = environment.LLM4TS_SOAP_SERVICE?.trim()
+        const requested = settingValue("LLM4TS_SOAP_SERVICE", environment)
         const services = (yield* workspace.discover(".llm4ts/soap/*/catalog.json")).map(
           (path) => path.split("/")[2] ?? ""
         )
-        const service =
-          requested !== undefined && requested !== ""
-            ? requested
-            : services.length === 1
-              ? services[0]
-              : undefined
+        const service = requested ?? (services.length === 1 ? services[0] : undefined)
         if (service === undefined) {
           return yield* FlowAborted.make({
             message:
@@ -192,7 +188,7 @@ const program = Effect.gen(function* () {
           })
         }
 
-        const api = environment.LLM4TS_ACE_API?.trim() || apiNameFor(service)
+        const api = settingValue("LLM4TS_ACE_API", environment) ?? apiNameFor(service)
         const soapRoot =
           catalog.documents[0] === undefined ? undefined : dirname(catalog.documents[0])
         // Schemas may be declared in ISO-8859-1: decode by their declaration and

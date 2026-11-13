@@ -318,11 +318,26 @@ llm4ts run implement --coder codex --repo /path/to/repository "Add a multiply fu
 
   A flow reads its settings from `process.env`. `llm4ts run` resolves the
   flags, the environment and the settings files first, then starts the flow
-  with the result in its environment, so the flow needs no file reader. The
-  built-in flows still parse each variable themselves.
-  `settingValue(name, process.env)` from `@llm4ts/flow/Settings` reads one
-  registered setting with its grammar and default, and a flow may use it for
-  the names the registry holds.
+  with the result in its environment, so the flow needs no file reader.
+  Read a registered setting with `settingValue(name, process.env)` from
+  `@llm4ts/flow/Settings`, never with `process.env.LLM4TS_…`: it applies the
+  setting's grammar and returns its default, or `undefined` where the default
+  is the flow's own to give.
+
+  ```ts
+  import { settingValue } from "@llm4ts/flow/Settings"
+
+  const rounds = settingValue("LLM4TS_JUDGE_ROUNDS", process.env) ?? 2
+  const failFast = settingValue("LLM4TS_FAIL_FAST", process.env)
+  ```
+
+  Every built-in flow and kit flow reads this way, so a toggle takes the same
+  eight spellings everywhere and a value the grammar does not read counts as
+  unset. `settingGiven` tells unset from unreadable, for a flow that refuses
+  a bad value by name. The `LLM4TS_` namespace belongs to the registry: the
+  name must be one it holds, or the call does not compile. A setting of your
+  own flow takes your own prefix (`ACME_BATCH_SIZE`), and you read and parse
+  it yourself from `process.env`.
 
 - **`planFrom(context.reasoning, input.prompt)`** — from
   `@llm4ts/flow/Planner`, is called immediately here, but calling it only

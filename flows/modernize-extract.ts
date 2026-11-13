@@ -72,6 +72,7 @@ import {
   extractProgramsResumably,
   programArtifactPaths
 } from "@llm4ts/flow/Artifacts"
+import { settingValue } from "@llm4ts/flow/Settings"
 import {
   ModDir,
   analystSystem,
@@ -81,7 +82,6 @@ import {
   judgeIssueProgram,
   makeProgramJudge,
   maxClosureFiles,
-  positiveEnvInt,
   programArtifactsJsonSchema,
   programAsk,
   programFixAsk,
@@ -100,7 +100,7 @@ const MaxRounds = 3
  * time without changing tokens or cost. Default 1 keeps the sequential
  * narration; the bound is about the coder seat's quota, not correctness.
  */
-const extractConcurrency = (): number => positiveEnvInt("LLM4TS_EXTRACT_CONCURRENCY", 1)
+const extractConcurrency = (): number => settingValue("LLM4TS_EXTRACT_CONCURRENCY", process.env)
 
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
@@ -147,9 +147,9 @@ const program = Effect.gen(function* () {
           "inventory",
           matchingFiles(repo, pack.programs ?? pack.sources ?? ".*", pack.exclude)
         )
-        const wave = process.env.LLM4TS_WAVE?.trim()
+        const wave = settingValue("LLM4TS_WAVE", process.env)
         const programs =
-          wave === undefined || wave.length === 0
+          wave === undefined
             ? all
             : yield* Effect.gen(function* () {
                 yield* stage(
@@ -173,7 +173,7 @@ const program = Effect.gen(function* () {
           })
         }
         const waveScope =
-          wave === undefined || wave.length === 0
+          wave === undefined
             ? undefined
             : ((): ((path: string) => boolean) => {
                 const names = new Set(programs.map(programName))

@@ -58,6 +58,7 @@ import { packageVersion } from "@llm4ts/flow/Package"
 import { coverage, coverageUnits, features, matchingFiles } from "@llm4ts/flow/SpecChecks"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 import { ProgramArtifacts, ProgramUnit, extractProgramsResumably } from "@llm4ts/flow/Artifacts"
+import { settingValue } from "@llm4ts/flow/Settings"
 
 const ModDir = "docs/modernization"
 const BenchFile = "bench-results.jsonl"
@@ -81,7 +82,7 @@ const machine = (): BenchMachine =>
 const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput("Benchmark a modernization extraction run")
   const mode =
-    process.env.LLM4TS_BENCH_MODE?.trim() ??
+    settingValue("LLM4TS_BENCH_MODE", process.env) ??
     (input.prompt.trim().toLowerCase() === "report" ? "report" : "measure")
   const files = nodePlainFileStore
   const benchPath = join(input.workspace, BenchFile)
@@ -93,9 +94,8 @@ const program = Effect.gen(function* () {
     if (records.length === 0) {
       return yield* FlowAborted.make({ message: `no benchmark records at ${benchPath}` })
     }
-    const projected = Number.parseInt(process.env.LLM4TS_BENCH_PROJECT ?? "", 10)
     process.stdout.write(
-      `${renderBenchReport(records, Number.isFinite(projected) && projected > 0 ? projected : undefined)}\n`
+      `${renderBenchReport(records, settingValue("LLM4TS_BENCH_PROJECT", process.env))}\n`
     )
     return
   }

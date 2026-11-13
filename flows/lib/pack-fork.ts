@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import type { JsonSchema } from "@llm4ts/core/Models"
+import { settingGiven, settingValue } from "@llm4ts/flow/Settings"
 import type { WorkspaceShape } from "@llm4ts/flow/Workspace"
 import { ScriptUsage } from "@llm4ts/runner"
 
@@ -9,15 +10,15 @@ export type TargetKind = "frontend" | "backend"
 export const parseTargetKind = (
   environment: Readonly<Record<string, string | undefined>>
 ): Effect.Effect<TargetKind, ScriptUsage> => {
-  const raw = environment.LLM4TS_TARGET_KIND?.trim().toLowerCase()
-  if (raw === "frontend" || raw === "backend") {
-    return Effect.succeed(raw)
+  const given = settingGiven("LLM4TS_TARGET_KIND", environment)
+  if (given._tag === "Read") {
+    return Effect.succeed(given.value)
   }
   return Effect.fail(
     ScriptUsage.make({
       message:
         "LLM4TS_TARGET_KIND must be 'frontend' or 'backend' " +
-        `(got ${raw === undefined || raw.length === 0 ? "unset" : `'${raw}'`})`
+        `(got ${given._tag === "Unset" ? "unset" : `'${given.text.toLowerCase()}'`})`
     })
   )
 }
@@ -27,7 +28,7 @@ const forkAsPattern = /^[a-z][a-z0-9-]*$/
 export const parseForkAs = (
   environment: Readonly<Record<string, string | undefined>>
 ): Effect.Effect<string, ScriptUsage> => {
-  const raw = environment.LLM4TS_FORK_AS?.trim()
+  const raw = settingValue("LLM4TS_FORK_AS", environment)
   if (raw !== undefined && forkAsPattern.test(raw)) {
     return Effect.succeed(raw)
   }
@@ -35,7 +36,7 @@ export const parseForkAs = (
     ScriptUsage.make({
       message:
         "LLM4TS_FORK_AS must be a lowercase kebab-case name, e.g. 'acmecorp-nextjs' " +
-        `(got ${raw === undefined || raw.length === 0 ? "unset" : `'${raw}'`})`
+        `(got ${raw === undefined ? "unset" : `'${raw}'`})`
     })
   )
 }
@@ -324,10 +325,7 @@ export const provenanceMarkdown = (
 
 export const parseFeedback = (
   environment: Readonly<Record<string, string | undefined>>
-): string | undefined => {
-  const raw = environment.LLM4TS_FEEDBACK?.trim()
-  return raw === undefined || raw.length === 0 ? undefined : raw
-}
+): string | undefined => settingValue("LLM4TS_FEEDBACK", environment)
 
 export const readGroundingFiles = (
   workspace: WorkspaceShape,

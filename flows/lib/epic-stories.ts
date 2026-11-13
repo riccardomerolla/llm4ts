@@ -64,6 +64,7 @@ import {
 import { stableHash } from "@llm4ts/flow/Plan"
 import { ReviewIssue, reviewRulesPreamble, type FixPromptOptions } from "@llm4ts/flow/Review"
 import { compactGateArtifacts, gatesIn, type GateRunOptions } from "@llm4ts/flow/Gates"
+import { settingGiven, settingValue } from "@llm4ts/flow/Settings"
 import { defaultStallRepeats, type StallOptions } from "@llm4ts/flow/Stall"
 import { loadTranscript, nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import {
@@ -344,8 +345,8 @@ export const mergeRevisionsOption = (
   if (flag !== undefined) {
     return { mergeRevisions: flag }
   }
-  const raw = environment.LLM4TS_MERGE_REVISIONS?.trim() ?? ""
-  return /^\d+$/u.test(raw) ? { mergeRevisions: Number.parseInt(raw, 10) } : {}
+  const given = settingGiven("LLM4TS_MERGE_REVISIONS", environment)
+  return given._tag === "Read" ? { mergeRevisions: given.value } : {}
 }
 
 /**
@@ -360,15 +361,15 @@ export const taskConcurrencyOption = (
   if (flag !== undefined) {
     return { taskConcurrency: flag }
   }
-  const raw = environment.LLM4TS_TASK_CONCURRENCY?.trim() ?? ""
-  return /^[1-9]\d*$/u.test(raw) ? { taskConcurrency: Number.parseInt(raw, 10) } : {}
+  const given = settingGiven("LLM4TS_TASK_CONCURRENCY", environment)
+  return given._tag === "Read" ? { taskConcurrency: given.value } : {}
 }
 
-/** `--defer-findings`, or `LLM4TS_DEFER_FINDINGS` set to 1/true/on/yes (ADR 0031). */
+/** `--defer-findings`, or `LLM4TS_DEFER_FINDINGS` on (ADR 0031). */
 export const deferFindingsEnabled = (
   flag: boolean,
   environment: Readonly<Record<string, string | undefined>>
-): boolean => flag || /^(1|true|on|yes)$/i.test(environment.LLM4TS_DEFER_FINDINGS?.trim() ?? "")
+): boolean => flag || settingValue("LLM4TS_DEFER_FINDINGS", environment)
 
 /**
  * The feedback a follow-up round is planned from (ADR 0031): every story's
@@ -408,8 +409,8 @@ export const judgeRoundsOption = (
   if (flag !== undefined) {
     return { judgeRounds: flag }
   }
-  const raw = Number.parseInt(environment.LLM4TS_JUDGE_ROUNDS ?? "", 10)
-  return Number.isInteger(raw) && raw > 0 ? { judgeRounds: raw } : {}
+  const rounds = settingValue("LLM4TS_JUDGE_ROUNDS", environment)
+  return rounds === undefined ? {} : { judgeRounds: rounds }
 }
 
 /**
@@ -833,29 +834,6 @@ export const storyCoderFromEnvironment = (
 // ---- Seat flags and local servers --------------------------------------------------
 
 /**
- * `LLM4TS_CODER_FLAGS` / `LLM4TS_REASONING_FLAGS`: extra CLI flags for a seat as
- * `key=value;key=value` (a bare `key` is a boolean flag). The first `=` splits, so
- * a value may itself carry `=`: `config=model_provider=lmstudio` is codex's
- * `--config model_provider=lmstudio`.
- */
-export const flagsFromEnvironment = (raw: string | undefined): Readonly<Record<string, string>> => {
-  const flags: Record<string, string> = {}
-  for (const part of (raw ?? "").split(";")) {
-    const entry = part.trim()
-    if (entry.length === 0) {
-      continue
-    }
-    const at = entry.indexOf("=")
-    if (at < 0) {
-      flags[entry] = ""
-    } else {
-      flags[entry.slice(0, at).trim()] = entry.slice(at + 1).trim()
-    }
-  }
-  return flags
-}
-
-/**
  * The local single-model server a coder seat points at, if any: pi's
  * `lmstudio/…` and `ollama/…` model specs, codex's `--config model_provider=lmstudio`,
  * a claude seat with `ANTHROPIC_BASE_URL` on a loopback host. Such a server serves
@@ -897,11 +875,9 @@ export const worktreeRootFor = (
   epicId: string,
   environment: Readonly<Record<string, string | undefined>>
 ): string => {
-  const configured = environment.LLM4TS_WORKTREE_ROOT?.trim()
   const root =
-    configured === undefined || configured.length === 0
-      ? `${workDir.replace(/[\\/]+$/, "")}.worktrees`
-      : configured
+    settingValue("LLM4TS_WORKTREE_ROOT", environment) ??
+    `${workDir.replace(/[\\/]+$/, "")}.worktrees`
   return join(root, epicId)
 }
 
@@ -914,8 +890,8 @@ export const serverHealthUrl = (
   server: string | undefined,
   environment: Readonly<Record<string, string | undefined>>
 ): string | undefined => {
-  const configured = environment.LLM4TS_CODER_HEALTH_URL?.trim()
-  if (configured !== undefined && configured.length > 0) {
+  const configured = settingValue("LLM4TS_CODER_HEALTH_URL", environment)
+  if (configured !== undefined) {
     return configured
   }
   switch (server) {
@@ -1667,8 +1643,8 @@ export const appDirFor = (
   environment: Readonly<Record<string, string | undefined>>
 ): Effect.Effect<string, ScriptUsage> =>
   Effect.gen(function* () {
-    const configured = environment.LLM4TS_APP_DIR?.trim()
-    if (configured !== undefined && configured.length > 0) {
+    const configured = settingValue("LLM4TS_APP_DIR", environment)
+    if (configured !== undefined) {
       const normalized = normalize(configured)
       const relative = normalized.replace(/[\\/]+$/, "")
       if (isAbsolute(normalized) || relative === ".." || /^\.\.[\\/]/.test(relative)) {
@@ -1719,24 +1695,21 @@ export const worktreeSetupCommand = (
   environment: Readonly<Record<string, string | undefined>>,
   pack?: Pick<Pack, "setup">
 ): ReadonlyArray<string> | undefined => {
-  const raw = environment.LLM4TS_WORKTREE_SETUP
-  if (raw === undefined) {
+  const given = settingGiven("LLM4TS_WORKTREE_SETUP", environment)
+  if (given._tag !== "Read") {
     return pack === undefined ? defaultWorktreeSetup : pack.setup
   }
-  const parts = raw
-    .trim()
-    .split(/\s+/)
-    .filter((part) => part.length > 0)
+  const parts = given.value.split(/\s+/).filter((part) => part.length > 0)
   return parts.length === 0 ? undefined : parts
 }
 
 /**
- * `LLM4TS_SETUP_AGENT=1` (or `true`/`on`): a failed setup gets one coder turn
+ * `LLM4TS_SETUP_AGENT=on`: a failed setup gets one coder turn
  * to make the worktree ready, then runs again as the check. Off by default.
  */
 export const setupAgentEnabled = (
   environment: Readonly<Record<string, string | undefined>>
-): boolean => /^(1|true|on|yes)$/i.test(environment.LLM4TS_SETUP_AGENT?.trim() ?? "")
+): boolean => settingValue("LLM4TS_SETUP_AGENT", environment)
 
 const output = (result: ReviewResult): string =>
   result.issues.map((issue) => issue.description).join("\n")
@@ -1806,17 +1779,9 @@ export const gateCommands = (
   scripts?: ReadonlySet<string>,
   packGates?: ReadonlyArray<ReadonlyArray<string>>
 ): ReadonlyArray<ReadonlyArray<string>> => {
-  const raw = environment.LLM4TS_GATES?.trim()
-  if (raw !== undefined && raw.length > 0) {
-    return raw
-      .split(";")
-      .map((command) =>
-        command
-          .trim()
-          .split(/\s+/)
-          .filter((part) => part.length > 0)
-      )
-      .filter((command) => command.length > 0)
+  const override = settingValue("LLM4TS_GATES", environment)
+  if (override !== undefined) {
+    return override.map((command) => command.split(/\s+/))
   }
   if (packGates !== undefined) {
     return packGates
@@ -1845,7 +1810,7 @@ export const selectedPack = (options: {
   readonly launchDir: string
   readonly flowDir: string
 }) =>
-  (options.environment.LLM4TS_PACK?.trim() ?? "").length === 0
+  settingValue("LLM4TS_PACK", options.environment) === undefined
     ? Effect.succeed(undefined)
     : Effect.map(
         openPack({
@@ -1862,7 +1827,7 @@ export const epicGateCommands = (options: {
   readonly scripts: ReadonlySet<string> | undefined
   readonly pack: Pack | undefined
 }): EpicGateCommands => {
-  const override = (options.environment.LLM4TS_GATES?.trim() ?? "").length > 0
+  const override = settingValue("LLM4TS_GATES", options.environment) !== undefined
   return {
     commands: gateCommands(
       options.environment,
@@ -1895,32 +1860,25 @@ export { gatesIn }
 /** `LLM4TS_GATE_TIMEOUT` in seconds (default 1200): a gate still running after it is a hang. */
 export const gateTimeoutSeconds = (
   environment: Readonly<Record<string, string | undefined>>
-): number => {
-  const raw = Number.parseInt(environment.LLM4TS_GATE_TIMEOUT ?? "", 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : 1200
-}
+): number => Duration.toSeconds(settingValue("LLM4TS_GATE_TIMEOUT", environment))
 
 /** `LLM4TS_GATE_TAIL_CHARS` (default 4000): how much gate output the fix prompt carries. */
-export const gateTailChars = (
-  environment: Readonly<Record<string, string | undefined>>
-): number => {
-  const raw = Number.parseInt(environment.LLM4TS_GATE_TAIL_CHARS ?? "", 10)
-  return Number.isFinite(raw) && raw > 0 ? raw : 4000
-}
+export const gateTailChars = (environment: Readonly<Record<string, string | undefined>>): number =>
+  settingValue("LLM4TS_GATE_TAIL_CHARS", environment)
 
 /** `LLM4TS_REVIEW_VOTES` (default 1): independent votes of the adversarial lens per round. */
 export const reviewVotes = (
   environment: Readonly<Record<string, string | undefined>>
 ): { readonly votes?: number } => {
-  const raw = Number.parseInt(environment.LLM4TS_REVIEW_VOTES ?? "", 10)
-  return Number.isFinite(raw) && raw > 1 ? { votes: raw } : {}
+  const votes = settingValue("LLM4TS_REVIEW_VOTES", environment)
+  return votes !== undefined && votes > 1 ? { votes } : {}
 }
 
 /** `LLM4TS_REVIEW_FIXER=separate`: review findings go to a fresh fixer chat, not the implementer's. */
 export const reviewFixer = (
   environment: Readonly<Record<string, string | undefined>>
 ): { readonly fixer?: "separate" } =>
-  environment.LLM4TS_REVIEW_FIXER?.trim().toLowerCase() === "separate" ? { fixer: "separate" } : {}
+  settingValue("LLM4TS_REVIEW_FIXER", environment) === "separate" ? { fixer: "separate" } : {}
 
 /**
  * `LLM4TS_STALL_REPEATS` (default 5) ends a coder turn that repeats one tool
@@ -1930,11 +1888,11 @@ export const reviewFixer = (
 export const stallOptions = (
   environment: Readonly<Record<string, string | undefined>>
 ): StallOptions => {
-  const repeats = Number.parseInt(environment.LLM4TS_STALL_REPEATS ?? "", 10)
-  const minutes = Number.parseFloat(environment.LLM4TS_STALL_MINUTES ?? "")
+  const repeats = settingValue("LLM4TS_STALL_REPEATS", environment)
+  const silence = settingValue("LLM4TS_STALL_MINUTES", environment)
   return {
-    repeats: Number.isFinite(repeats) && repeats >= 2 ? repeats : defaultStallRepeats,
-    ...(Number.isFinite(minutes) && minutes > 0 ? { silence: Duration.minutes(minutes) } : {})
+    repeats: repeats >= 2 ? repeats : defaultStallRepeats,
+    ...(silence === undefined ? {} : { silence })
   }
 }
 
@@ -1999,7 +1957,7 @@ export interface StoryJudgeContext {
 export const storiesEnvironment = (
   environment: Readonly<Record<string, string | undefined>>
 ): Readonly<Record<string, string | undefined>> =>
-  environment.LLM4TS_TRANSCRIPT === undefined
+  settingGiven("LLM4TS_TRANSCRIPT", environment)._tag === "Unset"
     ? { ...environment, LLM4TS_TRANSCRIPT: "on" }
     : environment
 
@@ -2081,11 +2039,8 @@ export const compactTranscripts = (
 export const storyContextChars = (
   environment: Readonly<Record<string, string | undefined>>
 ): { readonly contextChars?: number } => {
-  const raw = environment.LLM4TS_STORY_CONTEXT_CHARS?.trim()
-  const value = Number(raw ?? "")
-  return raw === undefined || raw.length === 0 || !Number.isInteger(value) || value < 0
-    ? {}
-    : { contextChars: value }
+  const given = settingGiven("LLM4TS_STORY_CONTEXT_CHARS", environment)
+  return given._tag === "Read" ? { contextChars: given.value } : {}
 }
 
 /**
@@ -2300,17 +2255,18 @@ export const epicRunnerOptions = Effect.fn("epic-stories.runnerOptions")(functio
 const withOptionalModel = (
   config: CliConnectorConfig,
   model: string | undefined
-): CliConnectorConfig => {
-  const trimmed = model?.trim()
-  return trimmed === undefined || trimmed.length === 0 ? config : withModel(config, trimmed)
-}
+): CliConnectorConfig => (model === undefined ? config : withModel(config, model))
 
-/** Extra CLI flags on top of a preset's own (`LLM4TS_CODER_FLAGS`). */
+/**
+ * Extra CLI flags on top of a preset's own (`LLM4TS_CODER_FLAGS`,
+ * `LLM4TS_REASONING_FLAGS`). A value may itself carry `=`:
+ * `config=model_provider=lmstudio` is codex's `--config model_provider=lmstudio`.
+ */
 const withExtraFlags = (
   config: CliConnectorConfig,
-  flags: Readonly<Record<string, string>>
+  flags: Readonly<Record<string, string>> | undefined
 ): CliConnectorConfig =>
-  Object.keys(flags).length === 0
+  flags === undefined
     ? config
     : CliConnectorConfig.make({ ...config, flags: { ...config.flags, ...flags } })
 
@@ -2395,17 +2351,15 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
       launchDir: given.workspace,
       flowDir: import.meta.dirname
     })
-    const coderFlags = flagsFromEnvironment(process.env.LLM4TS_CODER_FLAGS)
+    const coderFlags = settingValue("LLM4TS_CODER_FLAGS", process.env)
+    const coderModel = settingValue("LLM4TS_CODER_MODEL", process.env)
     const seats = yield* seatsFromEnvironment({ coder: pi, reasoner: claude })
     const reasoning = withExtraFlags(
-      withOptionalModel(seats.reasoning, process.env.LLM4TS_REASONING_MODEL),
-      flagsFromEnvironment(process.env.LLM4TS_REASONING_FLAGS)
+      withOptionalModel(seats.reasoning, settingValue("LLM4TS_REASONING_MODEL", process.env)),
+      settingValue("LLM4TS_REASONING_FLAGS", process.env)
     )
-    const coder = withExtraFlags(
-      withOptionalModel(seats.coder, process.env.LLM4TS_CODER_MODEL),
-      coderFlags
-    )
-    const localServer = localCoderServer(process.env.LLM4TS_CODER_MODEL, coderFlags, process.env)
+    const coder = withExtraFlags(withOptionalModel(seats.coder, coderModel), coderFlags)
+    const localServer = localCoderServer(coderModel, coderFlags ?? {}, process.env)
     // A new epic's id (and state folder) is derived from its text; an existing
     // one keeps its folder, whatever text is on the command line.
     const epicId =

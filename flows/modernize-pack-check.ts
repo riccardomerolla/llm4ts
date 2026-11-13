@@ -38,6 +38,7 @@ import { graphStats, probeResults } from "@llm4ts/flow/GraphQuery"
 import { coverageUnits, matchingFiles } from "@llm4ts/flow/SpecChecks"
 import type { CoverageRule } from "@llm4ts/flow/SpecChecks"
 import { buildCodeGraph, nodeId, nodeKind, type SurveyEdge } from "@llm4ts/flow/Survey"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { legacySourceWorkspaceLimits, workspaceLimitsFromEnv } from "@llm4ts/flow/Workspace"
 
 /** Prompt sidecars the modernization phases read, with the phase that reads each. */
@@ -301,7 +302,7 @@ const program = Effect.gen(function* () {
             }
             yield* say(
               `pack '${pack.name}' check passed with ${plural(warnings.length, "warning")} — ` +
-                `next: LLM4TS_PACK=${process.env.LLM4TS_PACK ?? opened.dir} modernize-survey --repo ${input.workDir}`
+                `next: LLM4TS_PACK=${settingValue("LLM4TS_PACK", process.env) ?? opened.dir} modernize-survey --repo ${input.workDir}`
             )
           })
         )

@@ -195,12 +195,15 @@ export const commandOrNone: SettingValue<string> = make(
   { runs: true, empty: "value" }
 )
 
-/** `cmd; cmd`. */
+/**
+ * `cmd; cmd`. A lone `;` is the empty list: the way to say "run none" where
+ * an empty value means "not set" and the default commands would run.
+ */
 export const commands: SettingValue<ReadonlyArray<string>> = make(
-  "command lines separated by ;",
+  "command lines separated by ; (a lone ; for none)",
   Schema.Array(Schema.String),
-  listOf(";"),
-  (value) => value.join("; "),
+  (text) => listOf(";")(text) ?? (text.includes(";") ? [] : undefined),
+  (value) => (value.length === 0 ? ";" : value.join("; ")),
   { runs: true }
 )
 

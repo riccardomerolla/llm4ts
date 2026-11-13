@@ -33,6 +33,7 @@ import { readFile } from "node:fs/promises"
 import { isAbsolute, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as Effect from "effect/Effect"
+import { settingText, settingValue } from "@llm4ts/flow/Settings"
 import {
   FlowAborted,
   Info,
@@ -100,9 +101,9 @@ const program = Effect.gen(function* () {
   const location =
     raw === "" ? undefined : isUrl(raw) || isAbsolute(raw) ? raw : resolve(input.workspace, raw)
   const environment = process.env
-  const requested = environment.LLM4TS_SOAP_SERVICE?.trim() || undefined
+  const requested = settingValue("LLM4TS_SOAP_SERVICE", environment)
   const judgment = yield* judgmentConnectorFromEnvironment()
-  const reasonerName = (environment.LLM4TS_REASONER ?? "claude").trim() || "claude"
+  const reasonerName = settingText("LLM4TS_REASONER", environment) ?? "claude"
   const reasoner = flags.design ? coderFor(reasonerName) : undefined
   if (flags.design && reasoner === undefined) {
     return yield* ScriptUsage.make({ message: `unknown LLM4TS_REASONER '${reasonerName}'` })
@@ -135,7 +136,7 @@ const program = Effect.gen(function* () {
               : yield* loadAuthProfile(
                   workspace,
                   requested,
-                  environment.LLM4TS_SOAP_ENV?.trim() || undefined
+                  settingValue("LLM4TS_SOAP_ENV", environment)
                 )
           const fetchSide = yield* resolveSide(nodeSecretSource(environment), fetchProfile?.fetch)
           const discovered = yield* discoverService({
@@ -178,7 +179,7 @@ const program = Effect.gen(function* () {
           yield* say(`continuing ${service}: ${catalog.operations.length} operations`)
         }
 
-        const env = environment.LLM4TS_SOAP_ENV?.trim() || undefined
+        const env = settingValue("LLM4TS_SOAP_ENV", environment)
         const profile = yield* loadAuthProfile(workspace, service, env)
         if (profile !== undefined) yield* say(`profile: ${profilePath(service, env)}`)
         const operations = yield* loadOperationsFile(workspace, service)
@@ -201,12 +202,12 @@ const program = Effect.gen(function* () {
         }
 
         // 2-3. requests and the probe
-        const stub = environment.LLM4TS_SOAP_STUB?.trim()
+        const stub = settingValue("LLM4TS_SOAP_STUB", environment)
         const transport =
-          stub === undefined || stub === ""
+          stub === undefined
             ? makeNodeSoapTransport()
             : makeDirectoryStubTransport(resolve(input.workspace, stub), catalog)
-        if (stub !== undefined && stub !== "")
+        if (stub !== undefined)
           yield* say(`LLM4TS_SOAP_STUB: answering from ${stub}, not the network`)
         const result = yield* exploreService({
           workspace,

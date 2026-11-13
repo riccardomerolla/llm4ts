@@ -191,13 +191,15 @@ Off a terminal it exits with code 2.
   is the one way to start a flow with the files applied.
 - The shell cannot see flow arguments after `--`. A `--repo` passed there
   does not select the project file; the shell's own `--repo` does.
-- Readers under `packages/*/src` read through the registry: `settingValue`,
-  or `settingGiven` and `settingText` where a reader keeps its own default or
-  refuses a value by name; `flows/` and `kits/` still parse the environment
-  themselves, one area per change. `examples/test/settings-sync.test.ts`
-  counts the raw `LLM4TS_*` reads of each area and fails when a count leaves
-  its ceiling: 0 for the packages, and for `flows/` and `kits/` a number that
-  may only go down.
+- Every reader reads through the registry: `settingValue`, or `settingGiven`
+  and `settingText` where a reader keeps its own default or refuses a value
+  by name. That holds for `packages/*/src`, for `flows/` and for the flows
+  and tools of `kits/`. A rule beyond the grammar (a minimum above 1, a
+  per-flow default, a name pattern) stays in the reader, after the read.
+  `examples/test/settings-sync.test.ts` fails on any raw `LLM4TS_*` read in
+  those three areas, and on a call that hands a quoted setting name to
+  anything but a registry reader, which is how a by-name helper such as
+  `positiveEnvInt("LLM4TS_…", 48)` read the environment by hand.
 
 ## Alternatives rejected
 

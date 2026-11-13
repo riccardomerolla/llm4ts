@@ -2,6 +2,7 @@
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import { withContract } from "@llm4ts/flow/AutonomyContract"
+import { settingGiven, settingValue } from "@llm4ts/flow/Settings"
 import {
   FlowAborted,
   Plan,
@@ -28,8 +29,8 @@ import {
 import type { ReviewResult } from "@llm4ts/runner"
 import { gemini } from "@llm4ts/runner/Connectors"
 
-const proModel = process.env.LLM4TS_REASONING_MODEL ?? "gemini-3-pro-preview"
-const flashModel = process.env.LLM4TS_CODER_MODEL ?? "gemini-2.5-flash"
+const proModel = settingValue("LLM4TS_REASONING_MODEL", process.env) ?? "gemini-3-pro-preview"
+const flashModel = settingValue("LLM4TS_CODER_MODEL", process.env) ?? "gemini-2.5-flash"
 
 const specInstructions = [
   "Turn the change request into a precise repository specification with context, goals,",
@@ -57,16 +58,10 @@ const program = Effect.gen(function* () {
   const input = yield* resolveFlowInput(
     "Add due dates, mark overdue items in list output, and show items due today."
   )
-  const explicitCoder = process.env.LLM4TS_CODER?.trim()
+  const coderNamed = settingGiven("LLM4TS_CODER", process.env)._tag !== "Unset"
   const coder = yield* coderFromEnvironment(process.env, withModel(gemini, flashModel))
-  const reasoning =
-    explicitCoder === undefined || explicitCoder.length === 0
-      ? asReadOnly(withModel(gemini, proModel))
-      : asReadOnly(coder)
-  const reviewer =
-    explicitCoder === undefined || explicitCoder.length === 0
-      ? asReadOnly(withModel(gemini, flashModel))
-      : asReadOnly(coder)
+  const reasoning = coderNamed ? asReadOnly(coder) : asReadOnly(withModel(gemini, proModel))
+  const reviewer = coderNamed ? asReadOnly(coder) : asReadOnly(withModel(gemini, flashModel))
   const store = makePlanStore(nodePlainFileStore)
   const planPath = join(input.workDir, defaultPlanPath(input.prompt))
 
