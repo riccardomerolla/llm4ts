@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/core",
-  "version": "3.4.0",
+  "version": "4.0.0",
   "description": "Effect-native LLM contracts, providers, evaluation, and observability",
   "license": "MIT",
   "type": "module",
