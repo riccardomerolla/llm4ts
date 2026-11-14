@@ -29,6 +29,7 @@ import {
   nodeWatchDependencies,
   type WatchOptions
 } from "./Watch.ts"
+import { nodeWebWatchDependencies, runWebWatch } from "./WebWatch.ts"
 import { makeProfileProgram, type ProfileOptions } from "./Profile.ts"
 import {
   makeGraphProgram,
@@ -689,15 +690,28 @@ const watchCommand = Command.make(
       Flag.withDescription(
         "Print a story's or an executor's transcript as it grows, like tail -f (needs a run started with --transcript)"
       )
+    ),
+    web: Flag.Boolean("web").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription(
+        "Watch in a browser instead: serve the tree on a local URL until Ctrl-C (ADR 0051)"
+      )
     )
   },
   (config) =>
     Effect.gen(function* () {
       const options = yield* watchOptionsFrom(config)
-      yield* makeWatchProgram(
-        { ...options, idleAfterMs: idleAfterFrom(yield* verbEnvironment(options.repo)) },
-        nodeWatchDependencies()
-      )
+      const idleAfterMs = idleAfterFrom(yield* verbEnvironment(options.repo))
+      if (config.web) {
+        if (options.tail !== undefined) {
+          return yield* new ShellUsageError({ message: "watch --web does not take --tail" })
+        }
+        return yield* runWebWatch(
+          { ...options, idleAfterMs },
+          nodeWebWatchDependencies(nodeTraceSources)
+        )
+      }
+      yield* makeWatchProgram({ ...options, idleAfterMs }, nodeWatchDependencies())
     })
 ).pipe(
   Command.withDescription(

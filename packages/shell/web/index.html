@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1440" />
+    <title>llm4ts watch</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- `llm4ts watch --web` (ADR 0051): the page shows the screen of the run's mode. -->
+
+    <!-- ───────────── LIVE ───────────── -->
+    <main id="screen-live" class="screen" data-screen="live">
+      <header class="topbar">
+        <div class="title">
+          <div class="eyebrow-row">
+            <span class="eyebrow">llm4ts watch</span><span class="dot-sep">·</span
+            ><span class="faint mono" data-bind="runId"></span>
+          </div>
+          <h1 data-bind-title></h1>
+        </div>
+        <div class="status-row">
+          <span class="status-pill live" data-live-pill
+            ><i class="pulse"></i><span data-bind="runState">live</span></span
+          >
+          <span class="stat"><b>elapsed</b><span class="time" data-bind="elapsed"></span></span>
+          <span class="stat"><b>stories</b><span data-bind="stories"></span></span>
+          <span class="stat"><b>tokens</b><span data-bind="tokens"></span></span>
+          <span class="stat"><b>cost</b><span data-bind="cost"></span></span>
+        </div>
+      </header>
+      <section class="card flow-card">
+        <div class="card-head">
+          <div class="head-title">
+            <div class="card-title">stage&nbsp;&nbsp;<span data-bind="stage"></span></div>
+            <div class="card-desc" data-bind="agents"></div>
+          </div>
+          <div class="seg" role="group">
+            <button aria-pressed="true">flow</button><button disabled>executors <kbd>e</kbd></button
+            ><button disabled>boards <kbd>b</kbd></button>
+          </div>
+          <div class="legend">
+            <span><i class="sw idle"></i>planned</span><span><i class="sw running"></i>running</span
+            ><span><i class="sw done"></i>done</span><span><i class="sw failed"></i>failed</span
+            ><span><i class="sw waiting"></i>waiting</span>
+          </div>
+        </div>
+        <div class="viz" data-graph></div>
+        <div class="roster">
+          <span class="eyebrow">roster</span>
+          <div class="roster-list" data-roster></div>
+        </div>
+      </section>
+      <div class="lower">
+        <section class="card detail-card" data-detail></section>
+        <section class="card judge-card" data-judge></section>
+        <section class="card timeline-card">
+          <div class="card-head">
+            <div class="head-title">
+              <div class="card-title">events</div>
+              <div class="card-desc" data-bind="timelineDesc"></div>
+            </div>
+            <span class="key"><kbd>l</kbd>full log</span>
+          </div>
+          <ol class="timeline" data-timeline></ol>
+        </section>
+      </div>
+    </main>
+
+    <!-- ───────────── REPLAY ───────────── -->
+    <main id="screen-replay" class="screen" data-screen="replay">
+      <header class="topbar">
+        <div class="title">
+          <div class="eyebrow-row">
+            <span class="eyebrow">llm4ts watch --replay</span><span class="dot-sep">·</span
+            ><span class="faint mono" data-bind="runId"></span>
+          </div>
+          <h1 data-bind-title></h1>
+        </div>
+        <div class="status-row">
+          <span class="status-pill replay"
+            ><i class="pulse"></i><span data-bind="replayLabel">replay ×10</span></span
+          >
+          <span class="stat"><b>at</b><span class="time" data-bind="elapsed"></span></span>
+          <span class="stat"><b>stories</b><span data-bind="stories"></span></span>
+          <span class="stat"><b>tokens</b><span data-bind="tokens"></span></span>
+        </div>
+      </header>
+      <section class="card scrub-card">
+        <div class="card-head">
+          <div class="transport">
+            <button class="btn play" data-act="play">▶ play</button>
+            <button class="btn" data-act="back">◀ step</button>
+            <button class="btn" data-act="fwd">step ▶</button>
+          </div>
+          <div class="head-title">
+            <div class="card-title">
+              <span data-bind="clock"></span>
+              <span class="muted">/ <span data-bind="total"></span></span>
+            </div>
+            <div class="card-desc">
+              seq <span data-bind="seq"></span> of <span data-bind="lastSeq"></span> · trace
+              <span data-bind="trace"></span>
+            </div>
+          </div>
+          <div class="speed">
+            <div class="speed-row">
+              <span class="eyebrow">speed</span>
+              <div class="seg" role="group" data-speed>
+                <button data-speed="1">×1</button><button data-speed="10">×10</button
+                ><button data-speed="50">×50</button>
+              </div>
+            </div>
+            <div class="card-desc">default 10 · each gap = min(Δt, 2s) ÷ speed</div>
+          </div>
+        </div>
+        <div class="scrub">
+          <div class="track" data-track>
+            <div class="played" data-played></div>
+            <div class="markers" data-markers></div>
+            <div class="playhead" data-playhead><span class="tip" data-tip></span></div>
+          </div>
+          <div class="scale">
+            <span>00:00:00</span><span data-bind="mid"></span><span data-bind="total"></span>
+          </div>
+        </div>
+      </section>
+      <section class="card flow-card">
+        <div class="card-head">
+          <div class="head-title">
+            <div class="card-title">stage&nbsp;&nbsp;<span data-bind="stage"></span></div>
+            <div class="card-desc" data-bind="agents"></div>
+          </div>
+          <div class="seg" role="group">
+            <button aria-pressed="true">flow</button><button disabled>executors <kbd>e</kbd></button
+            ><button disabled>boards <kbd>b</kbd></button>
+          </div>
+          <div class="legend">
+            <span><i class="sw idle"></i>planned</span><span><i class="sw running"></i>running</span
+            ><span><i class="sw done"></i>done</span><span><i class="sw failed"></i>failed</span
+            ><span><i class="sw waiting"></i>waiting</span>
+          </div>
+        </div>
+        <div class="viz" data-graph></div>
+        <div class="roster">
+          <span class="eyebrow">roster</span>
+          <div class="roster-list" data-roster></div>
+        </div>
+      </section>
+      <div class="lower">
+        <section class="card detail-card" data-detail></section>
+        <section class="card judge-card" data-judge></section>
+        <section class="card timeline-card">
+          <div class="card-head">
+            <div class="head-title">
+              <div class="card-title">events</div>
+              <div class="card-desc" data-bind="timelineDesc"></div>
+            </div>
+            <span class="key"><kbd>l</kbd>full log</span>
+          </div>
+          <ol class="timeline" data-timeline></ol>
+        </section>
+      </div>
+    </main>
+
+    <p class="boot" data-boot>connecting to llm4ts watch…</p>
+    <script src="app.js"></script>
+  </body>
+</html>

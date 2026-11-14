@@ -134,6 +134,24 @@ export default [
     }
   },
   {
+    // The `llm4ts watch --web` page: a plain browser script (ADR 0051).
+    files: ["packages/shell/web/**/*.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "script",
+      globals: {
+        document: "readonly",
+        location: "readonly",
+        matchMedia: "readonly",
+        fetch: "readonly",
+        EventSource: "readonly",
+        URLSearchParams: "readonly",
+        CSS: "readonly",
+        addEventListener: "readonly"
+      }
+    }
+  },
+  {
     files: ["packages/**/test/**/*.ts"],
     rules: {
       "no-console": "off"
