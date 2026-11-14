@@ -1222,10 +1222,10 @@ const statusLine = (lane: TreeLane, now: number | undefined, idleAfterMs: number
 
 const elapsedMs = (ms: number): string => elapsed(0, ms)
 
-type ChipStatus = "planned" | "running" | "waiting" | "done" | "failed"
+export type ChipStatus = "planned" | "running" | "waiting" | "done" | "failed"
 
 /** Every story once: the board's in plan order, then lanes the board does not list. */
-const chipsOf = (
+export const chipsOf = (
   state: TreeState
 ): ReadonlyArray<{ readonly id: string; readonly status: ChipStatus }> => {
   const laneStatus = (id: string): ChipStatus | undefined =>
@@ -1274,7 +1274,8 @@ const wrapChips = (chips: ReadonlyArray<Line>, width: number): Array<Line> => {
  * What an executor holds: its leases, or — for a trace from before the
  * roster's events — the running lanes that name it.
  */
-const heldBy = (state: TreeState, executor: string): ReadonlyArray<string> => {
+/** What an executor holds now: its leases, else the running lanes it codes. */
+export const heldBy = (state: TreeState, executor: string): ReadonlyArray<string> => {
   const leases = state.leases
     .filter((lease) => lease.executor === executor)
     .map((lease) => `${lease.role}${lease.label === undefined ? "" : ` · ${lease.label}`}`)
@@ -1676,7 +1677,8 @@ const boardsOf = (
 }
 
 /** `codex ×2 · claude ×1`: how many leases each executor holds now. */
-const leaseCounts = (state: TreeState): string =>
+/** `codex ×1 · pi-lmstudio ×1`: the executors holding leases, and how many. */
+export const leaseCounts = (state: TreeState): string =>
   state.executors
     .map(
       (executor) =>
