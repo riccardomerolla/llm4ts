@@ -65,7 +65,7 @@ import {
 } from "@llm4ts/flow/FlowEvents"
 import { FlowContext, type ContextOptions, type FlowContextShape } from "@llm4ts/flow/FlowContext"
 import { makeFlowRecorder, type RunOutcome } from "@llm4ts/flow/FlowRecorder"
-import { timedJudgment, timedSeat, withTimedRole, type TimedSeatOptions } from "@llm4ts/flow/Timing"
+import { timedJudgment, timedSeat, withTimedRole } from "@llm4ts/flow/Timing"
 import { attr, otelContent, withKindSpan } from "@llm4ts/flow/Spans"
 import * as Tracer from "effect/Tracer"
 import { basename } from "node:path"
@@ -270,8 +270,8 @@ const isPiSeat = (config: ConnectorConfig | undefined): config is CliConnectorCo
   config instanceof CliConnectorConfig && config.connectorId.value === ConnectorIds.Pi.value
 
 /**
- * Start the ADR 0016 bridge for a `pi`-coder run, scoped to that run, and
- * return the mapping that points pi's seats at it.
+ * Start the ADR 0016 bridge when one of the run's `seats` is pi, scoped to
+ * that run, and return the mapping that points pi's seats at it.
  *
  * Opting in with `LLM4TS_GEMINI_BRIDGE` but leaving pi unable to reach the
  * bridge is the failure this whole feature exists to avoid, so an
@@ -280,7 +280,8 @@ const isPiSeat = (config: ConnectorConfig | undefined): config is CliConnectorCo
  * is left alone: an explicit choice outranks the default.
  */
 const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats")(function* (
-  options: FlowRunnerOptions,
+  seats: ReadonlyArray<ConnectorConfig | undefined>,
+  workDir: string,
   dependencies: FlowRunnerDependencies,
   environment: Readonly<Record<string, string | undefined>>
 ): Effect.fn.Return<(config: ConnectorConfig) => ConnectorConfig, FlowError, Scope.Scope> {
@@ -288,9 +289,6 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
   if (!settingValue("LLM4TS_GEMINI_BRIDGE", environment)) {
     return identity
   }
-  // The reasoning seat defaults to the coder, so a pi coder makes this a pi
-  // run even when nothing else names pi.
-  const seats = [options.coder, options.reasoning, ...(options.reviewers ?? [])]
   if (!seats.some(isPiSeat)) {
     return identity
   }
@@ -339,7 +337,7 @@ const geminiBridgeSeats = Effect.fn("@llm4ts/runner/FlowRunner.geminiBridgeSeats
   } else {
     yield* runGeminiAcpBridge({
       port: Number(port),
-      cwd: options.workDir,
+      cwd: workDir,
       executor: dependencies.process,
       ...geminiModel
     }).pipe(Effect.mapError(FlowLlmError.from))
@@ -388,21 +386,6 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         join(options.workDir, ".llm4ts", "transcripts", runId)
       )
     : undefined
-  const recorded = (
-    service: LlmServiceShape,
-    lane: string | undefined,
-    role: string,
-    executor?: Effect.Effect<string | undefined>,
-    clone?: Effect.Effect<number | undefined>
-  ): LlmServiceShape =>
-    transcripts === undefined
-      ? service
-      : transcriptSeat(service, transcripts, {
-          role,
-          ...(lane === undefined ? {} : { lane }),
-          ...(executor === undefined ? {} : { executor }),
-          ...(clone === undefined ? {} : { clone })
-        })
   const judgmentLog =
     options.judgmentLog === true
       ? yield* makeJudgmentLog({ files: dependencies.files, root: options.workDir, runId })
@@ -411,13 +394,29 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   const tracker = yield* makeCostTracker()
   yield* tracker.consume(events)
   const reasoning = defaultReasoningConfig(options.coder, options.reasoning)
+  const runEnvironment = options.environment ?? process.env
+  const rosterDocument =
+    options.roster === "none"
+      ? undefined
+      : (options.roster ??
+        (yield* loadRosterDocument({
+          files: dependencies.files,
+          environment: runEnvironment,
+          workDir: options.workDir
+        })))
+  // The seats that can run: a roster's executors, or else the flow's own
+  // (the reasoning seat defaults to the coder, so a pi coder makes this a pi
+  // run even when nothing else names pi). The flow's judgment seat runs on
+  // either path.
+  const runSeats = [
+    ...(rosterDocument === undefined
+      ? [options.coder, reasoning, ...(options.reviewers ?? [])]
+      : rosterDocument.executors.map((spec) => executorConfig(spec, false, runEnvironment))),
+    options.judgment
+  ]
   // Bound to this run's scope: the bridge subprocess and its server go away
   // with the run, matching every other long-lived subprocess here (ADR 0016).
-  const bridged = yield* geminiBridgeSeats(
-    options,
-    dependencies,
-    options.environment ?? process.env
-  )
+  const bridged = yield* geminiBridgeSeats(runSeats, options.workDir, dependencies, runEnvironment)
   // Every seat retries transient provider failures and flaky streams (an
   // empty response or malformed tool call), announcing each attempt on the
   // run's events. Without the wrapper one hiccup from a CLI agent failed the
@@ -513,16 +512,32 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
   // wins; the estimate only fills a gap the backend left. Metering here rather
   // than in each flow also covers the seats a flow never touches directly,
   // notably the judgment seat and the worktree seats `contextFor` rebinds.
-  const runEnvironment = options.environment ?? process.env
   const estimateOptions = estimatedUsageOptionsFromEnv(runEnvironment)
   const meterUsage = options.estimateUsage ?? settingValue("LLM4TS_ESTIMATE_USAGE", runEnvironment)
-  // Every seat's spans (ADR 0026): content only when asked, an estimate on a
-  // call the backend reports no usage for, and who served it when known.
-  const seatOptions = (executor?: Effect.Effect<string | undefined>): TimedSeatOptions => ({
-    content: otelContent(runEnvironment),
-    ...(meterUsage ? { estimate: estimateOptions } : {}),
-    ...(executor === undefined ? {} : { executor })
-  })
+  // How every seat a flow sees is offered, on either path: each call timed
+  // on the lane's events under its role, and transcribed when asked. Its
+  // spans (ADR 0026) carry content only when asked, an estimate on a call the
+  // backend reports no usage for, and who served it when known.
+  const decorated = (
+    seat: LlmServiceShape,
+    role: string,
+    laneEvents: FlowEventsShape,
+    lane: string | undefined,
+    held?: Pick<HeldCoder, "executor" | "clone">
+  ): LlmServiceShape => {
+    const timed = timedSeat(seat, laneEvents, role, {
+      content: otelContent(runEnvironment),
+      ...(meterUsage ? { estimate: estimateOptions } : {}),
+      ...(held === undefined ? {} : { executor: held.executor })
+    })
+    return transcripts === undefined
+      ? timed
+      : transcriptSeat(timed, transcripts, {
+          role,
+          ...(lane === undefined ? {} : { lane }),
+          ...(held === undefined ? {} : { executor: held.executor, clone: held.clone })
+        })
+  }
   const metered = (service: LlmServiceShape): Effect.Effect<LlmServiceShape> =>
     meterUsage
       ? Effect.map(makeEstimatedUsageMeter(service, estimateOptions), (meter) => meter.service)
@@ -650,27 +665,15 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     lane?: string
   ): FlowContextShape =>
     FlowContext.of({
-      // Every call is timed on the lane's events, under its role.
-      reasoning: recorded(
-        timedSeat(seats.reasoning, laneEvents, "reasoning", seatOptions()),
-        lane,
-        "reasoning"
-      ),
-      coder: {
-        ...seats.coder,
-        ...recorded(timedSeat(seats.coder, laneEvents, "coder", seatOptions()), lane, "coder")
-      },
+      reasoning: decorated(seats.reasoning, "reasoning", laneEvents, lane),
+      coder: { ...seats.coder, ...decorated(seats.coder, "coder", laneEvents, lane) },
       judgment: timedJudgment(seats.judgment, laneEvents),
-      judge: recorded(
-        timedSeat(seats.judge, laneEvents, "judgment", seatOptions()),
-        lane,
-        "judgment"
-      ),
+      judge: decorated(seats.judge, "judgment", laneEvents, lane),
       git: makeGitTool(dependencies.process, workDir, laneEvents),
       hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
       events: laneEvents,
       reviewers: seats.reviewers.map((reviewer) =>
-        recorded(timedSeat(reviewer, laneEvents, "reviewer", seatOptions()), lane, "reviewer")
+        decorated(reviewer, "reviewer", laneEvents, lane)
       ),
       coderCapabilities: seats.coder.capabilities,
       userPrompt: options.userPrompt,
@@ -834,20 +837,16 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       lane: string | undefined
     ): RosterView => ({
       forRole: (role) =>
-        recorded(
-          timedSeat(
-            rosterSeat(roster, source, role, workDir, {
-              events: laneEvents,
-              avoid: Effect.map(held.executor, (id) => (id === undefined ? [] : [id])),
-              borrow: held.lease,
-              label
-            }),
-            laneEvents,
-            role,
-            seatOptions()
-          ),
-          lane,
-          role
+        decorated(
+          rosterSeat(roster, source, role, workDir, {
+            events: laneEvents,
+            avoid: Effect.map(held.executor, (id) => (id === undefined ? [] : [id])),
+            borrow: held.lease,
+            label
+          }),
+          role,
+          laneEvents,
+          lane
         ),
       available: roster.available,
       slots: roster.slots,
@@ -870,12 +869,16 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         const view = viewFor(held, workDir, label, laneEvents, lane)
         const judgmentSeat =
           options.judgment === undefined
-            ? view.forRole("judge")
+            ? undefined
             : yield* resolveSeat(options.judgment, workDir).pipe(ScopeModule.provide(runScope))
-        const judged = yield* judgmentFor(judgmentSeat, judgmentConfig, runEnvironment)
+        const judge =
+          judgmentSeat === undefined
+            ? view.forRole("judge")
+            : decorated(judgmentSeat, "judgment", laneEvents, lane)
+        const judged = yield* judgmentFor(judgmentSeat ?? judge, judgmentConfig, runEnvironment)
         // Over the roster's judge seat the calls are timed already; name them.
         const judgment =
-          options.judgment === undefined
+          judgmentSeat === undefined
             ? {
                 ...judged,
                 judge: (input: JudgmentInput) => withTimedRole("judgment", judged.judge(input))
@@ -883,15 +886,9 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
             : timedJudgment(judged, laneEvents)
         return FlowContext.of({
           reasoning: view.forRole(rebind ? "planner" : "reviewer"),
-          coder: recorded(
-            timedSeat(held.service, laneEvents, "coder", seatOptions(held.executor)),
-            lane,
-            "coder",
-            held.executor,
-            held.clone
-          ),
+          coder: decorated(held.service, "coder", laneEvents, lane, held),
           judgment,
-          judge: judgmentSeat,
+          judge,
           git: makeGitTool(dependencies.process, workDir, laneEvents),
           hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
           events: laneEvents,
@@ -945,15 +942,6 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     return yield* contextIn(options.workDir, rootCoder, "the run", true, events)
   })
 
-  const rosterDocument =
-    options.roster === "none"
-      ? undefined
-      : (options.roster ??
-        (yield* loadRosterDocument({
-          files: dependencies.files,
-          environment: runEnvironment,
-          workDir: options.workDir
-        })))
   if (rosterDocument !== undefined) {
     const context = yield* rosterContext(rosterDocument)
     return {
