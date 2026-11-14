@@ -3,3 +3,11 @@ packages:
   - examples
   - flows
   - kits
+
+# The watch --web page takes only geist's font files (ADR 0051); its Next.js
+# peer is for the package's next/font loader, which nothing here uses.
+packageExtensions:
+  geist:
+    peerDependenciesMeta:
+      next:
+        optional: true

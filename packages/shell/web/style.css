@@ -1,5 +1,20 @@
 /* llm4ts watch --web (ADR 0051), ported from the approved v2 design.
    Tokens: llm4ts "Agentic Flows in Motion" :root (riccardomerolla.github.io/llm4ts) + xterm 256 tree colours from AgentTree.ts */
+/* Geist and Geist Mono, served from fonts/ (copied from the `geist` package at build, OFL in fonts/OFL.txt). */
+@font-face {
+  font-family: "Geist";
+  src: url("fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 :root {
   --bg: #09090b;
   --panel: #121214;
@@ -1095,4 +1110,70 @@ body.frozen *,
 body.frozen *::before,
 body.frozen *::after {
   animation-play-state: paused !important;
+}
+
+/* Colours the page once wrote in style attributes, as classes, so the page
+   runs under a Content-Security-Policy with no inline styles (ADR 0051). */
+.tone-orchestrator {
+  background: var(--t-orch);
+}
+.tone-judgment {
+  background: var(--t-judgment);
+}
+.tone-judge {
+  background: var(--t-judge);
+}
+.tone-running {
+  background: var(--run);
+}
+.tone-log {
+  background: var(--t-log);
+}
+.tone-tool {
+  background: var(--node-time);
+}
+.tone-done {
+  background: var(--ok-fg);
+}
+.tone-failed {
+  background: var(--err);
+}
+.tone-issue {
+  background: var(--int);
+}
+.exec i.dot-out {
+  background: var(--err);
+}
+.exec i.dot-busy {
+  background: var(--run);
+}
+.exec i.dot-idle {
+  background: var(--idle);
+}
+.kv > span.v-time {
+  color: var(--node-time);
+}
+.kv > span.v-err {
+  color: var(--err);
+}
+.kv > span.v-int {
+  color: var(--int);
+}
+.kv > span.v-faint {
+  color: var(--faint);
+}
+.kv > span.v-dim {
+  color: var(--t-dim);
+}
+.kv > span.v-judge {
+  color: var(--t-judge);
+}
+.round.latest .round-head .eyebrow {
+  color: var(--t-judgment);
+}
+.round.older .round-head .eyebrow {
+  color: var(--muted);
+}
+.mini.judge.unleased {
+  opacity: 0.5;
 }

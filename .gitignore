@@ -19,6 +19,9 @@ repos/
 .llm4ts/
 packages/shell/flows/
 packages/shell/kits/
+# The watch --web page bundle and fonts, written by scripts/build-web.mjs.
+packages/shell/web/app.js
+packages/shell/web/fonts/
 
 # Autonomous loop state (tools/ralph)
 progress-auto.txt

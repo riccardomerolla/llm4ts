@@ -23,6 +23,7 @@
     "./ExecutorRoster": "./dist/ExecutorRoster.js",
     "./FlowArgs": "./dist/FlowArgs.js",
     "./FlowRunner": "./dist/FlowRunner.js",
+    "./Format": "./dist/Format.js",
     "./GeminiBridgeServe": "./dist/GeminiBridgeServe.js",
     "./Graph": "./dist/Graph.js",
     "./Kits": "./dist/Kits.js",

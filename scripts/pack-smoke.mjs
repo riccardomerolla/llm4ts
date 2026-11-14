@@ -4,7 +4,7 @@
  * published artifact (exports maps, dist output, dependency metadata) instead
  * of the workspace src aliases used by tests. Run after `pnpm build`.
  */
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import * as path from "node:path"
@@ -24,6 +24,62 @@ const run = (command, args, options = {}) =>
     encoding: "utf8",
     stdio: ["ignore", "pipe", "inherit"],
     ...options
+  })
+
+/**
+ * Starts `llm4ts watch --web`, fetches what the page loads, and stops it with
+ * SIGINT; fails unless every file is there and the server says `detached`.
+ */
+const serveWebWatch = (bin, { cwd, env, args }) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(bin, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] })
+    let out = ""
+    let checked
+    const fail = (error) => {
+      child.kill("SIGKILL")
+      reject(error)
+    }
+    const timer = setTimeout(() => fail(new Error(`watch --web did not finish: ${out}`)), 20_000)
+    child.stderr.on("data", (chunk) => (out += chunk))
+    child.stdout.on("data", (chunk) => {
+      out += chunk
+      const address = /open (http:\/\/127\.0\.0\.1:\d+)\//u.exec(out)?.[1]
+      if (address === undefined || checked !== undefined) return
+      const get = async (file) => {
+        const response = await fetch(`${address}/${file}`)
+        if (!response.ok) throw new Error(`watch --web: /${file} answered ${response.status}`)
+        return response
+      }
+      checked = (async () => {
+        const page = await (await get("")).text()
+        if (!page.includes('src="app.js"')) throw new Error("watch --web: the page has no app.js")
+        const app = await (await get("app.js")).arrayBuffer()
+        const fonts = await Promise.all(
+          ["fonts/Geist-Variable.woff2", "fonts/GeistMono-Variable.woff2"].map(async (font) => {
+            const response = await get(font)
+            if (response.headers.get("content-type") !== "font/woff2") {
+              throw new Error(`watch --web: ${font} is ${response.headers.get("content-type")}`)
+            }
+            return (await response.arrayBuffer()).byteLength
+          })
+        )
+        const run = await (await get("api/run")).json()
+        child.kill("SIGINT")
+        return {
+          appBytes: app.byteLength,
+          fontBytes: fonts.reduce((a, b) => a + b, 0),
+          steps: run.steps.length
+        }
+      })().catch(fail)
+    })
+    child.on("exit", (code) => {
+      clearTimeout(timer)
+      if (code !== 0 || !out.includes("detached")) {
+        reject(new Error(`watch --web exited ${code}: ${out}`))
+        return
+      }
+      checked.then(resolve, reject)
+    })
   })
 
 const workDir = mkdtempSync(path.join(tmpdir(), "llm4ts-pack-smoke-"))
@@ -197,6 +253,22 @@ console.log(
     throw new Error(`installed built-in flow did not launch: ${launch}`)
   }
   console.log("pack smoke: installed built-in flow launched from node_modules")
+
+  // The installed shell serves the watch --web page (ADR 0051): its bundle,
+  // its fonts and its frames, then detaches cleanly on Ctrl-C.
+  const tracePath = path.join(workDir, "trace.jsonl")
+  writeFileSync(
+    tracePath,
+    readFileSync(path.join(repoRoot, "packages/runner/test/fixtures/agent-tree.trace.jsonl"))
+  )
+  const web = await serveWebWatch(path.join(workDir, "node_modules", ".bin", "llm4ts"), {
+    cwd: workDir,
+    env: { ...process.env, XDG_CONFIG_HOME: path.join(workDir, "xdg-config") },
+    args: ["watch", "--web", "--replay", tracePath]
+  })
+  console.log(
+    `pack smoke: watch --web served the page (app.js ${web.appBytes} B, fonts ${web.fontBytes} B, ${web.steps} steps) and detached`
+  )
 } finally {
   rmSync(workDir, { recursive: true, force: true })
 }

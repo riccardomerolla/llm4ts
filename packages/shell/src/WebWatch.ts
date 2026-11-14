@@ -1,12 +1,13 @@
 // @internal: `llm4ts watch --web`, served by the shell's own CLI
 import { readFileSync } from "node:fs"
-import { createServer } from "node:http"
+import { createServer, type Server } from "node:http"
 import { basename } from "node:path"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as HttpRouter from "effect/http/HttpRouter"
@@ -14,6 +15,7 @@ import * as HttpServer from "effect/http/HttpServer"
 import type { ServeError } from "effect/http/HttpServerError"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
+import type * as NetAddress from "effect/net/NetAddress"
 import type { FlowError } from "@llm4ts/flow/FlowError"
 import { readTrace } from "@llm4ts/flow/Replay"
 import { reduceTree } from "@llm4ts/runner/AgentTree"
@@ -27,13 +29,13 @@ import {
   type WatchTarget,
   type WatchTargetMissing
 } from "./Watch.ts"
+import { WebFrame, WebFrameJson, WebRun } from "./WebFrame.ts"
 import {
   advance,
   foldSteps,
   frameOf,
   stepsOfTrace,
   type WebFold,
-  type WebFrame,
   type WebStep
 } from "./WebWatchView.ts"
 
@@ -56,21 +58,39 @@ export type WebWatchOptions = Pick<
   readonly port?: number
 }
 
-/** The page's files, under `packages/shell/web/`. */
-const webAssets: ReadonlyArray<{
+/**
+ * The page's files, under `packages/shell/web/`. `pnpm build` writes
+ * `app.js` (bundled from `web-src/`) and copies the Geist fonts and their
+ * licence into `fonts/` (scripts/build-web.mjs).
+ */
+export const webAssets: ReadonlyArray<{
   readonly path: HttpRouter.PathInput
   readonly file: string
   readonly type: string
 }> = [
   { path: "/", file: "index.html", type: "text/html; charset=utf-8" },
   { path: "/style.css", file: "style.css", type: "text/css; charset=utf-8" },
-  { path: "/app.js", file: "app.js", type: "text/javascript; charset=utf-8" }
+  { path: "/app.js", file: "app.js", type: "text/javascript; charset=utf-8" },
+  { path: "/fonts/Geist-Variable.woff2", file: "fonts/Geist-Variable.woff2", type: "font/woff2" },
+  {
+    path: "/fonts/GeistMono-Variable.woff2",
+    file: "fonts/GeistMono-Variable.woff2",
+    type: "font/woff2"
+  },
+  { path: "/fonts/OFL.txt", file: "fonts/OFL.txt", type: "text/plain; charset=utf-8" }
 ]
+
+/**
+ * Everything the page loads comes from this server: its script, its
+ * stylesheet, its fonts, its frames. Nothing inline, nothing remote.
+ */
+export const contentSecurityPolicy =
+  "default-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
 
 export interface WebWatchDependencies extends TraceSources {
   readonly write: (text: string) => Effect.Effect<void>
-  /** A page file's text. */
-  readonly asset: (file: string) => string | undefined
+  /** A page file's bytes. */
+  readonly asset: (file: string) => Uint8Array | undefined
   /** Completes when the reader detaches (Ctrl-C). */
   readonly detach: Effect.Effect<void>
 }
@@ -83,35 +103,65 @@ const FrameQuery = Schema.Struct({
   speed: Schema.optional(Schema.FiniteFromString)
 })
 
-/** The run as the page first sees it: its mode, its steps, its whole timeline for the scrubber. */
-export interface WebRun {
-  readonly mode: "live" | "replay"
-  readonly runId: string | undefined
-  readonly trace: string
-  readonly speed: number
-  readonly steps: ReadonlyArray<{ readonly seq: number; readonly at: number }>
-  readonly lastSeq: number | undefined
-  readonly timeline: WebFold["timeline"]
-}
-
 interface Loaded {
   readonly runId: string | undefined
   readonly lastSeq: number | undefined
   readonly steps: ReadonlyArray<WebStep>
 }
 
-const sse = (event: string, data: unknown): string =>
-  `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+const encodeFrame = Schema.encodeSync(WebFrameJson)
+
+/** One server-sent event; `data` is JSON on a single line. */
+const sse = (event: string, data: string): string => `event: ${event}\ndata: ${data}\n\n`
+
+const frameEvent = (frame: WebFrame): string => sse("frame", encodeFrame(frame))
+const endEvent = sse("end", "{}")
+
+/**
+ * The `Host` values a request may carry: the loopback names of the port the
+ * server listens on. Anything else is refused, so a page on another origin
+ * cannot read the run by rebinding its own name to 127.0.0.1.
+ */
+export const allowedHosts = (port: number): ReadonlySet<string> =>
+  new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`])
+
+const portOf = (address: NetAddress.SocketAddress): number | undefined =>
+  "port" in address ? address.port : undefined
+
+/** Refuses a foreign `Host` (403); stamps every answer as not to be sniffed or cached. */
+const guard = HttpRouter.middleware(
+  Effect.gen(function* () {
+    const server = yield* HttpServer.HttpServer
+    const port = portOf(server.address)
+    const allowed = port === undefined ? new Set<string>() : allowedHosts(port)
+    return (app) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const host = request.headers["host"]
+        const response =
+          host !== undefined && allowed.has(host.toLowerCase())
+            ? yield* app
+            : HttpServerResponse.text("forbidden host", { status: 403 })
+        return HttpServerResponse.setHeaders(response, {
+          "x-content-type-options": "nosniff",
+          "cache-control": "no-store"
+        })
+      })
+  }),
+  { global: true }
+)
 
 /**
  * The routes: the page, `/api/run`, `/api/frame?count=` (a replay's scrub),
- * and `/api/stream?count=&speed=` (a replay playing, or a live run followed).
+ * and `/api/stream?count=&speed=` (a replay playing, or a live run followed),
+ * behind the `Host` guard. Needs the `HttpServer` it is served on, for the
+ * port the guard allows.
  */
 export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
   options: WebWatchOptions,
   dependencies: WebWatchDependencies
 ): Effect.fn.Return<
-  Layer.Layer<never, never, HttpRouter.HttpRouter>,
+  Layer.Layer<never, never, HttpRouter.HttpRouter | HttpServer.HttpServer>,
   FlowError | WatchTargetMissing
 > {
   const target: WatchTarget = yield* resolveTraceTarget(options, dependencies)
@@ -152,7 +202,7 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
   const replayStream = (loaded: Loaded, count: number, speed: number): Stream.Stream<string> => {
     const { steps } = loaded
     const frame = (fold: WebFold, gapMs: number): string =>
-      sse("frame", frameOf(fold, { steps: steps.length, lastSeq: loaded.lastSeq, gapMs }))
+      frameEvent(frameOf(fold, { steps: steps.length, lastSeq: loaded.lastSeq, gapMs }))
     const first = foldSteps(start, steps.slice(0, count))
     return Stream.make(frame(first, 0)).pipe(
       Stream.concat(
@@ -169,20 +219,19 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
           ] as const)
         })
       ),
-      Stream.concat(Stream.make(sse("end", {})))
+      Stream.concat(Stream.make(endEvent))
     )
   }
 
-  /** A live run: a frame now and every poll, until its trace says it ended. */
-  const liveStream: Stream.Stream<string, FlowError> = Stream.unfold(true, (going) =>
-    going
-      ? Effect.gen(function* () {
-          const frame = yield* Effect.flatMap(load, liveFrame)
-          yield* Effect.sleep(pollInterval)
-          return [sse("frame", frame), frame.ended === undefined] as const
-        })
-      : Effect.succeed(undefined)
-  ).pipe(Stream.concat(Stream.make(sse("end", {}))))
+  /** A live run: the trace re-read now and every poll, until it says the run ended. */
+  const liveStream: Stream.Stream<string, FlowError> = Stream.fromEffectSchedule(
+    Effect.flatMap(load, liveFrame),
+    Schedule.spaced(pollInterval)
+  ).pipe(
+    Stream.takeUntil((frame) => frame.ended !== undefined),
+    Stream.map(frameEvent),
+    Stream.concat(Stream.make(endEvent))
+  )
 
   const query = HttpServerRequest.schemaSearchParams(FrameQuery)
   const failed = (error: unknown): Effect.Effect<HttpServerResponse.HttpServerResponse> =>
@@ -197,16 +246,21 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
 
   const pages = webAssets.map((asset) =>
     HttpRouter.route("GET", asset.path, () => {
-      const text = dependencies.asset(asset.file)
+      const bytes = dependencies.asset(asset.file)
       return Effect.succeed(
-        text === undefined
+        bytes === undefined
           ? HttpServerResponse.text("missing", { status: 404 })
-          : HttpServerResponse.text(text, {
+          : HttpServerResponse.uint8Array(bytes, {
               contentType: asset.type,
-              headers: { "cache-control": "no-store" }
+              headers:
+                asset.path === "/" ? { "content-security-policy": contentSecurityPolicy } : {}
             })
       )
     })
+  )
+  // The page names no icon; this keeps the browser's own request quiet.
+  const favicon = HttpRouter.route("GET", "/favicon.ico", () =>
+    Effect.succeed(HttpServerResponse.empty({ status: 204 }))
   )
 
   const run = HttpRouter.route(
@@ -214,17 +268,15 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
     "/api/run",
     Effect.gen(function* () {
       const loaded = yield* load
-      const timeline = foldSteps(start, loaded.steps).timeline
-      const body: WebRun = {
+      return yield* HttpServerResponse.schemaJson(WebRun)({
         mode: replay ? "replay" : "live",
         runId: loaded.runId,
         trace: basename(target.tracePath),
         speed: speedOf(undefined),
         steps: loaded.steps.map((step) => ({ seq: step.seq, at: step.at })),
         lastSeq: loaded.lastSeq,
-        timeline
-      }
-      return yield* HttpServerResponse.json(body)
+        timeline: foldSteps(start, loaded.steps).timeline
+      })
     }).pipe(Effect.catch(failed))
   )
 
@@ -241,7 +293,7 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
               Math.min(loaded.steps.length, Math.max(1, asked.count ?? loaded.steps.length))
             )
           : yield* liveFrame(loaded)
-      return yield* HttpServerResponse.json(body)
+      return yield* HttpServerResponse.schemaJson(WebFrame)(body)
     }).pipe(Effect.catch(failed))
   )
 
@@ -260,12 +312,12 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
         : liveStream
       return HttpServerResponse.stream(Stream.encodeText(body), {
         contentType: "text/event-stream",
-        headers: { "cache-control": "no-store", connection: "keep-alive" }
+        headers: { connection: "keep-alive" }
       })
     }).pipe(Effect.catch(failed))
   )
 
-  return HttpRouter.addAll([...pages, run, frame, stream])
+  return Layer.mergeAll(HttpRouter.addAll([...pages, favicon, run, frame, stream]), guard)
 })
 
 /** Serves the page until the reader detaches; prints where to open it. */
@@ -282,13 +334,35 @@ export const runWebWatch = Effect.fn("@llm4ts/shell/WebWatch.run")(function* (
       )
     )
   )
+  let server: Server | undefined
   const served = Layer.launch(
     Layer.mergeAll(
       HttpRouter.serve(app, { disableLogger: true, disableListenLog: true }),
       announce
-    ).pipe(Layer.provide(NodeHttpServer.layer(createServer, { host, port: options.port ?? 0 })))
+    ).pipe(
+      Layer.provide(
+        NodeHttpServer.layer(
+          () => {
+            server = createServer()
+            return server
+          },
+          { host, port: options.port ?? 0 }
+        )
+      )
+    )
   )
-  yield* Effect.raceFirst(served, dependencies.detach)
+  // A page holds its event stream open while the run is live, and the browser
+  // reopens it on the same keep-alive socket when it ends. A graceful close
+  // waits for those sockets, so it would never finish: on detach the server
+  // stops listening and drops every connection, then the layer shuts down.
+  const detach = Effect.andThen(
+    dependencies.detach,
+    Effect.sync(() => {
+      server?.close()
+      server?.closeAllConnections()
+    })
+  )
+  yield* Effect.raceFirst(served, detach)
   yield* dependencies.write("detached\n")
 })
 
@@ -297,9 +371,9 @@ export const runWebWatch = Effect.fn("@llm4ts/shell/WebWatch.run")(function* (
 const webDir = new URL("../web/", import.meta.url)
 
 /** A page file from `packages/shell/web/`, next to `src/` and `dist/` alike. */
-export const nodeWebAsset = (file: string): string | undefined => {
+export const nodeWebAsset = (file: string): Uint8Array | undefined => {
   try {
-    return readFileSync(new URL(file, webDir), "utf8")
+    return readFileSync(new URL(file, webDir))
   } catch {
     return undefined
   }

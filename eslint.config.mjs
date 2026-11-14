@@ -62,6 +62,7 @@ export default [
   {
     ignores: [
       "**/dist/**",
+      "**/.tsbuildinfo/**",
       "**/coverage/**",
       "**/node_modules/**",
       "**/.repos/**",
@@ -76,6 +77,8 @@ export default [
       "kits/*/scaffolds/**",
       "packages/shell/flows/**",
       "packages/shell/kits/**",
+      // The `watch --web` page bundle, built from packages/shell/web-src (ADR 0051).
+      "packages/shell/web/app.js",
       // Demo-bank fixture repos: standalone toolchains (the Next.js fixture
       // lints itself) and deliberately legacy-styled J2EE content.
       "kits/*/fixtures/**",
@@ -131,24 +134,6 @@ export default [
       "object-shorthand": "error",
       "prefer-const": "error",
       "require-yield": "off"
-    }
-  },
-  {
-    // The `llm4ts watch --web` page: a plain browser script (ADR 0051).
-    files: ["packages/shell/web/**/*.js"],
-    languageOptions: {
-      ecmaVersion: "latest",
-      sourceType: "script",
-      globals: {
-        document: "readonly",
-        location: "readonly",
-        matchMedia: "readonly",
-        fetch: "readonly",
-        EventSource: "readonly",
-        URLSearchParams: "readonly",
-        CSS: "readonly",
-        addEventListener: "readonly"
-      }
     }
   },
   {

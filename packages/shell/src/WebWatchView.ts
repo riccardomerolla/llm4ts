@@ -11,16 +11,23 @@ import {
   type ChipStatus,
   type TreeInput,
   type TreeLogEntry,
-  type TreeState,
-  type TreeVerdict
+  type TreeState
 } from "@llm4ts/runner/AgentTree"
 import { presentationOf } from "@llm4ts/runner/EventPresentation"
+import type {
+  WebExecutor,
+  WebFrame,
+  WebStory,
+  WebTimelineItem,
+  WebTone,
+  WebVerdict
+} from "./WebFrame.ts"
 
 /**
  * `llm4ts watch --web` (ADR 0051): what the browser draws, folded from the
  * same `TreeInput`s and `reduceTree` as the terminal tree. Pure: the server
- * folds, this module projects a `TreeState` into a frame of plain JSON, and
- * the page only lays it out.
+ * folds, this module projects a `TreeState` into a `WebFrame` (WebFrame.ts),
+ * and the page only lays it out.
  */
 
 /** One trace line the tree reads, with the `seq` the trace gave it. */
@@ -35,26 +42,6 @@ export const stepsOfTrace = (lines: ReadonlyArray<TraceLine>): ReadonlyArray<Web
   lines.flatMap((line) =>
     treeInputsOfTrace([line]).map((input) => ({ seq: line.seq, at: input.at, input }))
   )
-
-/** How a timeline item is coloured: the tree's styles, and the node states. */
-export type WebTone =
-  | "orchestrator"
-  | "judgment"
-  | "judge"
-  | "running"
-  | "log"
-  | "tool"
-  | "done"
-  | "failed"
-  | "issue"
-
-export interface WebTimelineItem {
-  readonly seq: number
-  readonly at: number
-  readonly who: string
-  readonly what: string
-  readonly tone: WebTone
-}
 
 /** What the tree does not keep about a lane, read from the same events. */
 interface LaneNotes {
@@ -87,7 +74,7 @@ export interface WebFold {
   readonly seq: number | undefined
   readonly state: TreeState
   readonly timeline: ReadonlyArray<WebTimelineItem>
-  readonly verdicts: ReadonlyArray<TreeVerdict & { readonly seq: number }>
+  readonly verdicts: ReadonlyArray<WebVerdict>
   readonly notes: Readonly<Record<string, LaneNotes>>
 }
 
@@ -242,68 +229,6 @@ export const foldSteps = (start: TreeState, steps: ReadonlyArray<WebStep>): WebF
   steps.reduce(advance, startFold(start))
 
 // ── the frame ───────────────────────────────────────────────────────────────
-
-export interface WebStory {
-  readonly id: string
-  readonly status: ChipStatus
-  readonly executor: string | undefined
-  readonly stage: string | undefined
-  readonly startedAt: number | undefined
-  readonly endedAt: number | undefined
-  readonly tokens: number
-  readonly prompt: number
-  readonly completion: number
-  readonly model: string | undefined
-  readonly merged: boolean
-  readonly failStage: string | undefined
-  readonly failMessage: string | undefined
-  readonly tools: ReadonlyArray<string>
-  readonly activity: { readonly text: string; readonly since: number } | undefined
-  readonly note: string | undefined
-  readonly tasks: number
-}
-
-export interface WebExecutor {
-  readonly name: string
-  readonly state: "busy" | "idle" | "out"
-  readonly text: string
-}
-
-export interface WebFrame {
-  /** Steps folded, of `steps`; a live frame has folded them all. */
-  readonly count: number
-  readonly steps: number
-  readonly seq: number | undefined
-  readonly lastSeq: number | undefined
-  readonly startedAt: number | undefined
-  readonly now: number | undefined
-  readonly ended: string | undefined
-  readonly title: string
-  readonly action: string | undefined
-  readonly stage: string
-  readonly agents: string
-  readonly counts: Readonly<Record<ChipStatus, number>> & { readonly total: number }
-  readonly tokens: number
-  readonly costUsd: number
-  readonly stories: ReadonlyArray<WebStory>
-  /** The story the detail card follows until the reader picks one. */
-  readonly focus: string | undefined
-  readonly judge: {
-    readonly executor: string | undefined
-    readonly state: "idle" | "waiting" | "running"
-    readonly reviews: number
-    readonly verdicts: number
-    readonly borrowed: number
-  }
-  readonly verdicts: ReadonlyArray<TreeVerdict & { readonly seq: number }>
-  readonly merged: number
-  readonly roster: ReadonlyArray<WebExecutor>
-  /** The latest items; `timelineCount` says how many there are in all. */
-  readonly timeline: ReadonlyArray<WebTimelineItem>
-  readonly timelineCount: number
-  /** The replay's wait before this frame, so the playhead moves as long. */
-  readonly gapMs: number
-}
 
 const executorOf = (state: TreeState, name: string): WebExecutor => {
   const out = state.exclusions.find((exclusion) => exclusion.executor === name)

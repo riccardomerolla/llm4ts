@@ -13,7 +13,7 @@ import {
 import type { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { estimateCostUsd } from "@llm4ts/flow/PriceList"
 import { settingValue } from "@llm4ts/flow/Settings"
-import { formatCount } from "./Terminal.ts"
+import { clock, dollars, elapsed, formatCount } from "./Format.ts"
 
 /**
  * The agent tree (ADR 0022): a full-screen view of a running or finished
@@ -933,13 +933,6 @@ const beside = (
   )
 }
 
-const clock = (from: number | undefined, to: number): string => {
-  const seconds = Math.max(0, Math.round((to - (from ?? to)) / 1_000))
-  return [Math.floor(seconds / 3_600), Math.floor(seconds / 60) % 60, seconds % 60]
-    .map((part) => String(part).padStart(2, "0"))
-    .join(":")
-}
-
 const logStyle: Readonly<Record<LogSource, Style>> = {
   lane: "judgment",
   run: "orchestrator",
@@ -961,15 +954,6 @@ const logOf = (state: TreeState, count: number): Array<Line> => {
         span(" "),
         span(entry.what)
       ])
-}
-
-const dollars = (usd: number): string => `~$${usd.toFixed(2)}`
-
-const elapsed = (from: number | undefined, to: number | undefined): string => {
-  const seconds = Math.max(0, Math.floor(((to ?? 0) - (from ?? to ?? 0)) / 1_000))
-  return seconds < 60
-    ? `${seconds}s`
-    : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`
 }
 
 const colours: Readonly<Record<Style, string>> = {

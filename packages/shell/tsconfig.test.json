@@ -3,6 +3,7 @@
   "include": ["test"],
   "references": [
     { "path": "tsconfig.src.json" },
+    { "path": "tsconfig.web.json" },
     { "path": "../core/tsconfig.src.json" },
     { "path": "../flow/tsconfig.src.json" },
     { "path": "../runner/tsconfig.src.json" }

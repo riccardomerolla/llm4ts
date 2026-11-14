@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": ["web-src"],
+  "references": [{ "path": "tsconfig.src.json" }, { "path": "../runner/tsconfig.src.json" }],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": "web-src",
+    "outDir": ".tsbuildinfo/web",
+    "emitDeclarationOnly": true,
+    "rewriteRelativeImportExtensions": false,
+    "allowImportingTsExtensions": true,
+    "tsBuildInfoFile": ".tsbuildinfo/web.tsbuildinfo",
+    "paths": {
+      "@llm4ts/core/*": ["../core/src/*"],
+      "@llm4ts/flow/*": ["../flow/src/*"],
+      "@llm4ts/runner/*": ["../runner/src/*"]
+    }
+  }
+}
