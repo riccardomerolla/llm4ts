@@ -1,5 +1,30 @@
 # Changelog
 
+## 4.2.0
+
+### Fixed
+
+- **A roster run times and transcribes the flow's own judgment seat.** With
+  a roster in force and a judgment seat the flow names
+  (`LLM4TS_JUDGMENT_PROVIDER`), calls on `context.judge` (the `epic-retro`
+  seat, among others) left no `Timed` line in the trace, no row in
+  `llm4ts profile` and no transcript entry. They now do, labelled
+  `judgment` as in a plain run.
+- **`LLM4TS_GEMINI_BRIDGE` follows the seats that run.** Under a roster the
+  bridge started only when the flow's own seats named pi, and those seats do
+  not run: a roster with a pi executor and a flow coder of claude left pi
+  without the bridge model, and a pi flow coder with a roster of no pi
+  started a bridge nothing used, or failed the run when pi's `models.json`
+  offered no bridge model. The bridge now starts when a roster executor is
+  pi, or, without a roster, when the flow's coder, reasoning, reviewer or
+  judgment seat is.
+
+### Changed
+
+- The plain and roster paths of the runner now offer every seat through one
+  decorator (timing and transcript), so the two cannot drift apart again.
+  Nothing else changes for a user.
+
 ## 4.1.0
 
 ### Breaking

@@ -203,3 +203,16 @@ tokens differently (input and output, in flight, estimated), reads the clock
 rather than the event, and opens a lane on any laned event, so moving it onto
 the tree would change what it prints. Golden tests over three traces now pin
 what each run view prints (`RunViews.golden.test.ts` in runner and shell).
+
+## Phase 3, unit 14: the smaller deepening (2026-11-13)
+
+The plain path did not become a roster of one. That would add
+`context.roster`, which the epic and taskforce flows branch on, rename the
+trace labels, merge reviewers into one seat and force them read-only.
+Instead, both builders offer every seat through one local `decorated` in
+`FlowRunner.ts` (timing and transcript). Seat resolution was already shared
+through `resolveSeat` since unit 2, and the `deniedPaths` drift was gone.
+Two drifts were fixed: a roster run did not time or transcribe the flow's
+own judgment seat, and the Gemini bridge started for the flow's seats rather
+than the roster's. `SeatParity.test.ts` pins both paths, with the intended
+differences named; `FlowRunner.test.ts` is unchanged.
