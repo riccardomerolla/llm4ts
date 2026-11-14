@@ -1,0 +1,2 @@
+failed, run-views, 1 min: 1 stories done, 0 active, 1 failed (S2: failed · gates failed: pnpm test), $0.72
+failed, epic-stories, 1 min: 1 stories done, 0 active, 1 failed (S2: failed · gates failed: pnpm test), $0.72

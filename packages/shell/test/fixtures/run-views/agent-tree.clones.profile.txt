@@ -1,0 +1,27 @@
+llm4ts profile · 58s wall · 5 stories
+
+Where the time goes
+  1. stories queued before starting (dependencies, free coder slots): 2m59s in all
+  2. S01: a coder turn still running for 32s (3 tool calls so far)
+  3. gate `pnpm test`: 1 run, 18s (17% of story time)
+
+Story time
+  category     time  share
+  model         32s    30%
+  coder tools    0s     0%
+  gates         18s    17%
+  git + merge    0s     0%
+  waiting        0s     0%
+  unaccounted   56s    53%
+
+Stories
+  story   status  wall  queued  model  tools  gates  git+merge  wait  other  turns  avg turn  steps/turn  model/step  prompt ×
+  S01    running   47s     10s    32s     0s     0s         0s    0s    15s      0        0s                              1.0×
+  S02    running   27s     30s     0s     0s     0s         0s    0s    27s      0        0s
+  S03    running   20s     37s     0s     0s    18s         0s    0s     2s      0        0s
+  S04    running   10s     47s     0s     0s     0s         0s    0s    10s      0        0s
+  S05    running    2s     55s     0s     0s     0s         0s    0s     2s      0        0s
+
+Gates
+  command    runs  total  avg  failed
+  pnpm test     1    18s  18s       0

@@ -1,0 +1,33 @@
+                                  LLM4TS AGENT TREE  ·  agent-tree                                  
+════════════════════════════════════════════════════════════════════════════════════════════════════
+                                                                                                    
+┌────────────────────────┐               ┌─ agent-tree ───────────────────────────────┐             
+│       JUDGE SEAT       │               │ stage  implement stories                   │             
+│    claude · on call    │               │ stories 4  elapsed 7m10s                   │             
+│                        │               └────────────────────────────────────────────┘             
+│ last verdict:          │                                     •                                    
+│ » accounts r2: cleared │  ┌─ JUDGMENT · accounts r2 ─────────────────────────────────────────────┐
+│                        │  │ provides        ██████████  2/2                                      │
+│ reviews            1   │  │ scope           ██████████  2/2                                      │
+│ verdicts           2   │  │ house-style     ██████████  2/2                                      │
+└────────────────────────┘  │ tests           ██████████  2/2                                      │
+                            │ cleared → merge                                                      │
+                            └──────────────────────────────────────────────────────────────────────┘
+                                         agents · 2 running · codex ×1 · pi-lmstudio ×1             
+                            ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  
+                            │ codex        │  │ pi-lmstudio  │  │ lemonade     │  │ claude       │  
+                            │ coder · ove… │  │ coder · pay… │  │ no lease     │  │ no lease     │  
+                            │ ◐ busy       │  │ ◐ busy       │  │ ✗ out: unti… │  │ ○ idle       │  
+                            └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘  
+                                                                                                    
+                            ✓ accounts  ◐ payments  ✗ iban  ◐ overview                              
+                                                                                                    
+┌─ session log ────────────────────────────────────────────────────────────────────────────────────┐
+│ 00:05:30  judge            accounts r1 · 1 issue → coder                                         │
+│ 00:06:35  judge            accounts r2 · cleared → merge                                         │
+│ 00:06:39  accounts         merged into epic/conto-bonifico                                       │
+│ 00:06:40  accounts         done                                                                  │
+│ 00:06:42  roster           codex → coder · overview                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+stories [1/4 done · 2 running · 1 failed · 0 waiting]  roster [2/4 busy]                            
+tokens [383.5k]  cost [~$0.38]  run [live]                                                          

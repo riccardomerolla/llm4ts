@@ -1,0 +1,119 @@
+14:13:20 ▶ story plan
+  status | story plan
+14:13:21 ✔ story plan (1.0s)
+  status | (none)
+14:13:22 ▶ epic branch
+  status | epic branch
+14:13:22 ✔ epic branch (500ms)
+  status | (none)
+14:13:23 [accounts] ▶ story accounts
+  status | accounts · 0ms · Thinking… · story accounts
+14:13:23 [accounts · codex]   ▶ story accounts: setup
+  status | accounts · codex · 500ms · Thinking… · story accounts: setup
+14:13:24 [payments] ▶ story payments
+  status | accounts · codex · 1.0s · Thinking… · story accounts: setup
+  status | payments · 0ms · Thinking… · story payments
+14:13:24 [payments · pi-lmstudio]   ▶ story payments: setup
+  status | accounts · codex · 1.5s · Thinking… · story accounts: setup
+  status | payments · pi-lmstudio · 500ms · Thinking… · story payments: setup
+14:13:25 [iban] ▶ story iban
+  status | accounts · codex · 2.0s · Thinking… · story accounts: setup
+  status | payments · pi-lmstudio · 1.0s · Thinking… · story payments: setup
+  status | iban · 0ms · Thinking… · story iban
+14:13:25 [iban · lemonade]   ▶ story iban: setup
+  status | accounts · codex · 2.5s · Thinking… · story accounts: setup
+  status | payments · pi-lmstudio · 1.5s · Thinking… · story payments: setup
+  status | iban · lemonade · 500ms · Thinking… · story iban: setup
+14:13:30 [accounts · codex]   ✔ story accounts: setup (6.5s)
+  status | accounts · codex · 7.0s · Thinking… · story accounts
+  status | payments · pi-lmstudio · 6.0s · Thinking… · story payments: setup
+  status | iban · lemonade · 5.0s · Thinking… · story iban: setup
+14:13:31 [payments · pi-lmstudio]   ✔ story payments: setup (6.5s)
+  status | accounts · codex · 8.0s · Thinking… · story accounts
+  status | payments · pi-lmstudio · 7.0s · Thinking… · story payments
+  status | iban · lemonade · 6.0s · Thinking… · story iban: setup
+14:13:32 [iban · lemonade]   ✔ story iban: setup (6.5s)
+  status | accounts · codex · 9.0s · Thinking… · story accounts
+  status | payments · pi-lmstudio · 8.0s · Thinking… · story payments
+  status | iban · lemonade · 7.0s · Thinking… · story iban
+14:13:32 [accounts · codex]   ▶ Add accounts contract
+  status | accounts · codex · 9.0s · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 8.0s · Thinking… · story payments
+  status | iban · lemonade · 7.0s · Thinking… · story iban
+14:13:33 [payments · pi-lmstudio]   ▶ Payments fake routes
+  status | accounts · codex · 10.0s · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 9.0s · Thinking… · Payments fake routes
+  status | iban · lemonade · 8.0s · Thinking… · story iban
+14:13:34 [iban · lemonade]   ▶ IBAN input component
+  status | accounts · codex · 11.0s · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 10.0s · Thinking… · Payments fake routes
+  status | iban · lemonade · 9.0s · Thinking… · IBAN input component
+  status | accounts · codex · 17.0s · Running read… · Add accounts contract
+  status | payments · pi-lmstudio · 16.0s · Thinking… · Payments fake routes
+  status | iban · lemonade · 15.0s · Thinking… · IBAN input component
+  status | accounts · codex · 22.0s · Running bash… · Add accounts contract
+  status | payments · pi-lmstudio · 21.0s · Thinking… · Payments fake routes
+  status | iban · lemonade · 20.0s · Thinking… · IBAN input component
+  status | accounts · codex · 23.0s · Running bash… · Add accounts contract
+  status | payments · pi-lmstudio · 22.0s · Running edit… · Payments fake routes
+  status | iban · lemonade · 21.0s · Thinking… · IBAN input component
+  status | accounts · codex · 37.0s · 186.0k tokens · Running bash… · Add accounts contract
+  status | payments · pi-lmstudio · 36.0s · Running edit… · Payments fake routes
+  status | iban · lemonade · 35.0s · Thinking… · IBAN input component
+  status | accounts · codex · 38.0s · 186.0k tokens · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 37.0s · 92.5k tokens · Running edit… · Payments fake routes
+  status | iban · lemonade · 36.0s · Thinking… · IBAN input component
+  status | accounts · codex · 56.0s · 186.0k tokens · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 55.0s · 92.5k tokens · Thinking… · Payments fake routes
+  status | iban · lemonade · 54.0s · Thinking… · IBAN input component
+  status | accounts · codex · 57.0s · 229.0k tokens · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 56.0s · 92.5k tokens · Thinking… · Payments fake routes
+  status | iban · lemonade · 55.0s · Thinking… · IBAN input component
+  status | accounts · codex · 58.0s · 229.0k tokens · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 57.0s · 92.5k tokens · Thinking… · Payments fake routes
+  status | iban · lemonade · 56.0s · Thinking… · IBAN input component
+  status | accounts · codex · 59.0s · 229.0k tokens · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 58.0s · 92.5k tokens · Thinking… · Payments fake routes
+  status | iban · lemonade · 57.0s · Thinking… · IBAN input component
+  status | accounts · codex · 3m16s · 229.0k tokens · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 3m15s · 92.5k tokens · Thinking… · Payments fake routes
+  status | iban · lemonade · 3m14s · Thinking… · IBAN input component
+14:16:40 [iban · lemonade]   ✖ IBAN input component — pi error: Connection error. (3m06s)
+  status | accounts · codex · 3m17s · 229.0k tokens · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 3m16s · 92.5k tokens · Thinking… · Payments fake routes
+  status | iban · lemonade · 3m15s · Thinking… · story iban
+14:16:40 [iban · lemonade] ✖ story iban — pi error: Connection error. (3m15s)
+  status | accounts · codex · 3m17s · 229.0k tokens · Thinking… · Add accounts contract
+  status | payments · pi-lmstudio · 3m16s · 92.5k tokens · Thinking… · Payments fake routes
+14:18:20 [accounts · codex]   ✔ Add accounts contract (4m48s)
+  status | accounts · codex · 4m57s · 229.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 4m56s · 92.5k tokens · Thinking… · Payments fake routes
+  status | accounts · codex · 5m17s · 229.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 5m16s · 92.5k tokens · Thinking… · Payments fake routes
+  status | accounts · codex · 5m27s · 229.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 5m26s · 92.5k tokens · Thinking… · Payments fake routes
+  status | accounts · codex · 5m28s · 229.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 5m27s · 92.5k tokens · Thinking… · Payments fake routes
+  status | accounts · codex · 6m22s · 229.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 6m21s · 92.5k tokens · Thinking… · Payments fake routes
+  status | accounts · codex · 6m27s · 291.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 6m26s · 92.5k tokens · Thinking… · Payments fake routes
+  status | accounts · codex · 6m32s · 291.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 6m31s · 92.5k tokens · Thinking… · Payments fake routes
+  status | accounts · codex · 6m33s · 291.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 6m32s · 92.5k tokens · Thinking… · Payments fake routes
+  status | accounts · codex · 6m36s · 291.0k tokens · Thinking… · story accounts
+  status | payments · pi-lmstudio · 6m35s · 92.5k tokens · Thinking… · Payments fake routes
+14:20:00 [accounts · codex] ✔ story accounts (6m37s)
+  status | payments · pi-lmstudio · 6m36s · 92.5k tokens · Thinking… · Payments fake routes
+14:20:01 [overview] ▶ story overview
+  status | payments · pi-lmstudio · 6m37s · 92.5k tokens · Thinking… · Payments fake routes
+  status | overview · 0ms · Thinking… · story overview
+14:20:02 [overview · codex]   ▶ story overview: setup
+  status | payments · pi-lmstudio · 6m38s · 92.5k tokens · Thinking… · Payments fake routes
+  status | overview · codex · 1.0s · Thinking… · story overview: setup
+  status | payments · pi-lmstudio · 6m56s · 92.5k tokens · Thinking… · Payments fake routes
+  status | overview · codex · 19.0s · Running read… · story overview: setup
+  status | payments · pi-lmstudio · 7m06s · 92.5k tokens · Running bash… · Payments fake routes
+  status | overview · codex · 29.0s · Running read… · story overview: setup
+stats: 7 completed, 2 failed
