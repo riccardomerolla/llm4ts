@@ -1,6 +1,6 @@
 # ADR 0051: `llm4ts watch --web` — the Agent Tree in a Browser
 
-Status: Proposed (prototype) · Date: 2026-11-14 · Relates to ADR 0022, ADR 0033, ADR 0050
+Status: Accepted (4.3.0) · Date: 2026-11-14 · Relates to ADR 0022, ADR 0033, ADR 0050
 
 ## Context
 

@@ -255,6 +255,9 @@ exports no module. The following modules are the main entry points.
   public pieces they read with.
 - `@llm4ts/runner/EventPresentation`: `eventPresentation`, one entry per
   event: the verbosity it prints at, its kind in a profile gap, its digest line.
+- `@llm4ts/runner/Format`: `formatCount`, `clock`, `elapsed` and `dollars`,
+  the text the terminal tree and the `watch --web` page print. Pure, with no
+  Node import (`@llm4ts/runner/Terminal` still re-exports `formatCount`).
 
 ## JavaScript
 

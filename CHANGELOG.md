@@ -1,5 +1,33 @@
 # Changelog
 
+## 4.3.0
+
+### Added
+
+- **`llm4ts watch --web`: the agent tree in a browser** (ADR 0051). Opt-in:
+  without `--web`, `watch` is unchanged. It takes the trace, `--repo`,
+  `--epic`, `--replay` and `--speed` (`--tail` is refused), serves a page on
+  `127.0.0.1` and a free port, and prints the URL; Ctrl-C prints `detached`.
+  Live runs follow the trace every 500ms; a replay plays at ×1, ×10 or ×50
+  with step, scrub and `?seq=N` to open at a trace line. The server folds the
+  trace with the terminal tree's own `reduceTree`; the page only draws the
+  frames, which it decodes through the same schema the server encodes with.
+  The page loads nothing from the network (Geist fonts ship with the shell),
+  carries a strict Content-Security-Policy, and the server refuses any
+  `Host` other than the loopback names of its port. The executors and boards
+  views, the transcript tail, the expanded lane and the full log are drawn
+  but not wired yet.
+- `@llm4ts/runner/Format`: `formatCount`, `clock`, `elapsed` and `dollars`,
+  shared by the terminal tree and the page. `@llm4ts/runner/Terminal` still
+  exports `formatCount`.
+
+### Changed
+
+- Elapsed times past an hour read `1h02m` in the agent tree, where they
+  read `62m00s`.
+- `pnpm build` also bundles the page (esbuild) and copies its fonts; both
+  are generated, not committed.
+
 ## 4.2.0
 
 ### Fixed
