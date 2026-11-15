@@ -194,7 +194,11 @@ Add `--web` to watch in a browser instead (ADR 0051): `llm4ts watch --web`
 takes the same trace, `--epic`, `--replay` and `--speed`, serves the page on
 a loopback URL it prints, and stops on Ctrl-C. A live run's clocks move every
 500ms; a replay plays at ×1, ×10 or ×50, steps, and scrubs to any seq
-(`?seq=33` opens there). `?freeze` shows one still frame. The flow card
+(`?seq=33` opens there). `?freeze` shows one still frame.
+
+![llm4ts watch --web replaying an epic: the flow graph with one story running on a pi executor, the judge seat, the roster, the selected story's detail and the event log](../images/watch-web-graph.png)
+
+The flow card
 switches, by its toggles or by `e` and `b` as in the terminal, between the
 graph, one card per executor (its leases, idle, busy, or out with the
 roster's reason) and the boards: the epic's stories by column, a running
@@ -203,7 +207,11 @@ tasks by column. Click a story card to select it; in the executors view,
 click an executor card or move between them with the arrow keys (there
 the arrows select instead of stepping a replay). `?view=executors` or
 `?view=boards` opens on that view, and the page keeps it there as you
-switch. As in the terminal, `enter` (or the detail card's button) expands
+switch.
+
+![llm4ts watch --web, boards view: the epic's stories in planned, running, waiting, done and failed columns, and the running story's task board](../images/watch-web-boards.png)
+
+As in the terminal, `enter` (or the detail card's button) expands
 the story on the detail card to every open stage and its last 20 tool calls;
 `l` shows the whole event log, scrollable in its card; `t` shows the
 transcript of the selected story, or in the executors view of the selected
