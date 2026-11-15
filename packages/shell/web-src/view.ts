@@ -132,6 +132,12 @@ export interface FrameView {
   ) => void
   /** Whose transcript the tail shows now: the picked executor, or the story on the card. */
   readonly tailTarget: () => ReturnType<typeof tailTargetOf>
+  /** What the flow card shows now. */
+  readonly shown: () => PageView
+  /** The roster's executors, in order, and the one selected in the executors view. */
+  readonly executors: () => { readonly names: ReadonlyArray<string>; readonly selected?: string }
+  /** Selects an executor, as a click on its card does. */
+  readonly pickExecutor: (name: string) => void
 }
 
 export interface ViewOptions {
@@ -168,13 +174,17 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
     redraw()
     options.onSelect?.()
   }
+  const pickExecutor = (name: string): void => {
+    pickedExecutor = name
+    redraw()
+    executorsPane?.querySelector(".exec-card.selected")?.scrollIntoView({ block: "nearest" })
+    options.onSelect?.()
+  }
   executorsPane?.addEventListener("click", (event) => {
     const card = event.target instanceof Element ? event.target.closest("[data-executor]") : null
     const name = card instanceof HTMLElement ? card.dataset["executor"] : undefined
     if (name !== undefined) {
-      pickedExecutor = name
-      redraw()
-      options.onSelect?.()
+      pickExecutor(name)
     }
   })
   boardsPane?.addEventListener("click", (event) => {
@@ -528,7 +538,22 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
     }
   }
 
-  return { render, show, detail: showDetail, tail: showTail, tailTarget }
+  const executors = (): { readonly names: ReadonlyArray<string>; readonly selected?: string } => {
+    const names = current?.roster.map((executor) => executor.name) ?? []
+    const chosen = selectedExecutor()
+    return chosen === undefined ? { names } : { names, selected: chosen }
+  }
+
+  return {
+    render,
+    show,
+    detail: showDetail,
+    tail: showTail,
+    tailTarget,
+    shown: () => view,
+    executors,
+    pickExecutor
+  }
 }
 
 const executorState: Readonly<Record<WebExecutor["state"], string>> = {

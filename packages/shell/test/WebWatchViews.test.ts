@@ -4,6 +4,7 @@ import {
   detailActionNamed,
   detailAfter,
   detailOnKey,
+  executorOnKey,
   initialDetail,
   tailRoles,
   tailTargetOf,
@@ -164,5 +165,59 @@ describe("watch --web detail keys", () => {
       transcriptPath({ target: "claude", of: "executor" }, "judge", 33),
       "/api/transcript?target=claude&of=executor&role=judge&count=33"
     )
+  })
+})
+
+describe("watch --web executor keys", () => {
+  const names = ["codex", "pi-lmstudio", "lemonade", "claude"]
+  const arrows: ReadonlyArray<readonly [string, string]> = [
+    ["ArrowDown", "down"],
+    ["ArrowRight", "right"],
+    ["ArrowUp", "up"],
+    ["ArrowLeft", "left"]
+  ]
+
+  it("moves the selection as the terminal tree's executors view does, stopping at the ends", () => {
+    const state = { ...emptyTree({ title: "run" }), executors: names }
+    const walk = [
+      "ArrowDown",
+      "ArrowRight",
+      "ArrowRight",
+      "ArrowRight",
+      "ArrowDown",
+      "ArrowUp",
+      "ArrowLeft",
+      "ArrowLeft",
+      "ArrowLeft",
+      "ArrowUp"
+    ]
+    for (const start of [undefined, ...names]) {
+      let page: string | undefined = start
+      let tree: TreeView = { ...initialView, mode: "executors", selected: start }
+      for (const key of walk) {
+        page = executorOnKey(names, page, press(key))
+        const moved = onTreeKey(tree, arrows.find(([web]) => web === key)?.[1] ?? "", state)
+        assert.notStrictEqual(moved, "quit")
+        tree = moved === "quit" ? tree : moved
+        assert.strictEqual(page, tree.selected, `from ${start ?? "none"} after ${key}`)
+      }
+    }
+  })
+
+  it("picks the first executor on any arrow when none is selected", () => {
+    for (const [key] of arrows) {
+      assert.strictEqual(executorOnKey(names, undefined, press(key)), "codex")
+    }
+    assert.strictEqual(executorOnKey(names, "gone", press("ArrowUp")), "codex")
+  })
+
+  it("leaves other keys, modifiers, fields and an empty roster alone", () => {
+    assert.isUndefined(executorOnKey(names, "codex", press("e")))
+    assert.isUndefined(executorOnKey(names, "codex", press("ArrowDown", { altKey: true })))
+    assert.isUndefined(executorOnKey(names, "codex", press("ArrowDown", { metaKey: true })))
+    assert.isUndefined(
+      executorOnKey(names, "codex", press("ArrowDown", { target: { tagName: "INPUT" } }))
+    )
+    assert.isUndefined(executorOnKey([], undefined, press("ArrowDown")))
   })
 })

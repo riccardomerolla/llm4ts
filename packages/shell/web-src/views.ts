@@ -69,6 +69,34 @@ export const viewOnKey = (view: PageView, key: ViewKey): PageView | undefined =>
   return asked === view ? "flow" : asked
 }
 
+const executorMoves: Readonly<Record<string, -1 | 1>> = {
+  ArrowDown: 1,
+  ArrowRight: 1,
+  ArrowUp: -1,
+  ArrowLeft: -1
+}
+
+/**
+ * The executor an arrow selects in the executors view, as `onTreeKey` moves
+ * the selection: down and right go forward, up and left back, both stop at
+ * the ends, and the first press with none selected picks the first.
+ * Undefined when the key is not an arrow, a modifier is held, a field has
+ * focus, or there is no executor yet.
+ */
+export const executorOnKey = (
+  names: ReadonlyArray<string>,
+  current: string | undefined,
+  key: ViewKey
+): string | undefined => {
+  const move = executorMoves[key.key]
+  if (move === undefined || !plain(key) || names.length === 0) {
+    return undefined
+  }
+  const index = names.findIndex((name) => name === current)
+  const next = index < 0 ? 0 : Math.max(0, Math.min(names.length - 1, index + move))
+  return names[next]
+}
+
 // ── the detail and events cards ──
 
 /**
