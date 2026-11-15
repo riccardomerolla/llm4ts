@@ -117,12 +117,10 @@ more than a hello flow, add the packages to the project that holds
 `.llm4ts/flows/`:
 
 ```bash
-npm i -D @llm4ts/runner @llm4ts/flow @llm4ts/core effect@rc
+npm i -D @llm4ts/runner @llm4ts/flow @llm4ts/core effect@4.0.0
 ```
 
 Your project's copies now win over the shell's fallback, so keep them on the
-same versions as the shell, and keep `effect` pinned exactly rather than
-with a caret: the Effect 4 line is a release candidate, and a caret range
-drifts past the version llm4ts was built against.
+same versions as the shell, and pin `effect` exactly as llm4ts does.
 
 Next: [4. Fork a built-in](04-fork-a-built-in.md).

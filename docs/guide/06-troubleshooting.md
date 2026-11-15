@@ -3,12 +3,13 @@
 Start with `llm4ts doctor`. Most first-run failures are visible in its
 report before any flow is launched. Then find your symptom below.
 
-## `unknown LLM4TS_CODER 'x'; expected agy|claude|codex|...`
+## `LLM4TS_CODER must be claude, claude-cli, gemini, ...; fix or unset it`
 
-The value is not one of the coder tokens. `LLM4TS_CODER` selects the CLI
+The value is not one of the coder names. `LLM4TS_CODER` selects the CLI
 connector; API providers are selected with `LLM4TS_PROVIDER` instead and
 only by flows built on `apiConnectorFromEnvironment`, such as chapter 3's
-hello flow. Exit code 2.
+hello flow. The same message names any other `LLM4TS_*` value it cannot
+read. Exit code 2.
 
 ## The coder starts and fails at once, or hangs on a login prompt
 

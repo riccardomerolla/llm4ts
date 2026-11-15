@@ -154,28 +154,9 @@ line.
 
 ## Design your own phase flow
 
-A pack is also the input for flows of your own. The shipped `sdd` flow is a
-spec-first loop over one task; the same shape over a pack's specs directory
-gives a test-driven implementation phase:
-
-```mermaid
-flowchart TB
-  PK[("pack<br/>specs-dir · gates · judge")] --> L["for each spec in specs-dir"]
-  L --> RT["coder: encode the spec's<br/>Given/When/Then as tests"]
-  RT --> RED{"test gate<br/>must fail"}
-  RED -- passes already --> STOP["abort: the spec is<br/>not testable as written"]
-  RED -- fails --> IMP["coder: implement<br/>until the tests pass"]
-  IMP --> G{"every pack gate<br/>typecheck · lint · test · build"}
-  G -- fails --> FIX["reviewAndFixLoop"] --> G
-  G -- green --> J["judge the increment on<br/>the pack's dimensions"]
-  J --> CM["commit and tick the task"] --> L
-```
-
-The pieces already exist as public exports: `openPack` in
-`@llm4ts/runner/Packs` loads the pack, `pack.gate("test")` returns a gate
-command, `stage`, `implementTaskLoop`, and `reviewAndFixLoop` in
-`@llm4ts/flow` are the loop, and `flows/sdd.ts` is the reference for the
-red-then-green ordering. Start from `llm4ts view sdd`, as chapter 4 did
-with `implement`.
+A pack is also the input for flows of your own: `openPack` in
+`@llm4ts/runner/Packs` loads it and `pack.gate("test")` returns a gate
+command. `flows/sdd.ts` is a spec-first, red-then-green loop to start from
+(`llm4ts view sdd`, as chapter 4 did with `implement`).
 
 Next: [6. Troubleshooting](06-troubleshooting.md).
