@@ -15,7 +15,7 @@ where the next begins.
 | [3. Your first flow](03-your-first-flow.md)         | Run the built-in `hello`, copy it, point it at your coding agent               | nothing            |
 | [4. Fork a built-in](04-fork-a-built-in.md)         | Copy `implement`, change its prompt and gates                                  | a coding agent     |
 | [5. Your first pack](05-your-first-pack.md)         | Write a modernization pack, check it without an LLM, kit it                    | a legacy code base |
-| [6. Troubleshooting](06-troubleshooting.md)         | Read `doctor`, fix the five errors newcomers hit                               |                    |
+| [6. Troubleshooting](06-troubleshooting.md)         | Read `doctor`, fix the errors newcomers hit                                    |                    |
 | [7. Upgrade a spec pack](07-upgrade-a-spec-pack.md) | Continue a modernization extracted by an older llm4ts with the current release | an extracted pack  |
 
 If you only want to call an LLM from a TypeScript program, the

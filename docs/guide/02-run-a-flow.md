@@ -105,128 +105,36 @@ branch is the story of the run and `git diff main` is the whole change.
 
 A run with several stories in flight (`epic-stories` on an executor roster)
 is easier to follow as a tree than as a scrolling log. Add `--ui tree` to
-`llm4ts run` and the terminal shows, full-screen, the orchestrator, the
-judge's latest verdict, every running agent on one line — the story, the
-executor clone that holds it (`codex#2` is the second of codex's `slots`),
-its task, how long it has run and what it cost — with the sub-agents the
-harness spawned indented under their story, then one detail box for the
-selected story: its task checklist with the acceptance criteria each task
-satisfies, its stage, its last tools, a harness pause (a provider retry, a
-context compaction), and its figures. Every other story is a status chip
-below; the judge seat, a session log, and the run's tokens and estimated
-cost frame it:
+`llm4ts run` and the terminal shows, full-screen, every running agent on one
+line (its story, the executor clone that holds it, its task, time and cost),
+the judge's latest verdict, a detail box for the selected story (its task
+checklist, stage, last tools and figures) and a session log.
 
-```text
-                          LLM4TS AGENT TREE  ·  epic bank-login
-══════════════════════════════════════════════════════════════════════════════════════════
+Keys: `↑`/`↓` or `1`–`9` select a story, `enter` expands its detail, `b`
+opens the boards (the epic's stories and the selected story's tasks by
+column), `e` shows one box per executor with its leases, `t` tails the
+selection's transcript, `l` shows the whole log, `q` returns to the classic
+view while the run goes on. Off a terminal, below 90 columns, or with
+`NO_COLOR` set, the classic view is used.
 
-┌────────────────────────┐          ┌─ epic bank-login ──────────────────────────┐
-│       JUDGE SEAT       │          │ stage  implement stories                   │
-│    codex · on call     │          │ stories 8  elapsed 58s                     │
-│                        │          └────────────────────────────────────────────┘
-│ last verdict:          │                                •
-│ » S04 r1: 2 issues     │  ┌─ JUDGMENT · S04 r1 ────────────────────────────────────────┐
-│                        │  │ correctness     ████████░░  8/10                           │
-│ reviews            0   │  │ tests           ██████░░░░  6/10                           │
-│ verdicts           1   │  │ 2 issues → coder                                           │
-│ borrowed           1   │  └────────────────────────────────────────────────────────────┘
-└────────────────────────┘            agents · 5 running · codex ×3 · claude ×1
-                            ▸ ◐ S01 codex#1 · 3/5 wire session cookie · 47s · 48.0k tok
-                                └ sub-agent Agent Explore: find session middleware … · 31s
-                              ◐ S02 codex#2 · 1/4 scaffold reset route · 27s · 0 tok
-                              ◐ S03 claude#1 · 2/3 verify otp in service · … · 20s · 0 tok
-                              ◐ S04 codex#3 · 5/5 tasks · story S04: judge 1 · 10s · 0 tok
-                              ◐ S05 (leasing) · starting · 2s · 0 tok
-                            ┌─ S01 · codex#1 · task 3/5 ─────────────────────────────────┐
-                            │ [x] 1 add login route                          satisfies 1 │
-                            │ [x] 2 validate credentials against user store  satisfies 1 │
-                            │ [▶] 3 wire session cookie                      satisfies 2 │
-                            │ [ ] 4 add e2e login test                       satisfies 3 │
-                            │ [ ] 5 update docs                              satisfies 3 │
-                            │ stage  wire session cookie                                 │
-                            │ 0s · Edit src/session/cookie.ts                            │
-                            │ tools  Agent Explore: find session middleware · Edit src/… │
-                            │ 47s · 48.0k tok · ~$0.44                                   │
-                            │ ◐ running                                                  │
-                            └────────────────────────────────────────────────────────────┘
+`llm4ts watch` draws the same tree from a trace, from another terminal or
+after the run: `--epic <id>` opens an epic's latest run, `watch <trace>` a
+given one, bare `watch` the newest. A live trace is followed as it grows;
+`--replay [--speed n]` plays a finished one back. Piped, `watch` prints one
+frame and exits.
 
-                            ◐ S01  ◐ S02  ◐ S03  ◐ S04  ◐ S05  · S06  · S07  ✓ S00
-
-┌─ session log ──────────────────────────────────────────────────────────────────────────┐
-│ 00:00:32  roster           codex#2 → coder · S02                                       │
-│ 00:00:39  roster           claude#1 → coder · S03                                      │
-│ 00:00:49  roster           codex#3 → coder · S04                                       │
-│ 00:00:52  roster           judge borrowed from own executor codex · S04                │
-│ 00:00:53  judge            S04 r1 · 2 issues → coder                                   │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-stories [1/8 done · 5 running · 0 failed · 0 waiting]  roster [2/2 busy]
-time [model 0% · tools 0% · gates 100% · wait 0%]
-tokens [48.0k]  cost [~$0.44]  run [live]
-```
-
-With `--task-concurrency 2` or more (the default, `1`, runs every task in
-order), a story whose task plan says two tasks need nothing from each other,
-and whose `Owns:` paths do not overlap, runs the second beside the first on
-another coder that is free: it shows as a `└ task coder
-claude#2 · 3/5 …` line under its story and as `[▶] … ← claude#2` in the
-checklist, works in its own worktree, and merges into the story branch
-when its gates pass.
-
-The detail box follows the story that moved last until you pick one.
-Keys: `↑`/`↓` or `1`–`9` select a story, `enter` expands its detail (every
-stage and tool call), `b` opens the boards — the epic's stories by column
-(planned, active, waiting, done, failed) and the selected story's tasks by
-column (todo, doing, review, done) — `e` switches to one box per executor
-with the leases it holds, `t` tails the selection's transcript, `l` shows
-the whole log, `q` hands the screen back to the classic view while the run
-goes on. `ctrl-c` still aborts. On a short terminal the agent list shrinks
-first (with a count of what is out of view), then the log. Off a terminal,
-below 90 columns, or with `NO_COLOR` set, the classic view is used.
-
-`llm4ts watch` draws the same tree from a trace file, from another terminal
-or after the run: `llm4ts watch --epic <id>` opens an epic's latest run,
-`llm4ts watch <trace>` a given one, and bare `llm4ts watch` the newest
-trace in the repository. A live trace is followed as it grows; a finished
-one shows its last frame; `--replay [--speed n]` plays it back on its own
-timestamps. Piped, `watch` prints one frame and exits.
-
-Add `--web` to watch in a browser instead (ADR 0051): `llm4ts watch --web`
-takes the same trace, `--epic`, `--replay` and `--speed`, serves the page on
-a loopback URL it prints, and stops on Ctrl-C. A live run's clocks move every
-500ms; a replay plays at ×1, ×10 or ×50, steps, and scrubs to any seq
-(`?seq=33` opens there). `?freeze` shows one still frame.
+Add `--web` to draw it in a browser instead (ADR 0051). The page takes the
+same keys, and the arrow keys select an executor in the executors view; a
+replay also steps, scrubs, and opens at a trace line with `?seq=33`.
 
 ![llm4ts watch --web replaying an epic: the flow graph with one story running on a pi executor, the judge seat, the roster, the selected story's detail and the event log](../images/watch-web-graph.png)
 
-The flow card
-switches, by its toggles or by `e` and `b` as in the terminal, between the
-graph, one card per executor (its leases, idle, busy, or out with the
-roster's reason) and the boards: the epic's stories by column, a running
-card with its clone and task progress, and under it the selected story's
-tasks by column. Click a story card to select it; in the executors view,
-click an executor card or move between them with the arrow keys (there
-the arrows select instead of stepping a replay). `?view=executors` or
-`?view=boards` opens on that view, and the page keeps it there as you
-switch.
-
 ![llm4ts watch --web, boards view: the epic's stories in planned, running, waiting, done and failed columns, and the running story's task board](../images/watch-web-boards.png)
 
-As in the terminal, `enter` (or the detail card's button) expands
-the story on the detail card to every open stage and its last 20 tool calls;
-`l` shows the whole event log, scrollable in its card; `t` shows the
-transcript of the selected story, or in the executors view of the selected
-executor, in the detail card, and `r` cycles it through all, coder,
-reviewer and judge calls. Scroll it with the mouse; escape closes it. A live
-tail refreshes with each frame; a replay's stops at the step on screen. A
-run started without `--transcript` says so.
-It listens on `127.0.0.1` and a free port unless you pass `--port 4173` or
-`--host <address>`; both need `--web`. The page answers only on
-`127.0.0.1`, `localhost` or `[::1]` at its own port, or the `--host` you
-gave. `--host 0.0.0.0` (or `::`) shows the run to anyone who can reach the
-machine, by its IP address, and `watch` says so when it starts; a host
-name it was not given is still refused. The page loads nothing from the
-network: its script and the Geist fonts ship with the shell. In a checkout, run `pnpm build` first: it bundles the
-page.
+The page listens on `127.0.0.1` and a free port; `--port` and `--host`
+choose them. `--host 0.0.0.0` shows the run to anyone who can reach the
+machine, and `watch` says so when it starts. In a checkout, run `pnpm build`
+first: it bundles the page.
 
 ## Where the time goes: `llm4ts profile`
 
@@ -256,17 +164,9 @@ durations, so it can be shared from a customer's server. A trace written
 before 2.22 has no timings; its report is estimated from the gaps between
 events and says so.
 
-During a run, the agent tree (`--ui tree`) shows the same numbers live: each
-story's current activity and how long it has run — a coder tool, a gate or
-setup command (`14m02s · pnpm test`), a merge, a wait for the merge lock or
-a roster slot, a model call (`3m10s · coder call`) — and `turns · avg ·
-gates`. A story with no event for `LLM4TS_IDLE_AFTER` (default `2m`) is
-marked **quiet** while a model call is open (`⏸ quiet 5m00s · coder call
-open`: the backend has said nothing) and **idle** when nothing is under way;
-a long gate is running, never idle. Work the run does outside any story (the
-epic's own gates) shows on the header's `now` line. The run's split sits
-above the status line: `time [model 62% · tools 5% · gates 24% · wait 9%]`.
-The classic view prints a line when each gate or setup command starts.
+During a run, the agent tree shows each story's current activity and how
+long it has run, and marks a story **quiet** or **idle** after
+`LLM4TS_IDLE_AFTER` (default `2m`) without an event.
 
 ## Tailing what a seat says: `--transcript`
 
@@ -285,10 +185,8 @@ only by their owner. The trace and `llm4ts profile` stay content-free: a
 transcript is never part of them. Landing the epic deletes its earlier runs'
 transcripts.
 
-In the tree (live, or in `llm4ts watch`), select a story (or, in the executors
-view, an executor) and press `t`: the boxes give way to its transcript,
-following the end. `r` cycles the role shown (all, coder, reviewer, judge),
-`PgUp`/`PgDn` scroll, `esc` closes it. From another terminal,
+In the tree, `t` shows the selection's transcript and `r` cycles the role
+(all, coder, reviewer, judge). From another terminal,
 
 ```bash
 llm4ts watch --epic <id> --tail <story-or-executor>
