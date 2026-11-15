@@ -53,14 +53,10 @@ the `modernize-*` phases. More: [chapter 2](docs/guide/02-run-a-flow.md).
 
 ## Watch a run
 
-Every run writes a trace, and `llm4ts watch` turns any trace, live or
-finished, into the **agent tree**: every agent in flight (its story, its
-executor clone, its task), the judge's verdicts, the session log, and the
-epic and story boards. `llm4ts run epic-stories --ui tree …` draws the same
-tree while the run goes. `--replay` plays a finished trace back at ×1, ×10
-or ×50. More: [chapter 2](docs/guide/02-run-a-flow.md#watching-a-run-the-agent-tree).
-
-`llm4ts watch --web` serves the tree as a page in your browser:
+Every run writes a trace, and `llm4ts watch` draws any trace, live or
+finished, as the **agent tree**: the agents in flight, the judge's
+verdicts, the session log, and the epic and story boards. `--replay` plays
+a finished one back; `--web` draws it in your browser:
 
 ```bash
 llm4ts watch --web --repo ~/work/portal            # the newest trace, live
@@ -69,43 +65,23 @@ llm4ts watch --web --replay .llm4ts/trace-….jsonl  # a finished run, with step
 
 ![llm4ts watch --web: the flow graph of an epic with one story running on a pi executor, the judge seat, the roster, the selected story's detail and the event log](docs/images/watch-web-graph.png)
 
-The flow card switches between the graph, one card per executor, and the
-boards (`e`, `b`); `enter` expands the selected story, `t` tails its
-transcript, `l` opens the full event log. The page fits the window, loads
-nothing from the network and listens on `127.0.0.1` and a free port;
-`--port` and `--host` choose them, and a host other than loopback warns that
-anyone who can reach the port sees the run. More: [ADR 0051](docs/adr/0051-web-watch.md).
-
 ![llm4ts watch --web, boards view: the epic's stories in planned, running, waiting, done and failed columns, and the running story's task board](docs/images/watch-web-boards.png)
+
+More: [chapter 2](docs/guide/02-run-a-flow.md#watching-a-run-the-agent-tree)
+and [ADR 0051](docs/adr/0051-web-watch.md).
 
 ## Measure and operate
 
-`llm4ts costs` reads the traces of every past run and reports tokens and
-cost per day, per hour, per run, and per model, with a projection for the
-run rate you expect — the numbers a budget needs. Measured token counts and
-character-count estimates stay in separate columns.
-
-`llm4ts profile --epic <id>` says where a run's time went — model, tools,
-gates, merges, waiting — with the biggest sinks first, and nothing of the
-code or prompts in it, so it can come back from a customer's server.
-With `--otel` the same run shows up in a local Arize Phoenix, or in any
-OpenTelemetry backend through the `OTEL_*` variables: [observability](docs/observability.md).
-
-`llm4ts tool` is the one command a coder runs inside a task: `list`,
-`describe <name>`, and `run <name> --flag value` print a JSON report (ok,
-summary, issues) for a job the model would otherwise improvise a script
-for — `json-validate` against a JSON Schema or an OpenAPI component,
-`diff` of two JSON documents, `http-call` against a running service; the
-soap-ace kit adds `xml-validate` against an XSD and `soap-call`. A pack names presets in
-`## Tools`; every story's brief quotes them, and `llm4ts profile` counts the
-ad-hoc scripts that remain. More: [ADR 0048](docs/adr/0048-tool-catalog.md).
-
-`llm4ts mcp` serves the same runs to an MCP client such as Grok Bot,
-Claude Code or Cursor: `preflight`, run status, a `run_wait` long poll,
-`diagnose`, `costs`, and with `--allow-run` it starts and stops flows. It
-speaks stdio by default; `--http` serves `/mcp` on loopback behind a bearer
-token. More: [ADR 0041](docs/adr/0041-mcp-operator-server.md) and the
-[Grok Bot operator](docs/grok-bot/operator.md).
+- `llm4ts costs`: tokens and cost per day, run and model, from every past
+  trace.
+- `llm4ts profile --epic <id>`: where a run's time went, biggest sinks
+  first, with no code or prompts in it. `--otel` sends the run to Phoenix
+  or any OpenTelemetry backend: [observability](docs/observability.md).
+- `llm4ts tool`: checks a coder runs inside a task instead of improvising
+  a script (`json-validate`, `diff`, `http-call`; the soap-ace kit adds
+  `xml-validate` and `soap-call`): [ADR 0048](docs/adr/0048-tool-catalog.md).
+- `llm4ts mcp`: the same runs for an MCP client such as Claude Code or
+  Grok Bot, over stdio or `--http`: [ADR 0041](docs/adr/0041-mcp-operator-server.md).
 
 ## Write a flow
 
@@ -227,30 +203,14 @@ by copying a skill directory.
 
 Every setting is an `LLM4TS_*` name; nothing is required for the mock
 provider. A setting comes from, highest first: a `run` flag or
-`--set NAME=value`, the environment, the project file
-`<repo>/.llm4ts/config.env`, the global file `~/.config/llm4ts/config.env`
-(ADR 0049).
+`--set NAME=value`, the environment, `<repo>/.llm4ts/config.env`, then
+`~/.config/llm4ts/config.env`.
 
 ```bash
-llm4ts config init                        # write the LLM4TS_* exports of this shell into the files
-llm4ts config set LLM4TS_CODER=pi         # each name goes to the file it belongs in
-llm4ts config set --repo ~/work/portal LLM4TS_PACK=j2ee-nextjs-spa LLM4TS_LEGACY_REPO=~/legacy/ib-core
-llm4ts config show                        # effective values and where each comes from
-llm4ts config show LLM4TS_JUDGE_ROUNDS    # one setting in full
-llm4ts config unset LLM4TS_PACK
-llm4ts config edit                        # guided on a terminal: pick, see, change or remove
-llm4ts config trust                       # review and accept a project file you edited by hand or received
-llm4ts config untrust                     # forget that acceptance
-llm4ts run convert-all --set LLM4TS_JUDGE_ROUNDS=1   # one run only
+llm4ts config set LLM4TS_CODER=pi   # each name goes to the file it belongs in
+llm4ts config show                  # effective values and where each comes from
+llm4ts config edit                  # guided on a terminal
 ```
-
-An unknown name or an unreadable value in `--set`, `config set` or the
-environment is refused, and a flow that lacks a setting it requires stops
-before it starts.
-An exported `LLM4TS_*` name that is close to a real one prints a warning
-with the name it probably meant.
-
-The settings most runs touch:
 
 | Setting                            | Effect                                                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------------------- |
@@ -258,15 +218,10 @@ The settings most runs touch:
 | `LLM4TS_CODER_MODEL`               | The coder's model on every flow; read-only seats on the same agent follow it            |
 | `LLM4TS_PROVIDER` / `LLM4TS_MODEL` | API provider and model for provider-driven flows such as `hello`                        |
 | `LLM4TS_PACK`                      | Pack for the modernization flows, also `llm4ts run --pack`                              |
-| `LLM4TS_VERBOSITY`                 | Terminal verbosity, also `llm4ts run --verbose`                                         |
 
-Provider credentials (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`GEMINI_API_KEY`) and the two llm4ts secrets stay in the environment and
-never go in a file. llm4ts reads a project file only when you trusted its
-content: the `config` commands trust what they write, and a file you edited
-by hand or received with a repository needs `llm4ts config trust` once. The [configuration guide](docs/configuration.md)
-describes the files and holds the reference of every setting, generated
-from the registry (`node scripts/settings-docs.mjs`).
+Provider credentials stay in the environment and never go in a file. The
+[configuration guide](docs/configuration.md) covers project-file trust and
+every setting.
 
 ## Working on this repository
 
@@ -313,14 +268,9 @@ Internal engineering reference:
 
 ## Status
 
-4.x since 2026-11-13. 4.0.0 removed what no run reached and decided the
-public surface in the sources: a module whose first line is
-`// @internal: <reason>` has no subpath, and `@llm4ts/shell` is the `llm4ts`
-command with no library subpaths (ADR 0050). 4.1.0 put the coder and
-reasoning model and flag settings on every flow and removed the copilot
-connector; 4.3.0 through 4.7.1 brought `watch --web`.
-[CHANGELOG.md](CHANGELOG.md) lists every removal with what replaces it;
-importing package-private files is unsupported. The implementation uses
-Effect 4 (4.0.0, pinned exactly).
+4.x since 2026-11-13. [CHANGELOG.md](CHANGELOG.md) lists every removal
+with what replaces it; a module marked `// @internal` has no subpath
+(ADR 0050), and importing package-private files is unsupported. Effect 4
+(4.0.0, pinned exactly).
 
 Licensed under MIT.
