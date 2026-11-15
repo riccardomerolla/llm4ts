@@ -1,6 +1,7 @@
 // @internal: `llm4ts watch --web`, served by the shell's own CLI
 import { readFileSync } from "node:fs"
 import { createServer, type Server } from "node:http"
+import { isIP, isIPv4 } from "node:net"
 import { basename } from "node:path"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import * as Clock from "effect/Clock"
@@ -15,6 +16,7 @@ import * as HttpServer from "effect/http/HttpServer"
 import type { ServeError } from "effect/http/HttpServerError"
 import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/http/HttpServerResponse"
+import { formatUrlHostString } from "effect/net/NetAddress"
 import type * as NetAddress from "effect/net/NetAddress"
 import type { FlowError } from "@llm4ts/flow/FlowError"
 import { readTrace } from "@llm4ts/flow/Replay"
@@ -68,9 +70,9 @@ export type WebWatchOptions = Pick<
   WatchOptions,
   "repo" | "trace" | "epic" | "replay" | "speed" | "idleAfterMs"
 > & {
-  /** Loopback by default; the page shows the run to whoever can reach it. */
+  /** `127.0.0.1` by default; the page shows the run to whoever can reach it (`--host`). */
   readonly host?: string
-  /** A free port when omitted. */
+  /** A free port when omitted (`--port`). */
   readonly port?: number
 }
 
@@ -150,39 +152,73 @@ const sse = (event: string, data: string): string => `event: ${event}\ndata: ${d
 const frameEvent = (frame: WebFrame): string => sse("frame", encodeFrame(frame))
 const endEvent = sse("end", "{}")
 
+const loopbackNames: ReadonlySet<string> = new Set(["127.0.0.1", "localhost", "::1"])
+const wildcardHosts: ReadonlySet<string> = new Set(["0.0.0.0", "::"])
+
+/** A host as written, lower case and without IPv6 brackets: `[::1]` is `::1`. */
+const bareHost = (host: string): string => host.toLowerCase().replace(/^\[(.*)\]$/, "$1")
+
+/** The address `--host` binds by default. */
+export const defaultWebHost = "127.0.0.1"
+
+/** Whether a bind address is this machine only (`127.0.0.0/8`, `::1`, `localhost`). */
+export const isLoopbackHost = (host: string): boolean => {
+  const bare = bareHost(host)
+  return loopbackNames.has(bare) || (isIPv4(bare) && bare.startsWith("127."))
+}
+
 /**
- * The `Host` values a request may carry: the loopback names of the port the
- * server listens on. Anything else is refused, so a page on another origin
- * cannot read the run by rebinding its own name to 127.0.0.1.
+ * Whether a request's `Host` names this server: its port, and either a
+ * loopback name, the address it was bound to, or, bound to every interface
+ * (`0.0.0.0`, `::`), any IP address. A DNS name it was not bound to is
+ * refused, so a page on another origin cannot read the run by rebinding
+ * its own name to this machine.
  */
-export const allowedHosts = (port: number): ReadonlySet<string> =>
-  new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`])
+export const hostAllowed = (
+  header: string | undefined,
+  port: number,
+  bound: string = defaultWebHost
+): boolean => {
+  const match = header === undefined ? null : /^(\[[^\]]+\]|[^:[\]]+):(\d+)$/.exec(header)
+  if (match === null || Number(match[2]) !== port) {
+    return false
+  }
+  const name = bareHost(match[1] ?? "")
+  const bind = bareHost(bound)
+  return loopbackNames.has(name) || name === bind || (wildcardHosts.has(bind) && isIP(name) !== 0)
+}
+
+/** What `watch --web` adds to its banner when it binds beyond this machine; empty on loopback. */
+export const exposureNotice = (host: string): string =>
+  isLoopbackHost(host)
+    ? ""
+    : `Listening on ${host}, not loopback: anyone who can reach this port sees the run.\n`
 
 const portOf = (address: NetAddress.SocketAddress): number | undefined =>
   "port" in address ? address.port : undefined
 
 /** Refuses a foreign `Host` (403); stamps every answer as not to be sniffed or cached. */
-const guard = HttpRouter.middleware(
-  Effect.gen(function* () {
-    const server = yield* HttpServer.HttpServer
-    const port = portOf(server.address)
-    const allowed = port === undefined ? new Set<string>() : allowedHosts(port)
-    return (app) =>
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const host = request.headers["host"]
-        const response =
-          host !== undefined && allowed.has(host.toLowerCase())
-            ? yield* app
-            : HttpServerResponse.text("forbidden host", { status: 403 })
-        return HttpServerResponse.setHeaders(response, {
-          "x-content-type-options": "nosniff",
-          "cache-control": "no-store"
+const guardFor = (bound: string) =>
+  HttpRouter.middleware(
+    Effect.gen(function* () {
+      const server = yield* HttpServer.HttpServer
+      const port = portOf(server.address)
+      return (app) =>
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const host = request.headers["host"]
+          const response =
+            port !== undefined && hostAllowed(host, port, bound)
+              ? yield* app
+              : HttpServerResponse.text("forbidden host", { status: 403 })
+          return HttpServerResponse.setHeaders(response, {
+            "x-content-type-options": "nosniff",
+            "cache-control": "no-store"
+          })
         })
-      })
-  }),
-  { global: true }
-)
+    }),
+    { global: true }
+  )
 
 /**
  * The routes: the page, `/api/run`, `/api/frame?count=` (a replay's scrub),
@@ -401,21 +437,46 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
 
   return Layer.mergeAll(
     HttpRouter.addAll([...pages, favicon, run, frame, stream, transcript]),
-    guard
+    guardFor(options.host ?? defaultWebHost)
   )
 })
+
+/** The server could not listen on the address and port asked for. */
+export class WebListenError extends Schema.TaggedError<WebListenError>()("WebListen", {
+  message: Schema.String
+}) {}
+
+const listenReasons: Readonly<Record<string, string>> = {
+  EADDRINUSE: "the port is in use (pick another --port, or 0 for a free one)",
+  EADDRNOTAVAIL: "this machine has no such address",
+  EACCES: "not allowed to listen there",
+  ENOTFOUND: "no such host"
+}
+
+/** Why listening failed, in words; the cause's own message for a code it does not know. */
+export const listenFailure = (host: string, port: number | undefined, cause: unknown): string => {
+  const code =
+    typeof cause === "object" && cause !== null && "code" in cause ? String(cause.code) : ""
+  const message = cause instanceof Error ? cause.message : String(cause)
+  return `watch --web cannot listen on ${formatUrlHostString(host)}:${port ?? 0}: ${listenReasons[code] ?? message}`
+}
+
+/** The URL the banner says to open: a wildcard bind (`0.0.0.0`, `::`) is opened on loopback. */
+export const openAddress = (formatted: string): string =>
+  formatted.replace("//0.0.0.0:", "//127.0.0.1:").replace("//[::]:", "//[::1]:")
 
 /** Serves the page until the reader detaches; prints where to open it. */
 export const runWebWatch = Effect.fn("@llm4ts/shell/WebWatch.run")(function* (
   options: WebWatchOptions,
   dependencies: WebWatchDependencies
-): Effect.fn.Return<void, FlowError | WatchTargetMissing | ServeError> {
+): Effect.fn.Return<void, FlowError | WatchTargetMissing | WebListenError> {
   const app = yield* webWatchApp(options, dependencies)
-  const host = options.host ?? "127.0.0.1"
+  const host = options.host ?? defaultWebHost
+  const exposed = exposureNotice(host)
   const announce = Layer.effectDiscard(
     HttpServer.addressFormattedWith((address) =>
       dependencies.write(
-        `llm4ts watch --web${options.replay === true ? " --replay" : ""} · open ${address}/\nCtrl-C stops the server and detaches.\n`
+        `llm4ts watch --web${options.replay === true ? " --replay" : ""} · open ${openAddress(address)}/\n${exposed}Ctrl-C stops the server and detaches.\n`
       )
     )
   )
@@ -447,7 +508,14 @@ export const runWebWatch = Effect.fn("@llm4ts/shell/WebWatch.run")(function* (
       server?.closeAllConnections()
     })
   )
-  yield* Effect.raceFirst(served, detach)
+  yield* Effect.raceFirst(
+    Effect.mapError(
+      served,
+      (error: ServeError) =>
+        new WebListenError({ message: listenFailure(host, options.port, error.cause) })
+    ),
+    detach
+  )
   yield* dependencies.write("detached\n")
 })
 

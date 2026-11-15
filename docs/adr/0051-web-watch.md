@@ -27,7 +27,8 @@ bubbles, token dots on running edges, a scrubber over the trace.
   `pollInterval` (500ms), with a `Tick`, until its trace says it ended; a replay steps on `replayGap` — min(Δt, 2s) ÷
   speed, default ×10 — which `watch` now shares.
 - **Transport.** Plain Effect HTTP (`HttpRouter`, `NodeHttpServer`) on
-  `127.0.0.1` and a free port: the page, `GET /api/run`, `GET /api/frame?count=`
+  `127.0.0.1` and a free port, or the `--host` and `--port` given (both
+  need `--web`; a port in use fails before anything is printed): the page, `GET /api/run`, `GET /api/frame?count=`
   for scrubbing, and server-sent events on `GET /api/stream?count=&speed=` —
   one-way frames fit SSE, and the browser reconnects by itself. Pausing closes
   the stream; changing speed reopens it.
@@ -56,7 +57,11 @@ bubbles, token dots on running edges, a scrubber over the trace.
 - **Host check.** Every request whose `Host` is not `127.0.0.1:<port>`,
   `localhost:<port>` or `[::1]:<port>` for the bound port gets 403, so a
   page on another origin cannot read the run by rebinding its own name to
-  127.0.0.1.
+  127.0.0.1. With `--host` the bound address is allowed too, and bound to
+  every interface (`0.0.0.0`, `::`) so is any IP address at that port: a
+  rebinding page names a domain, never an IP, so only a host name `watch`
+  was not given stays refused (`hostAllowed`). A bind beyond loopback adds
+  a line to the banner saying anyone who can reach the port sees the run.
 - **Content-Security-Policy.** The page is served with `default-src 'self';
 base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src
 'none'`. It has no inline script and no `style` attributes in its markup:
@@ -71,7 +76,8 @@ no-store`.
 ## Consequences
 
 - The page shows what the trace shows. Anyone who can reach the port sees
-  the run, so it binds loopback only.
+  the run, so it binds loopback unless `--host` asks for more; the page has
+  no login, and a run shown to a network is shown to all of it.
 - The executors and boards views (ADR 0033) ride the same frame: each
   executor carries what `heldBy` lists and its exclusion reason, each story
   its clone (`cloneLabel`) and its tasks in the story board's column

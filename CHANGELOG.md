@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`llm4ts watch --web --port <n> --host <address>`**: listen on a chosen
+  port (0 for a free one, the default) and address (default `127.0.0.1`).
+  Both need `--web`. Bound to `0.0.0.0` or `::`, the page answers on any IP
+  address of the machine, and `watch` warns that anyone who can reach the
+  port sees the run; a host name it was not given still gets 403, so DNS
+  rebinding stays shut out. A port in use or an address the machine lacks
+  fails before serving, saying which (exit 1).
+
 ## 4.6.0
 
 ### Added

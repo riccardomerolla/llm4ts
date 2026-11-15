@@ -211,9 +211,13 @@ executor, in the detail card, and `r` cycles it through all, coder,
 reviewer and judge calls. Scroll it with the mouse; escape closes it. A live
 tail refreshes with each frame; a replay's stops at the step on screen. A
 run started without `--transcript` says so.
-The page answers only on `127.0.0.1`, `localhost` or `[::1]` at its own
-port, and loads nothing from the network: its script and the Geist fonts
-ship with the shell. In a checkout, run `pnpm build` first: it bundles the
+It listens on `127.0.0.1` and a free port unless you pass `--port 4173` or
+`--host <address>`; both need `--web`. The page answers only on
+`127.0.0.1`, `localhost` or `[::1]` at its own port, or the `--host` you
+gave. `--host 0.0.0.0` (or `::`) shows the run to anyone who can reach the
+machine, by its IP address, and `watch` says so when it starts; a host
+name it was not given is still refused. The page loads nothing from the
+network: its script and the Geist fonts ship with the shell. In a checkout, run `pnpm build` first: it bundles the
 page.
 
 ## Where the time goes: `llm4ts profile`

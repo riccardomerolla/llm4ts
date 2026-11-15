@@ -21,7 +21,8 @@ import {
   runFlagAssignments,
   runShellCommand,
   geminiBridgeOptionsFrom,
-  watchOptionsFrom
+  watchOptionsFrom,
+  webBindFrom
 } from "@llm4ts/shell/Cli"
 import { registryFacts } from "@llm4ts/shell/Config"
 import type { DiscoveredFlow } from "@llm4ts/shell/FlowCatalog"
@@ -235,6 +236,40 @@ describe("costsOptionsFrom", () => {
       assert.match(badZone.message, /--tz/)
       assert.strictEqual(badRuns._tag, "ShellUsage")
       assert.match(badRuns.message, /--runs-per-day/)
+    })
+  )
+})
+
+describe("webBindFrom", () => {
+  const web = { web: true, port: Option.none<number>(), host: Option.none<string>() }
+
+  it.effect("passes --port and --host through to watch --web", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* webBindFrom(web), {})
+      assert.deepStrictEqual(yield* webBindFrom({ ...web, web: false }), {})
+      assert.deepStrictEqual(
+        yield* webBindFrom({ ...web, port: Option.some(4173), host: Option.some(" 0.0.0.0 ") }),
+        { port: 4173, host: "0.0.0.0" }
+      )
+      assert.deepStrictEqual(yield* webBindFrom({ ...web, port: Option.some(0) }), { port: 0 })
+    })
+  )
+
+  it.effect("rejects them without --web, a port out of range, and a host that is no address", () =>
+    Effect.gen(function* () {
+      const cases: ReadonlyArray<readonly [Parameters<typeof webBindFrom>[0], RegExp]> = [
+        [{ ...web, web: false, port: Option.some(4173) }, /need --web/],
+        [{ ...web, web: false, host: Option.some("0.0.0.0") }, /need --web/],
+        [{ ...web, port: Option.some(-1) }, /between 0 and 65535/],
+        [{ ...web, port: Option.some(65_536) }, /between 0 and 65535/],
+        [{ ...web, host: Option.some("  ") }, /--host must be/],
+        [{ ...web, host: Option.some("http://devbox") }, /--host must be/]
+      ]
+      for (const [flags, message] of cases) {
+        const error = yield* Effect.flip(webBindFrom(flags))
+        assert.strictEqual(error._tag, "ShellUsage")
+        assert.match(error.message, message)
+      }
     })
   )
 })

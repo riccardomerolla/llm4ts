@@ -625,6 +625,36 @@ const costsCommand = Command.make(
   )
 )
 
+export interface WebBindFlags {
+  readonly web: boolean
+  readonly port: Option.Option<number>
+  readonly host: Option.Option<string>
+}
+
+/** `--port` and `--host` for `watch --web`; both need `--web`, a port fits 0–65535 (0: a free one). */
+export const webBindFrom = (
+  flags: WebBindFlags
+): Effect.Effect<{ readonly port?: number; readonly host?: string }, ShellUsageError> =>
+  Effect.gen(function* () {
+    const port = Option.getOrUndefined(flags.port)
+    const host = Option.getOrUndefined(flags.host)?.trim()
+    if (!flags.web && (port !== undefined || host !== undefined)) {
+      return yield* new ShellUsageError({ message: "--port and --host need --web" })
+    }
+    if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65_535)) {
+      return yield* new ShellUsageError({ message: "--port must be between 0 and 65535" })
+    }
+    if (host !== undefined && (host === "" || /[\s/]/.test(host))) {
+      return yield* new ShellUsageError({
+        message: "--host must be an address or a host name, such as 127.0.0.1 or 0.0.0.0"
+      })
+    }
+    return {
+      ...(port === undefined ? {} : { port }),
+      ...(host === undefined ? {} : { host })
+    }
+  })
+
 export interface WatchFlags {
   readonly trace: Option.Option<string>
   readonly repo: Option.Option<string>
@@ -696,18 +726,29 @@ const watchCommand = Command.make(
       Flag.withDescription(
         "Watch in a browser instead: serve the tree on a local URL until Ctrl-C (ADR 0051)"
       )
+    ),
+    port: Flag.Int("port").pipe(
+      Flag.optional,
+      Flag.withDescription("With --web: the port to listen on (default: a free one)")
+    ),
+    host: Flag.String("host").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "With --web: the address to listen on (default 127.0.0.1; 0.0.0.0 shows the run to the network)"
+      )
     )
   },
   (config) =>
     Effect.gen(function* () {
       const options = yield* watchOptionsFrom(config)
+      const bind = yield* webBindFrom(config)
       const idleAfterMs = idleAfterFrom(yield* verbEnvironment(options.repo))
       if (config.web) {
         if (options.tail !== undefined) {
           return yield* new ShellUsageError({ message: "watch --web does not take --tail" })
         }
         return yield* runWebWatch(
-          { ...options, idleAfterMs },
+          { ...options, ...bind, idleAfterMs },
           nodeWebWatchDependencies(nodeTraceSources)
         )
       }
