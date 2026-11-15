@@ -62,7 +62,10 @@ export const actToolkitFor = (config: OperatorConfig) =>
       ? approveToolkit
       : Toolkit.empty
 
-const actLayer = (config: OperatorConfig, deps: OperatorDeps): Layer.Layer<never> => {
+const actLayer = (
+  config: OperatorConfig,
+  deps: OperatorDeps
+): Layer.Layer<never, never, McpServer.McpServer> => {
   const act = actHandlers(deps)
   if (config.allowRun && config.allowApprove) {
     return McpServer.toolkit(actToolkit).pipe(Layer.provide(actToolkit.toLayer(act)))
