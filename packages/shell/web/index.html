@@ -36,8 +36,12 @@
             <div class="card-desc" data-bind="agents"></div>
           </div>
           <div class="seg" role="group">
-            <button aria-pressed="true">flow</button><button disabled>executors <kbd>e</kbd></button
-            ><button disabled>boards <kbd>b</kbd></button>
+            <button type="button" data-view="flow" aria-pressed="true">flow</button
+            ><button type="button" data-view="executors" aria-pressed="false">
+              executors <kbd>e</kbd></button
+            ><button type="button" data-view="boards" aria-pressed="false">
+              boards <kbd>b</kbd>
+            </button>
           </div>
           <div class="legend">
             <span><i class="sw idle"></i>planned</span><span><i class="sw running"></i>running</span
@@ -46,6 +50,8 @@
           </div>
         </div>
         <div class="viz" data-graph></div>
+        <div class="pane" data-executors hidden></div>
+        <div class="pane" data-boards hidden></div>
         <div class="roster">
           <span class="eyebrow">roster</span>
           <div class="roster-list" data-roster></div>
@@ -132,8 +138,12 @@
             <div class="card-desc" data-bind="agents"></div>
           </div>
           <div class="seg" role="group">
-            <button aria-pressed="true">flow</button><button disabled>executors <kbd>e</kbd></button
-            ><button disabled>boards <kbd>b</kbd></button>
+            <button type="button" data-view="flow" aria-pressed="true">flow</button
+            ><button type="button" data-view="executors" aria-pressed="false">
+              executors <kbd>e</kbd></button
+            ><button type="button" data-view="boards" aria-pressed="false">
+              boards <kbd>b</kbd>
+            </button>
           </div>
           <div class="legend">
             <span><i class="sw idle"></i>planned</span><span><i class="sw running"></i>running</span
@@ -142,6 +152,8 @@
           </div>
         </div>
         <div class="viz" data-graph></div>
+        <div class="pane" data-executors hidden></div>
+        <div class="pane" data-boards hidden></div>
         <div class="roster">
           <span class="eyebrow">roster</span>
           <div class="roster-list" data-roster></div>

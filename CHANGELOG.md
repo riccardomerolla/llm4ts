@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`llm4ts watch --web`: the executors and boards views** (ADR 0051,
+  ADR 0033). The flow card's toggles, and `e` and `b` as in the terminal
+  tree, switch between the graph, one card per executor (its leases, and
+  idle, busy or out with the roster's reason) and the boards: the epic's
+  stories in five columns, a running card with its clone and a `done/total`
+  bar, and the selected story's tasks as todo, doing, review and done.
+  Clicking a story card selects it. `?view=executors` or `?view=boards`
+  opens on a view, and switching keeps the URL in step. Frames carry each
+  executor's leases and exclusion reason and each story's clone and tasks;
+  `@llm4ts/runner/AgentTree` exports `cloneLabel` and `taskColumnOf`, which
+  the terminal's boards now use too.
+
 ## 4.3.0
 
 ### Added

@@ -2,11 +2,13 @@
 import type { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import {
   chipsOf,
+  cloneLabel,
   heldBy,
   initialView,
   leaseCounts,
   reduceTree,
   selectedLane,
+  taskColumnOf,
   treeInputsOfTrace,
   type ChipStatus,
   type TreeInput,
@@ -231,14 +233,14 @@ export const foldSteps = (start: TreeState, steps: ReadonlyArray<WebStep>): WebF
 // ── the frame ───────────────────────────────────────────────────────────────
 
 const executorOf = (state: TreeState, name: string): WebExecutor => {
+  const held = heldBy(state, name)
   const out = state.exclusions.find((exclusion) => exclusion.executor === name)
   if (out !== undefined) {
-    return { name, state: "out", text: `✗ out: ${out.reason}` }
+    return { name, state: "out", text: `✗ out: ${out.reason}`, leases: held, reason: out.reason }
   }
-  const held = heldBy(state, name)
   return held.length > 0
-    ? { name, state: "busy", text: `◐ busy · ${held.join(", ")}` }
-    : { name, state: "idle", text: "○ idle · no lease" }
+    ? { name, state: "busy", text: `◐ busy · ${held.join(", ")}`, leases: held }
+    : { name, state: "idle", text: "○ idle · no lease", leases: held }
 }
 
 /** At most this many of the latest timeline items travel with each frame. */
@@ -261,6 +263,7 @@ export const frameOf = (
       id: chip.id,
       status: chip.status,
       executor: lane?.executor,
+      clone: lane === undefined ? undefined : cloneLabel(lane),
       stage: lane?.stages.at(-1) ?? notes.stage,
       startedAt: lane?.startedAt,
       endedAt: lane?.status === "running" ? undefined : notes.endedAt,
@@ -277,7 +280,12 @@ export const frameOf = (
           ? undefined
           : { text: lane.activity.text, since: lane.activity.since },
       note: notes.note,
-      tasks: lane?.tasks.length ?? 0
+      tasks:
+        lane?.tasks.map((task) => ({
+          index: task.index,
+          title: task.title,
+          column: taskColumnOf(lane, task)
+        })) ?? []
     }
   })
   const judging = state.leases.some((lease) => lease.role === "judge")
