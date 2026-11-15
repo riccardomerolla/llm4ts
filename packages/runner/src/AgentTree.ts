@@ -1206,6 +1206,22 @@ const statusLine = (lane: TreeLane, now: number | undefined, idleAfterMs: number
 
 const elapsedMs = (ms: number): string => elapsed(0, ms)
 
+/** `codex#2`: who holds a lane or a task coder, or `(leasing)` before its lease lands. */
+export const cloneLabel = (holder: {
+  readonly executor: string | undefined
+  readonly clone: number | undefined
+}): string => cloneName(holder.executor ?? "(leasing)", holder.clone)
+
+export type TaskColumn = "todo" | "doing" | "done"
+
+/** A task's column on the story board: doing while the lane's coder or a task coder of its own has it. */
+export const taskColumnOf = (lane: TreeLane, task: TreeTask): TaskColumn =>
+  task.done
+    ? "done"
+    : task.index === lane.task?.index || lane.taskCoders.some((coder) => coder.index === task.index)
+      ? "doing"
+      : "todo"
+
 export type ChipStatus = "planned" | "running" | "waiting" | "done" | "failed"
 
 /** Every story once: the board's in plan order, then lanes the board does not list. */
@@ -1363,7 +1379,7 @@ const laneLine = (
     span(" "),
     span(lane.id, "bold"),
     // An attendee borrows the room's one seat, a specialist its role's: no executor of its own to show.
-    ...(seatless(lane) ? [] : [span(` ${cloneName(lane.executor ?? "(leasing)", lane.clone)}`)]),
+    ...(seatless(lane) ? [] : [span(` ${cloneLabel(lane)}`)]),
     ...(task.length === 0 ? [] : [span(" · "), span(task)]),
     // A task is a stage of its own name: say it once.
     ...(stage === lane.task?.title ? [] : [span(" · "), span(stage, "dim")]),
@@ -1385,7 +1401,7 @@ const taskCoderLine = (coder: TreeTaskCoder, width: number, now: number | undefi
     [
       span("    └ "),
       span("task coder ", "dim"),
-      span(`${cloneName(coder.executor ?? "(leasing)", coder.clone)} · `),
+      span(`${cloneLabel(coder)} · `),
       span(`${coder.index}/${coder.count} ${coder.title}`)
     ],
     span(` · ${elapsed(coder.since, now)}`, "dim"),
@@ -1498,9 +1514,7 @@ const detailBox = (
               `${tick(task, running)} ${task.index} ${task.title}`,
               running ? "bold" : undefined
             ),
-            ...(beside === undefined
-              ? []
-              : [span(`  ← ${cloneName(beside.executor ?? "(leasing)", beside.clone)}`, "dim")])
+            ...(beside === undefined ? [] : [span(`  ← ${cloneLabel(beside)}`, "dim")])
           ]
           return right.length === 0
             ? left
@@ -1522,7 +1536,7 @@ const detailBox = (
       ? `${lane.id} · ${lane.turn === undefined ? "listening" : turnText(lane)}`
       : lane.kind === "specialist"
         ? `${lane.id} · ${lane.report === undefined ? "idle" : reportText(lane)}`
-        : `${lane.id} · ${cloneName(lane.executor ?? "(leasing)", lane.clone)}${
+        : `${lane.id} · ${cloneLabel(lane)}${
             lane.task === undefined ? "" : ` · task ${lane.task.index}/${lane.task.count}`
           }`
   return box(
@@ -1598,10 +1612,7 @@ const boardsOf = (
           lane.tasks.length === 0
             ? ""
             : ` ${done}/${lane.tasks.length}${each >= 24 ? ` ${bar(done, lane.tasks.length)}` : ""}`
-        return [
-          [span(chip.id, "bold")],
-          [span(`  ${cloneName(lane.executor ?? "(leasing)", lane.clone)}${progress}`, "dim")]
-        ]
+        return [[span(chip.id, "bold")], [span(`  ${cloneLabel(lane)}${progress}`, "dim")]]
       })
       return box(
         each,
@@ -1615,22 +1626,10 @@ const boardsOf = (
     return [[span("epic board", "bold")], ...epic]
   }
   const taskColumns: ReadonlyArray<readonly [string, (task: TreeTask) => boolean]> = [
-    [
-      "todo",
-      (task) =>
-        !task.done &&
-        task.index !== selected.task?.index &&
-        !selected.taskCoders.some((coder) => coder.index === task.index)
-    ],
-    [
-      "doing",
-      (task) =>
-        !task.done &&
-        (task.index === selected.task?.index ||
-          selected.taskCoders.some((coder) => coder.index === task.index))
-    ],
+    ["todo", (task) => taskColumnOf(selected, task) === "todo"],
+    ["doing", (task) => taskColumnOf(selected, task) === "doing"],
     ["review", () => false],
-    ["done", (task) => task.done]
+    ["done", (task) => taskColumnOf(selected, task) === "done"]
   ]
   const story = chunked(taskColumns, width >= 4 * 16 + 6 ? 4 : 2).flatMap((group) =>
     columnsOf(group, width, ([name, keep], each) => {
@@ -1650,10 +1649,7 @@ const boardsOf = (
     ...epic,
     [],
     [
-      span(
-        `story board · ${selected.id} · ${cloneName(selected.executor ?? "(leasing)", selected.clone)}`,
-        "bold"
-      ),
+      span(`story board · ${selected.id} · ${cloneLabel(selected)}`, "bold"),
       span(` · ${elapsed(selected.startedAt, now)}`)
     ],
     ...story

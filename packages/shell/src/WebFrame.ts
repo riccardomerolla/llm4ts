@@ -48,10 +48,20 @@ export const WebVerdict = Schema.Struct({
 })
 export type WebVerdict = typeof WebVerdict.Type
 
+/** A task of a story's plan, in the story board's column (AgentTree `taskColumnOf`). */
+export const WebTask = Schema.Struct({
+  index: Schema.Number,
+  title: Schema.String,
+  column: Schema.Literals(["todo", "doing", "done"])
+})
+export type WebTask = typeof WebTask.Type
+
 export const WebStory = Schema.Struct({
   id: Schema.String,
   status: WebChipStatus,
   executor: Schema.optional(Schema.String),
+  /** Who codes it, `codex#2`, once it has a lane. */
+  clone: Schema.optional(Schema.String),
   stage: Schema.optional(Schema.String),
   startedAt: Schema.optional(Schema.Number),
   endedAt: Schema.optional(Schema.Number),
@@ -65,14 +75,18 @@ export const WebStory = Schema.Struct({
   tools: Schema.Array(Schema.String),
   activity: Schema.optional(Schema.Struct({ text: Schema.String, since: Schema.Number })),
   note: Schema.optional(Schema.String),
-  tasks: Schema.Number
+  tasks: Schema.Array(WebTask)
 })
 export type WebStory = typeof WebStory.Type
 
 export const WebExecutor = Schema.Struct({
   name: Schema.String,
   state: Schema.Literals(["busy", "idle", "out"]),
-  text: Schema.String
+  text: Schema.String,
+  /** Everything it holds now, as AgentTree `heldBy` lists it. */
+  leases: Schema.Array(Schema.String),
+  /** Why the roster left it out of the round, when it is out. */
+  reason: Schema.optional(Schema.String)
 })
 export type WebExecutor = typeof WebExecutor.Type
 

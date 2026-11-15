@@ -72,9 +72,18 @@ no-store`.
 
 - The page shows what the trace shows. Anyone who can reach the port sees
   the run, so it binds loopback only.
-- Not yet in the browser: the executors and boards views, the transcript
-  tail, the expanded lane, the full log, and keys other than space and the
-  arrows. Their controls are drawn but disabled.
+- The executors and boards views (ADR 0033) ride the same frame: each
+  executor carries what `heldBy` lists and its exclusion reason, each story
+  its clone (`cloneLabel`) and its tasks in the story board's column
+  (`taskColumnOf`), both exported by the agent tree so the page and the
+  terminal file a task alike. The flow card switches between the graph and
+  the two views by its toggles or by `e` and `b`, as `onTreeKey` does;
+  `?view=executors|boards` keeps the choice across a reload. The epic
+  board's second column reads `running`, as the page's legend does, where
+  the terminal's reads `active`.
+- Not yet in the browser: the transcript tail, the expanded lane, the full
+  log, selecting an executor, and keys other than space, the arrows, `e`
+  and `b`.
 - The page loads nothing from the network; it works offline.
 - A checkout serves the page only after `pnpm build`, as it runs the CLI
   from `dist/` only after one.

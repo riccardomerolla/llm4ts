@@ -12,11 +12,14 @@ export const runnerFixture = (name: string): string =>
 export const shellFixture = (name: string): string =>
   readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")
 
+const traceLines = (text: string): ReadonlyArray<TraceLine> =>
+  text
+    .trim()
+    .split("\n")
+    .map((line) => Schema.decodeUnknownSync(Schema.fromJsonString(TraceLine))(line))
+
 export const trace = runnerFixture("agent-tree.trace.jsonl")
-export const lines = trace
-  .trim()
-  .split("\n")
-  .map((line) => Schema.decodeUnknownSync(Schema.fromJsonString(TraceLine))(line))
+export const lines = traceLines(trace)
 export const steps = stepsOfTrace(lines)
 export const start = emptyTree({
   title: "epic conto-bonifico",
@@ -43,3 +46,12 @@ export const frameAt = (seq: number): WebFrame =>
 /** The frame after the first `count` steps, as `/api/frame?count=` serves it. */
 export const frameAfter = (count: number, gapMs = 0): WebFrame =>
   frameOf(foldSteps(start, steps.slice(0, count)), { steps: steps.length, lastSeq: 50, gapMs })
+
+/** The clones fixture (ADR 0033): clones, task plans, parallel task coders; the boards golden's run. */
+export const clonesStart = emptyTree({ title: "epic bank-login" })
+export const clonesSteps = stepsOfTrace(traceLines(runnerFixture("agent-tree.clones.trace.jsonl")))
+export const clonesFrame = (): WebFrame =>
+  frameOf(foldSteps(clonesStart, clonesSteps), {
+    steps: clonesSteps.length,
+    lastSeq: clonesSteps.at(-1)?.seq
+  })

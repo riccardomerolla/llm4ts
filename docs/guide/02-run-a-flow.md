@@ -194,7 +194,14 @@ Add `--web` to watch in a browser instead (ADR 0051): `llm4ts watch --web`
 takes the same trace, `--epic`, `--replay` and `--speed`, serves the page on
 a loopback URL it prints, and stops on Ctrl-C. A live run's clocks move every
 500ms; a replay plays at ×1, ×10 or ×50, steps, and scrubs to any seq
-(`?seq=33` opens there). `?freeze` shows one still frame.
+(`?seq=33` opens there). `?freeze` shows one still frame. The flow card
+switches, by its toggles or by `e` and `b` as in the terminal, between the
+graph, one card per executor (its leases, idle, busy, or out with the
+roster's reason) and the boards: the epic's stories by column, a running
+card with its clone and task progress, and under it the selected story's
+tasks by column. Click a story card to select it. `?view=executors` or
+`?view=boards` opens on that view, and the page keeps it there as you
+switch.
 The page answers only on `127.0.0.1`, `localhost` or `[::1]` at its own
 port, and loads nothing from the network: its script and the Geist fonts
 ship with the shell. In a checkout, run `pnpm build` first: it bundles the

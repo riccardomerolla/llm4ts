@@ -3,7 +3,8 @@
    through the shared schema and lays them out.
    ?freeze   one frame, no stream, loops paused
    ?seq=N    (replay) open at the last step at or before trace seq N
-   ?speed=N  (replay) start at this speed */
+   ?speed=N  (replay) start at this speed
+   ?view=executors|boards  what the flow card shows; `e` and `b` toggle it */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -11,7 +12,18 @@ import { clock } from "@llm4ts/runner/Format"
 import { WebRunJson, type WebFrame, type WebRun } from "../src/WebFrame.ts"
 import { decodeFrame, PageError, sseFrames, type FrameSource } from "./frames.ts"
 import { countAtSeq, countAtTime, makeReplayController, type ReplayState } from "./replay.ts"
-import { bind, esc, find, findAll, itemHtml, makeView, reduceMotion, setHtml } from "./view.ts"
+import {
+  bind,
+  esc,
+  find,
+  findAll,
+  itemHtml,
+  makeView,
+  reduceMotion,
+  setHtml,
+  type FrameView
+} from "./view.ts"
+import { searchWithView, viewNamed, viewOfSearch, viewOnKey, type PageView } from "./views.ts"
 
 const params = new URLSearchParams(location.search)
 const frozen = params.has("freeze")
@@ -66,6 +78,43 @@ const browserSource: FrameSource = {
 
 // ── the page ──
 
+/** The view toggles and their keys; the choice lives in the URL so a reload keeps it. */
+const wireViews = (root: HTMLElement, view: FrameView, initial: PageView): void => {
+  let shown = initial
+  const choose = (next: PageView): void => {
+    shown = next
+    history.replaceState(
+      history.state,
+      "",
+      `${location.pathname}${searchWithView(location.search, next)}${location.hash}`
+    )
+    view.show(next)
+  }
+  for (const button of findAll(root, "[data-view]")) {
+    button.addEventListener("click", () => {
+      const asked = viewNamed(button.dataset["view"])
+      if (asked !== shown) {
+        choose(asked)
+      }
+    })
+  }
+  addEventListener("keydown", (event) => {
+    const target = event.target instanceof HTMLElement ? event.target : null
+    const next = viewOnKey(shown, {
+      key: event.key,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      altKey: event.altKey,
+      target
+    })
+    if (next !== undefined) {
+      event.preventDefault()
+      choose(next)
+    }
+  })
+}
+const initialView = viewOfSearch(location.search)
+
 const boot = find(document, "[data-boot]")
 const failed = (message: string): void => {
   if (boot === undefined) {
@@ -95,7 +144,8 @@ const startLive = (run: WebRun): Effect.Effect<void, PageError> => {
   if (root === null) {
     return Effect.void
   }
-  const view = makeView(root, { mode: "live", reduce, frozen })
+  const view = makeView(root, { mode: "live", reduce, frozen, view: initialView })
+  wireViews(root, view, initialView)
   let seen = -1
   const draw = (frame: WebFrame): void => {
     const fresh = frame.count !== seen && seen >= 0
@@ -137,7 +187,8 @@ const startReplay = (run: WebRun) =>
     if (root === null) {
       return
     }
-    const view = makeView(root, { mode: "replay", reduce, frozen })
+    const view = makeView(root, { mode: "replay", reduce, frozen, view: initialView })
+    wireViews(root, view, initialView)
     const steps = run.steps
     const items = run.timeline
     const t0 = steps[0]?.at ?? 0

@@ -1,5 +1,12 @@
 import { clock, dollars, elapsed, formatCount } from "@llm4ts/runner/Format"
-import type { WebFrame, WebStory, WebTimelineItem, WebVerdict } from "../src/WebFrame.ts"
+import type {
+  WebExecutor,
+  WebFrame,
+  WebStory,
+  WebTimelineItem,
+  WebVerdict
+} from "../src/WebFrame.ts"
+import { epicColumns, progressOf, storyColumns, tasksIn, type PageView } from "./views.ts"
 
 /**
  * The page's drawing (ADR 0051), ported from the approved v2 design: plain
@@ -105,23 +112,43 @@ const restart = (el: HTMLElement, name: string): void => {
 
 export interface FrameView {
   readonly render: (frame: WebFrame, animate: boolean) => void
+  /** Shows the graph, the executors or the boards, and redraws the frame in hand. */
+  readonly show: (view: PageView) => void
 }
 
 export interface ViewOptions {
   readonly mode: "live" | "replay"
   readonly reduce: boolean
   readonly frozen: boolean
+  readonly view: PageView
 }
 
 export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => {
   const { mode, reduce, frozen } = options
   const viz = find(root, "[data-graph]")
+  const executorsPane = find(root, "[data-executors]")
+  const boardsPane = find(root, "[data-boards]")
   const nodes = new Map<string, HTMLElement>()
   const last = new Map<string, string>()
   let picked: string | undefined
   let shape = ""
   let svg: SVGSVGElement | undefined
   let current: WebFrame | undefined
+  let view = options.view
+
+  const pick = (id: string): void => {
+    picked = id
+    if (current !== undefined) {
+      render(current, false)
+    }
+  }
+  boardsPane?.addEventListener("click", (event) => {
+    const card = event.target instanceof Element ? event.target.closest("[data-story]") : null
+    const id = card instanceof HTMLElement ? card.dataset["story"] : undefined
+    if (id !== undefined) {
+      pick(id)
+    }
+  })
 
   const selected = (): string | undefined => {
     const ids = current?.stories.map((story) => story.id) ?? []
@@ -170,12 +197,7 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
     el.dataset["id"] = id
     el.innerHTML = `<div class="box"><div class="shine"></div><div class="slot"></div></div><div class="label"><span class="n"></span><span class="s"></span><span class="t"></span></div>`
     if (story) {
-      el.addEventListener("click", () => {
-        picked = id
-        if (current !== undefined) {
-          render(current, false)
-        }
-      })
+      el.addEventListener("click", () => pick(id))
     }
     viz?.append(el)
     nodes.set(id, el)
@@ -412,9 +434,121 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
     )
     renderDetail(root, frame, selected(), now)
     renderJudge(root, frame)
+    // the flow card's body: the graph, or the executors, or the boards
+    for (const button of findAll(root, "[data-view]")) {
+      button.setAttribute("aria-pressed", String(button.dataset["view"] === view))
+    }
+    if (viz !== undefined) {
+      viz.hidden = view !== "flow"
+    }
+    if (executorsPane !== undefined) {
+      executorsPane.hidden = view !== "executors"
+      if (view === "executors") {
+        setHtml(executorsPane, executorsHtml(frame.roster))
+      }
+    }
+    if (boardsPane !== undefined) {
+      boardsPane.hidden = view !== "boards"
+      if (view === "boards") {
+        setHtml(boardsPane, boardsHtml(frame, selected(), now))
+        placeAll(boardsPane)
+      }
+    }
   }
 
-  return { render }
+  const show = (next: PageView): void => {
+    view = next
+    if (current !== undefined) {
+      render(current, false)
+    }
+  }
+
+  return { render, show }
+}
+
+const executorState: Readonly<Record<WebExecutor["state"], string>> = {
+  busy: "◐ busy",
+  idle: "○ idle",
+  out: "✗ out"
+}
+
+/** One card per executor, as the terminal's executor boxes: name, leases, then idle, busy or out. */
+const executorsHtml = (roster: ReadonlyArray<WebExecutor>): string =>
+  roster.length === 0
+    ? `<div class="empty">no executors yet</div>`
+    : `<div class="exec-grid">${roster
+        .map(
+          (x) => `<div class="exec-card ${x.state}">
+            <div class="exec-name"><i class="dot-${x.state}"></i>${esc(x.name)}</div>
+            <ul class="leases">${
+              x.leases.length === 0
+                ? `<li class="v-dim">no lease</li>`
+                : x.leases.map((lease) => `<li>${esc(lease)}</li>`).join("")
+            }</ul>
+            <div class="exec-state">${esc(
+              x.state === "out" && x.reason !== undefined
+                ? `${executorState.out}: ${x.reason}`
+                : executorState[x.state]
+            )}</div>
+          </div>`
+        )
+        .join("")}</div>`
+
+const columnHtml = (title: string, count: number, cards: ReadonlyArray<string>): string =>
+  `<div class="column"><div class="col-head">${esc(title)} <span class="faint">(${count})</span></div>${
+    cards.length === 0 ? `<div class="col-empty">—</div>` : cards.join("")
+  }</div>`
+
+/** A running story's card carries its clone and its plan's progress, as the terminal's does. */
+const storyCardHtml = (story: WebStory, selected: boolean): string => {
+  const { done, total } = progressOf(story)
+  const running =
+    story.status === "running"
+      ? `<span class="card-sub">${esc(story.clone ?? "(leasing)")}${total > 0 ? ` · ${done}/${total}` : ""}</span>${
+          total > 0 ? `<span class="bar"><i data-pct="${(100 * done) / total}"></i></span>` : ""
+        }`
+      : ""
+  return `<button type="button" class="story-card ${nodeState(story.status)}${selected ? " selected" : ""}" data-story="${esc(story.id)}"><span class="card-id">${esc(story.id)}</span>${running}</button>`
+}
+
+/** The epic board, then the selected story's task board under it (ADR 0033, decision 4). */
+const boardsHtml = (frame: WebFrame, id: string | undefined, now: number): string => {
+  const epic = epicColumns
+    .map((status) => {
+      const members = frame.stories.filter((story) => story.status === status)
+      return columnHtml(
+        status,
+        members.length,
+        members.map((story) => storyCardHtml(story, story.id === id))
+      )
+    })
+    .join("")
+  const story = frame.stories.find((candidate) => candidate.id === id)
+  const board =
+    story === undefined
+      ? ""
+      : `<div class="board-title"><span class="eyebrow">story board</span><span class="mono">${esc(
+          [
+            story.id,
+            story.clone ?? story.status,
+            ...(story.startedAt === undefined
+              ? []
+              : [elapsed(story.startedAt, story.endedAt ?? now)])
+          ].join(" · ")
+        )}</span></div><div class="columns four">${storyColumns
+          .map((column) => {
+            const tasks = tasksIn(story, column)
+            return columnHtml(
+              column,
+              tasks.length,
+              tasks.map(
+                (task) =>
+                  `<div class="task-card"><span class="faint">${task.index}</span> ${esc(task.title)}</div>`
+              )
+            )
+          })
+          .join("")}</div>`
+  return `<div class="board-title"><span class="eyebrow">epic board</span><span class="mono faint">${frame.counts.total} stories</span></div><div class="columns five">${epic}</div>${board}`
 }
 
 const renderDetail = (
@@ -474,8 +608,8 @@ const renderDetail = (
   }
   const plan =
     state === "running"
-      ? story.tasks > 0
-        ? `<div class="kv"><span>plan</span><span>${story.tasks} tasks</span></div>`
+      ? story.tasks.length > 0
+        ? `<div class="kv"><span>plan</span><span>${story.tasks.length} tasks</span></div>`
         : `<div class="kv"><span>plan</span><span class="v-dim">no task plan yet</span></div><div class="indeterminate"></div>`
       : ""
   const desc = [story.executor, story.executor !== undefined ? "coder" : undefined, story.stage]

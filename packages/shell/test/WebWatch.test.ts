@@ -20,7 +20,18 @@ import {
   type WebWatchDependencies,
   type WebWatchOptions
 } from "../src/WebWatch.ts"
-import { frameAt, shellFixture, steps, trace } from "./WebWatchFixture.ts"
+import { initialView, renderTree, type TreeMode } from "@llm4ts/runner/AgentTree"
+import { foldSteps } from "../src/WebWatchView.ts"
+import {
+  clonesFrame,
+  clonesStart,
+  clonesSteps,
+  frameAt,
+  shellFixture,
+  start,
+  steps,
+  trace
+} from "./WebWatchFixture.ts"
 
 describe("watch --web view", () => {
   it("keeps the trace's seq on every step, and skips what the tree skips", () => {
@@ -109,6 +120,130 @@ describe("watch --web view", () => {
   })
 })
 
+/** What the terminal tree prints in `mode` for the same fold; its boxes cut long lines with `…`. */
+const terminal = (seq: number, mode: TreeMode): string =>
+  renderTree(
+    foldSteps(
+      start,
+      steps.filter((step) => step.seq <= seq)
+    ).state,
+    {
+      width: 160,
+      colour: false,
+      view: { ...initialView, mode }
+    }
+  ).join("\n")
+
+describe("watch --web executors and boards", () => {
+  it("gives every executor its leases, and lemonade's reason at seq 33, as the executor boxes do", () => {
+    const frame = frameAt(33)
+    assert.deepStrictEqual(
+      frame.roster.map((executor) => [
+        executor.name,
+        executor.state,
+        executor.leases,
+        executor.reason
+      ]),
+      [
+        ["codex", "busy", ["coder · accounts"], undefined],
+        ["pi-lmstudio", "busy", ["coder · payments"], undefined],
+        ["lemonade", "out", ["coder · iban"], "until 10:05: the serving engine is down"],
+        ["claude", "idle", [], undefined]
+      ]
+    )
+    const boxes = terminal(33, "executors")
+    for (const executor of frame.roster) {
+      for (const lease of executor.leases) {
+        assert.include(boxes, lease)
+      }
+    }
+    assert.include(boxes, `✗ out: ${frame.roster[2]?.reason?.slice(0, 12)}`)
+  })
+
+  it("keeps lemonade out with no lease at the end, and codex moved to overview", () => {
+    assert.deepStrictEqual(
+      frameAt(50).roster.map((executor) => [executor.name, executor.state, executor.leases]),
+      [
+        ["codex", "busy", ["coder · overview"]],
+        ["pi-lmstudio", "busy", ["coder · payments"]],
+        ["lemonade", "out", []],
+        ["claude", "idle", []]
+      ]
+    )
+  })
+
+  it("puts each story in the epic board's column with the clone the terminal's card shows", () => {
+    const columns = (seq: number) =>
+      frameAt(seq).stories.map((story) => [story.id, story.status, story.clone])
+    assert.deepStrictEqual(columns(33), [
+      ["accounts", "running", "codex"],
+      ["payments", "running", "pi-lmstudio"],
+      ["iban", "failed", "lemonade"],
+      ["overview", "planned", undefined],
+      ["movimenti", "planned", undefined],
+      ["bonifico", "waiting", undefined]
+    ])
+    assert.deepStrictEqual(columns(50), [
+      ["accounts", "done", "codex"],
+      ["payments", "running", "pi-lmstudio"],
+      ["iban", "failed", "lemonade"],
+      ["overview", "running", "codex"],
+      ["movimenti", "planned", undefined],
+      ["bonifico", "waiting", undefined]
+    ])
+    for (const seq of [33, 50]) {
+      const frame = frameAt(seq)
+      const boards = terminal(seq, "boards")
+      const focus = frame.stories.find((story) => story.id === frame.focus)
+      assert.include(boards, `story board · ${focus?.id} · ${focus?.clone}`, `seq ${seq}`)
+      for (const story of frame.stories.filter((candidate) => candidate.status === "running")) {
+        assert.match(boards, new RegExp(`│ +${story.clone} +│`, "u"), `seq ${seq} ${story.id}`)
+      }
+    }
+  })
+
+  it("files a story's tasks in the story board's columns, as the boards golden does", () => {
+    const frame = clonesFrame()
+    const s01 = frame.stories.find((story) => story.id === "S01")
+    assert.strictEqual(s01?.clone, "codex#1")
+    assert.deepStrictEqual(
+      s01?.tasks.map((task) => [task.index, task.column]),
+      [
+        [1, "done"],
+        [2, "done"],
+        [3, "doing"],
+        [4, "todo"],
+        [5, "todo"]
+      ]
+    )
+    assert.deepStrictEqual(
+      frame.stories
+        .filter((story) => story.status === "running")
+        .map((story) => [
+          story.id,
+          story.clone,
+          story.tasks.filter((task) => task.column === "done").length,
+          story.tasks.length
+        ]),
+      [
+        ["S01", "codex#1", 2, 5],
+        ["S02", "codex#2", 0, 4],
+        ["S03", "claude#1", 1, 3],
+        ["S04", "codex#3", 5, 5],
+        ["S05", "(leasing)", 0, 0]
+      ]
+    )
+    const boards = renderTree(foldSteps(clonesStart, clonesSteps).state, {
+      width: 160,
+      colour: false,
+      view: { ...initialView, mode: "boards" }
+    }).join("\n")
+    for (const task of s01?.tasks ?? []) {
+      assert.include(boards, `${task.index} ${task.title}`.slice(0, 20))
+    }
+  })
+})
+
 describe("watch --web frame schema", () => {
   const throughTheWire = (frame: WebFrame): WebFrame =>
     Schema.decodeUnknownSync(WebFrameJson)(Schema.encodeSync(WebFrameJson)(frame))
@@ -118,6 +253,8 @@ describe("watch --web frame schema", () => {
       const frame = frameAt(seq)
       assert.strictEqual(JSON.stringify(throughTheWire(frame)), JSON.stringify(frame), `seq ${seq}`)
     }
+    const clones = clonesFrame()
+    assert.strictEqual(JSON.stringify(throughTheWire(clones)), JSON.stringify(clones), "clones")
     const iban = throughTheWire(frameAt(33)).stories.find((story) => story.id === "iban")
     assert.strictEqual(iban?.failMessage, "pi error: Connection error.")
   })
