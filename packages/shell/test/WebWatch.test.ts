@@ -1,3 +1,4 @@
+import { createServer as createNetServer } from "node:net"
 import { request as httpRequest } from "node:http"
 import { readFileSync } from "node:fs"
 import { assert, describe, it } from "@effect/vitest"
@@ -23,6 +24,11 @@ import {
 } from "../src/WebFrame.ts"
 import {
   contentSecurityPolicy,
+  exposureNotice,
+  hostAllowed,
+  isLoopbackHost,
+  listenFailure,
+  openAddress,
   runWebWatch,
   webWatchApp,
   type WebWatchDependencies,
@@ -558,6 +564,18 @@ describe("watch --web server", () => {
     }).pipe(Effect.scoped)
   )
 
+  it.effect("bound to every interface, also answers an IP address, never a foreign name", () =>
+    Effect.gen(function* () {
+      const get = yield* serve({ repo: "/repo", trace: tracePath, replay: true, host: "0.0.0.0" })
+      for (const host of [`127.0.0.1:${port}`, `192.168.1.20:${port}`, `[fe80::1]:${port}`]) {
+        assert.strictEqual((yield* get("/api/run", host)).status, 200, host)
+      }
+      for (const host of [`evil.example:${port}`, `192.168.1.20:9999`, "192.168.1.20"]) {
+        assert.strictEqual((yield* get("/api/run", host)).status, 403, host)
+      }
+    }).pipe(Effect.scoped)
+  )
+
   it.effect("plays a replay from a step to the last, each frame after its gap", () =>
     Effect.gen(function* () {
       const get = yield* serve({ repo: "/repo", trace: tracePath, replay: true, speed: 10_000 })
@@ -746,7 +764,129 @@ describe("watch --web transcript tail", () => {
   )
 })
 
+describe("watch --web --host", () => {
+  it("allows the loopback names, the bound address, and any IP on a wildcard bind", () => {
+    const cases: ReadonlyArray<readonly [string | undefined, string, boolean]> = [
+      ["127.0.0.1:4000", "127.0.0.1", true],
+      ["LOCALHOST:4000", "127.0.0.1", true],
+      ["[::1]:4000", "127.0.0.1", true],
+      ["127.0.0.1:4001", "127.0.0.1", false],
+      ["127.0.0.1", "127.0.0.1", false],
+      [undefined, "127.0.0.1", false],
+      ["192.168.1.20:4000", "127.0.0.1", false],
+      ["192.168.1.20:4000", "192.168.1.20", true],
+      ["10.0.0.7:4000", "192.168.1.20", false],
+      ["devbox.lan:4000", "devbox.lan", true],
+      ["evil.example:4000", "devbox.lan", false],
+      ["10.0.0.7:4000", "0.0.0.0", true],
+      ["[fe80::1]:4000", "::", true],
+      ["[fe80::1]:4000", "[::]", true],
+      ["evil.example:4000", "0.0.0.0", false],
+      ["evil.example:4000", "::", false]
+    ]
+    for (const [header, bound, allowed] of cases) {
+      assert.strictEqual(hostAllowed(header, 4000, bound), allowed, `${header} on ${bound}`)
+    }
+  })
+
+  it("opens a wildcard bind on loopback, and names why listening failed", () => {
+    assert.strictEqual(openAddress("http://0.0.0.0:4174"), "http://127.0.0.1:4174")
+    assert.strictEqual(openAddress("http://[::]:4174"), "http://[::1]:4174")
+    assert.strictEqual(openAddress("http://192.168.1.20:4174"), "http://192.168.1.20:4174")
+    assert.strictEqual(
+      listenFailure("::1", 80, Object.assign(new Error("listen EACCES"), { code: "EACCES" })),
+      "watch --web cannot listen on [::1]:80: not allowed to listen there"
+    )
+    assert.strictEqual(
+      listenFailure("10.9.9.9", 4174, Object.assign(new Error("x"), { code: "EADDRNOTAVAIL" })),
+      "watch --web cannot listen on 10.9.9.9:4174: this machine has no such address"
+    )
+    assert.strictEqual(
+      listenFailure("127.0.0.1", undefined, new Error("something odd")),
+      "watch --web cannot listen on 127.0.0.1:0: something odd"
+    )
+  })
+
+  it("warns only when the bind reaches beyond this machine", () => {
+    for (const host of ["127.0.0.1", "127.0.0.2", "localhost", "::1", "[::1]"]) {
+      assert.isTrue(isLoopbackHost(host), host)
+      assert.strictEqual(exposureNotice(host), "", host)
+    }
+    for (const host of ["0.0.0.0", "::", "192.168.1.20", "devbox.lan"]) {
+      assert.isFalse(isLoopbackHost(host), host)
+      assert.include(exposureNotice(host), `Listening on ${host}, not loopback`, host)
+    }
+  })
+})
+
+/** A port nothing listens on right now. */
+const freePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const probe = createNetServer()
+    probe.once("error", reject)
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address()
+      const chosen = typeof address === "object" && address !== null ? address.port : 0
+      probe.close(() => resolve(chosen))
+    })
+  })
+
 describe("watch --web on a real socket", () => {
+  it.live("listens on the --port and --host it is given", () =>
+    Effect.gen(function* () {
+      const wanted = yield* Effect.promise(freePort)
+      const { dependencies, written, detach } = yield* dependenciesFor(trace)
+      const serving = yield* Effect.forkChild(
+        runWebWatch(
+          { repo: "/repo", trace: tracePath, replay: true, host: "127.0.0.1", port: wanted },
+          dependencies
+        )
+      )
+      for (;;) {
+        if ((yield* Ref.get(written)).includes("open http://")) break
+        yield* Effect.sleep("10 millis")
+      }
+      assert.include(yield* Ref.get(written), `open http://127.0.0.1:${wanted}/`)
+      assert.notInclude(yield* Ref.get(written), "not loopback")
+      const run = yield* Effect.promise(() =>
+        openGet(new URL(`http://127.0.0.1:${wanted}/api/run`), `localhost:${wanted}`)
+      )
+      run.close()
+      assert.strictEqual(run.status, 200)
+      yield* detach
+      assert.strictEqual((yield* Fiber.await(serving))._tag, "Success")
+    })
+  )
+
+  it.live("fails, without serving, when the --port is taken", () =>
+    Effect.gen(function* () {
+      const wanted = yield* Effect.promise(freePort)
+      const holder = createNetServer()
+      yield* Effect.acquireRelease(
+        Effect.callback<void>((resume) => {
+          holder.listen(wanted, "127.0.0.1", () => resume(Effect.void))
+        }),
+        () =>
+          Effect.callback<void>((resume) => {
+            holder.close(() => resume(Effect.void))
+          })
+      )
+      const { dependencies, written } = yield* dependenciesFor(trace)
+      const error = yield* Effect.flip(
+        runWebWatch(
+          { repo: "/repo", trace: tracePath, host: "127.0.0.1", port: wanted },
+          dependencies
+        )
+      )
+      assert.strictEqual(error._tag, "WebListen")
+      assert.strictEqual(
+        error.message,
+        `watch --web cannot listen on 127.0.0.1:${wanted}: the port is in use (pick another --port, or 0 for a free one)`
+      )
+      assert.notInclude(yield* Ref.get(written), "open http://")
+    }).pipe(Effect.scoped)
+  )
+
   it.live("refuses a foreign Host, and detaches cleanly with a live stream open", () =>
     Effect.gen(function* () {
       const { dependencies, written, detach } = yield* dependenciesFor(trace)
