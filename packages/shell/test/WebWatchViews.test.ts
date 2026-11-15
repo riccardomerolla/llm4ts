@@ -5,6 +5,9 @@ import {
   detailAfter,
   detailOnKey,
   executorOnKey,
+  graphWidth,
+  graphZoom,
+  minGraphZoom,
   initialDetail,
   tailRoles,
   tailTargetOf,
@@ -219,5 +222,17 @@ describe("watch --web executor keys", () => {
       executorOnKey(names, "codex", press("ArrowDown", { target: { tagName: "INPUT" } }))
     )
     assert.isUndefined(executorOnKey([], undefined, press("ArrowDown")))
+  })
+})
+
+describe("watch --web fit", () => {
+  it("zooms the graph down to the card it has, never up, and not below the floor", () => {
+    assert.strictEqual(graphZoom(1392), 1)
+    assert.strictEqual(graphZoom(2400), 1)
+    assert.strictEqual(graphZoom(graphWidth), 1)
+    assert.closeTo(graphZoom(1230) ?? 0, 1230 / graphWidth, 1e-9)
+    assert.strictEqual(graphZoom(Math.round(graphWidth * minGraphZoom) - 1), minGraphZoom)
+    assert.strictEqual(graphZoom(349), minGraphZoom)
+    assert.isUndefined(graphZoom(0))
   })
 })

@@ -9,6 +9,8 @@ import type {
 } from "../src/WebFrame.ts"
 import {
   epicColumns,
+  graphWidth,
+  graphZoom,
   initialDetail,
   progressOf,
   storyColumns,
@@ -88,7 +90,7 @@ const ROW = 84
 const geometry = (
   count: number
 ): { readonly height: number; readonly oy: number; readonly top: number } => {
-  const height = Math.max(560, 32 + count * ROW + 24)
+  const height = Math.max(400, 32 + count * ROW + 24)
   return { height, oy: Math.round(height / 2) - 28, top: 32 }
 }
 const curve = (x0: number, y0: number, x1: number, y1: number): string => {
@@ -164,6 +166,19 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
   let current: WebFrame | undefined
   let view = options.view
 
+  // The graph is drawn at a fixed width; on a narrower card it zooms to fit,
+  // so the page never scrolls sideways (zoom, unlike a transform, also
+  // shrinks the room it takes and keeps clicks on the nodes).
+  const card = viz?.parentElement
+  if (viz !== undefined && card !== null && card !== undefined) {
+    new ResizeObserver(() => {
+      const zoom = graphZoom(card.clientWidth)
+      if (zoom !== undefined) {
+        viz.style.zoom = String(zoom)
+      }
+    }).observe(card)
+  }
+
   const redraw = (): void => {
     if (current !== undefined) {
       render(current, false)
@@ -214,7 +229,7 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
     shape = key
     const { height } = geometry(count)
     viz.style.height = `${height}px`
-    viz.innerHTML = `<svg class="edges" width="1390" height="${height}" viewBox="0 0 1390 ${height}"></svg>`
+    viz.innerHTML = `<svg class="edges" width="${graphWidth}" height="${height}" viewBox="0 0 ${graphWidth} ${height}"></svg>`
     const drawn = viz.querySelector("svg")
     svg = drawn instanceof SVGSVGElement ? drawn : undefined
     nodes.clear()

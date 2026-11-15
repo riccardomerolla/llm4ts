@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`llm4ts watch --web` fits the window.** The page was 1440px wide at any
+  size, so a laptop window (a 14" MacBook, say) scrolled both ways. It now
+  fits the width: the cards reflow, the graph zooms to its card (on a
+  phone it scrolls inside the card instead), the graph no longer reserves
+  560px for three stories, and a long log or tail is capped to the window's
+  height. Phones get a proper viewport.
+
 ## 4.7.0
 
 ### Added

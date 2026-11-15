@@ -97,6 +97,23 @@ export const executorOnKey = (
   return names[next]
 }
 
+// ── the graph's fit ──
+
+/** The width the flow graph is drawn for: its node columns are fixed coordinates. */
+export const graphWidth = 1390
+
+/** Below this the graph stops shrinking and scrolls sideways in its card instead. */
+export const minGraphZoom = 0.55
+
+/**
+ * The zoom that fits the graph to the width it has: smaller on a narrower
+ * card, never larger than drawn nor smaller than `minGraphZoom`, where a
+ * phone's graph scrolls in its frame. Undefined while the card is hidden
+ * (no width).
+ */
+export const graphZoom = (room: number): number | undefined =>
+  room > 0 ? Math.max(minGraphZoom, Math.min(1, room / graphWidth)) : undefined
+
 // ── the detail and events cards ──
 
 /**

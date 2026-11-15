@@ -93,7 +93,8 @@ kbd {
 
 .screen {
   display: none;
-  width: 1440px;
+  width: 100%;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 32px 24px 40px;
   flex-direction: column;
@@ -106,6 +107,7 @@ kbd {
 /* top bar */
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 20px;
@@ -128,6 +130,7 @@ h1 {
 }
 .status-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
@@ -214,6 +217,7 @@ h1 {
 }
 .card-head {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   align-items: center;
   justify-content: space-between;
@@ -222,7 +226,7 @@ h1 {
   background: rgba(38, 38, 38, 0.5);
 }
 .head-title {
-  flex: 1;
+  flex: 1 1 180px;
   min-width: 0;
 }
 .card-title {
@@ -267,6 +271,7 @@ h1 {
 }
 .legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px 16px;
   font-size: 13px;
   color: var(--muted);
@@ -374,9 +379,15 @@ button.key[aria-pressed="true"] {
 }
 
 /* flow graph */
+.viz-frame {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
 .viz {
   position: relative;
-  height: 560px;
+  /* graphWidth (web-src/views.ts); a narrower card zooms it to fit */
+  width: 1390px;
+  height: 400px;
   margin: 16px 0 4px;
 }
 .viz svg.edges {
@@ -734,7 +745,7 @@ button.key[aria-pressed="true"] {
 /* lower row */
 .lower {
   display: grid;
-  grid-template-columns: 440px minmax(0, 1fr) 440px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
   align-items: start;
 }
@@ -970,7 +981,7 @@ button.key[aria-pressed="true"] {
 }
 .timeline-card.full .timeline {
   position: relative;
-  max-height: 560px;
+  max-height: min(560px, 60vh);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1000,6 +1011,7 @@ button.key[aria-pressed="true"] {
 /* replay scrubber */
 .transport {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .speed {
@@ -1087,6 +1099,38 @@ button.key[aria-pressed="true"] {
   font-family: var(--mono);
   font-size: 12px;
   color: var(--faint);
+}
+
+/* narrower windows: the page fits the width, never scrolls sideways */
+@media (max-width: 1100px) {
+  .lower {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lower > .timeline-card {
+    grid-column: 1 / -1;
+  }
+  .roster-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .scrub {
+    padding: 44px 28px 20px;
+  }
+}
+@media (max-width: 720px) {
+  .screen {
+    padding: 20px 12px 28px;
+  }
+  .lower,
+  .roster-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .roster {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .speed {
+    align-items: flex-start;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1401,7 +1445,7 @@ button.exec-card {
 .tail {
   margin: 0;
   padding: 0 20px 18px;
-  max-height: 560px;
+  max-height: min(560px, 60vh);
   overflow: auto;
   overscroll-behavior: contain;
   font-family: var(--mono);
