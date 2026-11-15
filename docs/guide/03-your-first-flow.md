@@ -117,7 +117,7 @@ more than a hello flow, add the packages to the project that holds
 `.llm4ts/flows/`:
 
 ```bash
-npm i -D @llm4ts/runner @llm4ts/flow @llm4ts/core effect@4.0.0
+npm i -D @llm4ts/runner @llm4ts/flow @llm4ts/core effect@4.1.4
 ```
 
 Your project's copies now win over the shell's fallback, so keep them on the

@@ -47,9 +47,9 @@
     "@llm4ts/runner": "workspace:*"
   },
   "peerDependencies": {
-    "effect": "4.0.0"
+    "effect": "4.1.4"
   },
   "devDependencies": {
-    "effect": "4.0.0"
+    "effect": "4.1.4"
   }
 }

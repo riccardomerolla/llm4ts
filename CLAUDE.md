@@ -9,7 +9,7 @@ began as a port of `llm4zio`; parity with it is no longer a goal.
    the living design record.
 2. Read `docs/architecture.md` and `docs/api.md` for package boundaries and
    the public surface.
-3. For Effect work, consult the installed `effect` package (pinned at 4.0.0,
+3. For Effect work, consult the installed `effect` package (pinned at 4.1.4,
    under `node_modules`) and the `effect-ts` and `effect-ts-conventions`
    skills before coding. A local `.repos/effect` checkout, when present, may
    lag the pin.
