@@ -62,6 +62,7 @@ export default [
   {
     ignores: [
       "**/dist/**",
+      "**/.tsbuildinfo/**",
       "**/coverage/**",
       "**/node_modules/**",
       "**/.repos/**",
@@ -76,6 +77,8 @@ export default [
       "kits/*/scaffolds/**",
       "packages/shell/flows/**",
       "packages/shell/kits/**",
+      // The `watch --web` page bundle, built from packages/shell/web-src (ADR 0051).
+      "packages/shell/web/app.js",
       // Demo-bank fixture repos: standalone toolchains (the Next.js fixture
       // lints itself) and deliberately legacy-styled J2EE content.
       "kits/*/fixtures/**",

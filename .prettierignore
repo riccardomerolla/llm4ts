@@ -17,6 +17,8 @@ kits/*/scaffolds
 kits/*/fixtures
 packages/shell/flows
 packages/shell/kits
+packages/shell/web/app.js
+packages/shell/web/fonts
 
 # Internet-banking portal fixture: a standalone Vite/React toolchain with its
 # own style, seeded into a working copy by the epic-stories runbook.

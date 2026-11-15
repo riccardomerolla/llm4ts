@@ -190,6 +190,16 @@ trace in the repository. A live trace is followed as it grows; a finished
 one shows its last frame; `--replay [--speed n]` plays it back on its own
 timestamps. Piped, `watch` prints one frame and exits.
 
+Add `--web` to watch in a browser instead (ADR 0051): `llm4ts watch --web`
+takes the same trace, `--epic`, `--replay` and `--speed`, serves the page on
+a loopback URL it prints, and stops on Ctrl-C. A live run's clocks move every
+500ms; a replay plays at ×1, ×10 or ×50, steps, and scrubs to any seq
+(`?seq=33` opens there). `?freeze` shows one still frame.
+The page answers only on `127.0.0.1`, `localhost` or `[::1]` at its own
+port, and loads nothing from the network: its script and the Geist fonts
+ship with the shell. In a checkout, run `pnpm build` first: it bundles the
+page.
+
 ## Where the time goes: `llm4ts profile`
 
 When stories take long, `llm4ts profile` says where the time went:

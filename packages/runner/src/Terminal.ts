@@ -15,6 +15,10 @@ import {
   type ReviewFindings
 } from "@llm4ts/flow/FlowEvents"
 import { atLeast, presentationOf, type Verbosity } from "./EventPresentation.ts"
+import { formatCount } from "./Format.ts"
+
+/** Lives in `Format`, which the `watch --web` page shares; kept here for importers. */
+export { formatCount }
 
 export const parseVerbosity = (value: string | undefined): Verbosity => {
   switch (value?.trim().toLowerCase()) {
@@ -609,14 +613,6 @@ const addTokens = (tally: TokenTally, event: FlowEvent): void => {
     tally.estimated = true
   }
 }
-
-/** 950 → "950", 12_400 → "12.4k", 1_250_000 → "1.3M". */
-export const formatCount = (value: number): string =>
-  value < 1_000
-    ? `${Math.max(0, Math.round(value))}`
-    : value < 1_000_000
-      ? `${(value / 1_000).toFixed(1)}k`
-      : `${(value / 1_000_000).toFixed(1)}M`
 
 /** `3.5k tokens` (in and out together), `~` when estimated; empty before any report. */
 export const formatTally = (tally: TokenTally | undefined): string => {

@@ -169,7 +169,7 @@ const actionWords = (run: EpicRun | undefined): string | undefined => {
 }
 
 /** The tree before any event: the epic's board, when the trace belongs to one. */
-const startingTree = (
+export const startingTree = (
   target: WatchTarget,
   files: PlainFileStoreShape,
   idleAfterMs: number | undefined
@@ -200,8 +200,13 @@ const readInputs = (
 ): Effect.Effect<ReadonlyArray<TreeInput>, FlowError> =>
   Effect.map(readTrace(files, target.tracePath), treeInputsOfTrace)
 
-const pollInterval = Duration.millis(500)
+/** How often a live run's trace is re-read, and its clocks move. */
+export const pollInterval = Duration.millis(500)
 const replayGapCap = 2_000
+
+/** A replay's wait between two inputs: their own gap, at most two seconds, sped up. */
+export const replayGap = (previousAt: number, nextAt: number, speed: number): number =>
+  Math.max(0, Math.min(replayGapCap, nextAt - previousAt) / speed)
 
 const draw = (
   state: TreeState,
@@ -346,8 +351,7 @@ export const makeWatchProgram = Effect.fn("@llm4ts/shell/Watch.make")(function* 
           }
           const replaying = options.replay === true && count < current.length
           const gap = replaying
-            ? Math.min(replayGapCap, (current[count]?.at ?? 0) - (current[count - 1]?.at ?? 0)) /
-              speed
+            ? replayGap(current[count - 1]?.at ?? 0, current[count]?.at ?? 0, speed)
             : Duration.toMillis(pollInterval)
           if (yield* awaitKey(Duration.millis(Math.max(0, gap)))) {
             return
