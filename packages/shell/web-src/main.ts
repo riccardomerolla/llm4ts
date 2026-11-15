@@ -4,13 +4,15 @@
    ?freeze   one frame, no stream, loops paused
    ?seq=N    (replay) open at the last step at or before trace seq N
    ?speed=N  (replay) start at this speed
-   ?view=executors|boards  what the flow card shows; `e` and `b` toggle it */
+   ?view=executors|boards  what the flow card shows; `e` and `b` toggle it
+   enter expands the detail card, `t` tails the selection's transcript (`r`
+   cycles its role), `l` shows the whole log, escape closes */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { clock } from "@llm4ts/runner/Format"
-import { WebRunJson, type WebFrame, type WebRun } from "../src/WebFrame.ts"
-import { decodeFrame, PageError, sseFrames, type FrameSource } from "./frames.ts"
+import { WebRunJson, type WebFrame, type WebRun, type WebTimelineItem } from "../src/WebFrame.ts"
+import { decodeFrame, decodeTranscript, PageError, sseFrames, type FrameSource } from "./frames.ts"
 import { countAtSeq, countAtTime, makeReplayController, type ReplayState } from "./replay.ts"
 import {
   bind,
@@ -23,7 +25,21 @@ import {
   setHtml,
   type FrameView
 } from "./view.ts"
-import { searchWithView, viewNamed, viewOfSearch, viewOnKey, type PageView } from "./views.ts"
+import {
+  detailActionNamed,
+  detailAfter,
+  detailOnKey,
+  initialDetail,
+  searchWithView,
+  timelineWith,
+  transcriptPath,
+  viewNamed,
+  viewOfSearch,
+  viewOnKey,
+  type DetailState,
+  type PageView,
+  type ViewKey
+} from "./views.ts"
 
 const params = new URLSearchParams(location.search)
 const frozen = params.has("freeze")
@@ -73,16 +89,32 @@ const browserSource: FrameSource = {
             : `/api/stream?count=${replay.count}&speed=${replay.speed}`
         ),
       { endOnError: replay !== undefined }
-    )
+    ),
+  transcript: (path) =>
+    Effect.flatMap(fetchText(path), (body) => Effect.fromResult(decodeTranscript(body)))
 }
+
+const keyOf = (event: KeyboardEvent): ViewKey => ({
+  key: event.key,
+  ctrlKey: event.ctrlKey,
+  metaKey: event.metaKey,
+  altKey: event.altKey,
+  target: event.target instanceof HTMLElement ? event.target : null
+})
 
 // ── the page ──
 
 /** The view toggles and their keys; the choice lives in the URL so a reload keeps it. */
-const wireViews = (root: HTMLElement, view: FrameView, initial: PageView): void => {
+const wireViews = (
+  root: HTMLElement,
+  view: FrameView,
+  initial: PageView,
+  chosen: () => void
+): void => {
   let shown = initial
   const choose = (next: PageView): void => {
     shown = next
+    chosen()
     history.replaceState(
       history.state,
       "",
@@ -99,20 +131,109 @@ const wireViews = (root: HTMLElement, view: FrameView, initial: PageView): void 
     })
   }
   addEventListener("keydown", (event) => {
-    const target = event.target instanceof HTMLElement ? event.target : null
-    const next = viewOnKey(shown, {
-      key: event.key,
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
-      altKey: event.altKey,
-      target
-    })
+    const next = viewOnKey(shown, keyOf(event))
     if (next !== undefined) {
       event.preventDefault()
       choose(next)
     }
   })
 }
+
+interface DetailWiring {
+  readonly state: () => DetailState
+  /** Closes the tail and the expanded detail, as a view switch does in the terminal. */
+  readonly close: () => void
+  /** Re-reads the open tail: on every frame, and when the selection moves. */
+  readonly refresh: () => void
+}
+
+/**
+ * The detail and events cards' buttons and keys (views.ts `detailOnKey`),
+ * and the open tail's requests: one at a time, re-asked when what it shows
+ * changed while one was out. `count` is the replay's steps on screen, which
+ * cut the transcript at that step's time; a live tail reads it all.
+ */
+const wireDetail = (
+  root: HTMLElement,
+  view: FrameView,
+  count: () => number | undefined,
+  changed: (state: DetailState) => void
+): DetailWiring => {
+  let state = initialDetail
+  let asking: string | undefined
+  const wanted = (): string | undefined => {
+    const tail = view.tailTarget()
+    return state.body._tag !== "Tail" || tail === undefined
+      ? undefined
+      : transcriptPath(tail, state.body.role, count())
+  }
+  const refresh = (): void => {
+    const path = wanted()
+    if (path === undefined || asking !== undefined) {
+      return
+    }
+    asking = path
+    Effect.runFork(
+      browserSource.transcript(path).pipe(
+        Effect.match({
+          onSuccess: (answer) => {
+            if (wanted() === path) {
+              view.tail(answer)
+            }
+          },
+          onFailure: (error) => {
+            if (wanted() === path) {
+              view.tail({ _tag: "Failed", message: error.message })
+            }
+          }
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            asking = undefined
+            if (wanted() !== path) {
+              refresh()
+            }
+          })
+        )
+      )
+    )
+  }
+  const apply = (next: DetailState): void => {
+    if (next === state) {
+      return
+    }
+    state = next
+    view.detail(state)
+    find(root, '[data-card-act="fullLog"]')?.setAttribute("aria-pressed", String(state.fullLog))
+    find(root, ".timeline-card")?.classList.toggle("full", state.fullLog)
+    changed(state)
+    refresh()
+  }
+  root.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest("[data-card-act]") : null
+    const action =
+      button instanceof HTMLElement ? detailActionNamed(button.dataset["cardAct"]) : undefined
+    if (action !== undefined) {
+      apply(detailAfter(state, action))
+    }
+  })
+  addEventListener("keydown", (event) => {
+    const next = detailOnKey(state, keyOf(event))
+    if (next !== undefined) {
+      event.preventDefault()
+      apply(next)
+    }
+  })
+  return {
+    state: () => state,
+    close: () => apply(detailAfter(state, "close")),
+    refresh
+  }
+}
+
+/** Keeps a full log's list at its end while the reader has not scrolled up. */
+const atEnd = (list: HTMLElement | undefined): boolean =>
+  list === undefined || list.scrollHeight - list.scrollTop - list.clientHeight < 24
 const initialView = viewOfSearch(location.search)
 
 const boot = find(document, "[data-boot]")
@@ -144,20 +265,50 @@ const startLive = (run: WebRun): Effect.Effect<void, PageError> => {
   if (root === null) {
     return Effect.void
   }
-  const view = makeView(root, { mode: "live", reduce, frozen, view: initialView })
-  wireViews(root, view, initialView)
-  let seen = -1
-  const draw = (frame: WebFrame): void => {
-    const fresh = frame.count !== seen && seen >= 0
-    seen = frame.count
-    view.render(frame, fresh)
-    bind(root, "runId", run.runId ?? "")
-    find(root, "[data-live-pill]")?.classList.toggle("paused", frame.ended !== undefined)
-    bind(root, "runState", frame.ended ?? "live")
-    const shown = frame.timeline.slice(-12)
+  let onScreen: WebFrame | undefined
+  // The whole timeline so far: the run's, with each frame's latest items laid over it.
+  let known: ReadonlyArray<WebTimelineItem> = run.timeline
+  const view = makeView(root, {
+    mode: "live",
+    reduce,
+    frozen,
+    view: initialView,
+    onSelect: () => detail.refresh()
+  })
+  const detail = wireDetail(
+    root,
+    view,
+    () => undefined,
+    () => {
+      if (onScreen !== undefined) {
+        drawTimeline(onScreen, false, true)
+      }
+    }
+  )
+  wireViews(root, view, initialView, detail.close)
+  const refetchTimeline = (): void => {
+    Effect.runFork(
+      Effect.match(browserSource.run, {
+        onSuccess: (fresh) => {
+          known = fresh.timeline
+          if (onScreen !== undefined) {
+            known = timelineWith(known, onScreen.timeline, onScreen.timelineCount) ?? known
+            drawTimeline(onScreen, false)
+          }
+        },
+        onFailure: (error) => failed(`llm4ts watch --web: ${error.message}`)
+      })
+    )
+  }
+  /** `opened`: the log was just toggled, so a full one starts at its end. */
+  const drawTimeline = (frame: WebFrame, fresh: boolean, opened = false): void => {
+    const full = detail.state().fullLog
+    const shown = full ? known.slice(0, frame.timelineCount) : frame.timeline.slice(-12)
     const t0 = frame.startedAt ?? 0
+    const list = find(root, "[data-timeline]")
+    const follow = opened || atEnd(list)
     setHtml(
-      find(root, "[data-timeline]"),
+      list,
       shown
         .map((item, i) =>
           itemHtml(
@@ -168,11 +319,32 @@ const startLive = (run: WebRun): Effect.Effect<void, PageError> => {
         )
         .join("")
     )
+    if (full && follow && list !== undefined) {
+      list.scrollTop = list.scrollHeight
+    }
     bind(
       root,
       "timelineDesc",
-      `last ${shown.length} of ${frame.timelineCount} · trace seq ${run.steps[0]?.seq ?? 0}–${frame.lastSeq ?? 0}`
+      `${full ? "all" : "last"} ${shown.length} of ${frame.timelineCount} · trace seq ${run.steps[0]?.seq ?? 0}–${frame.lastSeq ?? 0}`
     )
+  }
+  let seen = -1
+  const draw = (frame: WebFrame): void => {
+    const fresh = frame.count !== seen && seen >= 0
+    seen = frame.count
+    onScreen = frame
+    view.render(frame, fresh)
+    bind(root, "runId", run.runId ?? "")
+    find(root, "[data-live-pill]")?.classList.toggle("paused", frame.ended !== undefined)
+    bind(root, "runState", frame.ended ?? "live")
+    const merged = timelineWith(known, frame.timeline, frame.timelineCount)
+    if (merged === undefined) {
+      refetchTimeline()
+    } else {
+      known = merged
+    }
+    drawTimeline(frame, fresh)
+    detail.refresh()
   }
   show("live")
   return frozen
@@ -187,8 +359,25 @@ const startReplay = (run: WebRun) =>
     if (root === null) {
       return
     }
-    const view = makeView(root, { mode: "replay", reduce, frozen, view: initialView })
-    wireViews(root, view, initialView)
+    let onScreen: { readonly frame: WebFrame } | undefined
+    const view = makeView(root, {
+      mode: "replay",
+      reduce,
+      frozen,
+      view: initialView,
+      onSelect: () => detail.refresh()
+    })
+    const detail = wireDetail(
+      root,
+      view,
+      () => onScreen?.frame.count,
+      () => {
+        if (onScreen !== undefined) {
+          drawTimeline(onScreen.frame, false)
+        }
+      }
+    )
+    wireViews(root, view, initialView, detail.close)
     const steps = run.steps
     const items = run.timeline
     const t0 = steps[0]?.at ?? 0
@@ -236,18 +425,18 @@ const startReplay = (run: WebRun) =>
       }
       track?.classList.toggle("playing", state.playing)
     }
-    const draw = (frame: WebFrame, animate: boolean): void => {
-      const step = steps[frame.count - 1] ?? steps[0]
-      view.render(frame, animate)
-      const seq = step?.seq ?? 0
-      // timeline: the window around the playhead, later events dimmed
+    /** The window around the playhead, or the whole log; later events dimmed. */
+    const drawTimeline = (frame: WebFrame, animate: boolean): void => {
+      const seq = (steps[frame.count - 1] ?? steps[0])?.seq ?? 0
+      const full = detail.state().fullLog
       const idx = items.findIndex((i) => i.seq > seq)
       const cur = idx < 0 ? items.length : idx
-      const from = Math.max(0, cur - 7)
-      const shown = items.slice(from, from + 12)
+      const from = full ? 0 : Math.max(0, cur - 7)
+      const shown = full ? items : items.slice(from, from + 12)
       const current = [...items].reverse().find((i) => i.seq <= seq)
+      const list = find(root, "[data-timeline]")
       setHtml(
-        find(root, "[data-timeline]"),
+        list,
         shown
           .map((i) => {
             const isCurrent = current !== undefined && i === current
@@ -259,7 +448,26 @@ const startReplay = (run: WebRun) =>
           })
           .join("")
       )
-      bind(root, "timelineDesc", `at seq ${seq} · later events dimmed`)
+      if (full && list !== undefined) {
+        const playing = find(list, "li.current")
+        if (playing !== undefined) {
+          list.scrollTop = playing.offsetTop - list.clientHeight / 2
+        }
+      }
+      bind(
+        root,
+        "timelineDesc",
+        `${full ? `all ${items.length} · ` : ""}at seq ${seq} · later events dimmed`
+      )
+    }
+    const draw = (frame: WebFrame, animate: boolean): void => {
+      const step = steps[frame.count - 1] ?? steps[0]
+      onScreen = { frame }
+      view.render(frame, animate)
+      const seq = step?.seq ?? 0
+      drawTimeline(frame, animate)
+      detail.refresh()
+      const current = [...items].reverse().find((i) => i.seq <= seq)
       const at = step?.at ?? t0
       bind(root, "clock", clock(t0, at))
       bind(root, "seq", seq)

@@ -231,11 +231,15 @@ const screenLines = (
   tail?: ReadonlyArray<string>
 ): ReadonlyArray<string> => draw(state, view, output, output.rows(), tail).split("\n")
 
+/** What a tail says when the run kept no transcript. */
+export const noTranscriptMessage =
+  "no transcript for this run — start it with llm4ts run … --transcript"
+
 /** Rows the tail pane shows. */
 const tailRows = 16
 
 /** Where a trace's run kept its transcript: `.llm4ts/transcripts/<run-id>/`. */
-const transcriptDirOf = (
+export const transcriptDirOf = (
   repo: string,
   target: WatchTarget,
   files: PlainFileStoreShape
@@ -262,7 +266,7 @@ export const makeWatchProgram = Effect.fn("@llm4ts/shell/Watch.make")(function* 
   if (options.tail !== undefined) {
     if (transcriptDir === undefined || transcripts.list(transcriptDir).length === 0) {
       return yield* WatchTargetMissing.make({
-        message: "no transcript for this run — start it with llm4ts run … --transcript"
+        message: noTranscriptMessage
       })
     }
     return yield* followTail(options.tail, transcriptDir, transcripts, output, () =>

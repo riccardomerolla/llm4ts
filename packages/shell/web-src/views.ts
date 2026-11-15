@@ -1,4 +1,11 @@
-import type { WebChipStatus, WebStory, WebTask } from "../src/WebFrame.ts"
+import type {
+  WebChipStatus,
+  WebStory,
+  WebTailOf,
+  WebTailRole,
+  WebTask,
+  WebTimelineItem
+} from "../src/WebFrame.ts"
 
 /**
  * What the flow card shows (ADR 0051), as the terminal tree's `TreeMode`
@@ -43,6 +50,10 @@ const typing = (target: ViewKey["target"]): boolean =>
   (target.isContentEditable === true ||
     ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName?.toUpperCase() ?? ""))
 
+/** A plain key press the page may take: no modifier held, no field focused. */
+const plain = (key: ViewKey): boolean =>
+  !key.ctrlKey && !key.metaKey && !key.altKey && !typing(key.target)
+
 const viewKeys: Readonly<Record<string, PageView>> = { e: "executors", b: "boards" }
 
 /**
@@ -52,10 +63,143 @@ const viewKeys: Readonly<Record<string, PageView>> = { e: "executors", b: "board
  */
 export const viewOnKey = (view: PageView, key: ViewKey): PageView | undefined => {
   const asked = viewKeys[key.key]
-  if (asked === undefined || key.ctrlKey || key.metaKey || key.altKey || typing(key.target)) {
+  if (asked === undefined || !plain(key)) {
     return undefined
   }
   return asked === view ? "flow" : asked
+}
+
+// ── the detail and events cards ──
+
+/**
+ * What the detail card's body shows, as the terminal tree's `expanded` and
+ * `tail` (ADR 0022, 0033): the short detail, every stage and the last tools,
+ * or the selection's transcript in one role (all when unset).
+ */
+export type DetailBody =
+  | { readonly _tag: "Short" }
+  | { readonly _tag: "Expanded" }
+  | { readonly _tag: "Tail"; readonly role: WebTailRole | undefined }
+
+export interface DetailState {
+  readonly body: DetailBody
+  /** The events card shows the whole log, not the latest items. */
+  readonly fullLog: boolean
+}
+
+export const initialDetail: DetailState = { body: { _tag: "Short" }, fullLog: false }
+
+/** The roles `r` cycles through, as `onTreeKey` does: all, coder, reviewer, judge. */
+export const tailRoles: ReadonlyArray<WebTailRole | undefined> = [
+  undefined,
+  "coder",
+  "reviewer",
+  "judge"
+]
+
+const nextRole = (role: WebTailRole | undefined): WebTailRole | undefined =>
+  tailRoles[(tailRoles.indexOf(role) + 1) % tailRoles.length]
+
+export type DetailAction = "expand" | "tail" | "role" | "close" | "fullLog"
+
+/** What a detail or events button, or its key, does to the cards. */
+export const detailAfter = (state: DetailState, action: DetailAction): DetailState => {
+  const { body } = state
+  switch (action) {
+    case "expand":
+      return { ...state, body: { _tag: body._tag === "Expanded" ? "Short" : "Expanded" } }
+    case "tail":
+      return {
+        ...state,
+        body: body._tag === "Tail" ? { _tag: "Short" } : { _tag: "Tail", role: undefined }
+      }
+    case "role":
+      return body._tag === "Tail"
+        ? { ...state, body: { _tag: "Tail", role: nextRole(body.role) } }
+        : state
+    case "close":
+      return { ...state, body: { _tag: "Short" } }
+    case "fullLog":
+      return { ...state, fullLog: !state.fullLog }
+  }
+}
+
+const detailActions: ReadonlyArray<DetailAction> = ["expand", "tail", "role", "close", "fullLog"]
+
+/** A card button's `data-card-act`; anything else is no action. */
+export const detailActionNamed = (name: string | undefined): DetailAction | undefined =>
+  detailActions.find((action) => action === name)
+
+const detailKeys: Readonly<Record<string, DetailAction>> = {
+  Enter: "expand",
+  t: "tail",
+  r: "role",
+  Escape: "close",
+  l: "fullLog"
+}
+
+/**
+ * The cards after a key, as `onTreeKey` reads enter, `t`, `r`, escape and
+ * `l`; undefined when the key is not one of them, or `r` with no tail open,
+ * or a modifier is held or a field has focus.
+ */
+export const detailOnKey = (state: DetailState, key: ViewKey): DetailState | undefined => {
+  const action = detailKeys[key.key]
+  // Enter on a focused button presses that button, not the card's.
+  const pressing =
+    action === "expand" && ["BUTTON", "A"].includes(key.target?.tagName?.toUpperCase() ?? "")
+  if (
+    action === undefined ||
+    !plain(key) ||
+    pressing ||
+    (action === "role" && state.body._tag !== "Tail")
+  ) {
+    return undefined
+  }
+  return detailAfter(state, action)
+}
+
+/** Whose transcript the tail shows: the clicked executor in the executors view, else the story on the detail card. */
+export const tailTargetOf = (
+  view: PageView,
+  story: string | undefined,
+  executor: string | undefined
+): { readonly target: string; readonly of: WebTailOf } | undefined => {
+  const target = view === "executors" ? executor : story
+  return target === undefined
+    ? undefined
+    : { target, of: view === "executors" ? "executor" : "story" }
+}
+
+/** `/api/transcript?…` for a target, a role and, in a replay, the steps on screen. */
+export const transcriptPath = (
+  tail: { readonly target: string; readonly of: WebTailOf },
+  role: WebTailRole | undefined,
+  count: number | undefined
+): string => {
+  const params = new URLSearchParams({ target: tail.target, of: tail.of })
+  if (role !== undefined) {
+    params.set("role", role)
+  }
+  if (count !== undefined) {
+    params.set("count", String(count))
+  }
+  return `/api/transcript?${params.toString()}`
+}
+
+/**
+ * The whole timeline up to a frame: what the page holds, with the frame's
+ * latest items laid over its tail. A frame carries the last items of
+ * `count` in all; undefined when they do not reach what the page holds (a
+ * gap, so the page asks the run for its timeline again).
+ */
+export const timelineWith = (
+  known: ReadonlyArray<WebTimelineItem>,
+  latest: ReadonlyArray<WebTimelineItem>,
+  count: number
+): ReadonlyArray<WebTimelineItem> | undefined => {
+  const from = count - latest.length
+  return known.length < from ? undefined : [...known.slice(0, from), ...latest]
 }
 
 /** The epic board's columns, in the terminal's order. */

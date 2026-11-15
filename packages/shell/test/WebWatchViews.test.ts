@@ -1,5 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
+import { emptyTree, initialView, onTreeKey, type TreeView } from "@llm4ts/runner/AgentTree"
 import {
+  detailActionNamed,
+  detailAfter,
+  detailOnKey,
+  initialDetail,
+  tailRoles,
+  tailTargetOf,
+  transcriptPath,
+  type DetailState,
   progressOf,
   searchWithView,
   tasksIn,
@@ -7,6 +16,7 @@ import {
   viewOnKey,
   type ViewKey
 } from "../web-src/views.ts"
+import type { WebTailRole } from "../src/WebFrame.ts"
 import { clonesFrame } from "./WebWatchFixture.ts"
 
 const press = (key: string, more: Partial<ViewKey> = {}): ViewKey => ({
@@ -65,5 +75,94 @@ describe("watch --web views", () => {
       [[4, 5], [3], [], [1, 2]]
     )
     assert.deepStrictEqual(progressOf(s01), { done: 2, total: 5 })
+  })
+})
+
+describe("watch --web detail keys", () => {
+  const tail = (role?: WebTailRole): DetailState => ({
+    ...initialDetail,
+    body: { _tag: "Tail", role }
+  })
+
+  it("expands on enter, tails on t, cycles the role on r, closes on escape, toggles the log on l", () => {
+    const expanded = detailOnKey(initialDetail, press("Enter"))
+    assert.deepStrictEqual(expanded?.body, { _tag: "Expanded" })
+    assert.deepStrictEqual(detailOnKey(expanded ?? initialDetail, press("Enter"))?.body, {
+      _tag: "Short"
+    })
+    const tailing = detailOnKey(expanded ?? initialDetail, press("t"))
+    assert.deepStrictEqual(tailing?.body, { _tag: "Tail", role: undefined })
+    assert.deepStrictEqual(detailOnKey(tail(), press("t"))?.body, { _tag: "Short" })
+    assert.deepStrictEqual(detailOnKey(tail(), press("r"))?.body, { _tag: "Tail", role: "coder" })
+    assert.deepStrictEqual(detailOnKey(tail(), press("Escape"))?.body, { _tag: "Short" })
+    assert.deepStrictEqual(detailOnKey(expanded ?? initialDetail, press("Escape"))?.body, {
+      _tag: "Short"
+    })
+    const full = detailOnKey(tail("judge"), press("l"))
+    assert.deepStrictEqual(full, { body: { _tag: "Tail", role: "judge" }, fullLog: true })
+    assert.strictEqual(detailOnKey(full ?? initialDetail, press("l"))?.fullLog, false)
+  })
+
+  it("leaves keys that are not the cards', r with no tail, modifiers, fields and buttons alone", () => {
+    assert.isUndefined(detailOnKey(initialDetail, press("x")))
+    assert.isUndefined(detailOnKey(initialDetail, press("r")))
+    assert.isUndefined(detailOnKey(initialDetail, press("t", { metaKey: true })))
+    assert.isUndefined(detailOnKey(initialDetail, press("l", { ctrlKey: true })))
+    assert.isUndefined(detailOnKey(initialDetail, press("Enter", { altKey: true })))
+    assert.isUndefined(detailOnKey(initialDetail, press("t", { target: { tagName: "INPUT" } })))
+    assert.isUndefined(
+      detailOnKey(initialDetail, press("l", { target: { isContentEditable: true } }))
+    )
+    assert.isUndefined(
+      detailOnKey(initialDetail, press("Enter", { target: { tagName: "BUTTON" } }))
+    )
+    assert.isDefined(detailOnKey(initialDetail, press("t", { target: { tagName: "BUTTON" } })))
+  })
+
+  it("cycles the tail's role as the terminal tree's r does", () => {
+    let page: DetailState = tail()
+    let view: TreeView = { ...initialView, tail: true }
+    const state = emptyTree({ title: "epic" })
+    for (let press = 0; press < tailRoles.length + 1; press += 1) {
+      page = detailAfter(page, "role")
+      const next = onTreeKey(view, "r", state)
+      view = next === "quit" ? view : next
+      assert.strictEqual(page.body._tag === "Tail" ? page.body.role : "closed", view.tailRole)
+    }
+  })
+
+  it("names the buttons' actions, and nothing else", () => {
+    assert.strictEqual(detailActionNamed("fullLog"), "fullLog")
+    assert.strictEqual(detailActionNamed("expand"), "expand")
+    assert.isUndefined(detailActionNamed("delete"))
+    assert.isUndefined(detailActionNamed(undefined))
+  })
+
+  it("tails the clicked executor in the executors view, else the story on the card", () => {
+    assert.deepStrictEqual(tailTargetOf("flow", "payments", "claude"), {
+      target: "payments",
+      of: "story"
+    })
+    assert.deepStrictEqual(tailTargetOf("boards", "payments", undefined), {
+      target: "payments",
+      of: "story"
+    })
+    assert.deepStrictEqual(tailTargetOf("executors", "payments", "claude"), {
+      target: "claude",
+      of: "executor"
+    })
+    assert.isUndefined(tailTargetOf("executors", "payments", undefined))
+    assert.isUndefined(tailTargetOf("flow", undefined, "claude"))
+  })
+
+  it("asks for a tail with its target encoded, its role and the replay's count", () => {
+    assert.strictEqual(
+      transcriptPath({ target: "a b/../c", of: "story" }, undefined, undefined),
+      "/api/transcript?target=a+b%2F..%2Fc&of=story"
+    )
+    assert.strictEqual(
+      transcriptPath({ target: "claude", of: "executor" }, "judge", 33),
+      "/api/transcript?target=claude&of=executor&role=judge&count=33"
+    )
   })
 })

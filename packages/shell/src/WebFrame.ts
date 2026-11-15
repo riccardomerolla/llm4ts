@@ -63,6 +63,8 @@ export const WebStory = Schema.Struct({
   /** Who codes it, `codex#2`, once it has a lane. */
   clone: Schema.optional(Schema.String),
   stage: Schema.optional(Schema.String),
+  /** Every open stage of its lane, innermost last, for the expanded detail. */
+  stages: Schema.Array(Schema.String),
   startedAt: Schema.optional(Schema.Number),
   endedAt: Schema.optional(Schema.Number),
   tokens: Schema.Number,
@@ -72,6 +74,7 @@ export const WebStory = Schema.Struct({
   merged: Schema.Boolean,
   failStage: Schema.optional(Schema.String),
   failMessage: Schema.optional(Schema.String),
+  /** Its lane's latest tool calls, oldest first, as many as the tree keeps (20). */
   tools: Schema.Array(Schema.String),
   activity: Schema.optional(Schema.Struct({ text: Schema.String, since: Schema.Number })),
   note: Schema.optional(Schema.String),
@@ -150,6 +153,29 @@ export const WebRun = Schema.Struct({
 })
 export type WebRun = typeof WebRun.Type
 
+/** Whose transcript a tail shows: a story's, or everything an executor served. */
+export const WebTailOf = Schema.Literals(["story", "executor"])
+export type WebTailOf = typeof WebTailOf.Type
+
+/** The roles a tail can keep to; none keeps every call. */
+export const WebTailRole = Schema.Literals(["coder", "reviewer", "judge"])
+export type WebTailRole = typeof WebTailRole.Type
+
+/**
+ * `GET /api/transcript`: the tail's lines as `watch --tail` formats them,
+ * or `None` with the terminal's words when the run kept no transcript.
+ */
+export const WebTranscript = Schema.Union([
+  Schema.TaggedStruct("Lines", {
+    target: Schema.String,
+    of: WebTailOf,
+    role: Schema.optional(WebTailRole),
+    lines: Schema.Array(Schema.String)
+  }),
+  Schema.TaggedStruct("None", { message: Schema.String })
+])
+export type WebTranscript = typeof WebTranscript.Type
+
 /**
  * The bodies on the wire: JSON text, an absent value written as `null`. The
  * server's `schemaJson` responses and its server-sent frames use this
@@ -157,3 +183,4 @@ export type WebRun = typeof WebRun.Type
  */
 export const WebFrameJson = Schema.fromJsonString(Schema.toCodecJson(WebFrame))
 export const WebRunJson = Schema.fromJsonString(Schema.toCodecJson(WebRun))
+export const WebTranscriptJson = Schema.fromJsonString(Schema.toCodecJson(WebTranscript))

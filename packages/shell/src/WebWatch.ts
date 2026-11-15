@@ -20,16 +20,32 @@ import type { FlowError } from "@llm4ts/flow/FlowError"
 import { readTrace } from "@llm4ts/flow/Replay"
 import { reduceTree } from "@llm4ts/runner/AgentTree"
 import {
+  loadTranscript,
+  nodeTranscriptFiles,
+  tailLinesOf,
+  type TailTarget,
+  type TranscriptFiles
+} from "@llm4ts/runner/Transcripts"
+import {
+  noTranscriptMessage,
   pollInterval,
   replayGap,
   resolveTraceTarget,
   startingTree,
+  transcriptDirOf,
   type TraceSources,
   type WatchOptions,
   type WatchTarget,
   type WatchTargetMissing
 } from "./Watch.ts"
-import { WebFrame, WebFrameJson, WebRun } from "./WebFrame.ts"
+import {
+  WebFrame,
+  WebFrameJson,
+  WebRun,
+  WebTailOf,
+  WebTailRole,
+  WebTranscript
+} from "./WebFrame.ts"
 import {
   advance,
   foldSteps,
@@ -93,6 +109,8 @@ export interface WebWatchDependencies extends TraceSources {
   readonly asset: (file: string) => Uint8Array | undefined
   /** Completes when the reader detaches (Ctrl-C). */
   readonly detach: Effect.Effect<void>
+  /** A run's transcript files (`--transcript`); the disk by default. */
+  readonly transcripts?: TranscriptFiles
 }
 
 const defaultSpeed = 10
@@ -102,6 +120,21 @@ const FrameQuery = Schema.Struct({
   count: Schema.optional(Schema.FiniteFromString),
   speed: Schema.optional(Schema.FiniteFromString)
 })
+
+/**
+ * What a tail asks for: a story or an executor of the run, a role, and for a
+ * replay the steps on screen, whose last step's time cuts the transcript.
+ */
+const TranscriptQuery = Schema.Struct({
+  target: Schema.String.check(Schema.isNonEmpty()),
+  of: WebTailOf,
+  role: Schema.optional(WebTailRole),
+  count: Schema.optional(Schema.FiniteFromString)
+})
+
+/** The tail's width in characters, as the detail card fits it, and how many of its last lines travel. */
+const tailWidth = 52
+const tailRows = 400
 
 interface Loaded {
   readonly runId: string | undefined
@@ -244,6 +277,10 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
       )
     )
 
+  const transcripts = dependencies.transcripts ?? nodeTranscriptFiles
+  const transcriptDir = yield* transcriptDirOf(options.repo, target, dependencies.files)
+  const transcriptQuery = HttpServerRequest.schemaSearchParams(TranscriptQuery)
+
   const pages = webAssets.map((asset) =>
     HttpRouter.route("GET", asset.path, () => {
       const bytes = dependencies.asset(asset.file)
@@ -317,7 +354,55 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
     }).pipe(Effect.catch(failed))
   )
 
-  return Layer.mergeAll(HttpRouter.addAll([...pages, favicon, run, frame, stream]), guard)
+  // The target only ever names a story or an executor the fold knows; a
+  // story's file name is `transcriptFileOf` of it, which keeps no separator.
+  const transcript = HttpRouter.route(
+    "GET",
+    "/api/transcript",
+    Effect.gen(function* () {
+      const asked = yield* transcriptQuery
+      const loaded = yield* load
+      const count =
+        replay || asked.count !== undefined
+          ? Math.min(loaded.steps.length, Math.max(1, asked.count ?? loaded.steps.length))
+          : loaded.steps.length
+      const shown = frameOf(foldSteps(start, loaded.steps.slice(0, count)), {
+        steps: loaded.steps.length,
+        lastSeq: loaded.lastSeq
+      })
+      const known =
+        asked.of === "story"
+          ? shown.stories.some((story) => story.id === asked.target)
+          : shown.roster.some((executor) => executor.name === asked.target)
+      if (!known) {
+        return HttpServerResponse.text(`no ${asked.of} of this run is named so`, { status: 404 })
+      }
+      const tailTarget: TailTarget =
+        asked.of === "story" ? { lane: asked.target } : { executor: asked.target }
+      const entries =
+        transcriptDir === undefined
+          ? undefined
+          : yield* loadTranscript(transcripts, transcriptDir, tailTarget)
+      const until = count < loaded.steps.length ? loaded.steps[count - 1]?.at : undefined
+      const lines = tailLinesOf(
+        until === undefined ? entries : entries?.filter((entry) => entry.at <= until),
+        tailTarget,
+        asked.role,
+        tailWidth,
+        tailRows
+      )
+      return yield* HttpServerResponse.schemaJson(WebTranscript)(
+        lines === undefined
+          ? { _tag: "None", message: noTranscriptMessage }
+          : { _tag: "Lines", target: asked.target, of: asked.of, role: asked.role, lines }
+      )
+    }).pipe(Effect.catch(failed))
+  )
+
+  return Layer.mergeAll(
+    HttpRouter.addAll([...pages, favicon, run, frame, stream, transcript]),
+    guard
+  )
 })
 
 /** Serves the page until the reader detaches; prints where to open it. */
