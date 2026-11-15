@@ -4,9 +4,19 @@ import type {
   WebFrame,
   WebStory,
   WebTimelineItem,
+  WebTranscript,
   WebVerdict
 } from "../src/WebFrame.ts"
-import { epicColumns, progressOf, storyColumns, tasksIn, type PageView } from "./views.ts"
+import {
+  epicColumns,
+  initialDetail,
+  progressOf,
+  storyColumns,
+  tailTargetOf,
+  tasksIn,
+  type DetailState,
+  type PageView
+} from "./views.ts"
 
 /**
  * The page's drawing (ADR 0051), ported from the approved v2 design: plain
@@ -114,6 +124,14 @@ export interface FrameView {
   readonly render: (frame: WebFrame, animate: boolean) => void
   /** Shows the graph, the executors or the boards, and redraws the frame in hand. */
   readonly show: (view: PageView) => void
+  /** What the detail card's body shows; redraws the frame in hand. */
+  readonly detail: (state: DetailState) => void
+  /** The open tail's answer, or what kept it from coming, drawn in the detail card. */
+  readonly tail: (
+    answer: WebTranscript | { readonly _tag: "Failed"; readonly message: string }
+  ) => void
+  /** Whose transcript the tail shows now: the picked executor, or the story on the card. */
+  readonly tailTarget: () => ReturnType<typeof tailTargetOf>
 }
 
 export interface ViewOptions {
@@ -121,6 +139,8 @@ export interface ViewOptions {
   readonly reduce: boolean
   readonly frozen: boolean
   readonly view: PageView
+  /** The reader picked a story or an executor. */
+  readonly onSelect?: () => void
 }
 
 export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => {
@@ -131,17 +151,32 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
   const nodes = new Map<string, HTMLElement>()
   const last = new Map<string, string>()
   let picked: string | undefined
+  let pickedExecutor: string | undefined
+  let detail: DetailState = initialDetail
   let shape = ""
   let svg: SVGSVGElement | undefined
   let current: WebFrame | undefined
   let view = options.view
 
-  const pick = (id: string): void => {
-    picked = id
+  const redraw = (): void => {
     if (current !== undefined) {
       render(current, false)
     }
   }
+  const pick = (id: string): void => {
+    picked = id
+    redraw()
+    options.onSelect?.()
+  }
+  executorsPane?.addEventListener("click", (event) => {
+    const card = event.target instanceof Element ? event.target.closest("[data-executor]") : null
+    const name = card instanceof HTMLElement ? card.dataset["executor"] : undefined
+    if (name !== undefined) {
+      pickedExecutor = name
+      redraw()
+      options.onSelect?.()
+    }
+  })
   boardsPane?.addEventListener("click", (event) => {
     const card = event.target instanceof Element ? event.target.closest("[data-story]") : null
     const id = card instanceof HTMLElement ? card.dataset["story"] : undefined
@@ -154,6 +189,12 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
     const ids = current?.stories.map((story) => story.id) ?? []
     return picked !== undefined && ids.includes(picked) ? picked : current?.focus
   }
+  const selectedExecutor = (): string | undefined =>
+    current?.roster.some((executor) => executor.name === pickedExecutor) === true
+      ? pickedExecutor
+      : undefined
+  const tailTarget = (): ReturnType<typeof tailTargetOf> =>
+    tailTargetOf(view, selected(), selectedExecutor())
 
   const layout = (count: number): void => {
     const key = String(count)
@@ -432,7 +473,7 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
             .join("")
         : `<div class="exec"><div><div class="ln">no executors yet</div></div></div>`
     )
-    renderDetail(root, frame, selected(), now)
+    renderDetail(root, frame, selected(), now, detail, tailTarget())
     renderJudge(root, frame)
     // the flow card's body: the graph, or the executors, or the boards
     for (const button of findAll(root, "[data-view]")) {
@@ -444,7 +485,7 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
     if (executorsPane !== undefined) {
       executorsPane.hidden = view !== "executors"
       if (view === "executors") {
-        setHtml(executorsPane, executorsHtml(frame.roster))
+        setHtml(executorsPane, executorsHtml(frame.roster, selectedExecutor()))
       }
     }
     if (boardsPane !== undefined) {
@@ -458,12 +499,36 @@ export const makeView = (root: HTMLElement, options: ViewOptions): FrameView => 
 
   const show = (next: PageView): void => {
     view = next
-    if (current !== undefined) {
-      render(current, false)
+    redraw()
+  }
+
+  const showDetail = (next: DetailState): void => {
+    detail = next
+    redraw()
+  }
+
+  /** Lines into the tail, kept at the bottom unless the reader scrolled up. */
+  const showTail: FrameView["tail"] = (answer) => {
+    const pane = find(root, "[data-tail]")
+    if (pane === undefined) {
+      return
+    }
+    const atEnd = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 24
+    const fresh = pane.dataset["html"] === undefined
+    setHtml(
+      pane,
+      answer._tag === "Lines"
+        ? answer.lines.length === 0
+          ? `<span class="v-dim">nothing said yet</span>`
+          : answer.lines.map((line) => esc(line)).join("\n")
+        : `<span class="${answer._tag === "Failed" ? "v-err" : "v-dim"}">${esc(answer.message)}</span>`
+    )
+    if (atEnd || fresh) {
+      pane.scrollTop = pane.scrollHeight
     }
   }
 
-  return { render, show }
+  return { render, show, detail: showDetail, tail: showTail, tailTarget }
 }
 
 const executorState: Readonly<Record<WebExecutor["state"], string>> = {
@@ -473,24 +538,26 @@ const executorState: Readonly<Record<WebExecutor["state"], string>> = {
 }
 
 /** One card per executor, as the terminal's executor boxes: name, leases, then idle, busy or out. */
-const executorsHtml = (roster: ReadonlyArray<WebExecutor>): string =>
+const executorsHtml = (roster: ReadonlyArray<WebExecutor>, picked: string | undefined): string =>
   roster.length === 0
     ? `<div class="empty">no executors yet</div>`
     : `<div class="exec-grid">${roster
         .map(
-          (x) => `<div class="exec-card ${x.state}">
-            <div class="exec-name"><i class="dot-${x.state}"></i>${esc(x.name)}</div>
-            <ul class="leases">${
+          (
+            x
+          ) => `<button type="button" class="exec-card ${x.state}${x.name === picked ? " selected" : ""}" data-executor="${esc(x.name)}" aria-pressed="${x.name === picked}">
+            <span class="exec-name"><i class="dot-${x.state}"></i>${esc(x.name)}</span>
+            <span class="leases">${
               x.leases.length === 0
-                ? `<li class="v-dim">no lease</li>`
-                : x.leases.map((lease) => `<li>${esc(lease)}</li>`).join("")
-            }</ul>
-            <div class="exec-state">${esc(
+                ? `<span class="v-dim">no lease</span>`
+                : x.leases.map((lease) => `<span>${esc(lease)}</span>`).join("")
+            }</span>
+            <span class="exec-state">${esc(
               x.state === "out" && x.reason !== undefined
                 ? `${executorState.out}: ${x.reason}`
                 : executorState[x.state]
-            )}</div>
-          </div>`
+            )}</span>
+          </button>`
         )
         .join("")}</div>`
 
@@ -551,14 +618,51 @@ const boardsHtml = (frame: WebFrame, id: string | undefined, now: number): strin
   return `<div class="board-title"><span class="eyebrow">epic board</span><span class="mono faint">${frame.counts.total} stories</span></div><div class="columns five">${epic}</div>${board}`
 }
 
+/** A card button with its key, pressed while what it opens is open. */
+const cardKey = (act: string, key: string, label: string, pressed: boolean): string =>
+  `<button type="button" class="key" data-card-act="${act}" aria-pressed="${pressed}"><kbd>${key}</kbd>${label}</button>`
+
+const detailKeysHtml = (detail: DetailState): string =>
+  `${cardKey("tail", "t", "tail", detail.body._tag === "Tail")}${cardKey("expand", "enter", "expand", detail.body._tag === "Expanded")}`
+
+/**
+ * The tail in the detail card: its head names the target and role only, so
+ * the card is rebuilt when they change and not on every frame, and the
+ * lines' pane keeps its scroll while the transcript grows.
+ */
+const tailCardHtml = (
+  tail: ReturnType<typeof tailTargetOf>,
+  detail: DetailState,
+  role: string
+): string =>
+  `<div class="card-head"><div class="mini running"></div><div class="head-title"><div class="card-title">${esc(
+    tail === undefined ? "tail" : tail.target
+  )}</div><div class="card-desc">tail · ${esc(tail === undefined ? "" : `${tail.of} · `)}${esc(role)}</div></div>${cardKey(
+    "role",
+    "r",
+    role,
+    false
+  )}${detailKeysHtml(detail)}</div>
+      <div class="body tail-body">${
+        tail === undefined
+          ? `<div class="empty">click an executor to tail its transcript</div>`
+          : `<pre class="tail" data-tail></pre>`
+      }</div>`
+
 const renderDetail = (
   root: HTMLElement,
   frame: WebFrame,
   id: string | undefined,
-  now: number
+  now: number,
+  detail: DetailState,
+  tail: ReturnType<typeof tailTargetOf>
 ): void => {
-  const story = frame.stories.find((s) => s.id === id)
   const card = find(root, "[data-detail]")
+  if (detail.body._tag === "Tail") {
+    setHtml(card, tailCardHtml(tail, detail, detail.body.role ?? "all"))
+    return
+  }
+  const story = frame.stories.find((s) => s.id === id)
   if (story === undefined) {
     setHtml(
       card,
@@ -566,6 +670,7 @@ const renderDetail = (
     )
     return
   }
+  const expanded = detail.body._tag === "Expanded"
   const state = nodeState(story.status)
   const rows: Array<string> = []
   const kv = (k: string, v: string, tone = ""): void => {
@@ -573,14 +678,24 @@ const renderDetail = (
       `<div class="kv"><span>${k}</span><span${tone === "" ? "" : ` class="${tone}"`}>${esc(v)}</span></div>`
     )
   }
-  if (story.stage !== undefined && story.stage !== "") {
+  const list = (k: string, items: ReadonlyArray<string>): void => {
+    rows.push(
+      `<div class="kv"><span>${k}</span><ol class="detail-list">${items.map((item) => `<li>${esc(item)}</li>`).join("")}</ol></div>`
+    )
+  }
+  if (expanded && story.stages.length > 0) {
+    list("stages", story.stages)
+  } else if (story.stage !== undefined && story.stage !== "") {
     kv("stage", story.stage)
   }
   if (state === "running" && story.activity !== undefined) {
     kv("now", `${elapsed(story.activity.since, now)} · ${story.activity.text}`, "v-time")
   }
-  if (story.tools.length > 0) {
-    kv("tools", story.tools.join(" · "))
+  if (expanded && story.tools.length > 0) {
+    kv("tools", `last ${story.tools.length}`, "v-dim")
+    list("", story.tools)
+  } else if (story.tools.length > 0) {
+    kv("tools", story.tools.slice(-3).join(" · "))
   }
   if (story.failMessage !== undefined && story.failMessage !== "") {
     kv(
@@ -618,7 +733,7 @@ const renderDetail = (
   setHtml(
     card,
     `
-      <div class="card-head"><div class="mini ${state}"></div><div class="head-title"><div class="card-title">${esc(story.id)}</div><div class="card-desc">${esc(desc === "" ? story.status : desc)}</div></div><span class="key"><kbd>t</kbd>tail</span><span class="key"><kbd>enter</kbd>expand</span></div>
+      <div class="card-head"><div class="mini ${state}"></div><div class="head-title"><div class="card-title">${esc(story.id)}</div><div class="card-desc">${esc(desc === "" ? story.status : desc)}</div></div>${detailKeysHtml(detail)}</div>
       <div class="body">${rows.join("")}${plan}</div>`
   )
 }

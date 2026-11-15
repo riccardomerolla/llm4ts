@@ -265,6 +265,7 @@ export const frameOf = (
       executor: lane?.executor,
       clone: lane === undefined ? undefined : cloneLabel(lane),
       stage: lane?.stages.at(-1) ?? notes.stage,
+      stages: lane?.stages ?? [],
       startedAt: lane?.startedAt,
       endedAt: lane?.status === "running" ? undefined : notes.endedAt,
       tokens: lane?.tokens ?? 0,
@@ -274,7 +275,7 @@ export const frameOf = (
       merged: notes.merged,
       failStage: notes.failStage,
       failMessage: chip.status === "failed" ? notes.failMessage : undefined,
-      tools: lane?.tools.slice(-2) ?? [],
+      tools: lane?.tools ?? [],
       activity:
         lane?.activity === undefined
           ? undefined

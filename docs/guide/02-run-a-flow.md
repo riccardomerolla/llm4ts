@@ -201,7 +201,14 @@ roster's reason) and the boards: the epic's stories by column, a running
 card with its clone and task progress, and under it the selected story's
 tasks by column. Click a story card to select it. `?view=executors` or
 `?view=boards` opens on that view, and the page keeps it there as you
-switch.
+switch. As in the terminal, `enter` (or the detail card's button) expands
+the story on the detail card to every open stage and its last 20 tool calls;
+`l` shows the whole event log, scrollable in its card; `t` shows the
+transcript of the selected story, or in the executors view of the executor
+card you clicked, in the detail card, and `r` cycles it through all, coder,
+reviewer and judge calls. Scroll it with the mouse; escape closes it. A live
+tail refreshes with each frame; a replay's stops at the step on screen. A
+run started without `--transcript` says so.
 The page answers only on `127.0.0.1`, `localhost` or `[::1]` at its own
 port, and loads nothing from the network: its script and the Geist fonts
 ship with the shell. In a checkout, run `pnpm build` first: it bundles the

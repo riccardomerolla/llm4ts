@@ -11,8 +11,16 @@ import * as HttpRouter from "effect/http/HttpRouter"
 import * as HttpServer from "effect/http/HttpServer"
 import * as NetAddress from "effect/net/NetAddress"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
-import { replayGap } from "../src/Watch.ts"
-import { WebFrameJson, WebRunJson, type WebFrame } from "../src/WebFrame.ts"
+import { TranscriptEntry } from "@llm4ts/flow/Transcript"
+import { tailLinesOf, type TailTarget } from "@llm4ts/runner/Transcripts"
+import { noTranscriptMessage, replayGap } from "../src/Watch.ts"
+import {
+  WebFrameJson,
+  WebRunJson,
+  WebTranscriptJson,
+  type WebFrame,
+  type WebTimelineItem
+} from "../src/WebFrame.ts"
 import {
   contentSecurityPolicy,
   runWebWatch,
@@ -21,7 +29,8 @@ import {
   type WebWatchOptions
 } from "../src/WebWatch.ts"
 import { initialView, renderTree, type TreeMode } from "@llm4ts/runner/AgentTree"
-import { foldSteps } from "../src/WebWatchView.ts"
+import { foldSteps, frameOf } from "../src/WebWatchView.ts"
+import { timelineWith } from "../web-src/views.ts"
 import {
   clonesFrame,
   clonesStart,
@@ -244,6 +253,79 @@ describe("watch --web executors and boards", () => {
   })
 })
 
+/** What the terminal tree prints for the same fold with the reader's view. */
+const terminalWith = (
+  state: ReturnType<typeof foldSteps>["state"],
+  view: Partial<typeof initialView>
+): string =>
+  renderTree(state, { width: 160, colour: false, view: { ...initialView, ...view } }).join("\n")
+
+describe("watch --web expanded detail and full log", () => {
+  it("carries every stage and the tools the expanded detail box lists, for each running story", () => {
+    const folds = [
+      foldSteps(
+        start,
+        steps.filter((step) => step.seq <= 50)
+      ),
+      foldSteps(clonesStart, clonesSteps)
+    ]
+    let checked = 0
+    for (const fold of folds) {
+      const frame = frameOf(fold, { steps: 0, lastSeq: undefined })
+      for (const story of frame.stories.filter((candidate) => candidate.status === "running")) {
+        const lane = fold.state.lanes.find((candidate) => candidate.id === story.id)
+        assert.deepStrictEqual(story.stages, lane?.stages, story.id)
+        assert.deepStrictEqual(story.tools, lane?.tools, story.id)
+        const box = terminalWith(fold.state, { selected: story.id, expanded: true })
+        for (const stage of story.stages) {
+          assert.isTrue(
+            box.split("\n").some((line) => line.includes(`│ ${stage} `)),
+            `${story.id} ${stage}`
+          )
+        }
+        if (story.tools.length > 0) {
+          assert.include(box, `tools (last ${story.tools.length})`, story.id)
+          for (const tool of story.tools) {
+            assert.include(box, `  ${tool}`.slice(0, 40), story.id)
+          }
+        }
+        checked += 1
+      }
+    }
+    assert.isAtLeast(checked, 5)
+  })
+
+  it("builds the whole log from each frame's latest items, and holds every line of the terminal's full log", () => {
+    let known: ReadonlyArray<WebTimelineItem> = []
+    for (const step of steps) {
+      const frame = frameAt(step.seq)
+      known = timelineWith(known, frame.timeline, frame.timelineCount) ?? []
+    }
+    const fold = foldSteps(start, steps)
+    assert.deepStrictEqual(known, fold.timeline)
+    const full = terminalWith(fold.state, { fullLog: true })
+    const short = terminalWith(fold.state, {})
+    assert.isAbove(full.split("\n").length, short.split("\n").length)
+    for (const entry of fold.state.log) {
+      assert.isTrue(
+        known.some((item) => item.who === entry.who && item.what === entry.what),
+        `${entry.who} ${entry.what}`
+      )
+      assert.include(full, entry.what.slice(0, 30))
+    }
+  })
+
+  it("says when a frame's latest items skip past what the page holds, so it asks again", () => {
+    const items = foldSteps(start, steps).timeline
+    assert.isUndefined(timelineWith(items.slice(0, 5), items.slice(10, 12), 12))
+    assert.deepStrictEqual(
+      timelineWith(items.slice(0, 10), items.slice(8, 12), 12),
+      items.slice(0, 12)
+    )
+    assert.deepStrictEqual(timelineWith(items, items.slice(0, 3), 3), items.slice(0, 3))
+  })
+})
+
 describe("watch --web frame schema", () => {
   const throughTheWire = (frame: WebFrame): WebFrame =>
     Schema.decodeUnknownSync(WebFrameJson)(Schema.encodeSync(WebFrameJson)(frame))
@@ -285,7 +367,56 @@ const testAssets: Readonly<Record<string, Uint8Array>> = {
   "fonts/Geist-Variable.woff2": fontBytes
 }
 
-const dependenciesFor = (contents: string) =>
+const encodeEntry = Schema.encodeSync(Schema.fromJsonString(TranscriptEntry))
+const transcriptDir = "/repo/.llm4ts/transcripts/run-fixture"
+const at = (offset: number): number => 1_790_000_000_000 + offset
+/** payments: a coder call during its task, and a reviewer call after seq 35; claude's judge call on accounts. */
+const paymentsEntries: ReadonlyArray<TranscriptEntry> = [
+  {
+    _tag: "Call",
+    at: at(20_000),
+    call: "c1",
+    role: "coder",
+    executor: "pi-lmstudio",
+    input: "Add the fake routes"
+  },
+  { _tag: "Reply", at: at(21_000), call: "c1", text: "Writing payments.fake.ts" },
+  { _tag: "Tool", at: at(23_000), call: "c1", tool: "bash", args: '{"command":"pnpm test"}' },
+  { _tag: "ToolResult", at: at(25_000), call: "c1", output: "3 passed" },
+  { _tag: "End", at: at(26_000), call: "c1", ms: 6_000 },
+  {
+    _tag: "Call",
+    at: at(300_500),
+    call: "c2",
+    role: "reviewer",
+    executor: "pi-lmstudio",
+    input: "Review the fake routes"
+  },
+  { _tag: "Reply", at: at(301_000), call: "c2", text: "Looks right" },
+  { _tag: "End", at: at(302_000), call: "c2", ms: 1_500 }
+]
+const accountsEntries: ReadonlyArray<TranscriptEntry> = [
+  {
+    _tag: "Call",
+    at: at(321_000),
+    call: "j1",
+    role: "judge",
+    executor: "claude",
+    input: "Judge accounts"
+  },
+  { _tag: "Reply", at: at(322_000), call: "j1", text: "two issues" },
+  { _tag: "End", at: at(329_000), call: "j1", ms: 8_000 }
+]
+const transcriptFiles: Readonly<Record<string, string>> = {
+  [`${transcriptDir}/payments.jsonl`]: `${paymentsEntries.map((entry) => encodeEntry(entry)).join("\n")}\n`,
+  [`${transcriptDir}/accounts.jsonl`]: `${accountsEntries.map((entry) => encodeEntry(entry)).join("\n")}\n`,
+  "/repo/.llm4ts/secret.jsonl": `${encodeEntry({ _tag: "Call", at: 1, call: "x", role: "coder", input: "SECRET" })}\n`
+}
+
+const dependenciesFor = (
+  contents: string,
+  transcripts: Readonly<Record<string, string>> = transcriptFiles
+) =>
   Effect.gen(function* () {
     const memory = yield* makeMemoryPlainFileStore({
       [tracePath]: contents,
@@ -298,6 +429,7 @@ const dependenciesFor = (contents: string) =>
       })}\n`
     })
     const written = yield* Ref.make("")
+    const reads = yield* Ref.make<ReadonlyArray<string>>([])
     const detached = yield* Deferred.make<void>()
     const dependencies: WebWatchDependencies = {
       files: memory.store,
@@ -305,9 +437,20 @@ const dependenciesFor = (contents: string) =>
       listEpics: (directory) => (directory === "/repo/.llm4ts/epics" ? ["conto"] : []),
       write: (text) => Ref.update(written, (all) => all + text),
       asset: (file) => testAssets[file],
-      detach: Deferred.await(detached)
+      detach: Deferred.await(detached),
+      transcripts: {
+        read: (path) =>
+          Effect.as(
+            Ref.update(reads, (all) => [...all, path]),
+            transcripts[path]
+          ),
+        list: (directory) =>
+          Object.keys(transcripts)
+            .filter((path) => path.startsWith(`${directory}/`))
+            .map((path) => path.slice(directory.length + 1))
+      }
     }
-    return { dependencies, written, detach: Deferred.succeed(detached, undefined) }
+    return { dependencies, written, reads, detach: Deferred.succeed(detached, undefined) }
   })
 
 const port = 4321
@@ -319,9 +462,13 @@ const listening = Layer.succeed(HttpServer.HttpServer)(
   })
 )
 
-const serve = (options: WebWatchOptions, contents: string = trace) =>
+const serve = (
+  options: WebWatchOptions,
+  contents: string = trace,
+  transcripts: Readonly<Record<string, string>> = transcriptFiles
+) =>
   Effect.gen(function* () {
-    const { dependencies } = yield* dependenciesFor(contents)
+    const { dependencies } = yield* serveDependencies(contents, transcripts)
     const app = yield* webWatchApp(options, dependencies)
     const { dispose, handler } = HttpRouter.toWebHandler(Layer.provide(app, listening), {
       disableLogger: true
@@ -332,6 +479,15 @@ const serve = (options: WebWatchOptions, contents: string = trace) =>
         handler(new Request(`http://127.0.0.1:${port}${path}`, { headers: { host } }))
       )
   })
+
+/** Each `serve` records the transcript reads it makes here, for the traversal test. */
+let lastReads: Ref.Ref<ReadonlyArray<string>> | undefined
+const serveDependencies = (contents: string, transcripts: Readonly<Record<string, string>>) =>
+  Effect.tap(dependenciesFor(contents, transcripts), (made) =>
+    Effect.sync(() => {
+      lastReads = made.reads
+    })
+  )
 
 const text = (response: Response) => Effect.promise(() => response.text())
 const bytes = (response: Response) =>
@@ -454,6 +610,141 @@ const openGet = (
     outgoing.on("error", reject)
     outgoing.end()
   })
+
+const tailOf = (target: TailTarget, role?: string, until?: number) =>
+  tailLinesOf(
+    [...paymentsEntries, ...accountsEntries]
+      .filter((entry) =>
+        "lane" in target
+          ? (target.lane === "payments" ? paymentsEntries : accountsEntries).includes(entry)
+          : true
+      )
+      .filter((entry) => until === undefined || entry.at <= until)
+      .sort((left, right) => left.at - right.at),
+    target,
+    role,
+    52,
+    400
+  )
+
+describe("watch --web transcript tail", () => {
+  it.effect("answers a story's tail with watch's own lines, and keeps to a role", () =>
+    Effect.gen(function* () {
+      const get = yield* serve({ repo: "/repo", trace: tracePath })
+      const all = yield* decoded(
+        WebTranscriptJson,
+        yield* get("/api/transcript?target=payments&of=story")
+      )
+      assert.strictEqual(all._tag, "Lines")
+      assert.deepStrictEqual(all._tag === "Lines" ? all.lines : [], tailOf({ lane: "payments" }))
+      const lines = all._tag === "Lines" ? all.lines.join("\n") : ""
+      assert.include(lines, "coder · pi-lmstudio")
+      assert.include(lines, "◀ Writing payments.fake.ts")
+      assert.include(lines, "reviewer · pi-lmstudio")
+      const reviewer = yield* decoded(
+        WebTranscriptJson,
+        yield* get("/api/transcript?target=payments&of=story&role=reviewer")
+      )
+      assert.deepStrictEqual(
+        reviewer._tag === "Lines" ? reviewer.lines : [],
+        tailOf({ lane: "payments" }, "reviewer")
+      )
+      assert.notInclude(reviewer._tag === "Lines" ? reviewer.lines.join("\n") : "", "Writing")
+      assert.strictEqual(reviewer._tag === "Lines" ? reviewer.role : undefined, "reviewer")
+      const reads = lastReads === undefined ? [] : yield* Ref.get(lastReads)
+      assert.isAbove(reads.length, 0)
+      assert.deepStrictEqual([...new Set(reads)], [`${transcriptDir}/payments.jsonl`])
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("tails an executor across the stories it served", () =>
+    Effect.gen(function* () {
+      const get = yield* serve({ repo: "/repo", trace: tracePath })
+      const claude = yield* decoded(
+        WebTranscriptJson,
+        yield* get("/api/transcript?target=claude&of=executor")
+      )
+      assert.deepStrictEqual(
+        claude._tag === "Lines" ? claude.lines : [],
+        tailOf({ executor: "claude" })
+      )
+      assert.include(claude._tag === "Lines" ? claude.lines.join("\n") : "", "◀ two issues")
+      assert.notInclude(claude._tag === "Lines" ? claude.lines.join("\n") : "", "Writing")
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("refuses a target the run does not have, a bad role, and a path in the target", () =>
+    Effect.gen(function* () {
+      const get = yield* serve({ repo: "/repo", trace: tracePath })
+      for (const query of [
+        "target=nobody&of=story",
+        "target=claude&of=story",
+        "target=payments&of=executor",
+        "target=..%2Fsecret&of=story",
+        "target=../secret&of=story",
+        "target=%2e%2e%2fsecret&of=story",
+        "target=%2Frepo%2F.llm4ts%2Fsecret&of=story",
+        "target=..&of=story"
+      ]) {
+        const refused = yield* get(`/api/transcript?${query}`)
+        assert.strictEqual(refused.status, 404, query)
+        assert.notInclude(yield* text(refused), "SECRET", query)
+      }
+      for (const query of [
+        "of=story",
+        "target=&of=story",
+        "target=payments",
+        "target=payments&of=file",
+        "target=payments&of=story&role=boss",
+        "target=payments&of=story&count=many"
+      ]) {
+        assert.strictEqual((yield* get(`/api/transcript?${query}`)).status, 400, query)
+      }
+      const reads = lastReads === undefined ? [] : yield* Ref.get(lastReads)
+      assert.deepStrictEqual(reads, [])
+      assert.strictEqual(
+        (yield* get("/api/transcript?target=payments&of=story", "evil.example")).status,
+        403
+      )
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("says what the terminal says when the run kept no transcript", () =>
+    Effect.gen(function* () {
+      const get = yield* serve({ repo: "/repo", trace: tracePath }, trace, {})
+      const none = yield* decoded(
+        WebTranscriptJson,
+        yield* get("/api/transcript?target=payments&of=story")
+      )
+      assert.deepStrictEqual(none, { _tag: "None", message: noTranscriptMessage })
+    }).pipe(Effect.scoped)
+  )
+
+  it.effect("cuts a replay's tail at the time of the step on screen", () =>
+    Effect.gen(function* () {
+      const get = yield* serve({ repo: "/repo", trace: tracePath, replay: true })
+      const count = steps.filter((step) => step.seq <= 33).length
+      const until = steps[count - 1]?.at
+      const early = yield* decoded(
+        WebTranscriptJson,
+        yield* get(`/api/transcript?target=payments&of=story&count=${count}`)
+      )
+      assert.deepStrictEqual(
+        early._tag === "Lines" ? early.lines : [],
+        tailOf({ lane: "payments" }, undefined, until)
+      )
+      assert.notInclude(early._tag === "Lines" ? early.lines.join("\n") : "", "reviewer")
+      const later = yield* decoded(
+        WebTranscriptJson,
+        yield* get(`/api/transcript?target=payments&of=story&count=${steps.length}`)
+      )
+      assert.include(later._tag === "Lines" ? later.lines.join("\n") : "", "reviewer")
+      // At step 3 the roster has no claude yet: the target is checked against the fold on screen.
+      const before = yield* get("/api/transcript?target=claude&of=executor&count=3")
+      assert.strictEqual(before.status, 404)
+    }).pipe(Effect.scoped)
+  )
+})
 
 describe("watch --web on a real socket", () => {
   it.live("refuses a foreign Host, and detaches cleanly with a live stream open", () =>

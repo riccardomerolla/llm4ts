@@ -4,7 +4,13 @@ import * as Queue from "effect/Queue"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { WebFrameJson, type WebFrame, type WebRun } from "../src/WebFrame.ts"
+import {
+  WebFrameJson,
+  WebTranscriptJson,
+  type WebFrame,
+  type WebRun,
+  type WebTranscript
+} from "../src/WebFrame.ts"
 
 /**
  * Where the `watch --web` page gets its data (ADR 0051), with no DOM in
@@ -26,6 +32,8 @@ export interface FrameSource {
   readonly stream: (
     replay: { readonly count: number; readonly speed: number } | undefined
   ) => Stream.Stream<WebFrame, PageError>
+  /** A tail's answer from `/api/transcript?…` (views.ts `transcriptPath`). */
+  readonly transcript: (path: string) => Effect.Effect<WebTranscript, PageError>
 }
 
 const decodeFrameJson = Schema.decodeUnknownResult(WebFrameJson)
@@ -35,6 +43,15 @@ export const decodeFrame = (json: unknown): Result.Result<WebFrame, PageError> =
   Result.mapError(
     decodeFrameJson(json),
     (error) => new PageError({ message: `a frame did not decode: ${error.message}` })
+  )
+
+const decodeTranscriptJson = Schema.decodeUnknownResult(WebTranscriptJson)
+
+/** A tail's JSON, through the schema. */
+export const decodeTranscript = (json: unknown): Result.Result<WebTranscript, PageError> =>
+  Result.mapError(
+    decodeTranscriptJson(json),
+    (error) => new PageError({ message: `a transcript did not decode: ${error.message}` })
   )
 
 /** What the page needs of an `EventSource`; the browser's satisfies it. */

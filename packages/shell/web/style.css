@@ -347,6 +347,31 @@ h1 {
   font-size: 12px;
   color: var(--muted);
 }
+button.key {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.detail-card .card-head {
+  gap: 4px;
+}
+.detail-card .head-title {
+  margin-right: 8px;
+}
+button.key:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+button.key[aria-pressed="true"] {
+  background: var(--panel-2);
+  border-color: var(--line-2);
+  color: var(--fg);
+}
 
 /* flow graph */
 .viz {
@@ -943,6 +968,12 @@ h1 {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+.timeline-card.full .timeline {
+  position: relative;
+  max-height: 560px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .timeline li.future {
   opacity: 0.35;
 }
@@ -1200,6 +1231,15 @@ body.frozen *::after {
   font-family: var(--mono);
   font-size: 13px;
 }
+button.exec-card {
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.exec-card.selected {
+  outline: 2px solid var(--fg);
+  outline-offset: -1px;
+}
 .exec-card.busy {
   border-color: rgba(59, 130, 246, 0.45);
 }
@@ -1237,10 +1277,10 @@ body.frozen *::after {
   color: var(--muted);
   font-size: 12px;
 }
-.leases li {
+.leases > span {
   overflow-wrap: anywhere;
 }
-.leases li.v-dim,
+.leases > span.v-dim,
 .exec-card.idle .exec-state {
   color: var(--faint);
 }
@@ -1338,4 +1378,41 @@ body.frozen *::after {
 }
 .story-card .bar > i {
   background: var(--run);
+}
+
+/* the detail card's expanded lists and its tail */
+.detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  min-width: 0;
+}
+.detail-list li {
+  overflow-wrap: anywhere;
+}
+.tail-body {
+  padding: 12px 0 0;
+}
+.tail {
+  margin: 0;
+  padding: 0 20px 18px;
+  max-height: 560px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  color: var(--node-name);
+}
+.tail .v-dim {
+  color: var(--faint);
+}
+.tail .v-err {
+  color: var(--err);
 }

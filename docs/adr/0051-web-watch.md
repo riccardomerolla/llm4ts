@@ -81,9 +81,36 @@ no-store`.
   `?view=executors|boards` keeps the choice across a reload. The epic
   board's second column reads `running`, as the page's legend does, where
   the terminal's reads `active`.
-- Not yet in the browser: the transcript tail, the expanded lane, the full
-  log, selecting an executor, and keys other than space, the arrows, `e`
-  and `b`.
+- The detail and events cards take the terminal tree's other keys:
+  `enter` expands, `t` tails, `r` cycles the tail's role, escape closes, `l`
+  toggles the full log, each also a button on its card. The page's keys
+  are pure rules (`web-src/views.ts`) over one detail state (short,
+  expanded, or tail in a role), with the full log beside it.
+  - **Expanded** reads the lane's open stages and its last tool calls from
+    each story of the frame (`stages`, and `tools` as many as the tree
+    keeps, 20), so the page draws what `detailBox` draws.
+  - **Full log** is the whole timeline up to the frame on screen. A
+    replay has it from `/api/run`; a live page starts from the same and
+    lays each frame's latest 40 items over its end, so frames do not carry
+    the whole timeline, and asks `/api/run` again only when a frame
+    skipped past what it holds. The page's log is the timeline (session
+    log lines and event digests), all of it, where the terminal shows the
+    last 30 session log lines.
+  - **Tail** asks `GET /api/transcript?target=&of=story|executor&role=&count=`,
+    behind the same `Host` check. The server resolves the run's transcript
+    directory as `watch` does (`transcriptDirOf`), accepts a target only if
+    the fold at `count` steps names that story or executor (404
+    otherwise), and answers through `WebTranscript`: `Lines` formatted by
+    `tailLinesOf` at 52 columns, the last 400, or `None` with `watch`'s
+    own "no transcript for this run" words. A story's file is
+    `transcriptFileOf` of the checked name, and an executor's tail reads
+    only the directory's listing, so no request names a path. A replay's
+    tail keeps the entries up to the time of the step on screen. A live
+    tail is asked again on each frame, the page's existing 500ms cadence,
+    one request at a time; the server never logs what it returns. In the
+    executors view, a clicked executor card is the tail's target. Switching
+    views closes the tail and the expanded detail, as `e` and `b` do in the
+    terminal.
 - The page loads nothing from the network; it works offline.
 - A checkout serves the page only after `pnpm build`, as it runs the CLI
   from `dist/` only after one.

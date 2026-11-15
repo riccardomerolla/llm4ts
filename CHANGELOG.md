@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`llm4ts watch --web`: expand, full log and transcript tail** (ADR 0051).
+  `enter` (or the detail card's button) expands the selected story to every
+  open stage and its last 20 tool calls; `l` shows the whole event log up
+  to the frame on screen, scrollable in its card, with later events still
+  dimmed in a replay; `t` shows the selection's transcript in the detail
+  card, a story's or, in the executors view, the clicked executor's, and
+  `r` cycles all, coder, reviewer and judge. Escape closes. A new
+  `GET /api/transcript` answers with `watch --tail`'s own lines, only for a
+  story or executor of the run, cut at the step on screen in a replay.
+  Executor cards are now selectable.
+
 ## 4.4.0
 
 ### Added

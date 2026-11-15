@@ -36,6 +36,7 @@ const makeFakeSource = Effect.fn("test/makeFakeSource")(function* (
   const closed = yield* Ref.make(0)
   const source: FrameSource = {
     run: Effect.die("not asked"),
+    transcript: () => Effect.die("not asked"),
     frame: (count) => Effect.succeed(frameAfter(count ?? steps.length)),
     stream: (replay) => {
       const from = replay?.count ?? steps.length
