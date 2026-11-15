@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`llm4ts watch --web`: arrow keys select an executor** in the executors
+  view, as in the terminal tree: down and right move forward, up and left
+  back, stopping at the ends, and the first press picks the first executor.
+  The selection is the tail's target. In that view the arrows no longer step
+  a replay; in the graph and the boards `←` and `→` still do.
+
 ## 4.5.0
 
 ### Added

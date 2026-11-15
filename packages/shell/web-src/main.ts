@@ -29,6 +29,7 @@ import {
   detailActionNamed,
   detailAfter,
   detailOnKey,
+  executorOnKey,
   initialDetail,
   searchWithView,
   timelineWith,
@@ -135,6 +136,15 @@ const wireViews = (
     if (next !== undefined) {
       event.preventDefault()
       choose(next)
+      return
+    }
+    if (shown === "executors") {
+      const { names, selected } = view.executors()
+      const picked = executorOnKey(names, selected, keyOf(event))
+      if (picked !== undefined) {
+        event.preventDefault()
+        view.pickExecutor(picked)
+      }
     }
   })
 }
@@ -520,6 +530,10 @@ const startReplay = (run: WebRun) =>
       if (event.key === " ") {
         event.preventDefault()
         play?.click()
+      }
+      // In the executors view the arrows move the selection (wireViews), not the replay.
+      if (view.shown() === "executors") {
+        return
       }
       if (event.key === "ArrowRight") {
         fwd?.click()

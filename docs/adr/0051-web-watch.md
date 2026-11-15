@@ -81,6 +81,11 @@ no-store`.
   `?view=executors|boards` keeps the choice across a reload. The epic
   board's second column reads `running`, as the page's legend does, where
   the terminal's reads `active`.
+- In the executors view the arrows select an executor, as `onTreeKey`
+  moves its selection: down and right forward, up and left back, stopping
+  at the ends, the first one when none is picked (`executorOnKey`). There
+  the arrows do not step a replay; in the graph and the boards `←` and `→`
+  still do, and the step buttons work in every view.
 - The detail and events cards take the terminal tree's other keys:
   `enter` expands, `t` tails, `r` cycles the tail's role, escape closes, `l`
   toggles the full log, each also a button on its card. The page's keys
@@ -108,7 +113,8 @@ no-store`.
     tail keeps the entries up to the time of the step on screen. A live
     tail is asked again on each frame, the page's existing 500ms cadence,
     one request at a time; the server never logs what it returns. In the
-    executors view, a clicked executor card is the tail's target. Switching
+    executors view, the selected executor (clicked, or picked by arrow) is the
+    tail's target. Switching
     views closes the tail and the expanded detail, as `e` and `b` do in the
     terminal.
 - The page loads nothing from the network; it works offline.
