@@ -51,29 +51,54 @@ Every task is a commit on the flow's branch, the plan lives under
 `llm4ts list` shows the other built-ins: `sdd`, `issue-pr`, `epic-stories`,
 the `modernize-*` phases. More: [chapter 2](docs/guide/02-run-a-flow.md).
 
+## Watch a run
+
+Every run writes a trace, and `llm4ts watch` turns any trace, live or
+finished, into the **agent tree**: every agent in flight (its story, its
+executor clone, its task), the judge's verdicts, the session log, and the
+epic and story boards. `llm4ts run epic-stories --ui tree …` draws the same
+tree while the run goes. `--replay` plays a finished trace back at ×1, ×10
+or ×50. More: [chapter 2](docs/guide/02-run-a-flow.md#watching-a-run-the-agent-tree).
+
+`llm4ts watch --web` serves the tree as a page in your browser:
+
+```bash
+llm4ts watch --web --repo ~/work/portal            # the newest trace, live
+llm4ts watch --web --replay .llm4ts/trace-….jsonl  # a finished run, with step and scrub
+```
+
+![llm4ts watch --web: the flow graph of an epic with one story running on a pi executor, the judge seat, the roster, the selected story's detail and the event log](docs/images/watch-web-graph.png)
+
+The flow card switches between the graph, one card per executor, and the
+boards (`e`, `b`); `enter` expands the selected story, `t` tails its
+transcript, `l` opens the full event log. The page fits the window, loads
+nothing from the network and listens on `127.0.0.1` and a free port;
+`--port` and `--host` choose them, and a host other than loopback warns that
+anyone who can reach the port sees the run. More: [ADR 0051](docs/adr/0051-web-watch.md).
+
+![llm4ts watch --web, boards view: the epic's stories in planned, running, waiting, done and failed columns, and the running story's task board](docs/images/watch-web-boards.png)
+
+## Measure and operate
+
 `llm4ts costs` reads the traces of every past run and reports tokens and
 cost per day, per hour, per run, and per model, with a projection for the
 run rate you expect — the numbers a budget needs. Measured token counts and
 character-count estimates stay in separate columns.
 
-`llm4ts run epic-stories --ui tree …` draws the run as an **agent tree**:
-every agent in flight on one line (its story, its executor clone, its task),
-the selected story's task checklist, the judge's verdicts, the session log,
-and the epic and story boards. `llm4ts watch` draws the same tree from any
-trace, live or afterwards, and replays it. More: [chapter 2](docs/guide/02-run-a-flow.md#watching-a-run-the-agent-tree).
-With `--otel` the same run shows up in a local Arize Phoenix, or in any
-OpenTelemetry backend through the `OTEL_*` variables: [observability](docs/observability.md).
 `llm4ts profile --epic <id>` says where a run's time went — model, tools,
 gates, merges, waiting — with the biggest sinks first, and nothing of the
 code or prompts in it, so it can come back from a customer's server.
+With `--otel` the same run shows up in a local Arize Phoenix, or in any
+OpenTelemetry backend through the `OTEL_*` variables: [observability](docs/observability.md).
 
 `llm4ts tool` is the one command a coder runs inside a task: `list`,
 `describe <name>`, and `run <name> --flag value` print a JSON report (ok,
 summary, issues) for a job the model would otherwise improvise a script
 for — `json-validate` against a JSON Schema or an OpenAPI component,
-`diff` of two JSON documents, `xml-validate` against an XSD. A pack names
-presets in `## Tools`; every story's brief quotes them, and `llm4ts profile`
-counts the ad-hoc scripts that remain. More: [ADR 0048](docs/adr/0048-tool-catalog.md).
+`diff` of two JSON documents, `http-call` against a running service; the
+soap-ace kit adds `xml-validate` against an XSD and `soap-call`. A pack names presets in
+`## Tools`; every story's brief quotes them, and `llm4ts profile` counts the
+ad-hoc scripts that remain. More: [ADR 0048](docs/adr/0048-tool-catalog.md).
 
 `llm4ts mcp` serves the same runs to an MCP client such as Grok Bot,
 Claude Code or Cursor: `preflight`, run status, a `run_wait` long poll,
@@ -190,13 +215,13 @@ by copying a skill directory.
 
 ## Packages
 
-| Package          | Purpose                                                     |
-| ---------------- | ----------------------------------------------------------- |
-| `@llm4ts/shell`  | `llm4ts` CLI and menu over discovered flows and kits        |
-| `@llm4ts/runner` | Node runner; its root export is the flow author's barrel    |
-| `@llm4ts/flow`   | Plans, events, persistence, repositories, review, packs     |
-| `@llm4ts/core`   | Models, connectors, providers, eval, judgments, redaction   |
-| `@llm4ts/js`     | Promise-based client for calling an LLM from any JS program |
+| Package          | Purpose                                                       |
+| ---------------- | ------------------------------------------------------------- |
+| `@llm4ts/shell`  | The `llm4ts` command: run, watch, costs, profile, mcp, config |
+| `@llm4ts/runner` | Node runner; its root export is the flow author's barrel      |
+| `@llm4ts/flow`   | Plans, events, persistence, repositories, review, packs       |
+| `@llm4ts/core`   | Models, connectors, providers, eval, judgments, redaction     |
+| `@llm4ts/js`     | Promise-based client for calling an LLM from any JS program   |
 
 ## Configuration
 
@@ -230,6 +255,7 @@ The settings most runs touch:
 | Setting                            | Effect                                                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------------------- |
 | `LLM4TS_CODER`                     | Coding agent, also `llm4ts run --coder`: `claude` (default), `codex`, `gemini`, `pi`, … |
+| `LLM4TS_CODER_MODEL`               | The coder's model on every flow; read-only seats on the same agent follow it            |
 | `LLM4TS_PROVIDER` / `LLM4TS_MODEL` | API provider and model for provider-driven flows such as `hello`                        |
 | `LLM4TS_PACK`                      | Pack for the modernization flows, also `llm4ts run --pack`                              |
 | `LLM4TS_VERBOSITY`                 | Terminal verbosity, also `llm4ts run --verbose`                                         |
@@ -246,7 +272,7 @@ from the registry (`node scripts/settings-docs.mjs`).
 
 ```sh
 pnpm install
-pnpm typecheck && pnpm lint && pnpm format:check && pnpm test
+pnpm typecheck && pnpm lint && pnpm format:check && pnpm unused && pnpm test
 pnpm build
 node scripts/pack-smoke.mjs   # verifies the published artifacts
 ```
@@ -287,11 +313,14 @@ Internal engineering reference:
 
 ## Status
 
-2.0 since 2026-09-15; see [CHANGELOG.md](CHANGELOG.md) for what the line
-holds stable and for the four renames 2.0 made: the package subpath exports, the `@llm4ts/runner` root
-barrel, the flow and kit layouts and their three discovery tiers, the pack
-manifest, and the `LLM4TS_*` environment. Importing package-private files is
-unsupported. 3.0 removed modules no run reached and changed nothing a run
-does. The implementation uses Effect 4 (4.0.0, pinned exactly).
+4.x since 2026-11-13. 4.0.0 removed what no run reached and decided the
+public surface in the sources: a module whose first line is
+`// @internal: <reason>` has no subpath, and `@llm4ts/shell` is the `llm4ts`
+command with no library subpaths (ADR 0050). 4.1.0 put the coder and
+reasoning model and flag settings on every flow and removed the copilot
+connector; 4.3.0 through 4.7.1 brought `watch --web`.
+[CHANGELOG.md](CHANGELOG.md) lists every removal with what replaces it;
+importing package-private files is unsupported. The implementation uses
+Effect 4 (4.0.0, pinned exactly).
 
 Licensed under MIT.
