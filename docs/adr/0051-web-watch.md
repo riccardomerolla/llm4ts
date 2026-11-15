@@ -123,6 +123,12 @@ no-store`.
     tail's target. Switching
     views closes the tail and the expanded detail, as `e` and `b` do in the
     terminal.
+- The page fits the window's width, up to 1440px: the cards reflow (three
+  across, then two, then one), and the graph, drawn in fixed coordinates
+  1390px wide, zooms to its card (`graphZoom`, CSS `zoom` so its height
+  and clicks follow) down to 0.55, below which it scrolls inside its card
+  rather than the page. The graph is at least 400px tall, more only when
+  the stories need it.
 - The page loads nothing from the network; it works offline.
 - A checkout serves the page only after `pnpm build`, as it runs the CLI
   from `dist/` only after one.
