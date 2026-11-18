@@ -121,6 +121,15 @@ describe("chatOptionsFrom", () => {
     })
   )
 
+  it.effect("refuses --flows chief: it is how the Chief decides, not a run to start", () =>
+    Effect.gen(function* () {
+      assert.match(
+        yield* refusal({ ...withSpace, flows: Option.some("implement,chief") }),
+        /--flows must not name chief/
+      )
+    })
+  )
+
   it.effect("refuses empty --flows", () =>
     Effect.gen(function* () {
       assert.match(yield* refusal({ ...withSpace, flows: Option.some(" , ") }), /--flows/)
@@ -170,7 +179,10 @@ describe("runChatUntilSignal", () => {
             yield* Ref.make<ReadonlyArray<string>>([])
           ),
           repo,
-          flows: Effect.succeed([]),
+          flows: Effect.succeed([
+            { name: "chief", path: "/flows/chief.ts", description: "One chat decision" },
+            { name: "implement", path: "/flows/implement.ts", description: "Plan and code" }
+          ]),
           sources: { files: memory.store, listFiles: () => [] },
           listTraces: () => [],
           listEpics: () => [],

@@ -6,11 +6,11 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import { TestClock } from "effect/testing"
 import { ChiefAction, ChiefContext, failedReply } from "@llm4ts/flow/ChiefAction"
-import { ProcessError } from "@llm4ts/flow/FlowError"
+import { PersistenceError, ProcessError } from "@llm4ts/flow/FlowError"
 import { Info, StoryStatusChanged, type FlowEvent } from "@llm4ts/flow/FlowEvents"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { ChatMessage, GwsLoginRequired, SpaceRef } from "@llm4ts/flow/GoogleChatTool"
-import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { defaultPlanPath } from "@llm4ts/flow/Plan"
 import { summarizeTree } from "@llm4ts/runner/RunSummary"
 import {
@@ -29,7 +29,15 @@ import {
   type ChatLoopDeps,
   type ChatOptions
 } from "@llm4ts/shell/ChatLoop"
-import { ChatState, chatDir, loadRequests, loadState, saveState } from "@llm4ts/shell/ChatState"
+import {
+  ChatRequest,
+  ChatState,
+  chatDir,
+  loadRequests,
+  loadState,
+  putRequest,
+  saveState
+} from "@llm4ts/shell/ChatState"
 import { makeFakeFlowProcess } from "@llm4ts/shell/FlowProcess"
 import { foldTrace } from "@llm4ts/shell/RunReaders"
 import { makeRunSupervisor, type SupervisorRepo } from "@llm4ts/shell/RunSupervisor"
@@ -119,6 +127,31 @@ const setup = (script: ReadonlyArray<Scripted> = [], overrides: Partial<ChatOpti
     }
     return { deps, memory, fake, chat, gitLog, dirty, lines, contexts }
   })
+
+/** The store, with reads or writes of the paths `failing` names refused while `on` holds. */
+const failingFiles = (
+  store: PlainFileStoreShape,
+  failing: { readonly reads?: string; readonly writes?: string },
+  on: Ref.Ref<boolean> | undefined = undefined
+): PlainFileStoreShape => {
+  const refused = (path: string, suffix: string | undefined) =>
+    Effect.gen(function* () {
+      if (suffix === undefined || !path.endsWith(suffix)) return false
+      return on === undefined ? true : yield* Ref.get(on)
+    })
+  const disk = PersistenceError.make({ message: "disk full" })
+  return {
+    ...store,
+    read: (path) =>
+      Effect.flatMap(refused(path, failing.reads), (no) =>
+        no ? Effect.fail(disk) : store.read(path)
+      ),
+    writeAtomic: (path, text) =>
+      Effect.flatMap(refused(path, failing.writes), (no) =>
+        no ? Effect.fail(disk) : store.writeAtomic(path, text)
+      )
+  }
+}
 
 /** Lets forked fibers run until `check` holds; fails the test after many turns. */
 const until = <A>(read: Effect.Effect<A>, check: (value: A) => boolean) =>
@@ -444,8 +477,30 @@ describe("handleBeat", () => {
         const [run] = yield* deps.supervisor.list(repo.id)
         yield* fake.exit(run?.pid ?? 0, { code: undefined, signal: "SIGINT" })
         yield* Fiber.join(fiber)
-        assert.deepStrictEqual(texts(yield* chat.posted).slice(1), [`${marker} Stopping it.`])
+        assert.deepStrictEqual(texts(yield* chat.posted).slice(1), [`${marker} Stopped ${runId}.`])
         assert.strictEqual((yield* deps.supervisor.get(runId))?.state, "interrupted")
+      })
+    )
+  )
+
+  it.effect("says a run that already ended was not running, whatever the Chief wrote", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const runId = "op-0-beef"
+        const { deps, chat, fake } = yield* setup([
+          startRun("implement", "fix"),
+          { _tag: "StopRun", runId, reply: "Stopped it." }
+        ])
+        yield* chat.add("/bot fix")
+        const state = yield* handleBeat(deps, initial)
+        const [run] = yield* deps.supervisor.list(repo.id)
+        yield* fake.exit(run?.pid ?? 0, { code: 0, signal: undefined })
+        yield* until(deps.supervisor.get(runId), (latest) => latest?.state === "exited")
+        yield* chat.add("/bot stop")
+        yield* handleBeat(deps, state)
+        assert.deepStrictEqual(texts(yield* chat.posted).slice(1), [
+          `${marker} ${runId} was not running.`
+        ])
       })
     )
   )
@@ -466,6 +521,65 @@ describe("handleBeat", () => {
           requests.map((r) => r.status),
           ["failed", "answered"]
         )
+      })
+    )
+  )
+
+  it.effect("tells the terminal when a request cannot be recorded, and moves on", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup([answer("Hi."), answer("Again.")])
+        const deps: ChatLoopDeps = {
+          ...fixture.deps,
+          files: failingFiles(fixture.memory.store, { writes: "requests.md" })
+        }
+        const asked = yield* fixture.chat.add("/bot hi")
+        const state = yield* handleBeat(deps, initial)
+        assert.strictEqual(state.cursor, asked.createTime)
+        // The next beat sees nothing new: no second decision, no second reply.
+        yield* handleBeat(deps, state)
+        assert.deepStrictEqual(texts(yield* fixture.chat.posted), [`${marker} Hi.`])
+        assert.strictEqual((yield* Ref.get(fixture.contexts)).length, 1)
+        assert.deepStrictEqual(yield* Ref.get(fixture.lines), [
+          `could not record ${asked.name}: disk full`,
+          `could not record ${asked.name}: disk full`
+        ])
+      })
+    )
+  )
+
+  it.effect("records a started run before its reply, so a failed post still follows it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup([startRun("implement", task)])
+        const deps: ChatLoopDeps = {
+          ...fixture.deps,
+          chat: {
+            ...fixture.deps.chat,
+            createMessage: () => Effect.fail(ProcessError.make({ message: "gws", detail: "boom" }))
+          }
+        }
+        const asked = yield* fixture.chat.add(`/bot ${task}`)
+        const state = yield* handleBeat(deps, initial)
+        const [run] = yield* deps.supervisor.list(repo.id)
+        const requests = yield* loadRequests(fixture.memory.store, dir)
+        assert.deepStrictEqual(
+          requests.map((r) => [r.status, r.runId]),
+          [["started", run?.runId]]
+        )
+        assert.deepStrictEqual(yield* Ref.get(fixture.lines), [
+          `could not post to ${space.name}: Process`
+        ])
+        // Chat is back: the run is followed into the request's thread.
+        yield* fixture.memory.store.writeAtomic(planPath, planOf(0))
+        yield* followRun(fixture.deps, state, startFollowing(run?.runId ?? ""))
+        assert.deepStrictEqual(yield* fixture.chat.posted, [
+          {
+            text: `${marker} ${run?.runId ?? "?"}: plan written, 4 tasks`,
+            threadName: asked.threadName
+          }
+        ])
+        yield* fixture.fake.exit(run?.pid ?? 0, { code: 0, signal: undefined })
       })
     )
   )
@@ -622,7 +736,7 @@ describe("decideThroughFlow", () => {
   it.effect("is Failed when chief exits without an action file", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { deps, fake } = yield* setup()
+        const { deps, fake, lines } = yield* setup()
         const fiber = yield* decideThroughFlow(deps)(contextFor("spaces/AAA/messages/q")).pipe(
           Effect.forkChild
         )
@@ -631,6 +745,24 @@ describe("decideThroughFlow", () => {
         yield* fake.exit(run?.pid ?? 0, { code: 0, signal: undefined })
         yield* TestClock.adjust("1 second")
         assert.deepStrictEqual(yield* Fiber.join(fiber), { _tag: "Failed", reply: failedReply })
+        assert.deepStrictEqual(yield* Ref.get(lines), [
+          `The Chief could not decide on spaces/AAA/messages/q: chief run ${run?.runId ?? "?"} wrote no action; its logs are in ${run?.logDir ?? "?"}`
+        ])
+      })
+    )
+  )
+
+  it.effect("is Failed, and says so, when no chief flow is found", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const deps = { ...fixture.deps, flows: Effect.succeed(flows.slice(0, 1)) }
+        const action = yield* decideThroughFlow(deps)(contextFor("spaces/AAA/messages/u"))
+        assert.deepStrictEqual(action, { _tag: "Failed", reply: failedReply })
+        assert.deepStrictEqual(yield* fixture.fake.started, [])
+        assert.deepStrictEqual(yield* Ref.get(fixture.lines), [
+          "The Chief could not decide on spaces/AAA/messages/u: no chief flow was found"
+        ])
       })
     )
   )
@@ -638,7 +770,7 @@ describe("decideThroughFlow", () => {
   it.effect("is Failed on a non-zero exit even with an action file", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { deps, fake, memory } = yield* setup()
+        const { deps, fake, memory, lines } = yield* setup()
         const fiber = yield* decideThroughFlow(deps)(contextFor("spaces/AAA/messages/r")).pipe(
           Effect.forkChild
         )
@@ -651,6 +783,9 @@ describe("decideThroughFlow", () => {
         yield* fake.exit(run?.pid ?? 0, { code: 1, signal: undefined })
         yield* TestClock.adjust("1 second")
         assert.deepStrictEqual(yield* Fiber.join(fiber), { _tag: "Failed", reply: failedReply })
+        assert.deepStrictEqual(yield* Ref.get(lines), [
+          `The Chief could not decide on spaces/AAA/messages/r: chief run ${run?.runId ?? "?"} ended exited, exit code 1; its logs are in ${run?.logDir ?? "?"}`
+        ])
       })
     )
   )
@@ -660,7 +795,7 @@ describe("decideThroughFlow bound", () => {
   it.effect("stops chief and is Failed after the bound", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { deps, fake } = yield* setup()
+        const { deps, fake, lines } = yield* setup()
         const fiber = yield* decideThroughFlow(deps)(contextFor("spaces/AAA/messages/s")).pipe(
           Effect.forkChild
         )
@@ -672,6 +807,9 @@ describe("decideThroughFlow bound", () => {
         const [run] = yield* deps.supervisor.list(repo.id)
         yield* fake.exit(run?.pid ?? 0, { code: undefined, signal: "SIGINT" })
         assert.deepStrictEqual(yield* Fiber.join(fiber), { _tag: "Failed", reply: failedReply })
+        assert.deepStrictEqual(yield* Ref.get(lines), [
+          `The Chief could not decide on spaces/AAA/messages/s: chief run ${run?.runId ?? "?"} gave no decision within 120 s; its logs are in ${run?.logDir ?? "?"}`
+        ])
       })
     )
   )
@@ -793,7 +931,7 @@ describe("followRun", () => {
         yield* finish
         step = yield* followRun(deps, step.state, step.followed)
         assert.isTrue(step.followed.done)
-        const ending = `${marker} ${run.runId} finished completed in 3 min, $0.00. Branch llm4ts/health, 3 commits.`
+        const ending = `${marker} ${run.runId} completed in 3 min, $0.00. Branch llm4ts/health, 3 commits.`
         const posted = (yield* chat.posted).slice(before)
         assert.deepStrictEqual(texts(posted), [
           `${marker} ${run.runId}: plan written, 4 tasks`,
@@ -809,6 +947,62 @@ describe("followRun", () => {
         assert.strictEqual((yield* chat.posted).length - before, 2)
       })
     )
+  )
+
+  it.effect("leaves the branch out of a lost run's ending line", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const deps: ChatLoopDeps = {
+          ...fixture.deps,
+          git: { ...fixture.deps.git, currentBranch: Effect.succeed("someone-else") }
+        }
+        yield* putRequest(
+          fixture.memory.store,
+          dir,
+          ChatRequest.make({
+            messageName: "spaces/AAA/messages/old",
+            createTime: "2026-11-18T09:00:00.000Z",
+            sender: ownerId,
+            text: "fix",
+            threadName: "spaces/AAA/threads/old",
+            status: "started",
+            runId: "op-gone"
+          })
+        )
+        const step = yield* followRun(deps, initial, startFollowing("op-gone"))
+        assert.isTrue(step.followed.done)
+        assert.deepStrictEqual(texts(yield* fixture.chat.posted), [
+          `${marker} op-gone lost in 0 min, $0.00.`
+        ])
+      })
+    )
+  )
+
+  it.effect(
+    "under --observe after an armed session changes nothing and says what it would post",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* chatRun()
+          const { run, memory, writeTrace, finish } = fixture
+          const deps: ChatLoopDeps = {
+            ...fixture.deps,
+            git: { ...fixture.deps.git, currentBranch: Effect.succeed("llm4ts/health") },
+            options: { ...fixture.deps.options, observe: true }
+          }
+          yield* writeTrace([eventLine(1, 0, Info.make({ message: "planning" }))])
+          yield* finish
+          const before = (yield* fixture.chat.posted).length
+          yield* followRun(deps, fixture.state, startFollowing(run.runId))
+          assert.strictEqual((yield* fixture.chat.posted).length, before)
+          const [request] = yield* loadRequests(memory.store, dir)
+          assert.strictEqual(request?.status, "started")
+          assert.deepStrictEqual(yield* Ref.get(fixture.lines), [
+            `would reply: ${run.runId} completed in 0 min, $0.00. Branch llm4ts/health, 0 commits.`
+          ])
+        })
+      )
   )
 
   it.effect("posts summarizeTree's sentence for a story-shaped run", () =>
@@ -948,6 +1142,48 @@ describe("startChat", () => {
     )
   )
 
+  it.effect("stops when the chief flow is not found", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const deps: ChatLoopDeps = {
+          ...fixture.deps,
+          flows: Effect.succeed(flows.filter((flow) => flow.name !== "chief"))
+        }
+        const error = yield* Effect.flip(startChat(deps))
+        assert.instanceOf(error, ChatStopped)
+        assert.include(error.message, "no chief flow")
+        assert.deepStrictEqual(yield* fixture.chat.posted, [])
+      })
+    )
+  )
+
+  it.effect("stops when --flows names a flow that is not here", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat } = yield* setup([], { flows: ["implement", "implment"] })
+        const error = yield* Effect.flip(startChat(deps))
+        assert.instanceOf(error, ChatStopped)
+        assert.include(error.message, "implment")
+        assert.notInclude(error.message, "implement,")
+        assert.deepStrictEqual(yield* chat.posted, [])
+      })
+    )
+  )
+
+  it.effect("stops when flow discovery fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const deps: ChatLoopDeps = { ...fixture.deps, flows: Effect.die("unreadable kits") }
+        const error = yield* Effect.flip(startChat(deps))
+        assert.instanceOf(error, ChatStopped)
+        assert.include(error.message, "Cannot discover the flows")
+        assert.deepStrictEqual(yield* fixture.chat.posted, [])
+      })
+    )
+  )
+
   it.effect("starts a new state's cursor at now, so an older /bot is not handled", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -988,6 +1224,51 @@ describe("runChat", () => {
           "could not list messages in spaces/AAA: Process; retrying in 2 s"
         ])
         assert.deepStrictEqual(texts(yield* chat.posted), [listening, `${marker} Hi.`])
+        yield* Fiber.interrupt(fiber)
+      })
+    )
+  )
+
+  it.effect("tells the terminal when requests.md cannot be read, and keeps listening", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const deps: ChatLoopDeps = {
+          ...fixture.deps,
+          files: failingFiles(fixture.memory.store, { reads: "requests.md" })
+        }
+        const fiber = yield* runChat(deps).pipe(Effect.forkChild)
+        yield* until(fixture.chat.posted, (posted) => posted.length === 1)
+        yield* fixture.chat.add("/bot")
+        yield* TestClock.adjust("5 seconds")
+        yield* until(fixture.chat.posted, (posted) => posted.length === 2)
+        assert.include((yield* Ref.get(fixture.lines))[0] ?? "", "could not follow runs: disk full")
+        yield* Fiber.interrupt(fiber)
+      })
+    )
+  )
+
+  it.effect("tells the terminal when the state cannot be saved, and keeps listening", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const broken = yield* Ref.make(false)
+        const deps: ChatLoopDeps = {
+          ...fixture.deps,
+          files: failingFiles(fixture.memory.store, { writes: "state.md" }, broken)
+        }
+        const fiber = yield* runChat(deps).pipe(Effect.forkChild)
+        yield* until(fixture.chat.posted, (posted) => posted.length === 1)
+        yield* Ref.set(broken, true)
+        yield* TestClock.adjust("5 seconds")
+        yield* until(Ref.get(fixture.lines), (all) => all.length > 0)
+        yield* fixture.chat.add("/bot")
+        yield* TestClock.adjust("5 seconds")
+        yield* until(fixture.chat.posted, (posted) => posted.length === 2)
+        assert.include(
+          (yield* Ref.get(fixture.lines))[0] ?? "",
+          "could not save the chat state: disk full"
+        )
         yield* Fiber.interrupt(fiber)
       })
     )
@@ -1054,7 +1335,8 @@ describe("runChat", () => {
         const posted = (yield* chat.posted).slice(2)
         assert.deepStrictEqual(texts(posted), [
           `${marker} ${run?.runId ?? "?"}: plan written, 4 tasks`,
-          `${marker} ${run?.runId ?? "?"} finished failed in 0 min, $0.00. Branch main, 0 commits.`
+          // Still on the base branch: no branch sentence.
+          `${marker} ${run?.runId ?? "?"} failed in 0 min, $0.00.`
         ])
         assert.deepStrictEqual(
           posted.map((p) => p.threadName),

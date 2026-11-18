@@ -383,6 +383,25 @@ const startRun = (
     } satisfies Outcome
   })
 
+/** The reply says what the supervisor did, not what the Chief expected it to do. */
+const stopRun = (deps: ChatLoopDeps, runId: string): Effect.Effect<Outcome> =>
+  Effect.gen(function* () {
+    const before = yield* deps.supervisor.get(runId)
+    if (before === undefined || !isActive(before)) {
+      return { status: "answered", reply: `${runId} was not running.`, runId } satisfies Outcome
+    }
+    const after = yield* deps.supervisor.stop(runId)
+    return {
+      status: "answered",
+      reply: isActive(after) ? `${runId} has not stopped yet.` : `Stopped ${runId}.`,
+      runId
+    } satisfies Outcome
+  }).pipe(
+    Effect.catchTag("UnknownRun", () =>
+      Effect.succeed<Outcome>({ status: "refused", reply: `There is no run ${runId}.` })
+    )
+  )
+
 const act = (deps: ChatLoopDeps, state: ChatState, message: ChatMessage, action: ChiefAction) => {
   switch (action._tag) {
     case "Answer":
@@ -392,9 +411,7 @@ const act = (deps: ChatLoopDeps, state: ChatState, message: ChatMessage, action:
     case "Failed":
       return Effect.succeed<Outcome>({ status: "failed", reply: action.reply })
     case "StopRun":
-      return deps.supervisor
-        .stop(action.runId)
-        .pipe(Effect.as<Outcome>({ status: "answered", reply: action.reply, runId: action.runId }))
+      return stopRun(deps, action.runId)
     case "StartRun":
       return startRun(deps, state, message, action)
   }
@@ -445,20 +462,36 @@ const isLoginRequired = (cause: Cause.Cause<unknown>): GwsLoginRequired | undefi
   return Option.isSome(error) && error.value instanceof GwsLoginRequired ? error.value : undefined
 }
 
+/** A failed post told to the terminal; only a lapsed login fails. */
+const sayPostFailure =
+  (deps: ChatLoopDeps) =>
+  (error: FlowError | GwsLoginRequired): Effect.Effect<void, GwsLoginRequired> =>
+    error instanceof GwsLoginRequired
+      ? Effect.fail(error)
+      : deps.say(`could not post to ${deps.options.space.name}: ${error._tag}`)
+
 /**
  * One pass: list what is new since the cursor, then handle each selected
- * message in order. A failure inside one request is answered and logged and
- * the beat goes on; a lapsed login and a failed list end the beat, so the
- * caller can stop or back off.
+ * message in order. Only a failed list and a lapsed login end the beat, so
+ * the caller can back off or stop; anything else is answered or told to the
+ * terminal, and the cursor moves past the message either way.
  */
 export const handleBeat = (
   deps: ChatLoopDeps,
   state: ChatState
 ): Effect.Effect<ChatState, GwsLoginRequired | FlowError> =>
+  Effect.flatMap(deps.chat.listMessages(deps.options.space, state.cursor), (messages) =>
+    handleMessages(deps, state, messages)
+  )
+
+const handleMessages = (
+  deps: ChatLoopDeps,
+  state: ChatState,
+  messages: ReadonlyArray<ChatMessage>
+): Effect.Effect<ChatState, GwsLoginRequired> =>
   Effect.gen(function* () {
     const { options } = deps
     const dir = dirOf(deps)
-    const messages = yield* deps.chat.listMessages(options.space, state.cursor)
     const selection = selectRequests(state, messages, options)
     const current = yield* Ref.make(ChatState.make({ ...state, cursor: selection.cursor }))
 
@@ -468,7 +501,8 @@ export const handleBeat = (
           posted === undefined
             ? Effect.void
             : Ref.update(current, (now) => notePosted(now, posted.name))
-        )
+        ),
+        Effect.catch(sayPostFailure(deps))
       )
 
     for (const selected of selection.selected) {
@@ -497,23 +531,28 @@ export const handleBeat = (
         status: "received",
         ...(message.threadName === undefined ? {} : { threadName: message.threadName })
       })
-      const record = (outcome: Outcome, action?: string) =>
+      // Not recorded is told, never retried: deciding again would post again.
+      const put = (request: ChatRequest) =>
         options.observe
           ? Effect.void
-          : putRequest(
-              deps.files,
-              dir,
-              ChatRequest.make({
-                ...received,
-                status: outcome.status,
-                reply: outcome.reply,
-                ...(action === undefined ? {} : { action }),
-                ...(outcome.runId === undefined ? {} : { runId: outcome.runId })
-              })
+          : putRequest(deps.files, dir, request).pipe(
+              Effect.catch((error) =>
+                deps.say(`could not record ${message.name}: ${error.message}`)
+              )
             )
+      const record = (outcome: Outcome, action?: string) =>
+        put(
+          ChatRequest.make({
+            ...received,
+            status: outcome.status,
+            reply: outcome.reply,
+            ...(action === undefined ? {} : { action }),
+            ...(outcome.runId === undefined ? {} : { runId: outcome.runId })
+          })
+        )
 
       const handle = Effect.gen(function* () {
-        if (!options.observe) yield* putRequest(deps.files, dir, received)
+        yield* put(received)
         const context = yield* contextFor(
           deps,
           message,
@@ -526,8 +565,9 @@ export const handleBeat = (
           return yield* post(action.reply, message.threadName)
         }
         const outcome = yield* act(deps, yield* Ref.get(current), message, action)
-        yield* post(outcome.reply, message.threadName)
+        // Recorded first: a started run whose reply fails to post is still followed.
         yield* record(outcome, action._tag)
+        yield* post(outcome.reply, message.threadName)
       })
 
       yield* handle.pipe(
@@ -536,14 +576,7 @@ export const handleBeat = (
           if (login !== undefined) return Effect.fail(login)
           if (Cause.hasInterrupts(cause)) return Effect.interrupt
           const failed: Outcome = { status: "failed", reply: `That failed: ${failureKind(cause)}` }
-          return post(failed.reply, message.threadName).pipe(
-            Effect.catch((error) =>
-              error instanceof GwsLoginRequired
-                ? Effect.fail(error)
-                : deps.say(`could not post to ${options.space.name}: ${error._tag}`)
-            ),
-            Effect.andThen(record(failed))
-          )
+          return post(failed.reply, message.threadName).pipe(Effect.andThen(record(failed)))
         })
       )
     }
@@ -562,11 +595,24 @@ const ActionJson = Schema.fromJsonString(ChiefAction)
 
 const failed: ChiefAction = { _tag: "Failed", reply: failedReply }
 
+/** Why no decision came; told to the terminal, never posted. */
+class NoDecision extends Schema.TaggedError<NoDecision>()("NoDecision", {
+  message: Schema.String
+}) {}
+
+const noDecision = (message: string): NoDecision => NoDecision.make({ message })
+
+const endedAs = (run: OperatorRun | undefined): string =>
+  run === undefined
+    ? "lost"
+    : `${run.state}${run.exitCode === undefined ? "" : `, exit code ${run.exitCode}`}${run.signal === undefined ? "" : `, ${run.signal}`}`
+
 /**
  * The Chief's decision made by the bundled `chief` flow: the context goes to
  * a file, the flow runs as a read-only supervised run, and its action file is
  * read once it exits. Anything short of a clean exit within `decideTimeoutMs`
- * and a decodable action is `Failed`.
+ * and a decodable action is `Failed`, and the terminal is told why, with the
+ * chief run's id and where its logs are.
  */
 export const decideThroughFlow =
   (deps: Omit<ChatLoopDeps, "decide">) =>
@@ -576,19 +622,27 @@ export const decideThroughFlow =
       const pending = pendingPath(dir, context.messageName)
       const action = actionPath(dir, context.messageName)
       const chief = (yield* deps.flows).find((flow) => flow.name === "chief")
-      if (chief === undefined) return failed
+      if (chief === undefined) return yield* noDecision("no chief flow was found")
       // A file left by an earlier attempt must not pass for this decision.
       yield* deps.files.remove(action)
       yield* deps.files.writeAtomic(
         pending,
         Schema.encodeSync(ContextJson)(ChiefContext.make({ ...context, actionPath: action }))
       )
-      const run = yield* deps.supervisor.start({
-        repo: deps.repo,
-        flow: { name: chief.name, path: chief.path },
-        knobs: { task: pending },
-        baseEnvironment: deps.environment
-      })
+      const run = yield* deps.supervisor
+        .start({
+          repo: deps.repo,
+          flow: { name: chief.name, path: chief.path },
+          knobs: { task: pending },
+          baseEnvironment: deps.environment
+        })
+        .pipe(
+          Effect.mapError((error) =>
+            noDecision(`the chief run could not start: ${describeFlowError(error)}`)
+          )
+        )
+      const where = `chief run ${run.runId}`
+      const logs = `its logs are in ${run.logDir}`
       const stopChief = Effect.ignore(deps.supervisor.stop(run.runId))
       const waited = yield* Effect.gen(function* () {
         let latest: OperatorRun | undefined = run
@@ -603,14 +657,34 @@ export const decideThroughFlow =
       )
       if (Option.isNone(waited)) {
         yield* stopChief
-        return failed
+        return yield* noDecision(
+          `${where} gave no decision within ${decideTimeoutMs / 1_000} s; ${logs}`
+        )
       }
       const latest = waited.value
-      if (latest?.state !== "exited" || latest.exitCode !== 0) return failed
+      if (latest?.state !== "exited" || latest.exitCode !== 0) {
+        return yield* noDecision(`${where} ended ${endedAs(latest)}; ${logs}`)
+      }
       const text = yield* deps.files.read(action)
-      if (text === undefined) return failed
-      return yield* Schema.decodeUnknownEffect(ActionJson)(text)
-    }).pipe(Effect.catch(() => Effect.succeed(failed)))
+      if (text === undefined) return yield* noDecision(`${where} wrote no action; ${logs}`)
+      const decided = yield* Schema.decodeUnknownEffect(ActionJson)(text).pipe(
+        Effect.mapError(() => noDecision(`${where} wrote an action that does not decode; ${logs}`))
+      )
+      if (decided._tag === "Failed") {
+        yield* deps.say(
+          `The Chief could not decide on ${context.messageName}: ${where} found no valid proposal; ${logs}`
+        )
+      }
+      return decided
+    }).pipe(
+      Effect.catch((error) =>
+        deps
+          .say(
+            `The Chief could not decide on ${context.messageName}: ${error instanceof NoDecision ? error.message : describeFlowError(error)}`
+          )
+          .pipe(Effect.as(failed))
+      )
+    )
 
 // ---- Run updates ---------------------------------------------------------------------------
 
@@ -703,8 +777,15 @@ export const followRun = (
       const outcome = fold.state.ended ?? outcomeOf(run)
       const startedAt = fold.state.startedAt ?? run?.startedAt ?? now
       const endedAt = fold.state.ended === undefined ? now : (fold.state.now ?? now)
-      const branch = yield* deps.git.currentBranch.pipe(Effect.option)
-      const commits = yield* deps.git.commitsAhead(state.baseBranch).pipe(Effect.option)
+      // The checkout is read now: on the base branch, or for a lost run, it says nothing of this run.
+      const current = yield* deps.git.currentBranch.pipe(Effect.option)
+      const branch =
+        run === undefined || run.state === "lost"
+          ? Option.none()
+          : Option.filter(current, (name) => name !== state.baseBranch)
+      const commits = Option.isNone(branch)
+        ? Option.none()
+        : yield* deps.git.commitsAhead(state.baseBranch).pipe(Effect.option)
       const line = plainProgressLine(followed.runId, followed.progress, {
         tasksTotal: progress?.tasksTotal ?? 0,
         tasksDone: progress?.tasksDone ?? 0,
@@ -718,7 +799,14 @@ export const followRun = (
       })
       const posted = line === undefined ? state : yield* post(line)
       if (posted === undefined) return unchanged
-      yield* putRequest(deps.files, dir, ChatRequest.make({ ...request, status: "ended", outcome }))
+      // Under --observe the request stays started, so an armed session still posts its end.
+      if (!deps.options.observe) {
+        yield* putRequest(
+          deps.files,
+          dir,
+          ChatRequest.make({ ...request, status: "ended", outcome })
+        )
+      }
       return { followed: { ...followed, seq: fold.seq, done: true }, state: posted }
     }
 
@@ -778,6 +866,21 @@ export const startChat = (
       .pipe(Effect.mapError(stoppedBy(`Cannot list messages in ${options.space.name}`)))
     const problem = yield* deps.seatProblem
     if (problem !== undefined) return yield* stopped(`The Chief cannot use its seat: ${problem}.`)
+    const discovered = yield* deps.flows.pipe(
+      Effect.catchDefect((defect) =>
+        Effect.fail(stopped(`Cannot discover the flows: ${String(defect)}.`))
+      )
+    )
+    const names = new Set(discovered.map((flow) => flow.name))
+    if (!names.has("chief")) {
+      return yield* stopped("There is no chief flow here, so the Chief cannot decide anything.")
+    }
+    const unknown = options.flows.filter((name) => !names.has(name))
+    if (unknown.length > 0) {
+      return yield* stopped(
+        `--flows names ${unknown.join(", ")}, which ${unknown.length === 1 ? "is" : "are"} not a flow here; llm4ts list shows the flows.`
+      )
+    }
 
     const dir = dirOf(deps)
     const loaded = yield* loadState(deps.files, dir)
@@ -824,8 +927,9 @@ const backoffCapMs = 60_000
 
 /**
  * `startChat`, then forever: one beat, a look at every run started from chat,
- * the state saved, a sleep. A failed list backs off and never ends the loop;
- * a lapsed login does.
+ * the state saved, a sleep. A failed list backs off, and a file that cannot
+ * be read or written is told to the terminal; neither ends the loop, a lapsed
+ * login does.
  */
 export const runChat = (deps: ChatLoopDeps): Effect.Effect<never, ChatStopped | PersistenceError> =>
   Effect.gen(function* () {
@@ -849,20 +953,29 @@ export const runChat = (deps: ChatLoopDeps): Effect.Effect<never, ChatStopped | 
       }
       failures = 0
       state = beat.success
-      for (const request of yield* loadRequests(deps.files, dir)) {
+      const requests = yield* loadRequests(deps.files, dir).pipe(
+        Effect.catch((error) => Effect.as(deps.say(`could not follow runs: ${error.message}`), []))
+      )
+      for (const request of requests) {
         if (request.status !== "started" || request.runId === undefined) continue
         const step = yield* followRun(
           deps,
           state,
           follows.get(request.runId) ?? startFollowing(request.runId)
         ).pipe(
-          Effect.mapError((error) => (error instanceof GwsLoginRequired ? loginExpired : error))
+          Effect.mapError((error) => (error instanceof GwsLoginRequired ? loginExpired : error)),
+          Effect.catchTag("Persistence", (error) =>
+            Effect.as(deps.say(`could not follow runs: ${error.message}`), undefined)
+          )
         )
+        if (step === undefined) continue
         state = step.state
         if (step.followed.done) follows.delete(request.runId)
         else follows.set(request.runId, step.followed)
       }
-      yield* saveState(deps.files, dir, state)
+      yield* saveState(deps.files, dir, state).pipe(
+        Effect.catch((error) => deps.say(`could not save the chat state: ${error.message}`))
+      )
       yield* Effect.sleep(Duration.seconds(options.intervalSeconds))
     }
   })

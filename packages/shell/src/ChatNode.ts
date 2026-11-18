@@ -87,6 +87,9 @@ export const chatOptionsFrom = (
           .filter((name) => name.length > 0)
     })
     if (flows.length === 0) return yield* usage("--flows names no flow")
+    if (flows.includes("chief")) {
+      return yield* usage("--flows must not name chief: it is how the Chief decides, not a run")
+    }
     const intervalSeconds = Option.getOrElse(flags.interval, () => defaultIntervalSeconds)
     if (!Number.isInteger(intervalSeconds) || intervalSeconds < 1) {
       return yield* usage("--interval must be a whole number of seconds, 1 or more")
@@ -108,7 +111,8 @@ const noEvents: FlowEventsShape = { publish: () => Effect.void }
 /**
  * The chat loop's dependencies on Node for the repository at `cwd`, and
  * only that one: the supervisor knows no other, so a run id the Chief names
- * cannot reach elsewhere. Flows start with the process environment, as under
+ * cannot reach elsewhere (other than a repository with the same directory
+ * name, which shares the registry, as under `llm4ts mcp`). Flows start with the process environment, as under
  * `llm4ts mcp`; the reasoning seat is checked against `settings`, the
  * environment with the config files applied. The supervisor lives in the
  * scope, so closing it stops every run started from chat.
@@ -144,8 +148,7 @@ export const nodeChatDeps = (
             path: flow.path,
             description: flow.description ?? ""
           }))
-        ),
-        Effect.orElseSucceed(() => [])
+        )
       ),
       sources: { files: nodePlainFileStore, listFiles: nodeListFiles },
       listTraces: nodeListTraces,
