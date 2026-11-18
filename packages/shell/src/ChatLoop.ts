@@ -1,12 +1,13 @@
 // @internal: the chat loop behind `llm4ts chat`; wired by the chat verb (plan task 8)
 import { join } from "node:path"
 import * as Cause from "effect/Cause"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import { ChiefAction, ChiefContext, failedReply, maxReplyChars } from "@llm4ts/flow/ChiefAction"
-import type { FlowError } from "@llm4ts/flow/FlowError"
+import { describeFlowError, type FlowError, type PersistenceError } from "@llm4ts/flow/FlowError"
 import type { GitToolShape } from "@llm4ts/flow/GitTool"
 import {
   GwsLoginRequired,
@@ -16,20 +17,24 @@ import {
 } from "@llm4ts/flow/GoogleChatTool"
 import { RunInProgress, type OperatorKnobs, type OperatorRun } from "@llm4ts/flow/OperatorSchemas"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
-import { defaultPlanPath } from "@llm4ts/flow/Plan"
+import { defaultPlanPath, parsePlan } from "@llm4ts/flow/Plan"
 import { emptyTree } from "@llm4ts/runner/AgentTree"
+import { plainProgressLine, summarizeTree, type PlainProgress } from "@llm4ts/runner/RunSummary"
 import {
   ChatRequest,
   ChatState,
   chatDir,
   loadRequests,
+  loadState,
   notePosted,
-  putRequest
+  putRequest,
+  saveState
 } from "./ChatState.ts"
 import { validateKnobs } from "./OperatorActTools.ts"
 import { discoveredRuns, transcriptsDir, type DiskRunDeps } from "./OperatorRuns.ts"
 import {
   foldTrace,
+  meaningfulEventsAfter,
   runDiagnosisOf,
   runStatusOf,
   type RunSources,
@@ -77,6 +82,10 @@ export interface ChatLoopDeps {
   readonly say: (line: string) => Effect.Effect<void>
   /** Senders already told who may ask; one reply each per process. */
   readonly strangers: Ref.Ref<ReadonlySet<string>>
+  /** Why the reasoning seat may not hold the Chief (`readOnlySeatProblem`), or undefined. */
+  readonly seatProblem: Effect.Effect<string | undefined>
+  /** Whether the repository's git ignores `.llm4ts/`. */
+  readonly ignored: Effect.Effect<boolean>
   readonly options: ChatOptions
 }
 
@@ -405,6 +414,20 @@ const wouldDo = (action: ChiefAction): ReadonlyArray<string> => {
 
 // ---- One beat ------------------------------------------------------------------------------
 
+/** Posts a reply with the marker; under `observe` tells the terminal instead and posts nothing. */
+const postMarked = (
+  deps: ChatLoopDeps,
+  text: string,
+  threadName: string | undefined
+): Effect.Effect<ChatMessage | undefined, FlowError | GwsLoginRequired> =>
+  deps.options.observe
+    ? Effect.as(deps.say(`would reply: ${text}`), undefined)
+    : deps.chat.createMessage(
+        deps.options.space,
+        `${deps.options.marker} ${text}`.slice(0, maxReplyChars),
+        threadName
+      )
+
 const failureKind = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.findErrorOption(cause)
   if (Option.isNone(error)) return "defect"
@@ -440,15 +463,13 @@ export const handleBeat = (
     const current = yield* Ref.make(ChatState.make({ ...state, cursor: selection.cursor }))
 
     const post = (text: string, threadName: string | undefined) =>
-      Effect.gen(function* () {
-        if (options.observe) return yield* deps.say(`would reply: ${text}`)
-        const posted = yield* deps.chat.createMessage(
-          options.space,
-          `${options.marker} ${text}`.slice(0, maxReplyChars),
-          threadName
+      postMarked(deps, text, threadName).pipe(
+        Effect.flatMap((posted) =>
+          posted === undefined
+            ? Effect.void
+            : Ref.update(current, (now) => notePosted(now, posted.name))
         )
-        yield* Ref.update(current, (now) => notePosted(now, posted.name))
-      })
+      )
 
     for (const selected of selection.selected) {
       const { message } = selected
@@ -533,6 +554,9 @@ export const handleBeat = (
 
 const pollInterval = "500 millis"
 
+/** How long the loop waits for one decision before it stops the chief run. */
+export const decideTimeoutMs = 120_000
+
 const ContextJson = Schema.fromJsonString(ChiefContext)
 const ActionJson = Schema.fromJsonString(ChiefAction)
 
@@ -541,8 +565,8 @@ const failed: ChiefAction = { _tag: "Failed", reply: failedReply }
 /**
  * The Chief's decision made by the bundled `chief` flow: the context goes to
  * a file, the flow runs as a read-only supervised run, and its action file is
- * read once it exits. Anything short of a clean exit and a decodable action
- * is `Failed`.
+ * read once it exits. Anything short of a clean exit within `decideTimeoutMs`
+ * and a decodable action is `Failed`.
  */
 export const decideThroughFlow =
   (deps: Omit<ChatLoopDeps, "decide">) =>
@@ -565,13 +589,280 @@ export const decideThroughFlow =
         knobs: { task: pending },
         baseEnvironment: deps.environment
       })
-      let latest: OperatorRun | undefined = run
-      while (latest !== undefined && isActive(latest)) {
-        yield* Effect.sleep(pollInterval)
-        latest = yield* deps.supervisor.get(run.runId)
+      const stopChief = Effect.ignore(deps.supervisor.stop(run.runId))
+      const waited = yield* Effect.gen(function* () {
+        let latest: OperatorRun | undefined = run
+        while (latest !== undefined && isActive(latest)) {
+          yield* Effect.sleep(pollInterval)
+          latest = yield* deps.supervisor.get(run.runId)
+        }
+        return latest
+      }).pipe(
+        Effect.timeoutOption(decideTimeoutMs),
+        Effect.onInterrupt(() => stopChief)
+      )
+      if (Option.isNone(waited)) {
+        yield* stopChief
+        return failed
       }
+      const latest = waited.value
       if (latest?.state !== "exited" || latest.exitCode !== 0) return failed
       const text = yield* deps.files.read(action)
       if (text === undefined) return failed
       return yield* Schema.decodeUnknownEffect(ActionJson)(text)
     }).pipe(Effect.catch(() => Effect.succeed(failed)))
+
+// ---- Run updates ---------------------------------------------------------------------------
+
+/** At most one progress line per run in this window; the ending line is never held back. */
+export const throttleMs = 30_000
+
+/** Where the loop stands with one run started from chat. */
+export interface Followed {
+  readonly runId: string
+  /** The trace seq the last story-shaped line covered. */
+  readonly seq: number
+  /** The plan progress the last plain line reported. */
+  readonly progress: PlainProgress | undefined
+  readonly lastPostedAt: number
+  readonly done: boolean
+}
+
+export const startFollowing = (runId: string): Followed => ({
+  runId,
+  seq: 0,
+  progress: undefined,
+  lastPostedAt: Number.NEGATIVE_INFINITY,
+  done: false
+})
+
+const outcomeOf = (run: OperatorRun | undefined): string => {
+  if (run === undefined) return "lost"
+  if (run.state === "exited") return run.exitCode === 0 ? "completed" : "failed"
+  return run.state
+}
+
+const planProgressOf = (deps: ChatLoopDeps, run: OperatorRun | undefined) =>
+  Effect.gen(function* () {
+    const task = run?.knobs.task
+    if (task === undefined) return undefined
+    const markdown = yield* deps.files.read(join(deps.repo.path, defaultPlanPath(task)))
+    if (markdown === undefined) return undefined
+    const plan = yield* parsePlan(markdown)
+    return {
+      tasksTotal: plan.tasks.length,
+      tasksDone: plan.tasks.filter((entry) => entry.completed).length
+    } satisfies PlainProgress
+  }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+
+/**
+ * One look at a run started from chat: post what changed into the thread of
+ * the request that started it, at most once per `throttleMs`, and its end
+ * always, once. A failed post is told to the terminal and tried again next
+ * time; only a lapsed login fails.
+ */
+export const followRun = (
+  deps: ChatLoopDeps,
+  state: ChatState,
+  followed: Followed
+): Effect.Effect<
+  { readonly followed: Followed; readonly state: ChatState },
+  GwsLoginRequired | PersistenceError
+> =>
+  Effect.gen(function* () {
+    const unchanged = { followed, state }
+    if (followed.done) return unchanged
+    const dir = dirOf(deps)
+    const request = (yield* loadRequests(deps.files, dir)).find(
+      (entry) =>
+        entry.runId === followed.runId && (entry.status === "started" || entry.status === "ended")
+    )
+    if (request === undefined || request.status === "ended") {
+      return { followed: { ...followed, done: true }, state }
+    }
+    const run = yield* deps.supervisor.get(followed.runId)
+    const fold = run === undefined ? emptyFold() : yield* foldOf(deps, run)
+    const now = yield* deps.now
+    const ended = run === undefined || !isActive(run)
+
+    const post = (text: string) =>
+      postMarked(deps, text, request.threadName).pipe(
+        Effect.map((posted) => (posted === undefined ? state : notePosted(state, posted.name))),
+        Effect.catch((error) =>
+          error instanceof GwsLoginRequired
+            ? Effect.fail(error)
+            : Effect.as(
+                deps.say(`could not post to ${deps.options.space.name}: ${error._tag}`),
+                undefined
+              )
+        )
+      )
+
+    const progress = yield* planProgressOf(deps, run)
+    if (ended) {
+      const outcome = fold.state.ended ?? outcomeOf(run)
+      const startedAt = fold.state.startedAt ?? run?.startedAt ?? now
+      const endedAt = fold.state.ended === undefined ? now : (fold.state.now ?? now)
+      const branch = yield* deps.git.currentBranch.pipe(Effect.option)
+      const commits = yield* deps.git.commitsAhead(state.baseBranch).pipe(Effect.option)
+      const line = plainProgressLine(followed.runId, followed.progress, {
+        tasksTotal: progress?.tasksTotal ?? 0,
+        tasksDone: progress?.tasksDone ?? 0,
+        ended: {
+          outcome,
+          minutes: Math.max(0, Math.floor((endedAt - startedAt) / 60_000)),
+          costUsd: fold.state.costUsd,
+          ...(Option.isSome(branch) ? { branch: branch.value } : {}),
+          ...(Option.isSome(commits) ? { commits: commits.value } : {})
+        }
+      })
+      const posted = line === undefined ? state : yield* post(line)
+      if (posted === undefined) return unchanged
+      yield* putRequest(deps.files, dir, ChatRequest.make({ ...request, status: "ended", outcome }))
+      return { followed: { ...followed, seq: fold.seq, done: true }, state: posted }
+    }
+
+    if (now - followed.lastPostedAt < throttleMs) return unchanged
+    if (fold.state.stories.length > 0) {
+      if (meaningfulEventsAfter(fold.lines, followed.seq).length === 0) return unchanged
+      const posted = yield* post(`${followed.runId}: ${summarizeTree(fold.state, run?.flow)}`)
+      if (posted === undefined) return unchanged
+      return { followed: { ...followed, seq: fold.seq, lastPostedAt: now }, state: posted }
+    }
+    const line =
+      progress === undefined
+        ? undefined
+        : plainProgressLine(followed.runId, followed.progress, progress)
+    if (line === undefined) return unchanged
+    const posted = yield* post(line)
+    if (posted === undefined) return unchanged
+    return { followed: { ...followed, progress, lastPostedAt: now }, state: posted }
+  })
+
+// ---- Starting and the loop -----------------------------------------------------------------
+
+export class ChatStopped extends Schema.TaggedError<ChatStopped>()("ChatStopped", {
+  message: Schema.String
+}) {}
+
+const stopped = (message: string): ChatStopped => ChatStopped.make({ message })
+
+const loginExpired = stopped("Google login expired. Run: gws auth login")
+
+const ignoreWarning =
+  "Warning: .llm4ts/ is not ignored by git in this repository; add it to .gitignore."
+
+/** A Chat failure at start as a sentence; a lapsed login is always the same one. */
+const stoppedBy =
+  (doing: string) =>
+  (error: FlowError | GwsLoginRequired): ChatStopped =>
+    error instanceof GwsLoginRequired
+      ? loginExpired
+      : stopped(`${doing}: ${describeFlowError(error)}`)
+
+/**
+ * The start checks, then the state: `gws` answers its probe, the space can be
+ * listed, and the reasoning seat enforces read-only. A new state starts its
+ * cursor now, so old `/bot` messages are not replayed. Unless `observe`, the
+ * Chief says it is listening, and whoever that line is posted as is the owner.
+ */
+export const startChat = (
+  deps: ChatLoopDeps
+): Effect.Effect<ChatState, ChatStopped | PersistenceError> =>
+  Effect.gen(function* () {
+    const { options } = deps
+    yield* deps.chat.probe.pipe(Effect.mapError(stoppedBy("gws is not ready")))
+    const now = new Date(yield* deps.now).toISOString()
+    yield* deps.chat
+      .listMessages(options.space, now)
+      .pipe(Effect.mapError(stoppedBy(`Cannot list messages in ${options.space.name}`)))
+    const problem = yield* deps.seatProblem
+    if (problem !== undefined) return yield* stopped(`The Chief cannot use its seat: ${problem}.`)
+
+    const dir = dirOf(deps)
+    const loaded = yield* loadState(deps.files, dir)
+    const baseBranch =
+      loaded?.baseBranch ??
+      (yield* deps.git.currentBranch.pipe(
+        Effect.mapError((error) =>
+          stopped(`Cannot read the current branch: ${describeFlowError(error)}`)
+        )
+      ))
+    let state = ChatState.make({
+      space: options.space.name,
+      cursor: now,
+      posted: [],
+      ...loaded,
+      trigger: options.trigger,
+      marker: options.marker,
+      baseBranch
+    })
+    if (!(yield* deps.ignored)) yield* deps.say(ignoreWarning)
+    if (!options.observe) {
+      const listening = yield* deps.chat
+        .createMessage(
+          options.space,
+          `${options.marker} Listening. Repository ${deps.repo.id}. I may start: ${options.flows.join(", ")}.`
+        )
+        .pipe(Effect.mapError(stoppedBy(`Cannot post to ${options.space.name}`)))
+      if (listening.senderName === undefined) {
+        return yield* stopped(
+          "Chat did not say who posted the listening line, so nobody could ask."
+        )
+      }
+      state = ChatState.make({
+        ...notePosted(state, listening.name),
+        ownerId: listening.senderName
+      })
+    }
+    yield* saveState(deps.files, dir, state)
+    return state
+  })
+
+const backoffStartMs = 1_000
+const backoffCapMs = 60_000
+
+/**
+ * `startChat`, then forever: one beat, a look at every run started from chat,
+ * the state saved, a sleep. A failed list backs off and never ends the loop;
+ * a lapsed login does.
+ */
+export const runChat = (deps: ChatLoopDeps): Effect.Effect<never, ChatStopped | PersistenceError> =>
+  Effect.gen(function* () {
+    const { options } = deps
+    const dir = dirOf(deps)
+    let state = yield* startChat(deps)
+    // In memory only: after a restart a run's last line may be posted once more.
+    const follows = new Map<string, Followed>()
+    let failures = 0
+    while (true) {
+      const beat = yield* Effect.result(handleBeat(deps, state))
+      if (beat._tag === "Failure") {
+        if (beat.failure instanceof GwsLoginRequired) return yield* loginExpired
+        failures += 1
+        const wait = Math.min(backoffStartMs * 2 ** (failures - 1), backoffCapMs)
+        yield* deps.say(
+          `could not list messages in ${options.space.name}: ${beat.failure._tag}; retrying in ${wait / 1_000} s`
+        )
+        yield* Effect.sleep(Duration.millis(wait))
+        continue
+      }
+      failures = 0
+      state = beat.success
+      for (const request of yield* loadRequests(deps.files, dir)) {
+        if (request.status !== "started" || request.runId === undefined) continue
+        const step = yield* followRun(
+          deps,
+          state,
+          follows.get(request.runId) ?? startFollowing(request.runId)
+        ).pipe(
+          Effect.mapError((error) => (error instanceof GwsLoginRequired ? loginExpired : error))
+        )
+        state = step.state
+        if (step.followed.done) follows.delete(request.runId)
+        else follows.set(request.runId, step.followed)
+      }
+      yield* saveState(deps.files, dir, state)
+      yield* Effect.sleep(Duration.seconds(options.intervalSeconds))
+    }
+  })

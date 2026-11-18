@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Ref from "effect/Ref"
@@ -6,20 +7,32 @@ import * as Schema from "effect/Schema"
 import { TestClock } from "effect/testing"
 import { ChiefAction, ChiefContext, failedReply } from "@llm4ts/flow/ChiefAction"
 import { ProcessError } from "@llm4ts/flow/FlowError"
+import { Info, StoryStatusChanged, type FlowEvent } from "@llm4ts/flow/FlowEvents"
+import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import type { GitToolShape } from "@llm4ts/flow/GitTool"
 import { ChatMessage, GwsLoginRequired, SpaceRef } from "@llm4ts/flow/GoogleChatTool"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import { defaultPlanPath } from "@llm4ts/flow/Plan"
+import { summarizeTree } from "@llm4ts/runner/RunSummary"
 import {
+  ChatStopped,
   decideThroughFlow,
+  decideTimeoutMs,
+  followRun,
   handleBeat,
   helpReply,
+  runChat,
   selectRequests,
+  startChat,
+  startFollowing,
   strangerReply,
+  throttleMs,
   type ChatLoopDeps,
   type ChatOptions
 } from "@llm4ts/shell/ChatLoop"
 import { ChatState, chatDir, loadRequests, loadState, saveState } from "@llm4ts/shell/ChatState"
 import { makeFakeFlowProcess } from "@llm4ts/shell/FlowProcess"
+import { foldTrace } from "@llm4ts/shell/RunReaders"
 import { makeRunSupervisor, type SupervisorRepo } from "@llm4ts/shell/RunSupervisor"
 import { makeFakeChat, ownerId } from "./support/FakeChat.ts"
 
@@ -141,9 +154,11 @@ const setup = (script: ReadonlyArray<Scripted> = [], overrides: Partial<ChatOpti
       listEpics: () => [],
       decide,
       environment: { PATH: "/usr/bin", HOME: "/home/op" },
-      now: Effect.succeed(Date.parse("2026-11-18T11:00:00.000Z")),
+      now: Clock.currentTimeMillis,
       say: (line) => Ref.update(lines, (all) => [...all, line]),
       strangers,
+      seatProblem: Effect.succeed(undefined),
+      ignored: Effect.succeed(true),
       options: { ...options, ...overrides }
     }
     return { deps, memory, fake, chat, gitLog, dirty, lines, contexts }
@@ -680,6 +695,398 @@ describe("decideThroughFlow", () => {
         yield* fake.exit(run?.pid ?? 0, { code: 1, signal: undefined })
         yield* TestClock.adjust("1 second")
         assert.deepStrictEqual(yield* Fiber.join(fiber), { _tag: "Failed", reply: failedReply })
+      })
+    )
+  )
+})
+
+describe("decideThroughFlow bound", () => {
+  it.effect("stops chief and is Failed after the bound", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, fake } = yield* setup()
+        const fiber = yield* decideThroughFlow(deps)(contextFor("spaces/AAA/messages/s")).pipe(
+          Effect.forkChild
+        )
+        yield* until(fake.started, (started) => started.length > 0)
+        yield* TestClock.adjust(decideTimeoutMs - 1_000)
+        assert.deepStrictEqual(yield* fake.signals, [])
+        yield* TestClock.adjust("1 second")
+        yield* until(fake.signals, (signals) => signals.length > 0)
+        const [run] = yield* deps.supervisor.list(repo.id)
+        yield* fake.exit(run?.pid ?? 0, { code: undefined, signal: "SIGINT" })
+        assert.deepStrictEqual(yield* Fiber.join(fiber), { _tag: "Failed", reply: failedReply })
+      })
+    )
+  )
+
+  it.effect("stops chief when the wait is interrupted", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, fake } = yield* setup()
+        const fiber = yield* decideThroughFlow(deps)(contextFor("spaces/AAA/messages/t")).pipe(
+          Effect.forkChild
+        )
+        yield* until(fake.started, (started) => started.length > 0)
+        const interrupting = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild)
+        yield* until(fake.signals, (signals) => signals.length > 0)
+        const [run] = yield* deps.supervisor.list(repo.id)
+        yield* fake.exit(run?.pid ?? 0, { code: undefined, signal: "SIGINT" })
+        yield* Fiber.join(interrupting)
+        assert.strictEqual((yield* deps.supervisor.get(run?.runId ?? ""))?.state, "interrupted")
+      })
+    )
+  )
+})
+
+// ---- Run updates ---------------------------------------------------------------------------
+
+const traceLine = (seq: number, at: number, kind: string, fields: TraceLine["fields"]) =>
+  TraceLine.make({ schemaVersion: 1, seq, timestamp: at, runId: "r", kind, fields })
+
+const eventLine = (seq: number, at: number, value: FlowEvent): TraceLine =>
+  traceLine(seq, at, value._tag, { event: JSON.stringify(value) })
+
+const encodeTrace = (lines: ReadonlyArray<TraceLine>): string =>
+  lines.map((entry) => JSON.stringify(entry)).join("\n") + "\n"
+
+const planOf = (done: number): string =>
+  [
+    "# Plan: health",
+    ...[1, 2, 3, 4].map((n) => `## [${n <= done ? "x" : " "}] Task ${n}\nDo ${n}.`)
+  ].join("\n\n")
+
+const task = "add a health check"
+const planPath = `${repo.path}/${defaultPlanPath(task)}`
+
+/** A run started from a `/bot` request, as the request half leaves it. */
+const chatRun = (overrides: Partial<ChatOptions> = {}) =>
+  Effect.gen(function* () {
+    const fixture = yield* setup([startRun("implement", task)], overrides)
+    const asked = yield* fixture.chat.add(`/bot ${task}`)
+    const state = yield* handleBeat(fixture.deps, initial)
+    const [run] = yield* fixture.deps.supervisor.list(repo.id)
+    if (run?.tracePath === undefined) return yield* Effect.die("no run was started")
+    const writeTrace = (lines: ReadonlyArray<TraceLine>) =>
+      fixture.memory.store.writeAtomic(run.tracePath ?? "", encodeTrace(lines))
+    const finish = Effect.gen(function* () {
+      yield* fixture.fake.exit(run.pid ?? 0, { code: 0, signal: undefined })
+      yield* until(fixture.deps.supervisor.get(run.runId), (latest) => latest?.state === "exited")
+    })
+    return { ...fixture, asked, state, run, writeTrace, finish }
+  })
+
+describe("followRun", () => {
+  it.effect("posts the plan, then one throttled line for two task completions", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat, asked, state, run, memory, writeTrace, finish } = yield* chatRun()
+        yield* writeTrace([eventLine(1, 0, Info.make({ message: "planning" }))])
+        yield* memory.store.writeAtomic(planPath, planOf(1))
+        const before = (yield* chat.posted).length
+        let step = yield* followRun(deps, state, startFollowing(run.runId))
+        yield* TestClock.adjust("10 seconds")
+        yield* memory.store.writeAtomic(planPath, planOf(2))
+        step = yield* followRun(deps, step.state, step.followed)
+        yield* TestClock.adjust("10 seconds")
+        yield* memory.store.writeAtomic(planPath, planOf(3))
+        step = yield* followRun(deps, step.state, step.followed)
+        assert.deepStrictEqual(texts((yield* chat.posted).slice(before)), [
+          `${marker} ${run.runId}: plan written, 4 tasks`
+        ])
+        yield* TestClock.adjust(throttleMs - 20_000)
+        step = yield* followRun(deps, step.state, step.followed)
+        const posted = (yield* chat.posted).slice(before)
+        assert.deepStrictEqual(texts(posted), [
+          `${marker} ${run.runId}: plan written, 4 tasks`,
+          `${marker} ${run.runId}: task 3 of 4 done`
+        ])
+        assert.deepStrictEqual(
+          posted.map((p) => p.threadName),
+          [asked.threadName, asked.threadName]
+        )
+        assert.isFalse(step.followed.done)
+        yield* finish
+      })
+    )
+  )
+
+  it.effect("posts the ending line inside the window with branch and commits, once", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* chatRun()
+        const { chat, asked, run, memory, writeTrace, finish } = fixture
+        const deps: ChatLoopDeps = {
+          ...fixture.deps,
+          git: {
+            ...fixture.deps.git,
+            currentBranch: Effect.succeed("llm4ts/health"),
+            commitsAhead: (base) => Effect.succeed(base === "main" ? 3 : 0)
+          }
+        }
+        yield* memory.store.writeAtomic(planPath, planOf(3))
+        yield* writeTrace([eventLine(1, 0, Info.make({ message: "planning" }))])
+        const before = (yield* chat.posted).length
+        let step = yield* followRun(deps, fixture.state, startFollowing(run.runId))
+        yield* TestClock.adjust("5 seconds")
+        yield* memory.store.writeAtomic(planPath, planOf(4))
+        yield* writeTrace([
+          eventLine(1, 0, Info.make({ message: "planning" })),
+          traceLine(2, 3 * 60_000 + 30_000, "RunEnded", { outcome: "completed" })
+        ])
+        yield* finish
+        step = yield* followRun(deps, step.state, step.followed)
+        assert.isTrue(step.followed.done)
+        const ending = `${marker} ${run.runId} finished completed in 3 min, $0.00. Branch llm4ts/health, 3 commits.`
+        const posted = (yield* chat.posted).slice(before)
+        assert.deepStrictEqual(texts(posted), [
+          `${marker} ${run.runId}: plan written, 4 tasks`,
+          ending
+        ])
+        assert.strictEqual(posted[1]?.threadName, asked.threadName)
+        const [request] = yield* loadRequests(memory.store, dir)
+        assert.strictEqual(request?.status, "ended")
+        assert.strictEqual(request?.outcome, "completed")
+        // Ended already: a fresh follower, as after a restart, posts nothing.
+        yield* TestClock.adjust("1 minute")
+        yield* followRun(deps, step.state, startFollowing(run.runId))
+        assert.strictEqual((yield* chat.posted).length - before, 2)
+      })
+    )
+  )
+
+  it.effect("posts summarizeTree's sentence for a story-shaped run", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat, asked, state, run, memory, writeTrace, finish } = yield* chatRun()
+        yield* writeTrace([eventLine(1, 0, StoryStatusChanged.make({ id: "a", status: "active" }))])
+        const before = (yield* chat.posted).length
+        let step = yield* followRun(deps, state, startFollowing(run.runId))
+        yield* TestClock.adjust("1 minute")
+        step = yield* followRun(deps, step.state, step.followed)
+        const fold = yield* foldTrace(memory.store, run.tracePath ?? "")
+        const posted = (yield* chat.posted).slice(before)
+        assert.deepStrictEqual(posted, [
+          {
+            text: `${marker} ${run.runId}: ${summarizeTree(fold.state, "implement")}`,
+            threadName: asked.threadName
+          }
+        ])
+        assert.strictEqual(step.followed.seq, 1)
+        yield* finish
+      })
+    )
+  )
+
+  it.effect("posts into the starting request's thread after a restart", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat, asked, state, run, memory, writeTrace, finish } = yield* chatRun()
+        yield* writeTrace([eventLine(1, 0, Info.make({ message: "planning" }))])
+        yield* memory.store.writeAtomic(planPath, planOf(1))
+        const before = (yield* chat.posted).length
+        const first = yield* followRun(deps, state, startFollowing(run.runId))
+        yield* saveState(memory.store, dir, first.state)
+        const restored = yield* loadState(memory.store, dir)
+        if (restored === undefined) return yield* Effect.die("no saved state")
+        yield* chat.add("/bot something else")
+        yield* TestClock.adjust("1 minute")
+        yield* memory.store.writeAtomic(planPath, planOf(2))
+        yield* followRun(deps, restored, startFollowing(run.runId))
+        const posted = (yield* chat.posted).slice(before)
+        assert.strictEqual(posted.length, 2)
+        assert.deepStrictEqual(
+          posted.map((p) => p.threadName),
+          [asked.threadName, asked.threadName]
+        )
+        yield* finish
+      })
+    )
+  )
+})
+
+// ---- Starting and looping ------------------------------------------------------------------
+
+const listening = `${marker} Listening. Repository app. I may start: implement, taskforce.`
+
+describe("startChat", () => {
+  it.effect("posts the listening line and stores its sender as the owner", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const deps: ChatLoopDeps = { ...fixture.deps, ignored: Effect.succeed(false) }
+        const state = yield* startChat(deps)
+        assert.deepStrictEqual(texts(yield* fixture.chat.posted), [listening])
+        assert.strictEqual(state.ownerId, ownerId)
+        assert.strictEqual(state.baseBranch, "main")
+        assert.strictEqual(state.posted.length, 1)
+        assert.strictEqual((yield* loadState(fixture.memory.store, dir))?.ownerId, ownerId)
+        assert.deepStrictEqual(yield* Ref.get(fixture.lines), [
+          "Warning: .llm4ts/ is not ignored by git in this repository; add it to .gitignore."
+        ])
+      })
+    )
+  )
+
+  it.effect("under observe posts nothing and leaves the owner unset", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat } = yield* setup([], { observe: true })
+        const state = yield* startChat(deps)
+        assert.deepStrictEqual(yield* chat.posted, [])
+        assert.isUndefined(state.ownerId)
+      })
+    )
+  )
+
+  it.effect("stops when gws fails its probe", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const deps: ChatLoopDeps = {
+          ...fixture.deps,
+          chat: {
+            ...fixture.deps.chat,
+            probe: Effect.fail(
+              ProcessError.make({ message: "gws --version", detail: "gws 0.1.0 is not supported" })
+            )
+          }
+        }
+        const error = yield* Effect.flip(startChat(deps))
+        assert.instanceOf(error, ChatStopped)
+        assert.include(error.message, "gws 0.1.0 is not supported")
+        assert.deepStrictEqual(yield* fixture.chat.posted, [])
+      })
+    )
+  )
+
+  it.effect("stops when the seat only advises read-only", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup()
+        const problem = "the seat 'pi' only has read-only grade 'advisory'"
+        const deps: ChatLoopDeps = { ...fixture.deps, seatProblem: Effect.succeed(problem) }
+        const error = yield* Effect.flip(startChat(deps))
+        assert.instanceOf(error, ChatStopped)
+        assert.include(error.message, problem)
+        assert.deepStrictEqual(yield* fixture.chat.posted, [])
+      })
+    )
+  )
+
+  it.effect("starts a new state's cursor at now, so an older /bot is not handled", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat, contexts } = yield* setup([answer("New.")])
+        yield* chat.add("/bot old")
+        yield* TestClock.setTime(Date.parse("2026-11-18T10:00:01.500Z"))
+        const state = yield* startChat(deps)
+        assert.strictEqual(state.cursor, "2026-11-18T10:00:01.500Z")
+        yield* chat.add("/bot new")
+        yield* handleBeat(deps, state)
+        assert.deepStrictEqual(
+          (yield* Ref.get(contexts)).map((context) => context.request.text),
+          ["new"]
+        )
+      })
+    )
+  )
+})
+
+describe("runChat", () => {
+  it.effect("survives two failed lists and handles the third", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat, lines } = yield* setup([answer("Hi.")])
+        const fiber = yield* runChat(deps).pipe(Effect.forkChild)
+        yield* until(chat.posted, (posted) => posted.length === 1)
+        yield* chat.failWith(ProcessError.make({ message: "gws", detail: "boom" }))
+        yield* TestClock.adjust("5 seconds")
+        yield* until(Ref.get(lines), (all) => all.length === 1)
+        yield* TestClock.adjust("1 second")
+        yield* until(Ref.get(lines), (all) => all.length === 2)
+        yield* chat.failWith(undefined)
+        yield* chat.add("/bot hi")
+        yield* TestClock.adjust("2 seconds")
+        yield* until(chat.posted, (posted) => posted.length === 2)
+        assert.deepStrictEqual(yield* Ref.get(lines), [
+          "could not list messages in spaces/AAA: Process; retrying in 1 s",
+          "could not list messages in spaces/AAA: Process; retrying in 2 s"
+        ])
+        assert.deepStrictEqual(texts(yield* chat.posted), [listening, `${marker} Hi.`])
+        yield* Fiber.interrupt(fiber)
+      })
+    )
+  )
+
+  it.effect("ends with ChatStopped when the Google login lapses", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat } = yield* setup()
+        const fiber = yield* runChat(deps).pipe(Effect.forkChild)
+        yield* until(chat.posted, (posted) => posted.length === 1)
+        yield* chat.failWith(GwsLoginRequired.make({ message: "login" }))
+        yield* TestClock.adjust("5 seconds")
+        const error = yield* Effect.flip(Fiber.join(fiber))
+        assert.deepStrictEqual(
+          error,
+          ChatStopped.make({ message: "Google login expired. Run: gws auth login" })
+        )
+      })
+    )
+  )
+
+  it.effect("never announces a run not started from chat", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat, fake, memory } = yield* setup()
+        const fiber = yield* runChat(deps).pipe(Effect.forkChild)
+        yield* until(chat.posted, (posted) => posted.length === 1)
+        const run = yield* deps.supervisor.start({
+          repo,
+          flow: { name: "implement", path: "/flows/implement.ts" },
+          knobs: { task },
+          baseEnvironment: {}
+        })
+        yield* memory.store.writeAtomic(
+          run.tracePath ?? "",
+          encodeTrace([eventLine(1, 0, StoryStatusChanged.make({ id: "a", status: "active" }))])
+        )
+        yield* memory.store.writeAtomic(planPath, planOf(1))
+        yield* TestClock.adjust("5 seconds")
+        yield* TestClock.adjust("5 seconds")
+        assert.deepStrictEqual(texts(yield* chat.posted), [listening])
+        yield* fake.exit(run.pid ?? 0, { code: 0, signal: undefined })
+        yield* Fiber.interrupt(fiber)
+      })
+    )
+  )
+
+  it.effect("follows a run it started until its end", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat, fake, memory } = yield* setup([startRun("implement", task)])
+        const fiber = yield* runChat(deps).pipe(Effect.forkChild)
+        yield* until(chat.posted, (posted) => posted.length === 1)
+        const asked = yield* chat.add(`/bot ${task}`)
+        yield* memory.store.writeAtomic(planPath, planOf(0))
+        yield* TestClock.adjust("5 seconds")
+        yield* until(chat.posted, (posted) => posted.length === 3)
+        const [run] = yield* deps.supervisor.list(repo.id)
+        yield* fake.exit(run?.pid ?? 0, { code: 1, signal: undefined })
+        yield* until(deps.supervisor.list(repo.id), (runs) => runs[0]?.state === "exited")
+        yield* TestClock.adjust("5 seconds")
+        yield* until(chat.posted, (posted) => posted.length === 4)
+        const posted = (yield* chat.posted).slice(2)
+        assert.deepStrictEqual(texts(posted), [
+          `${marker} ${run?.runId ?? "?"}: plan written, 4 tasks`,
+          `${marker} ${run?.runId ?? "?"} finished failed in 0 min, $0.00. Branch main, 0 commits.`
+        ])
+        assert.deepStrictEqual(
+          posted.map((p) => p.threadName),
+          [asked.threadName, asked.threadName]
+        )
+        yield* Fiber.interrupt(fiber)
       })
     )
   )
