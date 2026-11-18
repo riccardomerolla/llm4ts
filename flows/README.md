@@ -488,12 +488,13 @@ The chat loop starts `chief` once per request through the run supervisor,
 beside any writing run (it is read-only, like `epic-retro`):
 
 ```sh
-llm4ts run chief --repo ~/work/portal -- .llm4ts/chat/<space-id>/<request>.json
+llm4ts run chief --repo ~/work/portal -- .llm4ts/chat/<space-id>/pending/<message-id>.json
 ```
 
 The task is the path to a `ChiefContext` JSON file (`@llm4ts/flow/ChiefAction`):
 the request, the flows it may start, the runs it may stop, and recent
-messages. One toolless seat (`LLM4TS_REASONER`) proposes an action; code
+messages. One toolless seat on the reasoner CLI (`LLM4TS_REASONER`), never
+a roster's, proposes an action; code
 validates it, asks once more with the violations when it is invalid, and
 writes the `ChiefAction` to the context's `actionPath` — `Failed` with a
 fixed reply after a second invalid proposal or a seat failure. The seat's

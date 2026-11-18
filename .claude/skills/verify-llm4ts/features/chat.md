@@ -34,12 +34,12 @@ Preconditions:
 - **No space.** `$V cli $R chat-no-space -- chat`. Exit `2`; stderr says `chat needs a space`.
 - **Listen.** After the start, `$S/gws/posted.log` has `🌙 chief: Listening. Repository repo. I may start: implement.`
 - **Answer.** `$S/bin/gws say users/OWNER "/bot what is running?"`; within ~15 s `posted.log` has `🌙 chief: Runs I know of: …` on that message's thread.
-- **Start.** `$S/bin/gws say users/OWNER "/bot implement add a hello file"`; within ~60 s `posted.log` has `🌙 chief: Starting implement. (run op-…)` and then `op-… finished completed in 0 min, $0.00. Branch calculator, 2 commits.` `$V snapshot $R chat-start` shows the `calculator` branch with two commits.
+- **Start.** `$S/bin/gws say users/OWNER "/bot implement add a hello file"`; within ~60 s `posted.log` has `🌙 chief: Starting implement. (run op-…)` and then `op-… completed in 0 min, $0.00. Branch calculator, 2 commits.` `$V snapshot $R chat-start` shows the `calculator` branch with two commits.
 - **Stop.** `kill -INT $P`; the process exits 0 and its stdout ends with `Stopping; runs started from chat are stopped too.`
 - **Observe.** Start again with `--observe`, `say` from `users/STRANGER` and from `users/OWNER`. Stdout has `/bot from users/STRANGER (?)` with the would-be stranger reply, and `would start implement: …` for the owner; `posted.log` gains nothing.
 
 ## Gotchas
 
 - The implement run leaves its branch checked out. The loop returns to the branch it first started on before the next run, so nothing stacks, but a snapshot taken in between shows the run's branch as HEAD.
-- A relative responder path makes every decision `I could not work that out.`: that is the Chief's `Failed` reply when its seat fails, and the chief run's log under `$S/home/.local/state/llm4ts/mcp/repo/runs/` says why.
+- A relative responder path makes every decision `I could not work that out.`: that is the Chief's `Failed` reply when its seat fails. The chat's stdout says `The Chief could not decide on …` with the chief run's id and its log directory under `$S/home/.local/state/llm4ts/mcp/repo/runs/`.
 - Only the stand-in is proven here. The real `gws` JSON and how Chat delivers a typed `/bot` are unverified until a real Workspace space is used.

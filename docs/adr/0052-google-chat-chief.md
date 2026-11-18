@@ -63,27 +63,31 @@ users/…` adds others by user id, not email, so the login needs the Chat
   validated action. It is traced and costed like any run, and left out of
   the runs the Chief reports on. A decision not made within 120 seconds is
   stopped and answered with a fixed failure reply.
-- **The Chief's seat is an API connector or a CLI whose harness enforces
-  read-only**, or the verb refuses to start: the request text comes from
-  people in a chat.
+- **The Chief runs on the reasoner CLI (`LLM4TS_REASONER`), toolless,
+  and never on a roster seat**; the verb refuses to start unless that
+  CLI's harness enforces read-only: the request text comes from people in
+  a chat.
 - **One typed action per request**: answer, start a run, stop a run, or
   decline. Code validates it (the flow is allowed, the run id is one the
   Chief was shown, the reply fits) and acts through the supervisor.
-- **Before each writing run the loop returns to the branch it started
-  on**, and refuses in words when the working tree is dirty. One writing
-  run at a time; a second request is answered with the running one's id.
+- **Before each writing run the loop returns to the base branch**, the
+  one stored in `state.md` at first start (delete it to change it), and
+  refuses in words when the working tree is dirty. One writing run at a
+  time; a second request is answered with the running one's id.
 - **Replies carry a marker** (`🌙 chief:`) **and are also known by message
   name**: the marker survives a restart, the name set (the last 500)
   survives a changed marker.
 - **Run updates are written by code**, from the trace, the plan's task
   checkboxes and git, with no model call: at most one per run per 30
   seconds, and the ending line always. Only runs started from chat are
-  announced.
+  announced. The same loop posts them between beats, so none appear while
+  a decision is pending (up to 120 seconds).
 - **Allowed flows default to `implement`**; a flow that can pause for its
   owner (`roundtable`, `taskforce`) is started with `--no-pause`.
 - **Stopping `llm4ts chat` stops the runs it started**, as stopping
   `llm4ts mcp` does (ADR 0041). The supervisor and its registry are the
-  operator's, for this one repository; a run id cannot reach another.
+  operator's, for this one repository; repositories with the same
+  directory name share a registry, as under `llm4ts mcp`.
 - **No push and no pull request** from chat: the work stays as commits on
   the flow's branch.
 - **A fresh state starts from now** and does not replay the space.

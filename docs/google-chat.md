@@ -11,10 +11,10 @@ Riccardo   /bot what is running?
 Riccardo   🌙 chief: Nothing is running. The last run, implement
            (op-…-3fa2), finished green 40 minutes ago: 3 tasks, $0.82.
 Riccardo   /bot implement a CSV export on the orders page
-Riccardo   🌙 chief: Started implement as op-…-9c1e. I will post
-           progress here.
+Riccardo   🌙 chief: Starting implement for the CSV export. I will
+           post progress here. (run op-…-9c1e)
 Riccardo   🌙 chief: op-…-9c1e: plan written, 4 tasks
-Riccardo   🌙 chief: op-…-9c1e finished completed in 11 min, $1.37.
+Riccardo   🌙 chief: op-…-9c1e completed in 11 min, $1.37.
            Branch llm4ts/csv-export, 4 commits.
 ```
 
@@ -74,12 +74,14 @@ The space and the trigger can live in the repository's
 ### Before it starts
 
 It stops, saying why, when `gws` is missing or out of range, when the
-space cannot be listed (a lapsed login says to run `gws auth login`), or
-when the reasoning seat (`LLM4TS_REASONER`, default `claude`) cannot be
-held read-only: the Chief's seat must be an API connector or a CLI whose
-harness enforces read-only, because the request text comes from people in
-a chat. It warns, and goes on, when git does not ignore `.llm4ts/` in the
-repository.
+space cannot be listed (a lapsed login says to run `gws auth login`), when
+the flows cannot be discovered, when there is no `chief` flow, when
+`--flows` names a flow that is not there, or when the reasoner CLI cannot
+be held read-only. The Chief runs on the reasoner CLI (`LLM4TS_REASONER`,
+default `claude`), toolless, and never on a roster seat; the verb refuses
+to start unless that CLI's harness enforces read-only, because the request
+text comes from people in a chat. It warns, and goes on, when git does not
+ignore `.llm4ts/` in the repository.
 
 ## Flags
 
@@ -88,7 +90,7 @@ repository.
 | `--space <space>`   | `LLM4TS_CHAT_SPACE`                | The space, `spaces/AAAA…` or its id. Required.                                                    |
 | `--trigger <word>`  | `LLM4TS_CHAT_TRIGGER`, else `/bot` | What a request starts with, as a whole word. `/bot` alone gets a short help reply.                |
 | `--allow <users/…>` | nobody                             | A user id who may ask besides you; repeatable. Ids, not emails: an email lookup needs more scope. |
-| `--flows <a,b>`     | `implement`                        | The flows the Chief may start. It is shown only these.                                            |
+| `--flows <a,b>`     | `implement`                        | The flows the Chief may start. It is shown only these. `chief` is refused.                        |
 | `--interval <s>`    | 5                                  | Seconds between looks at the space.                                                               |
 | `--marker <text>`   | `🌙 chief:`                        | What every line the Chief posts starts with.                                                      |
 | `--observe`         | off                                | Read and decide; post and start nothing; print instead.                                           |
@@ -101,24 +103,34 @@ repository.
 - **Who may ask.** Only you, and the ids you `--allow`. Anyone else who
   types `/bot` gets one reply per process saying who may ask, and nothing
   is decided for them. With no owner known (observe mode on a fresh
-  state), nobody may ask.
+  state), nobody may ask. An id you `--allow` can have a coding agent work
+  on your machine, in your repository, under your name: allow only people
+  you would hand your keyboard.
 - **Questions** are answered only from what the Chief was shown: the
   repository's runs, newest first, with their one-line summaries, a
   bounded diagnosis of the newest failed run, and the last few requests.
   When that text does not hold the answer it says so.
 - **Starting a run.** One writing run at a time; a second request is
   answered with the running one's id. A dirty working tree is refused in
-  words. Before each writing run the loop returns to the branch it was
-  started on. The work stays as commits on the flow's branch: no push, no
-  pull request. A flow that can pause for its owner (`roundtable`,
+  words. Before each writing run the loop returns to the base branch: the
+  branch checked out when the space's state was first created, kept in
+  `state.md` (delete that file to change it). The work stays as commits
+  on the flow's branch: no push, no pull request. A flow that can pause for its owner (`roundtable`,
   `taskforce`) is started with `--no-pause`.
 - **Progress**, for runs started from chat only: a line when the plan is
   written and as tasks finish (or the story summary for an epic run), at
   most one per run every 30 seconds, and always the ending line with the
-  outcome, duration, cost, branch and commit count. No model is called for
-  these.
+  outcome, duration, cost, branch and commit count (the branch is left out
+  when the checkout is on the base branch, or the run was lost). No model
+  is called for these. The same loop posts them between requests, so none
+  appear while a decision is pending (up to 120 seconds).
+- **Stopping a run.** The reply says what happened: the run stopped, or
+  it was not running.
 - **Failures** get a short reply naming the kind of failure; the loop
-  goes on. A failed look at the space backs off and retries.
+  goes on. When the Chief cannot decide, the terminal says why, with the
+  chief run's id and where its logs are. A file under `.llm4ts/chat/` that
+  cannot be read or written is told to the terminal, and the loop goes on.
+  A failed look at the space backs off and retries.
 
 Each decision is a small read-only `chief` flow run, so it has a trace and
 shows in `llm4ts costs`; it is left out of the runs the Chief reports on.
@@ -126,10 +138,12 @@ shows in `llm4ts costs`; it is left out of the runs the Chief reports on.
 ## State
 
 Under `<repo>/.llm4ts/chat/<space-id>/`: `state.md` (the cursor, the names
-of the lines the Chief posted, the owner's id, the base branch) and
+of the lines the Chief posted, the owner's id, the base branch),
 `requests.md` (one section per request: text, action, reply, run id,
-outcome). A restart continues from the cursor; a fresh state starts at
-the moment it starts, so old `/bot` messages are not replayed. The run
+outcome), `pending/` (each request's context for the `chief` flow) and
+`actions/` (each decision). `pending/` and `actions/` are kept, never
+cleaned up, and hold the request text. A restart continues from the
+cursor; a fresh state starts at the moment it starts, so old `/bot` messages are not replayed. The run
 registry is the one `llm4ts mcp` uses
 (`~/.local/state/llm4ts/mcp/<repo>/`), so the Chief sees, and may stop,
 runs an MCP client started in the same repository.

@@ -15,14 +15,21 @@
   seconds. `--observe` reads and decides but posts and starts nothing.
   Messages go through the `gws` CLI (0.22.5 up to 0.23.0) and its login;
   llm4ts passes no credential. Each decision runs as the new read-only
-  `chief` flow, so it is traced and costed; its seat must enforce
-  read-only. State lives in `.llm4ts/chat/<space-id>/`. Not yet checked
+  `chief` flow, so it is traced and costed; it runs on the reasoner CLI
+  (`LLM4TS_REASONER`), toolless and never on a roster seat, and the verb
+  refuses to start unless that CLI enforces read-only. State lives in `.llm4ts/chat/<space-id>/`. Not yet checked
   against a real Workspace space.
 - **Settings `LLM4TS_CHAT_SPACE` and `LLM4TS_CHAT_TRIGGER`**, for the
   project's `config.env`; a flag wins.
 - **`@llm4ts/flow/GoogleChatTool`** (list and create Chat messages through
   `gws`), **`@llm4ts/flow/ChiefAction`** (the typed decision), and
   `plainProgressLine` in `@llm4ts/runner/RunSummary`.
+
+### Changed
+
+- **`GitToolShape` gains the required member `commitsAhead(base)`** (the
+  commit count for the chat's ending line). An implementation of the shape
+  outside llm4ts must add it.
 
 ## 4.8.0
 
