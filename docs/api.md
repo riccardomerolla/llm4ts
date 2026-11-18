@@ -99,6 +99,16 @@ exports no module. The following modules are the main entry points.
   and the capability guard runs either way. `GitHubTool` drives `gh` and
   `AzureDevOpsTool` drives `az` (ADR 0011); each CLI owns its own
   credential, so neither tool accepts or stores a token.
+- `@llm4ts/flow/GoogleChatTool`: Google Chat messages through the `gws` CLI
+  (ADR 0052). `makeGoogleChatTool(executor, workDir, events)` gives
+  `probe` (refuses a `gws` outside `gwsVersionRange`), `listMessages(space,
+after)` (every page, oldest first) and `createMessage(space, text,
+threadName?)`; a lapsed login is `GwsLoginRequired`. `gws` holds the
+  login; the tool passes and reads no credential.
+- `@llm4ts/flow/ChiefAction`: the Chief of Staff's typed decision for one
+  chat request (`Answer`, `StartRun`, `StopRun`, `Decline`, `Failed`), its
+  `ChiefContext`, the prompt, and `validateChiefProposal`, which the
+  bundled `chief` flow applies before it writes the action.
 - `@llm4ts/flow/Context`: context budgeting for LLM prompts, in characters
   (deterministic, no tokenizer). `cap(text, limit)` never returns more than
   `limit` chars (marker included; head ¾, tail ¼); `capped(label, text, limit)`
@@ -255,6 +265,10 @@ exports no module. The following modules are the main entry points.
   public pieces they read with.
 - `@llm4ts/runner/EventPresentation`: `eventPresentation`, one entry per
   event: the verbosity it prints at, its kind in a profile gap, its digest line.
+- `@llm4ts/runner/RunSummary`: `summarizeTree`, one sentence for a
+  story-shaped run, and `plainProgressLine`, the progress sentence of a run
+  with tasks and no stories ("plan written, 4 tasks", "task 2 of 4 done",
+  the ending line with branch and commits) that `llm4ts chat` posts.
 - `@llm4ts/runner/Format`: `formatCount`, `clock`, `elapsed` and `dollars`,
   the text the terminal tree and the `watch --web` page print. Pure, with no
   Node import (`@llm4ts/runner/Terminal` still re-exports `formatCount`).

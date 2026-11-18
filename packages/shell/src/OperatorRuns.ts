@@ -35,6 +35,9 @@ export interface RunLookupDeps {
   readonly supervisor: RunSupervisorShape
 }
 
+/** What reading runs off disk needs: no supervisor, no configuration. */
+export type DiskRunDeps = Pick<RunLookupDeps, "files" | "listTraces" | "listEpics">
+
 export interface Repo {
   readonly id: string
   readonly path: string
@@ -97,7 +100,7 @@ export interface EpicRunEntry {
 }
 
 export const epicRunsOf = (
-  deps: RunLookupDeps,
+  deps: DiskRunDeps,
   repo: Repo
 ): Effect.Effect<ReadonlyArray<EpicRunEntry>, ReadFailed> =>
   Effect.forEach(deps.listEpics(epicsDir(repo)), (epic) => {
@@ -203,7 +206,7 @@ export const epicOfRun = (
 
 /** Runs found on disk (epic run lists and traces) that the supervisor does not hold. */
 export const discoveredRuns = (
-  deps: RunLookupDeps,
+  deps: DiskRunDeps,
   repo: Repo,
   known: ReadonlySet<string>
 ): Effect.Effect<ReadonlyArray<OperatorRun>, ReadFailed> =>

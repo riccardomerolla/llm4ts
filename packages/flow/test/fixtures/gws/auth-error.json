@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 401,
+    "message": "Access denied. No credentials provided. Run `gws auth login` or set GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE to an OAuth credentials JSON file.",
+    "reason": "authError"
+  }
+}

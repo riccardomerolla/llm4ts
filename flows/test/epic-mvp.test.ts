@@ -120,6 +120,7 @@ const git = (uncommitted: ReadonlyArray<string>): GitToolShape => ({
   branchExists: () => Effect.succeed(false),
   deleteBranch: () => Effect.void,
   isAncestor: () => Effect.succeed(true),
+  commitsAhead: () => Effect.succeed(0),
   merge: () => Effect.void
 })
 

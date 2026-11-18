@@ -127,6 +127,7 @@ const gitFor = (log: Ref.Ref<ReadonlyArray<string>>, scenario: Scenario): GitToo
     branchExists: (name) => Effect.succeed(name === "main"),
     deleteBranch: () => ok,
     isAncestor: () => Effect.succeed(!scenario.behind),
+    commitsAhead: () => Effect.succeed(0),
     merge: (branch, message) => record(`merge:${branch}:${message}`),
     mergeNoCommit: (branch) =>
       record(`merge-no-commit:${branch}`).pipe(Effect.as(scenario.conflicts))

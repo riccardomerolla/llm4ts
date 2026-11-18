@@ -4,6 +4,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
+import {
+  ProcessResult,
+  makeFakeProcessExecutor,
+  processCommandKey
+} from "@llm4ts/core/ProcessExecutor"
 import { Grants, allGrants, restricted } from "@llm4ts/core/Capability"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { makeGitTool, statusPaths } from "@llm4ts/flow/GitTool"
@@ -466,5 +471,45 @@ describe("GitTool", () => {
         assert.isTrue(yield* git.isAncestor("main", "epic"))
       })
     )
+  )
+
+  it.effect("commitsAhead counts the commits HEAD has over a base", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* temporaryRepository
+        const events = yield* makeCollectingFlowEvents
+        const git = makeGitTool(nodeProcessExecutor, root, events)
+        yield* git.init
+        yield* git.config("user.name", "llm4ts test")
+        yield* git.config("user.email", "llm4ts@example.invalid")
+        yield* Effect.promise(() => writeFile(join(root, "a.txt"), "1\n", "utf8"))
+        yield* git.commitAll("base")
+        yield* git.checkoutOrCreate("feature")
+        assert.strictEqual(yield* git.commitsAhead("main"), 0)
+        yield* Effect.promise(() => writeFile(join(root, "a.txt"), "2\n", "utf8"))
+        yield* git.commitAll("two")
+        yield* Effect.promise(() => writeFile(join(root, "a.txt"), "3\n", "utf8"))
+        yield* git.commitAll("three")
+        assert.strictEqual(yield* git.commitsAhead("main"), 2)
+        const failure = yield* Effect.flip(git.commitsAhead("no-such-base"))
+        assert.strictEqual(failure._tag, "Process")
+      })
+    )
+  )
+
+  it.effect("commitsAhead fails typed when git prints something that is not a number", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["git", "rev-list", "--count", "main..HEAD"]),
+            ProcessResult.make({ exitCode: 0, stdout: ["many"], stderr: [] })
+          ]
+        ])
+      })
+      const git = makeGitTool(fake.executor, "/nowhere", yield* makeCollectingFlowEvents)
+      const failure = yield* Effect.flip(git.commitsAhead("main"))
+      assert.strictEqual(failure._tag, "Process")
+    })
   )
 })

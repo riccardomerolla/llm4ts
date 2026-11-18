@@ -19,9 +19,14 @@ import {
   offeredApiProviderNames,
   type ConnectorName
 } from "@llm4ts/core/Models"
+import { createConnectorRegistry } from "@llm4ts/core/providers/ConnectorFactories"
 import { runStateDeniedPaths } from "@llm4ts/flow/RunState"
 import { settingText, settingValue } from "@llm4ts/flow/Settings"
 import { ScriptUsage } from "./FlowArgs.ts"
+import { nodeGeminiCliExecutor } from "./NodeGeminiCliExecutor.ts"
+import { nodeHttpClient } from "./NodeHttpClient.ts"
+import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
+import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
 
 export const claude = CliConnectorConfig.make({
   connectorId: ConnectorIds.ClaudeCli,
@@ -153,6 +158,36 @@ export const asReadOnly = (config: CliConnectorConfig): CliConnectorConfig =>
 // text instead of an error (see CliConnectorConfig.noTools's doc comment).
 export const asToolless = (config: CliConnectorConfig): CliConnectorConfig =>
   CliConnectorConfig.make({ ...config, readOnly: true, noTools: true })
+
+// The grade lives on the built connector, not its config; building one spawns nothing.
+const capabilityRegistry = createConnectorRegistry({
+  http: nodeHttpClient,
+  process: nodeProcessExecutor,
+  temporaryFiles: nodeTemporaryFiles,
+  geminiCli: nodeGeminiCliExecutor
+})
+
+/**
+ * Why this seat cannot be trusted to stay read-only, or undefined when its
+ * harness enforces it: an advisory or ignored grade makes `readOnly` (and
+ * `noTools`) a request the harness may not honour (ADR 0010).
+ */
+export const readOnlySeatProblem = (config: CliConnectorConfig): string | undefined => {
+  const name = config.connectorId.value
+  // runSync holds only while every connector factory's `create` is synchronous.
+  return Effect.runSync(
+    capabilityRegistry.resolve(config).pipe(
+      Effect.match({
+        onFailure: (error) => `the seat '${name}' cannot be resolved: ${error.message}`,
+        onSuccess: ({ capabilities }) =>
+          capabilities.readOnlyEnforcement === "enforced"
+            ? undefined
+            : `the seat '${name}' only has read-only grade '${capabilities.readOnlyEnforcement}'; ` +
+              "this flow needs a seat whose harness enforces read-only"
+      })
+    )
+  )
+}
 
 export const withTimeoutSeconds = (
   config: ApiConnectorConfig,

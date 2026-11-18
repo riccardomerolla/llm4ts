@@ -1,0 +1,12 @@
+{
+  "body": null,
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "GET",
+  "query_params": [
+    ["filter", "createTime > \"2026-11-18T10:00:00Z\""],
+    ["orderBy", "createTime ASC"],
+    ["pageSize", "100"]
+  ],
+  "url": "https://chat.googleapis.com/v1/spaces/SPACE1/messages"
+}

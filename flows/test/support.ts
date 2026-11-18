@@ -81,6 +81,7 @@ export const idleGit: GitToolShape = {
   branchExists: () => Effect.succeed(false),
   deleteBranch: () => Effect.void,
   isAncestor: () => Effect.succeed(false),
+  commitsAhead: () => Effect.succeed(0),
   merge: () => Effect.void
 }
 

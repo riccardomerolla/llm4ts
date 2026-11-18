@@ -1,0 +1,31 @@
+{
+  "messages": [
+    {
+      "name": "spaces/SPACE1/messages/MSG1.MSG1",
+      "sender": { "name": "users/USER1", "displayName": "Owner One", "type": "HUMAN" },
+      "createTime": "2026-11-18T10:00:01.123456Z",
+      "text": "/bot hello",
+      "formattedText": "/bot hello",
+      "argumentText": "/bot hello",
+      "thread": { "name": "spaces/SPACE1/threads/MSG1" },
+      "space": { "name": "spaces/SPACE1" }
+    },
+    {
+      "name": "spaces/SPACE1/messages/MSG2.MSG2",
+      "sender": { "name": "users/USER2", "displayName": "Guest Two", "type": "HUMAN" },
+      "createTime": "2026-11-18T10:00:05.000000Z",
+      "thread": { "name": "spaces/SPACE1/threads/MSG2" },
+      "space": { "name": "spaces/SPACE1" },
+      "attachment": [{ "name": "spaces/SPACE1/messages/MSG2.MSG2/attachments/A1" }]
+    },
+    {
+      "name": "spaces/SPACE1/messages/MSG3.MSG3",
+      "sender": { "name": "users/APP1", "displayName": "Some App", "type": "BOT" },
+      "createTime": "2026-11-18T10:00:09.000000Z",
+      "text": "deploy finished",
+      "thread": { "name": "spaces/SPACE1/threads/MSG3" },
+      "space": { "name": "spaces/SPACE1" }
+    }
+  ],
+  "nextPageToken": "PAGE2"
+}

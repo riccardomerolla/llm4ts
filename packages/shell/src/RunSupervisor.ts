@@ -67,7 +67,7 @@ export interface SupervisorOptions {
   readonly parallelRuns: number
   /** How long `stop` waits after SIGINT before SIGTERM; default 30 s. */
   readonly graceMs?: number
-  /** Flows that may run beside a busy repository; default `epic-retro`. */
+  /** Flows that may run beside a busy repository; default `epic-retro` and `chief`. */
   readonly readOnlyFlows?: ReadonlySet<string>
   /** The 4-hex run id suffix; injectable so tests are deterministic. */
   readonly random?: () => string
@@ -122,7 +122,7 @@ export const makeRunSupervisor = (
 ): Effect.Effect<RunSupervisorShape, PersistenceError, Scope.Scope> =>
   Effect.gen(function* () {
     const graceMs = options.graceMs ?? 30_000
-    const readOnlyFlows = options.readOnlyFlows ?? new Set(["epic-retro"])
+    const readOnlyFlows = options.readOnlyFlows ?? new Set(["epic-retro", "chief"])
     const random = options.random ?? randomHex
     const stateDir = (repoId: string) => operatorStateDir(options.environment, repoId)
     const registryPath = (repoId: string) => join(stateDir(repoId), "runs.jsonl")

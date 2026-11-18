@@ -310,6 +310,13 @@ executes.
 | ------------------ | ----- | -------------------------------------- | ---------------- | -------------------------------------------------------------- |
 | `LLM4TS_MCP_TOKEN` | text  | no HTTP transport without --token-file | environment only | The bearer token of `llm4ts mcp --http`; never reaches a flow. |
 
+### Google Chat
+
+| Setting               | Value | Default                                | Belongs in   | Meaning                                                                                                       |
+| --------------------- | ----- | -------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_CHAT_SPACE`   | text  | none; `llm4ts chat` then needs --space | project file | The Google Chat space `llm4ts chat` binds this repository to: spaces/AAAA… or its id. `--space` wins over it. |
+| `LLM4TS_CHAT_TRIGGER` | text  | /bot                                   | project file | The word a Chat message starts with to reach the Chief of Staff in `llm4ts chat`. `--trigger` wins over it.   |
+
 ### Set by llm4ts
 
 | Setting             | Value  | Default                                         | Belongs in    | Meaning                                                                  |

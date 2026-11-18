@@ -8,7 +8,7 @@ import {
   type FlowEvent
 } from "@llm4ts/flow/FlowEvents"
 import { emptyTree, reduceTree, type TreeInput, type TreeState } from "@llm4ts/runner/AgentTree"
-import { summarizeTree } from "@llm4ts/runner/RunSummary"
+import { plainProgressLine, summarizeTree, type PlainProgress } from "@llm4ts/runner/RunSummary"
 
 const t0 = 1_790_000_000_000
 
@@ -62,6 +62,42 @@ describe("summarizeTree", () => {
     assert.strictEqual(
       summarizeTree(ended, undefined),
       "succeeded, epic-stories, 1 h 15 min: 1 stories done, 0 active, 0 failed, $0.00"
+    )
+  })
+})
+
+describe("plainProgressLine", () => {
+  const id = "op-1-ab12"
+  const at = (tasksDone: number, tasksTotal = 4): PlainProgress => ({ tasksTotal, tasksDone })
+  const withoutBranch = { outcome: "completed", minutes: 11, costUsd: 1.37 }
+  const ended = { ...withoutBranch, branch: "llm4ts/csv-export", commits: 4 }
+
+  it("announces the plan once, then each task that finishes", () => {
+    assert.strictEqual(plainProgressLine(id, undefined, at(0)), "op-1-ab12: plan written, 4 tasks")
+    assert.strictEqual(plainProgressLine(id, at(1), at(2)), "op-1-ab12: task 2 of 4 done")
+    assert.strictEqual(
+      plainProgressLine(id, undefined, at(0, 1)),
+      "op-1-ab12: plan written, 1 task"
+    )
+  })
+
+  it("says nothing when nothing changed or there is no plan", () => {
+    assert.isUndefined(plainProgressLine(id, at(2), at(2)))
+    assert.isUndefined(plainProgressLine(id, undefined, at(0, 0)))
+  })
+
+  it("closes with outcome, time, cost, branch and commits", () => {
+    assert.strictEqual(
+      plainProgressLine(id, at(3), { ...at(4), ended }),
+      "op-1-ab12 completed in 11 min, $1.37. Branch llm4ts/csv-export, 4 commits."
+    )
+    assert.strictEqual(
+      plainProgressLine(id, at(3), { ...at(3), ended: withoutBranch }),
+      "op-1-ab12 completed in 11 min, $1.37."
+    )
+    assert.strictEqual(
+      plainProgressLine(id, at(3), { ...at(4), ended: { ...ended, commits: 1 } }),
+      "op-1-ab12 completed in 11 min, $1.37. Branch llm4ts/csv-export, 1 commit."
     )
   })
 })

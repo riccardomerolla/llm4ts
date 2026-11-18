@@ -192,6 +192,7 @@ const baseGit: GitToolShape = {
   removeWorktree: () => Effect.void,
   moveWorktree: () => Effect.void,
   restorePaths: () => Effect.void,
+  commitsAhead: () => Effect.succeed(0),
   mergeNoCommit: () => Effect.succeed([]),
   branchExists: () => Effect.succeed(false),
   deleteBranch: () => Effect.void,

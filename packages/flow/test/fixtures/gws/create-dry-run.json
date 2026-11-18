@@ -1,0 +1,13 @@
+{
+  "body": {
+    "text": "hello",
+    "thread": {
+      "name": "spaces/SPACE1/threads/T1"
+    }
+  },
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "POST",
+  "query_params": [["messageReplyOption", "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD"]],
+  "url": "https://chat.googleapis.com/v1/spaces/SPACE1/messages"
+}

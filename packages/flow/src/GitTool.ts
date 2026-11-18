@@ -91,6 +91,8 @@ export interface GitToolShape {
   readonly deleteBranch: (name: string) => Effect.Effect<void, FlowError>
   /** Whether `commit` is reachable from `of` — a merged story branch is an ancestor of the epic head. */
   readonly isAncestor: (commit: string, of: string) => Effect.Effect<boolean, FlowError>
+  /** How many commits `HEAD` has over `base` (`git rev-list --count <base>..HEAD`). */
+  readonly commitsAhead: (base: string) => Effect.Effect<number, FlowError>
   /**
    * Merges `branch` into the checked-out branch with a merge commit. A
    * conflict fails typed with the conflicting paths and leaves the tree as it
@@ -499,6 +501,20 @@ export const makeGitTool = (
                     detail: problem(result)
                   })
                 )
+        )
+      ),
+    commitsAhead: (base) =>
+      read(
+        "git rev-list --count",
+        Effect.flatMap(runOrFail(["rev-list", "--count", `${base}..HEAD`]), (output) =>
+          /^\d+$/.test(output)
+            ? Effect.succeed(Number(output))
+            : Effect.fail(
+                ProcessError.make({
+                  message: `git rev-list --count ${base}..HEAD`,
+                  detail: `expected a number, got ${JSON.stringify(output)}`
+                })
+              )
         )
       ),
     mergeNoCommit: (branch) =>

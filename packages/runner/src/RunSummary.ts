@@ -60,3 +60,41 @@ export const summarizeTree = (state: TreeState, flow: string | undefined): strin
     `${failed.length} failed${parenthesized(failedItems, "; ")}, ${cost}`
   )
 }
+
+export interface PlainProgress {
+  readonly tasksTotal: number
+  readonly tasksDone: number
+  readonly ended?: {
+    readonly outcome: string
+    readonly minutes: number
+    readonly costUsd: number
+    readonly branch?: string
+    readonly commits?: number
+  }
+}
+
+/**
+ * One sentence for a run with plan tasks and no stories, or `undefined` when
+ * nothing worth saying changed. The end of the run wins over a task change in
+ * the same step.
+ */
+export const plainProgressLine = (
+  runId: string,
+  previous: PlainProgress | undefined,
+  next: PlainProgress
+): string | undefined => {
+  if (next.ended !== undefined) {
+    const { outcome, minutes, costUsd, branch, commits } = next.ended
+    const count =
+      commits === undefined ? "" : `, ${commits} ${commits === 1 ? "commit" : "commits"}`
+    const where = branch === undefined ? "" : ` Branch ${branch}${count}.`
+    return `${runId} ${outcome} in ${minutes} min, $${costUsd.toFixed(2)}.${where}`
+  }
+  if (next.tasksTotal === 0) return undefined
+  if (previous === undefined) {
+    return `${runId}: plan written, ${next.tasksTotal} ${next.tasksTotal === 1 ? "task" : "tasks"}`
+  }
+  if (previous.tasksDone === next.tasksDone && previous.tasksTotal === next.tasksTotal)
+    return undefined
+  return `${runId}: task ${next.tasksDone} of ${next.tasksTotal} done`
+}

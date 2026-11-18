@@ -379,6 +379,53 @@ describe("the mcp command", () => {
   )
 })
 
+describe("the chat command", () => {
+  const helpOf = (argv: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const lines: Array<string> = []
+      const capture: Console.Console = Object.assign(Object.create(console), {
+        log: (...args: ReadonlyArray<unknown>) => void lines.push(args.map(String).join(" "))
+      })
+      const exit = yield* Effect.exit(
+        runShellCommand(argv).pipe(
+          Effect.provideService(Console.Console, capture),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      if (exit._tag === "Failure") {
+        assert.include(String(exit.cause), "ShowHelp")
+      }
+      return lines.join("\n")
+    })
+
+  it.effect("is listed in help with its description", () =>
+    Effect.gen(function* () {
+      const help = yield* helpOf(["--help"])
+      assert.match(
+        help,
+        /chat\s+Bind this repository to a Google Chat space: a Chief of Staff answers \/bot, starts flows and posts progress/
+      )
+    })
+  )
+
+  it.effect("offers its flags", () =>
+    Effect.gen(function* () {
+      const help = yield* helpOf(["chat", "--help"])
+      for (const flag of [
+        "--space",
+        "--trigger",
+        "--marker",
+        "--allow",
+        "--flows",
+        "--interval",
+        "--observe"
+      ]) {
+        assert.include(help, flag)
+      }
+    })
+  )
+})
+
 describe("profileOptionsFrom", () => {
   const none = {
     trace: Option.none(),

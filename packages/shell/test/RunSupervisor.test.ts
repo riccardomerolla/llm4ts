@@ -296,6 +296,19 @@ describe("RunSupervisor", () => {
     )
   )
 
+  it.effect("a chief run starts while a writing run is active", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { fake, supervisor } = yield* setup()
+        const writing = yield* supervisor.start(request("implement"))
+        const chief = yield* supervisor.start(request("chief"))
+        assert.strictEqual(chief.state, "running")
+        yield* fake.exit(writing.pid ?? 0, { code: 0, signal: undefined })
+        yield* fake.exit(chief.pid ?? 0, { code: 0, signal: undefined })
+      })
+    )
+  )
+
   it.effect("stop sends SIGINT, then SIGTERM after the grace period", () =>
     Effect.scoped(
       Effect.gen(function* () {
