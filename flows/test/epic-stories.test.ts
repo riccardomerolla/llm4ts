@@ -211,6 +211,7 @@ const gitOver = (log: Ref.Ref<ReadonlyArray<string>>, prefix: string): GitToolSh
     branchExists: () => Effect.succeed(false),
     deleteBranch: () => Effect.void,
     isAncestor: () => Effect.succeed(false),
+    commitsAhead: () => Effect.succeed(0),
     merge: (branch) => note(`merge:${branch}`)
   }
 }
