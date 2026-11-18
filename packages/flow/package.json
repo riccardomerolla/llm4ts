@@ -24,6 +24,7 @@
     "./Blackboard": "./dist/Blackboard.js",
     "./BoardSync": "./dist/BoardSync.js",
     "./Chat": "./dist/Chat.js",
+    "./ChiefAction": "./dist/ChiefAction.js",
     "./Context": "./dist/Context.js",
     "./CostLedger": "./dist/CostLedger.js",
     "./CostReport": "./dist/CostReport.js",
