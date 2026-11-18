@@ -15,6 +15,7 @@ one-line description. These scripts double as the built-in flows of the
 | `epic-mvp.ts`               | Epic → MVP cut → red tests first → coders make them green; the rest parked for `--iterate`                                                             | reasoner CLI + pi + Git           |
 | `epic-draft.ts`             | Epic → stories without tests → one lens and the build gates; what was deferred is debt `--harden` pays                                                 | reasoner CLI + pi + Git           |
 | `epic-retro.ts`             | A failed `epic-stories` run → diagnosis per story and fixes the next run applies once approved                                                         | reasoner CLI                      |
+| `chief.ts`                  | One chat request → the Chief of Staff's typed decision (answer, start or stop a run, decline), written as JSON for the chat loop                       | reasoner CLI (enforced read-only) |
 | `roundtable.ts`             | A topic and a goal → personas discuss item by item, a Scribe writes the outline and the plan; you steer from the meeting file                          | reasoner CLI                      |
 | `taskforce.ts`              | A goal → a Chief of Staff plans briefs, specialists work them in waves, a Reviewer interrogates, the Doc Writer delivers; you steer from the plan file | reasoner CLI, coder CLI, roster   |
 | `issue-pr.ts`               | GitHub issue assessment through pushed pull request                                                                                                    | selected CLI + GitHub             |
@@ -480,6 +481,23 @@ changed. Unapproved reports are ignored; a report whose proposal no longer
 fits the plan is skipped with a note, never a failure. A `refine` item is
 printed with the feedback to give `--refine`. Nothing a retro writes is
 committed to the target (ADR 0023).
+
+### One chat request: `chief`
+
+The chat loop starts `chief` once per request through the run supervisor,
+beside any writing run (it is read-only, like `epic-retro`):
+
+```sh
+llm4ts run chief --repo ~/work/portal -- .llm4ts/chat/<space-id>/<request>.json
+```
+
+The task is the path to a `ChiefContext` JSON file (`@llm4ts/flow/ChiefAction`):
+the request, the flows it may start, the runs it may stop, and recent
+messages. One toolless seat (`LLM4TS_REASONER`) proposes an action; code
+validates it, asks once more with the violations when it is invalid, and
+writes the `ChiefAction` to the context's `actionPath` — `Failed` with a
+fixed reply after a second invalid proposal or a seat failure. The seat's
+harness must enforce read-only; an advisory one is refused before any call.
 
 ### Refining a finished epic
 

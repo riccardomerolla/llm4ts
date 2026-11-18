@@ -29,6 +29,7 @@ import {
   opencode,
   pi,
   prepareConnector,
+  readOnlySeatProblem,
   reasonerFromEnvironment,
   seatsFromEnvironment,
   withEnvironment,
@@ -98,6 +99,14 @@ describe("runner connector presets", () => {
     assert.isTrue(toolless.noTools)
     assert.isFalse(claude.readOnly)
     assert.isFalse(claude.noTools)
+  })
+
+  it("a read-only seat is a problem unless its harness enforces read-only", () => {
+    assert.isUndefined(readOnlySeatProblem(asToolless(claude)))
+    const problem = readOnlySeatProblem(asToolless(antigravity))
+    assert.isDefined(problem)
+    assert.include(problem ?? "", ConnectorIds.AntigravityCli.value)
+    assert.include(problem ?? "", "advisory")
   })
 
   it("enriches API defaults and credentials without replacing explicit values", () => {
