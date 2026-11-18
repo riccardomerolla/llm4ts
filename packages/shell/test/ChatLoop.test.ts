@@ -9,7 +9,6 @@ import { ChiefAction, ChiefContext, failedReply } from "@llm4ts/flow/ChiefAction
 import { ProcessError } from "@llm4ts/flow/FlowError"
 import { Info, StoryStatusChanged, type FlowEvent } from "@llm4ts/flow/FlowEvents"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
-import type { GitToolShape } from "@llm4ts/flow/GitTool"
 import { ChatMessage, GwsLoginRequired, SpaceRef } from "@llm4ts/flow/GoogleChatTool"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
 import { defaultPlanPath } from "@llm4ts/flow/Plan"
@@ -35,6 +34,7 @@ import { makeFakeFlowProcess } from "@llm4ts/shell/FlowProcess"
 import { foldTrace } from "@llm4ts/shell/RunReaders"
 import { makeRunSupervisor, type SupervisorRepo } from "@llm4ts/shell/RunSupervisor"
 import { makeFakeChat, ownerId } from "./support/FakeChat.ts"
+import { fakeGit } from "./support/FakeGit.ts"
 
 const repo: SupervisorRepo = { id: "app", path: "/work/app" }
 const space = new SpaceRef({ id: "AAA" })
@@ -67,50 +67,6 @@ const flows = [
   { name: "epic-stories", path: "/flows/epic-stories.ts", description: "Stories of an epic" },
   { name: "chief", path: "/flows/chief.ts", description: "One chat decision" }
 ]
-
-const unused = Effect.die("unused in these tests")
-
-const fakeGit = (
-  log: Ref.Ref<ReadonlyArray<string>>,
-  dirty: Ref.Ref<ReadonlyArray<string>>
-): GitToolShape => {
-  const ok = Effect.void
-  return {
-    init: ok,
-    initBare: ok,
-    config: () => ok,
-    status: Effect.succeed(""),
-    uncommittedFiles: Ref.get(dirty),
-    currentBranch: Effect.succeed("main"),
-    diff: Effect.succeed(""),
-    diffAll: Effect.succeed(""),
-    defaultBase: Effect.succeed("main"),
-    diffVsBase: () => Effect.succeed(""),
-    diffVsBaseScoped: () => Effect.succeed(""),
-    listFiles: () => Effect.succeed([]),
-    changedFilesVsBase: () => Effect.succeed([]),
-    addRemote: () => ok,
-    checkout: (name) => Ref.update(log, (all) => [...all, `checkout:${name}`]),
-    checkoutOrCreate: () => ok,
-    createBranch: () => unused,
-    commitAll: () => unused,
-    commitPaths: () => unused,
-    push: () => ok,
-    checkpoint: Effect.succeed("before"),
-    rollback: () => ok,
-    addWorktree: () => ok,
-    addWorktreeNewBranch: () => ok,
-    removeWorktree: () => ok,
-    moveWorktree: () => ok,
-    restorePaths: () => ok,
-    branchExists: () => Effect.succeed(true),
-    deleteBranch: () => ok,
-    isAncestor: () => Effect.succeed(true),
-    commitsAhead: () => Effect.succeed(0),
-    merge: () => ok,
-    mergeNoCommit: () => Effect.succeed([])
-  }
-}
 
 type Scripted = ChiefAction | "defect"
 
@@ -923,6 +879,24 @@ describe("startChat", () => {
         assert.strictEqual((yield* loadState(fixture.memory.store, dir))?.ownerId, ownerId)
         assert.deepStrictEqual(yield* Ref.get(fixture.lines), [
           "Warning: .llm4ts/ is not ignored by git in this repository; add it to .gitignore."
+        ])
+      })
+    )
+  )
+
+  it.effect("takes the marker from the options over a stored one, for selecting and posting", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* setup([answer("Nothing is running.")], { marker: "🤖 cos:" })
+        yield* saveState(fixture.memory.store, dir, initial)
+        const state = yield* startChat(fixture.deps)
+        assert.strictEqual(state.marker, "🤖 cos:")
+        assert.strictEqual((yield* loadState(fixture.memory.store, dir))?.marker, "🤖 cos:")
+        yield* fixture.chat.add("/bot what is running?")
+        yield* handleBeat(fixture.deps, state)
+        assert.deepStrictEqual(texts(yield* fixture.chat.posted), [
+          "🤖 cos: Listening. Repository app. I may start: implement, taskforce.",
+          "🤖 cos: Nothing is running."
         ])
       })
     )

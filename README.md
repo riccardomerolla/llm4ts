@@ -82,6 +82,10 @@ and [ADR 0051](docs/adr/0051-web-watch.md).
   `xml-validate` and `soap-call`): [ADR 0048](docs/adr/0048-tool-catalog.md).
 - `llm4ts mcp`: the same runs for an MCP client such as Claude Code or
   Grok Bot, over stdio or `--http`: [ADR 0041](docs/adr/0041-mcp-operator-server.md).
+- `llm4ts chat --space <space>`: a Chief of Staff in a Google Chat space
+  answers `/bot` questions about the repository's runs, starts flows and
+  posts their progress, through the `gws` CLI and your own login:
+  [Google Chat](docs/google-chat.md), [ADR 0052](docs/adr/0052-google-chat-chief.md).
 
 ## Write a flow
 
@@ -191,13 +195,13 @@ by copying a skill directory.
 
 ## Packages
 
-| Package          | Purpose                                                       |
-| ---------------- | ------------------------------------------------------------- |
-| `@llm4ts/shell`  | The `llm4ts` command: run, watch, costs, profile, mcp, config |
-| `@llm4ts/runner` | Node runner; its root export is the flow author's barrel      |
-| `@llm4ts/flow`   | Plans, events, persistence, repositories, review, packs       |
-| `@llm4ts/core`   | Models, connectors, providers, eval, judgments, redaction     |
-| `@llm4ts/js`     | Promise-based client for calling an LLM from any JS program   |
+| Package          | Purpose                                                             |
+| ---------------- | ------------------------------------------------------------------- |
+| `@llm4ts/shell`  | The `llm4ts` command: run, watch, costs, profile, mcp, chat, config |
+| `@llm4ts/runner` | Node runner; its root export is the flow author's barrel            |
+| `@llm4ts/flow`   | Plans, events, persistence, repositories, review, packs             |
+| `@llm4ts/core`   | Models, connectors, providers, eval, judgments, redaction           |
+| `@llm4ts/js`     | Promise-based client for calling an LLM from any JS program         |
 
 ## Configuration
 

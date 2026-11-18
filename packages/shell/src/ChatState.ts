@@ -1,4 +1,4 @@
-// @internal: the chat loop's persistent state; wired by the chat verb (plan task 8)
+// @internal: the chat loop's persistent state, read and written only by the chat loop
 import { join } from "node:path"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"

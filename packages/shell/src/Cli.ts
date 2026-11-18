@@ -57,6 +57,7 @@ import {
 import { settingValue } from "@llm4ts/flow/Settings"
 import { configCommand, configView, parseAssignment, renderDoctorConfig } from "./ConfigCommand.ts"
 import { launchFlow } from "./FlowLaunch.ts"
+import { chatOptionsFrom, nodeChatDeps, runChatUntilSignal } from "./ChatNode.ts"
 import { mcpOptionsFrom } from "./OperatorConfig.ts"
 import { nodeOperatorRuntime, nodeRead, runMcp } from "./OperatorNode.ts"
 import { mainMenu } from "./Menu.ts"
@@ -1199,6 +1200,59 @@ const mcpCommand = Command.make(
   )
 )
 
+const chatCommand = Command.make(
+  "chat",
+  {
+    space: Flag.String("space").pipe(
+      Flag.optional,
+      Flag.withDescription("The Chat space, spaces/AAAA… or its id (default LLM4TS_CHAT_SPACE)")
+    ),
+    trigger: Flag.String("trigger").pipe(
+      Flag.optional,
+      Flag.withDescription(
+        "The word a request starts with (default LLM4TS_CHAT_TRIGGER, else /bot)"
+      )
+    ),
+    marker: Flag.String("marker").pipe(
+      Flag.optional,
+      Flag.withDescription("What every message the Chief posts starts with (default 🌙 chief:)")
+    ),
+    allow: Flag.String("allow").pipe(
+      Flag.atLeast(0),
+      Flag.withDescription(
+        "A user id (users/…) who may ask besides you, repeatable; --observe prints senders' ids"
+      )
+    ),
+    flows: Flag.String("flows").pipe(
+      Flag.optional,
+      Flag.withDescription("Flows the Chief may start, comma-separated (default implement)")
+    ),
+    interval: Flag.Int("interval").pipe(
+      Flag.optional,
+      Flag.withDescription("Seconds between looks at the space (default 5)")
+    ),
+    observe: Flag.Boolean("observe").pipe(
+      Flag.withDefault(false),
+      Flag.withDescription("Read and decide, but post nothing and start nothing; print instead")
+    )
+  },
+  (flags) =>
+    Effect.gen(function* () {
+      const cwd = process.cwd()
+      const settings = yield* verbEnvironment(cwd)
+      const options = yield* chatOptionsFrom(flags, settings)
+      // SIGINT/SIGTERM end the loop; closing its scope stops the runs it started.
+      yield* runChatUntilSignal(
+        nodeChatDeps(options, cwd, shellTierPaths({ cwd }), settings),
+        process
+      )
+    })
+).pipe(
+  Command.withDescription(
+    "Bind this repository to a Google Chat space: a Chief of Staff answers /bot, starts flows and posts progress"
+  )
+)
+
 const doctorCommand = Command.make(
   "doctor",
   {
@@ -1255,6 +1309,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     rosterCommand,
     geminiBridgeCommand,
     mcpCommand,
+    chatCommand,
     toolCommand,
     configCommand,
     doctorCommand

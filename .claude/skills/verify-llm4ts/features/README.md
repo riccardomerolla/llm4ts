@@ -42,6 +42,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Run a flow](./run-flow.md) covers `run implement` end to end against a stubbed coding agent.
 - [Tool catalog](./tool-catalog.md) covers `tool list`, `tool describe` and `tool run`, with passing and failing reports.
 - [Run reports](./run-reports.md) covers `costs` and `profile` over a finished run.
+- [Chat](./chat.md) covers `llm4ts chat` against a stand-in `gws` space: listen, answer, start a run, observe, stop.
 - [Config files](./config.md) covers `config show`, `set`, `unset`, `init` and the guided `config edit`, `run --set`, the launch warnings and the required-setting preflight.
 
 Not mapped yet: the modernize, epic, port, soap, roundtable and taskforce flows, `graph`, `roster`, and the interactive surfaces named under "Not covered" in the skill.

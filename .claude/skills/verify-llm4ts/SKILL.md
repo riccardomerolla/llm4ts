@@ -97,3 +97,4 @@ Each run has its own sandbox, so runs can go side by side. Never point `$V cli` 
 - `verify.sh` is the harness. Commands: `build`, `doctor`, `new`, `path`, `stub`, `cli`, `snapshot`, `cleanup`, `help`.
 - `term.sh` is the terminal driver for interactive commands. Commands: `start`, `keys`, `shot`, `stop`. It needs tmux.
 - `stubs/implement.cjs` is the responder for the `implement` flow.
+- `stubs/chief.cjs` answers the Chief behind `llm4ts chat` and the runs it starts; `stubs/gws.cjs` is a stand-in `gws` for a Chat space ([features/chat.md](features/chat.md)).

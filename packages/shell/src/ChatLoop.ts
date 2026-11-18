@@ -1,4 +1,4 @@
-// @internal: the chat loop behind `llm4ts chat`; wired by the chat verb (plan task 8)
+// @internal: the chat loop behind `llm4ts chat`, run only by that verb
 import { join } from "node:path"
 import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"

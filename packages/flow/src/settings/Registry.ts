@@ -30,6 +30,7 @@ export const settingGroups = [
   ["telemetry", "OpenTelemetry and usage estimates"],
   ["gemini-bridge", "Gemini bridge"],
   ["operator", "MCP operator"],
+  ["chat", "Google Chat"],
   ["launch", "Set by llm4ts"]
 ] as const
 
@@ -776,6 +777,24 @@ export const settings = {
     value: Value.text,
     fallback: fallback.off("no HTTP transport without --token-file"),
     doc: "The bearer token of `llm4ts mcp --http`; never reaches a flow."
+  }),
+
+  // ---- chat -------------------------------------------------------------------
+  LLM4TS_CHAT_SPACE: setting({
+    group: "chat",
+    scope: "project",
+    shellOnly: true,
+    value: Value.text,
+    fallback: fallback.off("none; `llm4ts chat` then needs --space"),
+    doc: "The Google Chat space `llm4ts chat` binds this repository to: spaces/AAAA… or its id. `--space` wins over it."
+  }),
+  LLM4TS_CHAT_TRIGGER: setting({
+    group: "chat",
+    scope: "project",
+    shellOnly: true,
+    value: Value.text,
+    fallback: fallback.value("/bot", "/bot"),
+    doc: "The word a Chat message starts with to reach the Chief of Staff in `llm4ts chat`. `--trigger` wins over it."
   }),
 
   // ---- launch -----------------------------------------------------------------

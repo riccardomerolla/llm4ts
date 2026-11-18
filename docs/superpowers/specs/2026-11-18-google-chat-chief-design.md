@@ -1,7 +1,7 @@
 # Google Chat Chief of Staff: design
 
-Status: draft, not built · Date: 2026-11-18 · Becomes ADR 0052 or the next
-free number when accepted
+Status: built, accepted as [ADR 0052](../../adr/0052-google-chat-chief.md) ·
+Date: 2026-11-18
 
 ## Intent
 

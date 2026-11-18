@@ -1,6 +1,6 @@
 # Pi gate tools: plan
 
-Status: draft, not built · Date: 2026-11-15 · Becomes ADR 0052 when accepted
+Status: draft, not built · Date: 2026-11-15 · Becomes an ADR (the next free number) when accepted
 
 ## Problem
 
@@ -116,7 +116,7 @@ Each step ends in a check.
 7. **Drive the real CLI.** Use the `verify-llm4ts` skill with a stub `pi`
    that records its argv and loads the extension. Check: a captured run
    whose argv has no `bash` and has the gate tools.
-8. **ADR 0052, docs, changelog.**
+8. **The ADR (the next free number), docs, changelog.**
 9. **Prove it on the customer's model.** This is the gate for changing the
    default, and only the operator can run it.
 

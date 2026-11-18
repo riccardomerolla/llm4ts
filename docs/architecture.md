@@ -72,7 +72,13 @@ readers of finished and running runs live here too:
 `Costs`, `Profile`, `Watch`, `RunReaders` and `StoryReaders` back
 `llm4ts costs`, `profile`, `watch` and the operator's run and story views.
 They read traces and boards with `@llm4ts/flow` and present events with
-`@llm4ts/runner/EventPresentation`.
+`@llm4ts/runner/EventPresentation`. `llm4ts chat` (ADR 0052) is a loop in
+the shell over the operator's run supervisor (ADR 0041): `ChatLoop` polls a
+Google Chat space through `@llm4ts/flow/GoogleChatTool`, hands each request
+to the bundled read-only `chief` flow for one typed `ChiefAction`, acts on
+it through the supervisor, and keeps its state in `ChatState` under
+`<repo>/.llm4ts/chat/`; `ChatNode` wires it to Node. The shell still calls
+no model itself: the decision runs as a flow.
 
 ## JavaScript facade
 

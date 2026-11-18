@@ -1,5 +1,29 @@
 # Changelog
 
+## 4.9.0
+
+### Added
+
+- **`llm4ts chat --space <space>`: a Chief of Staff in Google Chat** (ADR
+  0052, [guide](docs/google-chat.md)). Run in a repository, it binds that
+  repository to one space until Ctrl-C. A message starting with `/bot`
+  (`--trigger`) from you, or from an id you `--allow`, gets a reply in its
+  thread: an answer about the repository's runs, a run of an allowed flow
+  started (`--flows`, default `implement`), a run stopped, or a decline.
+  Runs it started post their plan, task progress and ending line (outcome,
+  duration, cost, branch, commits), at most one line per run per 30
+  seconds. `--observe` reads and decides but posts and starts nothing.
+  Messages go through the `gws` CLI (0.22.5 up to 0.23.0) and its login;
+  llm4ts passes no credential. Each decision runs as the new read-only
+  `chief` flow, so it is traced and costed; its seat must enforce
+  read-only. State lives in `.llm4ts/chat/<space-id>/`. Not yet checked
+  against a real Workspace space.
+- **Settings `LLM4TS_CHAT_SPACE` and `LLM4TS_CHAT_TRIGGER`**, for the
+  project's `config.env`; a flag wins.
+- **`@llm4ts/flow/GoogleChatTool`** (list and create Chat messages through
+  `gws`), **`@llm4ts/flow/ChiefAction`** (the typed decision), and
+  `plainProgressLine` in `@llm4ts/runner/RunSummary`.
+
 ## 4.8.0
 
 ### Changed

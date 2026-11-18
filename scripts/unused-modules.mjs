@@ -26,8 +26,7 @@ const BIN_ONLY = new Set(["shell"])
 const ALLOWED = {
   "packages/core/src/eval/Checks.ts": "eval library, public API",
   "packages/core/src/eval/EvalSuite.ts": "eval library, public API",
-  "packages/flow/src/BasecampTool.ts": "consumed by sibling projects",
-  "packages/shell/src/ChatLoop.ts": "wired by the chat verb (plan task 8)"
+  "packages/flow/src/BasecampTool.ts": "consumed by sibling projects"
 }
 
 const skipDirs = new Set(["node_modules", "dist", ".repos", "repos", ".git", ".llm4ts", ".claude"])
