@@ -27,8 +27,7 @@ const ALLOWED = {
   "packages/core/src/eval/Checks.ts": "eval library, public API",
   "packages/core/src/eval/EvalSuite.ts": "eval library, public API",
   "packages/flow/src/BasecampTool.ts": "consumed by sibling projects",
-  "packages/flow/src/GoogleChatTool.ts": "wired by the chat verb (plan task 8)",
-  "packages/shell/src/ChatState.ts": "wired by the chat verb (plan task 8)"
+  "packages/shell/src/ChatLoop.ts": "wired by the chat verb (plan task 8)"
 }
 
 const skipDirs = new Set(["node_modules", "dist", ".repos", "repos", ".git", ".llm4ts", ".claude"])
