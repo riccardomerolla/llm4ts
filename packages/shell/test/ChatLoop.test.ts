@@ -173,16 +173,23 @@ const message = (text: string, fields: Partial<ChatMessage> = {}): ChatMessage =
 
 describe("selectRequests", () => {
   it("ignores its own messages by name, and by marker once the names are gone", () => {
-    const byName = message("/bot hello", { name: "spaces/AAA/messages/mine" })
-    const byMarker = message(`${marker} /bot hello`, { name: "spaces/AAA/messages/other" })
+    // A marker that begins with the trigger: only the marker filter can drop these.
+    const triggerMarker = ChatState.make({ ...initial, marker: "/bot says:" })
+    const byName = message("/bot says: hello", { name: "spaces/AAA/messages/mine" })
+    const byMarker = message("/bot says: hello", { name: "spaces/AAA/messages/other" })
     const kept = selectRequests(
-      ChatState.make({ ...initial, posted: [byName.name] }),
+      ChatState.make({ ...triggerMarker, posted: [byName.name] }),
       [byName, byMarker],
       options
     )
     assert.deepStrictEqual(kept.selected, [])
-    const emptied = selectRequests(initial, [byMarker], options)
+    const emptied = selectRequests(triggerMarker, [byMarker], options)
     assert.deepStrictEqual(emptied.selected, [])
+    // Without the marker filter the same message is a request.
+    assert.deepStrictEqual(
+      selectRequests(initial, [byMarker], options).selected.map((s) => s._tag),
+      ["Request"]
+    )
   })
 
   it("reads /bot alone as Help and ignores /bots", () => {
@@ -212,6 +219,7 @@ describe("selectRequests", () => {
     assert.deepStrictEqual(tags(initial, ["users/friend"]), ["Request", "Stranger", "Request"])
     const ownerless = ChatState.make({ ...initial, ownerId: undefined })
     assert.deepStrictEqual(tags(ownerless, []), ["Stranger", "Stranger", "Stranger"])
+    assert.deepStrictEqual(tags(ownerless, ["users/friend"]), ["Stranger", "Stranger", "Stranger"])
   })
 
   it("ignores app, senderless and empty messages and moves the cursor past them", () => {
@@ -515,7 +523,7 @@ describe("handleBeat", () => {
         })
         yield* chat.add("/bot fix", { senderName: "users/friend", senderDisplayName: "Ada" })
         yield* chat.add("/bot hi", { senderName: "users/eve", senderDisplayName: "Eve" })
-        yield* handleBeat(deps, ChatState.make({ ...initial, ownerId: undefined }))
+        yield* handleBeat(deps, initial)
         assert.deepStrictEqual(yield* chat.posted, [])
         assert.deepStrictEqual(yield* fake.started, [])
         assert.deepStrictEqual(yield* Ref.get(lines), [
@@ -527,6 +535,56 @@ describe("handleBeat", () => {
         ])
       })
     )
+  )
+
+  it.effect("with no owner id an --allow'ed sender is a stranger: printed, never decided", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { deps, chat, fake, lines, contexts } = yield* setup([startRun("implement", "fix")], {
+          observe: true,
+          allow: ["users/friend"]
+        })
+        yield* chat.add("/bot fix", { senderName: "users/friend", senderDisplayName: "Ada" })
+        yield* handleBeat(deps, ChatState.make({ ...initial, ownerId: undefined }))
+        assert.deepStrictEqual(yield* chat.posted, [])
+        assert.deepStrictEqual(yield* fake.started, [])
+        assert.deepStrictEqual(yield* Ref.get(contexts), [])
+        assert.deepStrictEqual(yield* Ref.get(lines), [
+          "/bot from users/friend (Ada)",
+          `would reply: ${strangerReply}`
+        ])
+      })
+    )
+  )
+
+  it.effect(
+    "a replayed StartRun names its live run and touches neither git nor the supervisor",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { deps, chat, fake, gitLog, memory } = yield* setup([
+            startRun("implement", "fix"),
+            startRun("implement", "fix")
+          ])
+          yield* chat.add("/bot fix")
+          yield* handleBeat(deps, initial)
+          // The same message again, as after a restart that lost the cursor.
+          yield* handleBeat(deps, initial)
+          assert.strictEqual((yield* fake.started).length, 1)
+          assert.deepStrictEqual(yield* Ref.get(gitLog), ["checkout:main"])
+          const [run] = yield* deps.supervisor.list(repo.id)
+          assert.strictEqual(run?.state, "running")
+          const posted = texts(yield* chat.posted)
+          assert.strictEqual(posted.length, 2)
+          assert.include(posted[1] ?? "", `(run ${run?.runId ?? "?"})`)
+          const requests = yield* loadRequests(memory.store, dir)
+          assert.deepStrictEqual(
+            requests.map((r) => [r.status, r.runId]),
+            [["started", run?.runId]]
+          )
+          yield* fake.exit(run?.pid ?? 0, { code: 0, signal: undefined })
+        })
+      )
   )
 
   it.effect("fails on GwsLoginRequired from listMessages", () =>

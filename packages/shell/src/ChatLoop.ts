@@ -115,9 +115,9 @@ const bodyAfter = (text: string, trigger: string): string | undefined => {
 
 /**
  * Which messages to act on. This decides who may start coding runs: only a
- * person (`HUMAN`) who is the owner or named in `allow`; with no owner id
- * nobody but `allow` is. The Chief's own messages are known by name and by
- * marker.
+ * person (`HUMAN`) who is the owner or named in `allow`, and with no owner id
+ * nobody at all, `allow` included. The Chief's own messages are known by
+ * name and by marker.
  */
 export const selectRequests = (
   state: ChatState,
@@ -142,7 +142,7 @@ export const selectRequests = (
     const body = bodyAfter(message.text, options.trigger)
     if (body === undefined) continue
     const allowed =
-      (state.ownerId !== undefined && sender === state.ownerId) || options.allow.includes(sender)
+      state.ownerId !== undefined && (sender === state.ownerId || options.allow.includes(sender))
     if (!allowed) selected.push({ _tag: "Stranger", message })
     else if (body === "") selected.push({ _tag: "Help", message })
     else selected.push({ _tag: "Request", message, body })
@@ -324,10 +324,18 @@ const startRun = (
         reply: `I can't start that: ${valid.failure.message}.`
       } satisfies Outcome
     }
+    const runs = yield* deps.supervisor.list(deps.repo.id)
+    // A replayed request: its run exists, so git and the supervisor stay untouched.
+    const already = runs.find((run) => run.requestId === message.name)
+    if (already !== undefined) {
+      return {
+        status: "started",
+        reply: `${action.reply} (run ${already.runId})`,
+        runId: already.runId
+      } satisfies Outcome
+    }
     // The checkout below would pull the tree from under a run that is working in it.
-    const busy = (yield* deps.supervisor.list(deps.repo.id)).find(
-      (run) => isActive(run) && run.flow !== "chief" && run.requestId !== message.name
-    )
+    const busy = runs.find((run) => isActive(run) && run.flow !== "chief")
     if (busy !== undefined) {
       return { status: "refused", reply: busyReply(busy), runId: busy.runId } satisfies Outcome
     }
