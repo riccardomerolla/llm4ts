@@ -205,16 +205,15 @@ so the Chief can answer while a writing run is busy. The loop leaves
 `chief` runs out of the run list it hands the Chief, so it does not
 report on itself; `llm4ts costs` shows them, which is right.
 
-**The seat's hands.** With an API connector the Chief has no tools at
-all. With a CLI harness (claude, gemini, pi) the planner seat is a
-coding agent started in the repository, and the request text is written
-by people in a chat. The `chief` flow therefore refuses to start unless
-the seat is an API connector or a CLI whose read-only grade is
-`enforced` (`readOnlyEnforcement`). On such a seat the Chief can read
-the repository but cannot write or run commands. A request that tries to
-talk it into something else can at worst produce a wrong reply or a
-`StartRun` of an allowed flow, which the sender was allowed to ask for
-anyway.
+**The seat's hands.** As built (ADR 0052), the Chief runs on the
+reasoner CLI named by `LLM4TS_REASONER`, toolless, and never on a roster
+seat: the `chief` flow passes `roster: "none"`, so the seat that is
+checked is the seat that is used. The request text is written by people
+in a chat, so the flow refuses to start unless that CLI's read-only
+grade is `enforced` (`readOnlyEnforcement`). The Chief can neither read
+the repository nor run commands. A request that tries to talk it into
+something else can at worst produce a wrong reply or a `StartRun` of an
+allowed flow, which the sender was allowed to ask for anyway.
 
 ### ChatLoop (`packages/shell/src/ChatLoop.ts`)
 
@@ -427,8 +426,8 @@ the Chief's lines. That is the visible cost of the personal token.
   user id, not email, so login needs the Chat message scopes only.
 - Each decision runs as a small read-only `chief` flow, so it is traced
   and costed like any run.
-- The Chief's seat must be an API connector or a CLI with enforced
-  read-only; otherwise the verb refuses to start.
+- The Chief's seat is the reasoner CLI, toolless, never a roster seat,
+  and must enforce read-only; otherwise the verb refuses to start.
 - Before each writing run the loop returns to the branch it started on,
   and refuses when the tree is dirty.
 - Replies carry a marker and are also recognised by message name.
