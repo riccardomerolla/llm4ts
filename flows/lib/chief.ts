@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import type { CliConnectorConfig } from "@llm4ts/core/ConnectorConfig"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import {
   ChiefAction,
@@ -20,6 +21,7 @@ import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import { ScriptUsage } from "@llm4ts/runner/FlowArgs"
+import type { FlowRunnerOptions } from "@llm4ts/runner/FlowRunner"
 
 const ChiefContextJson = Schema.fromJsonString(ChiefContext)
 const ChiefActionJson = Schema.fromJsonString(ChiefAction)
@@ -43,6 +45,26 @@ export const loadChiefContext = (
     )
   )
 }
+
+/**
+ * The chief run's options: the toolless reasoner holds every seat, and no
+ * roster replaces it, so the seat checked before the run is the one it uses.
+ */
+export const chiefRunOptions = (
+  given: { readonly workDir: string; readonly workspace: string },
+  reasoning: CliConnectorConfig,
+  context: ChiefContext,
+  environment: Readonly<Record<string, string | undefined>>
+): FlowRunnerOptions => ({
+  workDir: given.workDir,
+  workspace: given.workspace,
+  userPrompt: `chief decision for ${context.messageName}`,
+  // No coder turn is ever taken: the toolless reasoning seat fills both.
+  coder: reasoning,
+  reasoning,
+  roster: "none",
+  environment
+})
 
 const failed: ChiefAction = { _tag: "Failed", reply: failedReply }
 

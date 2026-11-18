@@ -174,6 +174,7 @@ const capabilityRegistry = createConnectorRegistry({
  */
 export const readOnlySeatProblem = (config: CliConnectorConfig): string | undefined => {
   const name = config.connectorId.value
+  // runSync holds only while every connector factory's `create` is synchronous.
   return Effect.runSync(
     capabilityRegistry.resolve(config).pipe(
       Effect.match({

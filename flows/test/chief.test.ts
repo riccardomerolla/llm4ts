@@ -1,13 +1,24 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+import { CliConnectorConfig, type ConnectorConfig } from "@llm4ts/core/ConnectorConfig"
+import { makeConnectorRegistry } from "@llm4ts/core/ConnectorRegistry"
 import { ProviderError } from "@llm4ts/core/Errors"
 import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { ChiefAction, ChiefContext, failedReply } from "@llm4ts/flow/ChiefAction"
 import { makeCollectingFlowEvents } from "@llm4ts/flow/FlowEvents"
 import { makeMemoryPlainFileStore } from "@llm4ts/flow/Persistence"
+import { ExecutorSpec, RosterDocument } from "@llm4ts/flow/Roster"
+import { ConnectorIds, LlmChunk, LlmConfig, type ConnectorId } from "@llm4ts/core/Models"
+import { makeFakeProcessExecutor } from "@llm4ts/core/ProcessExecutor"
+import { makeMockProvider } from "@llm4ts/core/providers/MockProvider"
+import { collect } from "@llm4ts/core/Streaming"
 import { ScriptUsage } from "@llm4ts/runner"
-import { loadChiefContext, runChief } from "../lib/chief.ts"
+import { asToolless, claude } from "@llm4ts/runner/Connectors"
+import { runEmbedded } from "@llm4ts/runner/FlowRunner"
+import { chiefRunOptions, loadChiefContext, runChief } from "../lib/chief.ts"
 import { scripted } from "./support.ts"
 
 const actionPath = "/repo/.llm4ts/chat/space-1/actions/msg-1.json"
@@ -135,5 +146,70 @@ describe("loadChiefContext", () => {
       assert.instanceOf(failure, ScriptUsage)
       assert.include(failure.message, contextPath)
     })
+  )
+})
+
+describe("chiefRunOptions", () => {
+  it.effect("keeps the toolless reasoner on the seat when a roster is present", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const resolved = yield* Ref.make<ReadonlyArray<string>>([])
+        const answer = () => Stream.make(LlmChunk.make({ delta: "ok", finishReason: "stop" }))
+        const mock = {
+          ...makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" })),
+          executeStream: answer,
+          executeStreamWithHistory: answer
+        }
+        const factory = (id: ConnectorId) => ({
+          connectorId: id,
+          kind: "Cli" as const,
+          create: (config: ConnectorConfig) =>
+            Ref.update(resolved, (all) => [
+              ...all,
+              `${id.value}${config instanceof CliConnectorConfig && config.noTools ? " toolless" : ""}`
+            ]).pipe(Effect.as(mock))
+        })
+        const memory = yield* makeMemoryPlainFileStore()
+        // A repository roster whose planner would otherwise hold the reasoning seat.
+        yield* memory.store.writeAtomic(
+          "/repo/.llm4ts/roster.json",
+          Schema.encodeSync(Schema.fromJsonString(RosterDocument))(
+            RosterDocument.make({
+              executors: [
+                ExecutorSpec.make({
+                  id: "codex",
+                  harness: "codex",
+                  roles: ["coder", "planner", "reviewer", "judge"]
+                })
+              ]
+            })
+          )
+        )
+        const process = yield* makeFakeProcessExecutor()
+        yield* runEmbedded(
+          {
+            ...chiefRunOptions(
+              { workDir: "/repo", workspace: "/repo" },
+              asToolless(claude),
+              context,
+              { HOME: "/home/op" }
+            ),
+            persistRun: false
+          },
+          (flow) => collect(flow.reasoning.executeStream("decide")),
+          {
+            registry: makeConnectorRegistry([
+              factory(ConnectorIds.ClaudeCli),
+              factory(ConnectorIds.Codex)
+            ]),
+            process: process.executor,
+            files: memory.store
+          }
+        )
+        const seats = yield* Ref.get(resolved)
+        assert.isAbove(seats.length, 0)
+        for (const seat of seats) assert.strictEqual(seat, "claude-cli toolless")
+      })
+    )
   )
 })
