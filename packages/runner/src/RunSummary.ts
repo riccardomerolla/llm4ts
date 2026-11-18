@@ -88,10 +88,12 @@ export const plainProgressLine = (
     const count =
       commits === undefined ? "" : `, ${commits} ${commits === 1 ? "commit" : "commits"}`
     const where = branch === undefined ? "" : ` Branch ${branch}${count}.`
-    return `${runId} finished ${outcome} in ${minutes} min, $${costUsd.toFixed(2)}.${where}`
+    return `${runId} ${outcome} in ${minutes} min, $${costUsd.toFixed(2)}.${where}`
   }
   if (next.tasksTotal === 0) return undefined
-  if (previous === undefined) return `${runId}: plan written, ${next.tasksTotal} tasks`
+  if (previous === undefined) {
+    return `${runId}: plan written, ${next.tasksTotal} ${next.tasksTotal === 1 ? "task" : "tasks"}`
+  }
   if (previous.tasksDone === next.tasksDone && previous.tasksTotal === next.tasksTotal)
     return undefined
   return `${runId}: task ${next.tasksDone} of ${next.tasksTotal} done`

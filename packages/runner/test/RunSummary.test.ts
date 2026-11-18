@@ -75,6 +75,10 @@ describe("plainProgressLine", () => {
   it("announces the plan once, then each task that finishes", () => {
     assert.strictEqual(plainProgressLine(id, undefined, at(0)), "op-1-ab12: plan written, 4 tasks")
     assert.strictEqual(plainProgressLine(id, at(1), at(2)), "op-1-ab12: task 2 of 4 done")
+    assert.strictEqual(
+      plainProgressLine(id, undefined, at(0, 1)),
+      "op-1-ab12: plan written, 1 task"
+    )
   })
 
   it("says nothing when nothing changed or there is no plan", () => {
@@ -85,11 +89,15 @@ describe("plainProgressLine", () => {
   it("closes with outcome, time, cost, branch and commits", () => {
     assert.strictEqual(
       plainProgressLine(id, at(3), { ...at(4), ended }),
-      "op-1-ab12 finished completed in 11 min, $1.37. Branch llm4ts/csv-export, 4 commits."
+      "op-1-ab12 completed in 11 min, $1.37. Branch llm4ts/csv-export, 4 commits."
     )
     assert.strictEqual(
       plainProgressLine(id, at(3), { ...at(3), ended: withoutBranch }),
-      "op-1-ab12 finished completed in 11 min, $1.37."
+      "op-1-ab12 completed in 11 min, $1.37."
+    )
+    assert.strictEqual(
+      plainProgressLine(id, at(3), { ...at(4), ended: { ...ended, commits: 1 } }),
+      "op-1-ab12 completed in 11 min, $1.37. Branch llm4ts/csv-export, 1 commit."
     )
   })
 })
