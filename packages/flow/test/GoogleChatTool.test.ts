@@ -16,6 +16,7 @@ import {
   checkGwsVersion,
   gwsVersionRange,
   makeGoogleChatTool,
+  maxMessagePages,
   messageCreateArgs,
   messagesListArgs,
   parseMessage,
@@ -234,6 +235,106 @@ describe("Google Chat tool", () => {
       const chat = makeGoogleChatTool(fake.executor, "/repo", events)
       const error = yield* Effect.flip(chat.createMessage(space, "hi"))
       assert.strictEqual(error._tag, "Process")
+    })
+  )
+
+  it.effect("keeps only gws's error code and reason, never its message text", () =>
+    Effect.gen(function* () {
+      const secret = "/home/op/.config/gws/credentials.json"
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["gws", ...messageCreateArgs(space, "hi")]),
+            ProcessResult.make({
+              stdout: [
+                JSON.stringify({
+                  error: { code: 403, message: `cannot read ${secret}`, reason: "forbidden" }
+                })
+              ],
+              stderr: [`GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=${secret}`],
+              exitCode: 1
+            })
+          ]
+        ])
+      })
+      const events = yield* makeCollectingFlowEvents
+      const chat = makeGoogleChatTool(fake.executor, "/repo", events)
+      const error = yield* Effect.flip(chat.createMessage(space, "hi"))
+      assert.strictEqual(error._tag, "Process")
+      const text = JSON.stringify(error)
+      assert.notInclude(text, secret)
+      assert.notInclude(text, "CREDENTIALS")
+      if (error._tag === "Process") assert.strictEqual(error.detail, "gws error 403 forbidden")
+    })
+  )
+
+  it.effect("says only the exit code when gws's output is not its error envelope", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["gws", ...messageCreateArgs(space, "hi")]),
+            ProcessResult.make({
+              stdout: ["could not open /home/op/.config/gws/credentials.json"],
+              exitCode: 3
+            })
+          ]
+        ])
+      })
+      const events = yield* makeCollectingFlowEvents
+      const chat = makeGoogleChatTool(fake.executor, "/repo", events)
+      const error = yield* Effect.flip(chat.createMessage(space, "hi"))
+      if (error._tag !== "Process") return assert.fail(`unexpected ${error._tag}`)
+      assert.strictEqual(error.detail, "exit code 3")
+    })
+  )
+
+  it.effect("stops listing when a page token repeats", () =>
+    Effect.gen(function* () {
+      const page = (token: string) => JSON.stringify({ messages: [], nextPageToken: token })
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["gws", ...messagesListArgs(space, after)]),
+            ProcessResult.make({ stdout: [page("SAME")], exitCode: 0 })
+          ],
+          [
+            processCommandKey(["gws", ...messagesListArgs(space, after, "SAME")]),
+            ProcessResult.make({ stdout: [page("SAME")], exitCode: 0 })
+          ]
+        ])
+      })
+      const events = yield* makeCollectingFlowEvents
+      const chat = makeGoogleChatTool(fake.executor, "/repo", events)
+      const error = yield* Effect.flip(chat.listMessages(space, after))
+      if (error._tag !== "Process") return assert.fail(`unexpected ${error._tag}`)
+      assert.include(error.detail, "repeated a page token")
+      assert.lengthOf(yield* fake.recorded, 2)
+    })
+  )
+
+  it.effect("stops listing after the page cap", () =>
+    Effect.gen(function* () {
+      const page = (n: number) => JSON.stringify({ messages: [], nextPageToken: `P${n + 1}` })
+      const responses = new Map([
+        [
+          processCommandKey(["gws", ...messagesListArgs(space, after)]),
+          ProcessResult.make({ stdout: [page(1)], exitCode: 0 })
+        ]
+      ])
+      for (let n = 2; n <= maxMessagePages + 5; n++) {
+        responses.set(
+          processCommandKey(["gws", ...messagesListArgs(space, after, `P${n}`)]),
+          ProcessResult.make({ stdout: [page(n)], exitCode: 0 })
+        )
+      }
+      const fake = yield* makeFakeProcessExecutor({ responses })
+      const events = yield* makeCollectingFlowEvents
+      const chat = makeGoogleChatTool(fake.executor, "/repo", events)
+      const error = yield* Effect.flip(chat.listMessages(space, after))
+      if (error._tag !== "Process") return assert.fail(`unexpected ${error._tag}`)
+      assert.include(error.detail, `${maxMessagePages} pages`)
+      assert.lengthOf(yield* fake.recorded, maxMessagePages)
     })
   )
 

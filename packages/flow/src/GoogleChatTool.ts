@@ -44,6 +44,9 @@ export const gwsVersionRange: { readonly min: string; readonly below: string } =
 
 const pageSize = 100
 
+/** At most this many pages per listing: 5,000 messages between two beats is not a conversation. */
+export const maxMessagePages = 50
+
 export const messagesListArgs = (
   space: SpaceRef,
   after: string,
@@ -184,11 +187,20 @@ export const checkGwsVersion = (stdout: string): Effect.Effect<void, ProcessErro
       )
 }
 
-const isLoginRequired = (stdout: string): boolean => {
-  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(GwsErrorResponse))(stdout)
-  return decoded._tag === "Some"
-    ? decoded.value.error.reason === "authError" || decoded.value.error.code === 401
-    : false
+const decodeGwsError = Schema.decodeUnknownOption(Schema.fromJsonString(GwsErrorResponse))
+
+const isLoginRequired = (error: GwsErrorBody): boolean =>
+  error.reason === "authError" || error.code === 401
+
+/**
+ * What a failed gws call says, without its own words: those can name the
+ * credentials-file variable or a path. Only the envelope's code and reason.
+ */
+const failureDetail = (error: GwsErrorBody | undefined, exitCode: number): string => {
+  const parts = [error?.code?.toString(), error?.reason].filter(
+    (part): part is string => part !== undefined && part !== ""
+  )
+  return parts.length === 0 ? `exit code ${exitCode}` : `gws error ${parts.join(" ")}`
 }
 
 export interface GoogleChatToolShape {
@@ -221,64 +233,62 @@ export const makeGoogleChatTool = (
           detail: error.message
         })
       ),
-      Effect.flatMap(
-        (result): Effect.Effect<ProcessResult, FlowError | GwsLoginRequired> =>
-          result.exitCode === 0
-            ? Effect.succeed(result)
-            : isLoginRequired(output(result))
-              ? Effect.fail(GwsLoginRequired.make({ message: loginRequiredMessage }))
-              : Effect.fail(
-                  ProcessError.make({
-                    message: `gws ${args.join(" ")}`,
-                    detail:
-                      [...result.stdout, ...result.stderr].join("\n").trim() ||
-                      `exit code ${result.exitCode}`
-                  })
-                )
-      )
+      Effect.flatMap((result): Effect.Effect<ProcessResult, FlowError | GwsLoginRequired> => {
+        if (result.exitCode === 0) return Effect.succeed(result)
+        const decoded = decodeGwsError(output(result))
+        const error = decoded._tag === "Some" ? decoded.value.error : undefined
+        return error !== undefined && isLoginRequired(error)
+          ? Effect.fail(GwsLoginRequired.make({ message: loginRequiredMessage }))
+          : Effect.fail(
+              ProcessError.make({
+                message: `gws ${args.join(" ")}`,
+                detail: failureDetail(error, result.exitCode)
+              })
+            )
+      })
     )
 
   const gws = Capabilities.Exec("gws")
   const guard = <A, E>(operation: string, effect: Effect.Effect<A, E>) =>
     guarded(gws, operation, events, effect)
 
+  const listFailed = (detail: string): ProcessError =>
+    ProcessError.make({ message: "gws chat spaces messages list", detail })
+
   const listPages = (
     space: SpaceRef,
     after: string,
     pageToken: string | undefined,
+    seen: ReadonlySet<string>,
     collected: ReadonlyArray<ChatMessage>
   ): Effect.Effect<ReadonlyArray<ChatMessage>, FlowError | GwsLoginRequired> =>
     run(messagesListArgs(space, after, pageToken)).pipe(
       Effect.flatMap((result) => parseMessages(output(result))),
       Effect.flatMap((page) => {
         const messages = [...collected, ...page.messages]
-        return page.nextPageToken === undefined
-          ? Effect.succeed(messages)
-          : listPages(space, after, page.nextPageToken, messages)
+        const token = page.nextPageToken
+        if (token === undefined) return Effect.succeed(messages)
+        if (seen.has(token)) return Effect.fail(listFailed("gws repeated a page token"))
+        if (seen.size + 1 >= maxMessagePages) {
+          return Effect.fail(listFailed(`more than ${maxMessagePages} pages of messages`))
+        }
+        return listPages(space, after, token, new Set([...seen, token]), messages)
       })
     )
 
   return {
     probe: guard(
       "gws --version",
-      process.run(["gws", "--version"], workDir, {}).pipe(
-        Effect.mapError((error) =>
-          ProcessError.make({ message: "gws --version", detail: error.message })
+      run(["--version"]).pipe(
+        // `--version` needs no login; an auth envelope here is still a failed probe.
+        Effect.catchTag("GwsLoginRequired", (error) =>
+          Effect.fail(ProcessError.make({ message: "gws --version", detail: error.message }))
         ),
-        Effect.flatMap((result) =>
-          result.exitCode === 0
-            ? checkGwsVersion(output(result))
-            : Effect.fail(
-                ProcessError.make({
-                  message: "gws --version",
-                  detail: `exit code ${result.exitCode}`
-                })
-              )
-        )
+        Effect.flatMap((result) => checkGwsVersion(output(result)))
       )
     ),
     listMessages: (space, after) =>
-      guard("gws chat spaces messages list", listPages(space, after, undefined, [])),
+      guard("gws chat spaces messages list", listPages(space, after, undefined, new Set(), [])),
     createMessage: (space, text, threadName) =>
       guard(
         "gws chat spaces messages create",
