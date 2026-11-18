@@ -47,6 +47,7 @@
     "./Gates": "./dist/Gates.js",
     "./GitHubTool": "./dist/GitHubTool.js",
     "./GitTool": "./dist/GitTool.js",
+    "./GoogleChatTool": "./dist/GoogleChatTool.js",
     "./GraphCache": "./dist/GraphCache.js",
     "./GraphQuery": "./dist/GraphQuery.js",
     "./GraphRender": "./dist/GraphRender.js",
