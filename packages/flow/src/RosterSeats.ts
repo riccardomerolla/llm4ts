@@ -118,6 +118,13 @@ export interface RosterSeatOptions {
   readonly borrow?: Effect.Effect<ExecutorSpec | undefined>
   /** Who is asking, for the events. */
   readonly label?: string
+  /**
+   * The role the leased executor is seated as, when not `role` itself: a
+   * judge slot seated as a coder writes (the rescuer, ADR 0054).
+   */
+  readonly seatAs?: Role
+  /** Told which executor took each call. */
+  readonly onLease?: (executor: string) => Effect.Effect<void>
 }
 
 /**
@@ -155,7 +162,10 @@ export const rosterSeat = (
     })
 
   const seatOf = (executor: ExecutorSpec): Effect.Effect<RosterSeat, LlmError> =>
-    source.seatFor(executor, role, workDir).pipe(Effect.mapError(asLlmError))
+    Effect.andThen(
+      options.onLease === undefined ? Effect.void : options.onLease(executor.id),
+      source.seatFor(executor, options.seatAs ?? role, workDir).pipe(Effect.mapError(asLlmError))
+    )
 
   /**
    * After a failure that took `executor` out of the round, whether another

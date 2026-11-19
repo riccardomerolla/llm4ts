@@ -392,6 +392,7 @@ export interface SeatConfigs {
   readonly reasoning?: ConnectorConfig
   readonly reviewers?: ReadonlyArray<ConnectorConfig>
   readonly judgment?: ConnectorConfig
+  readonly rescuer?: ConnectorConfig
 }
 
 /**
@@ -426,7 +427,8 @@ export const withSeatSettings = <S extends SeatConfigs>(seats: S, environment: E
     ),
     reasoning: other(reasoning),
     ...(seats.reviewers === undefined ? {} : { reviewers: seats.reviewers.map(other) }),
-    ...(seats.judgment === undefined ? {} : { judgment: other(seats.judgment) })
+    ...(seats.judgment === undefined ? {} : { judgment: other(seats.judgment) }),
+    ...(seats.rescuer === undefined ? {} : { rescuer: other(seats.rescuer) })
   }
 }
 

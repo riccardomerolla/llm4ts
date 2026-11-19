@@ -177,6 +177,9 @@ export const epicUsage = [
   "                      excused are written to debt.md (the coder is still asked for tests;",
   "                      a red test gate still fails). LLM4TS_DEFER_TESTS=1 sets it too",
   "  --harden            plan the epic's open debt as a refine round under the full bar",
+  "  --no-rescue         fail a story its last review round leaves open; by default the",
+  "                      judge's agent first takes the coder's seat for one rescue turn, then",
+  "                      the gates and the judge decide (ADR 0054). LLM4TS_RESCUE=off sets it",
   "  --no-test-first     plan a story's tasks straight from it; by default its coder first",
   "                      writes one test per acceptance criterion, proves them red with the",
   "                      test gate, and they are frozen (ADR 0053). LLM4TS_TEST_FIRST=off sets it",
@@ -2261,6 +2264,11 @@ export interface EpicStoriesOptions {
   readonly judgmentFromEnvironment?: boolean
   /** Write every JudgmentObserved to .llm4ts/judgments/<consumer>.jsonl. */
   readonly judgmentLog?: boolean
+  /**
+   * The rescue (ADR 0054): a story its last round would fail gets one turn
+   * by the judge's agent, with write access, before it fails.
+   */
+  readonly rescue?: boolean
 }
 
 /** The runner options the two flags above add; empty when neither is set. */
@@ -2392,6 +2400,8 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
         coder,
         reasoning,
         reviewers: [asReadOnly(reasoning)],
+        // The judge's agent, writable, for a story's rescue turn (ADR 0054).
+        ...(options.rescue === true ? { rescuer: reasoning } : {}),
         environment: storiesEnvironment(process.env),
         ...runnerOptions
       },
@@ -2860,6 +2870,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                 concurrency,
                 ...(deferring ? { deferNonBlocking: true } : {}),
                 failFast: flags.failFast,
+                ...(options.rescue === true ? { rescue: true } : {}),
                 ...(options.stories === undefined ? {} : options.stories(unitContext(work)))
               }
             )

@@ -527,6 +527,26 @@ export const storyTaskPlanInstructions = (story: Story): string =>
   ].join("\n")
 
 /**
+ * The rescuer's one turn (ADR 0054): the story, what is still open, and that
+ * the coder's rounds are spent, so the fix is the rescuer's to make now.
+ */
+export const rescuePrompt = (story: Story, why: string, standing: ReviewResult): string =>
+  [
+    `You are taking over story ${story.id} ("${story.title}") from its coder: ${why}.`,
+    "Fix what is still open below yourself, in this working tree, inside the story's owned",
+    "paths. Change production code; never change, skip or delete a frozen red test. Run the",
+    "checks you need, then stop: the gates and the judge decide whether the story merges.",
+    "",
+    story.description.trim(),
+    ...(story.acceptance.length === 0
+      ? []
+      : ["", "Done when:", ...story.acceptance.map((line) => `- ${line}`)]),
+    "",
+    "Still open:",
+    issueLines(standing)
+  ].join("\n")
+
+/**
  * What the task planner is told after a red phase (ADR 0053): the tests are
  * written and frozen, so the tasks write the production code that makes
  * them pass and never plan the tests again.
@@ -850,6 +870,14 @@ export interface StoriesOptions {
    * verdict judged under one bar is never reused under another.
    */
   readonly judgeBar?: string
+  /**
+   * The rescue (ADR 0054): when a story's last round would fail it, the
+   * context's `rescuer` (the judge's agent, with write access) takes the
+   * coder's seat for one turn on what is still open; the gates and one more
+   * judge verdict then decide. Off, or without a rescuer, the story fails as
+   * before.
+   */
+  readonly rescue?: boolean
   /**
    * Second opinion on a BLOCKED_ON claim the plan cannot settle (a path no
    * story owns, or a parallel story's). `real: false` sends the coder back
@@ -2186,6 +2214,66 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       })
 
     /**
+     * The rescue (ADR 0054): the story's last round left `standing` open, so
+     * the judge's agent takes the coder's seat for one turn, then the gates
+     * and one judge verdict decide. Undefined when no rescue is configured;
+     * the story's note when it cleared; the story fails otherwise.
+     */
+    const rescue = (
+      standing: ReviewResult,
+      why: string,
+      round: number
+    ): Effect.Effect<string | undefined, FlowError> =>
+      Effect.gen(function* () {
+        const rescuer = storyContext.rescuer
+        if (options.rescue !== true || rescuer === undefined) {
+          return undefined
+        }
+        yield* laneOf(story).publish(
+          Info.make({
+            lane: story.id,
+            message: `story ${story.id}: ${why}; the judge's agent takes the coder's seat for one rescue turn`
+          })
+        )
+        yield* stage(
+          laneOf(story),
+          `story ${story.id}: rescue`,
+          Effect.flatMap(makeChat(rescuer, { system, events, agent: "rescuer" }), (chat) =>
+            chat.ask(rescuePrompt(story, why, standing))
+          )
+        )
+        if ((yield* git.uncommittedFiles).length > 0) {
+          yield* git.commitAll(`${story.id}: rescue`)
+        }
+        yield* repairPerimeter
+        const reported = yield* Ref.make<ReadonlySet<string>>(new Set())
+        const regated = yield* applyTriage(yield* gates, triage, laneOf(story), reported)
+        if (!regated.isClean) {
+          return yield* failed(
+            story,
+            `${why}; the rescue left its gates red:\n${issueLines(regated)}`
+          )
+        }
+        if (options.judge === undefined) {
+          return "gates green after a rescue"
+        }
+        const { verdict } = yield* judgeOnce(options.judge, round)
+        if (!verdict.isClean && !(deferring && !verdict.issues.some(isBlocking))) {
+          return yield* failed(
+            story,
+            `${why}; judge not cleared after a rescue:\n${issueLines(verdict)}`
+          )
+        }
+        const waiting = nonBlockingIssues(verdict)
+        for (const issue of waiting) {
+          deferred.push(deferredLine(`judge after rescue`, issue))
+        }
+        return `judge cleared after a rescue (round ${round}${
+          waiting.length === 0 ? "" : `, ${waiting.length} finding(s) deferred`
+        })`
+      })
+
+    /**
      * The story review (ADR 0044): every lens and the judge on the story's
      * diff, one fix turn per round, re-checks after the first. Returns the
      * judge's note; fails the story when the judge is still not cleared.
@@ -2308,9 +2396,29 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           }
         })
         const rounds = yield* Ref.get(lastRound)
-        const left = result.issues
+        const reviewed = result.issues
         // Lenses and the judge always name themselves: a finding with no
         // lens is a gate's (target gates, oracle, perimeter, frozen tests).
+        const gateOpen = reviewed.filter((issue) => issue.lens === undefined)
+        const judgeOpen = reviewed.filter(
+          (issue) => issue.lens === "judge" && (!deferring || isBlocking(issue))
+        )
+        const roundsRan = `${rounds} story review round${rounds === 1 ? "" : "s"}`
+        const rescued =
+          gateOpen.length === 0 && judgeOpen.length === 0
+            ? undefined
+            : yield* rescue(
+                ReviewResult.make({ issues: [...gateOpen, ...judgeOpen] }),
+                gateOpen.length > 0
+                  ? `its gates are still red after ${roundsRan}`
+                  : `judge not cleared after ${roundsRan}`,
+                (yield* Ref.get(judgeRuns)) + 1
+              )
+        // A rescue that cleared the story answered the gates and the judge.
+        const left =
+          rescued === undefined
+            ? reviewed
+            : reviewed.filter((issue) => issue.lens !== undefined && issue.lens !== "judge")
         const gateLeft = left.filter((issue) => issue.lens === undefined)
         if (gateLeft.length > 0) {
           return yield* failed(
@@ -2343,11 +2451,14 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             ReviewResult.make({ issues: carried })
           )
         }
-        return judge === undefined
-          ? undefined
-          : `judge cleared (story review round ${rounds}${
-              waiting.length === 0 ? "" : `, ${waiting.length} finding(s) deferred`
-            })`
+        return (
+          rescued ??
+          (judge === undefined
+            ? undefined
+            : `judge cleared (story review round ${rounds}${
+                waiting.length === 0 ? "" : `, ${waiting.length} finding(s) deferred`
+              })`)
+        )
       })
 
     let judgeNote: string | undefined
@@ -2374,6 +2485,17 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         }
         if (round >= judgeRounds) {
           const revisions = `${round - 1} revision${round === 2 ? "" : "s"}`
+          const rescued = yield* rescue(
+            verdict,
+            empty
+              ? `the story's code is not in place after ${revisions}`
+              : `judge not cleared after ${revisions}`,
+            round + 1
+          )
+          if (rescued !== undefined) {
+            judgeNote = rescued
+            break
+          }
           return yield* failed(
             story,
             empty

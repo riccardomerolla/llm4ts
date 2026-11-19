@@ -529,6 +529,34 @@ describe("Roster seats", () => {
     )
   )
 
+  it.effect("a judge slot seated as a coder writes, and says who took it (ADR 0054)", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const leased = yield* Ref.make<ReadonlyArray<string>>([])
+        const roster = yield* makeRoster({ executors: [codex, claude], events })
+        const rescuer = rosterSeat(
+          roster,
+          { seatFor: seatFor(log, () => undefined) },
+          "judge",
+          "/wt/a",
+          {
+            events,
+            label: "story a",
+            seatAs: "coder",
+            onLease: (id) => Ref.update(leased, (all) => [...all, id])
+          }
+        )
+        const answer = yield* text(rescuer, "fix it")
+        const [line] = yield* Ref.get(log)
+        // Leased as a judge, seated (and so configured) as a coder.
+        assert.strictEqual(line, `${answer.replace(" ok", "")}:coder:fix it`)
+        assert.deepStrictEqual(yield* Ref.get(leased), [answer.replace(" ok", "")])
+      })
+    )
+  )
+
   it.effect("a per-call lease names what the call is for, so parallel calls read apart", () =>
     Effect.scoped(
       Effect.gen(function* () {
