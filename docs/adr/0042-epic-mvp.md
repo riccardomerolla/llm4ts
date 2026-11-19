@@ -110,3 +110,10 @@ grilling session on 2026-10-22 (Q1–Q22).
 - Not measured yet: the 50% wall-clock target against epic-stories on the
   epic-light fixture. It is a rehearsal spec,
   `specs/pending/epic-mvp-rehearsal.md`.
+
+## Amendment (2026-11-19): the red phase is shared
+
+The red phase moved to `flows/lib/red-phase.ts`, and epic-stories now runs it
+by default under a lighter policy (ADR 0053). epic-mvp's behaviour is
+unchanged: per-test evidence, a criterion no test names fails the story, and
+a criterion green before implementation is parked.

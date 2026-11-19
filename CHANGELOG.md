@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **`epic-stories` is test-first by default** (ADR 0053). Before a story's
+  tasks are planned, its coder writes tests for each acceptance criterion
+  (tagged `[story#n]` in the test name), a reviewer reads them, and the test
+  gate must fail. The executor then commits the tests as `<story>: red tests`
+  and freezes them, so the implementation cannot change them. The task
+  planner is told the tests exist and plans the production code that makes
+  them pass. Per-test evidence (`LLM4TS_TEST_REPORT` or `LLM4TS_TEST_ONE`)
+  proves each criterion red instead of the whole suite. A test green too
+  early, or a criterion no test names, is noted; a red phase that writes no
+  test fails the story. Stories with no acceptance criteria, `testsDeferred`
+  or `testsChange` skip it, as do stories already in flight and runs under
+  `--defer-tests` or `--harden`. `--no-test-first` or
+  `LLM4TS_TEST_FIRST=off` turns it off. It costs one more coder conversation,
+  one review and one test-gate run per story.
+- **No more "write all the tests" story.** The `epic-stories` planner is told
+  that each story writes the tests of its own behaviour and the composition
+  story tests only its wiring. A story that owns nothing but test files
+  (and is not a `testsChange` migration) makes it plan once more; if the
+  plan still has one, the run names it so you can fold it in before running.
+- The red phase moved from `flows/lib/epic-mvp.ts` to
+  `flows/lib/red-phase.ts`; epic-mvp behaves as before.
+
 ## 4.9.0
 
 ### Added

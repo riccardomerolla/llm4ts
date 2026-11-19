@@ -9,6 +9,7 @@ import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { countNotPlanned } from "@llm4ts/flow/RefineRound"
 import { settingValue } from "@llm4ts/flow/Settings"
 import { lastStoryVerdict, type EpicReport } from "@llm4ts/flow/Stories"
+import { evidenceSourceFromEnvironment, type EvidenceSource } from "@llm4ts/flow/TestEvidence"
 import { ScriptUsage } from "@llm4ts/runner"
 import {
   deferringTestsJudge,
@@ -19,6 +20,7 @@ import {
   type EpicStoriesOptions,
   type EpicUnitContext
 } from "./epic-stories.ts"
+import { storiesTestFirst } from "./red-phase.ts"
 
 // ---- The debt ---------------------------------------------------------------
 
@@ -179,6 +181,14 @@ export interface StoriesFlags {
   readonly deferTests: boolean
   /** `--harden`: plan the epic's open debt as a round under the full bar. */
   readonly harden: boolean
+  /**
+   * Test-first (ADR 0053): each story's red tests before its tasks. On unless
+   * `--no-test-first` or LLM4TS_TEST_FIRST=off; off under `--defer-tests` and
+   * `--harden`, whose stories are not held to tests written first.
+   */
+  readonly testFirst: boolean
+  /** LLM4TS_TEST_REPORT or LLM4TS_TEST_ONE: per-criterion proof for the red phase. */
+  readonly testEvidence: EvidenceSource | undefined
   /** Everything else, for the spine's own flags (`--harden` becomes `--refine`). */
   readonly argv: ReadonlyArray<string>
 }
@@ -196,8 +206,21 @@ export const parseStoriesFlags = (
         message: `--harden pays the debt under the full bar; it does not take --defer-tests (or LLM4TS_DEFER_TESTS)\n${epicUsage}`
       })
     }
-    const rest = argv.filter((arg) => arg !== "--defer-tests" && arg !== "--harden")
-    return { deferTests, harden, argv: harden ? ["--refine", ...rest] : rest }
+    const testFirst =
+      !argv.includes("--no-test-first") &&
+      settingValue("LLM4TS_TEST_FIRST", environment) &&
+      !deferTests &&
+      !harden
+    const rest = argv.filter(
+      (arg) => arg !== "--defer-tests" && arg !== "--harden" && arg !== "--no-test-first"
+    )
+    return {
+      deferTests,
+      harden,
+      testFirst,
+      testEvidence: evidenceSourceFromEnvironment(environment),
+      argv: harden ? ["--refine", ...rest] : rest
+    }
   })
 
 /** epic-stories' policy for its flags: the rubric judge, excusing tests, or hardening. */
@@ -210,4 +233,7 @@ export const epicStoriesOptions = (flags: StoriesFlags): EpicStoriesOptions =>
           stories: () => ({ judgeBar: "defer-tests" }),
           afterUnit: testsDebtAfterUnit
         }
-      : { storyJudge: rubricStoryJudge }
+      : {
+          storyJudge: rubricStoryJudge,
+          ...(flags.testFirst ? { stories: storiesTestFirst(flags.testEvidence) } : {})
+        }

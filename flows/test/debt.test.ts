@@ -145,6 +145,8 @@ describe("epic-stories --defer-tests and --harden flags (ADR 0045)", () => {
       assert.deepStrictEqual(yield* parseStoriesFlags(["--defer-tests", "--epic", "e"], {}), {
         deferTests: true,
         harden: false,
+        testFirst: false,
+        testEvidence: undefined,
         argv: ["--epic", "e"]
       })
       assert.isTrue((yield* parseStoriesFlags([], { LLM4TS_DEFER_TESTS: "1" })).deferTests)
@@ -157,6 +159,8 @@ describe("epic-stories --defer-tests and --harden flags (ADR 0045)", () => {
       assert.deepStrictEqual(yield* parseStoriesFlags(["--harden", "--epic", "e"], {}), {
         deferTests: false,
         harden: true,
+        testFirst: false,
+        testEvidence: undefined,
         argv: ["--refine", "--epic", "e"]
       })
     })
@@ -172,12 +176,13 @@ describe("epic-stories --defer-tests and --harden flags (ADR 0045)", () => {
   )
 
   it("each flag picks its policy", () => {
-    const plain = epicStoriesOptions({ deferTests: false, harden: false, argv: [] })
+    const off = { testFirst: false, testEvidence: undefined, argv: [] }
+    const plain = epicStoriesOptions({ deferTests: false, harden: false, ...off })
     assert.strictEqual(plain.storyJudge, rubricStoryJudge)
     assert.isUndefined(plain.afterUnit)
     assert.isUndefined(plain.stories)
 
-    const deferring = epicStoriesOptions({ deferTests: true, harden: false, argv: [] })
+    const deferring = epicStoriesOptions({ deferTests: true, harden: false, ...off })
     assert.strictEqual(deferring.storyJudge, deferringTestsJudge)
     assert.isDefined(deferring.afterUnit)
     const memory = Effect.runSync(makeMemoryPlainFileStore())
@@ -185,8 +190,52 @@ describe("epic-stories --defer-tests and --harden flags (ADR 0045)", () => {
     assert.strictEqual(deferring.stories?.(unit).judgeBar, "defer-tests")
 
     assert.strictEqual(
-      epicStoriesOptions({ deferTests: false, harden: true, argv: [] }),
+      epicStoriesOptions({ deferTests: false, harden: true, ...off }),
       hardenOptions
     )
+  })
+})
+
+describe("epic-stories test-first (ADR 0053)", () => {
+  it.effect("is on by default; --no-test-first and LLM4TS_TEST_FIRST=off turn it off", () =>
+    Effect.gen(function* () {
+      const plain = yield* parseStoriesFlags(["--epic", "e"], {})
+      assert.isTrue(plain.testFirst)
+      assert.deepStrictEqual(plain.argv, ["--epic", "e"])
+      const flag = yield* parseStoriesFlags(["--no-test-first", "--epic", "e"], {})
+      assert.isFalse(flag.testFirst)
+      assert.deepStrictEqual(flag.argv, ["--epic", "e"])
+      assert.isFalse((yield* parseStoriesFlags([], { LLM4TS_TEST_FIRST: "off" })).testFirst)
+    })
+  )
+
+  it.effect("is off under --defer-tests and --harden", () =>
+    Effect.gen(function* () {
+      assert.isFalse((yield* parseStoriesFlags(["--defer-tests"], {})).testFirst)
+      assert.isFalse((yield* parseStoriesFlags(["--harden"], {})).testFirst)
+    })
+  )
+
+  it.effect("reads per-test evidence from the environment", () =>
+    Effect.gen(function* () {
+      const flags = yield* parseStoriesFlags([], {
+        LLM4TS_TEST_ONE: "pnpm vitest run -t {tagRegex}"
+      })
+      assert.strictEqual(flags.testEvidence?._tag, "Command")
+    })
+  )
+
+  it("adds the red phase to the plain policy only", () => {
+    const memory = Effect.runSync(makeMemoryPlainFileStore())
+    const { unit } = Effect.runSync(unitWith(memory.store))
+    const on = epicStoriesOptions({
+      deferTests: false,
+      harden: false,
+      testFirst: true,
+      testEvidence: undefined,
+      argv: []
+    })
+    assert.strictEqual(on.storyJudge, rubricStoryJudge)
+    assert.isDefined(on.stories?.(unit).redPhase)
   })
 })

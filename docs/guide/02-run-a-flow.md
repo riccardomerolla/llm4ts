@@ -207,13 +207,13 @@ same command again. Completed tasks are not redone.
 
 ## The other built-ins
 
-| Flow           | Add to what you just saw                                        | Needs                  |
-| -------------- | --------------------------------------------------------------- | ---------------------- |
-| `sdd`          | A written spec, red tests first, then implementation to green   | a coding agent + Maven |
-| `issue-pr`     | Reads a GitHub issue, ends with a pushed pull request           | GitHub remote and `gh` |
-| `epic-stories` | Splits an epic into stories run by parallel coders in worktrees | a reasoner CLI + pi    |
-| `local`        | LM Studio reasons, a local pi agent implements                  | LM Studio + pi         |
-| `modernize-*`  | The six-phase legacy modernization pipeline                     | a pack, see chapter 5  |
+| Flow           | Add to what you just saw                                      | Needs                  |
+| -------------- | ------------------------------------------------------------- | ---------------------- |
+| `sdd`          | A written spec, red tests first, then implementation to green | a coding agent + Maven |
+| `issue-pr`     | Reads a GitHub issue, ends with a pushed pull request         | GitHub remote and `gh` |
+| `epic-stories` | Splits an epic into stories run test-first by parallel coders | a reasoner CLI + pi    |
+| `local`        | LM Studio reasons, a local pi agent implements                | LM Studio + pi         |
+| `modernize-*`  | The six-phase legacy modernization pipeline                   | a pack, see chapter 5  |
 
 `llm4ts view <flow>` prints any of them; [flows/README.md](../../flows/README.md)
 describes each in full.

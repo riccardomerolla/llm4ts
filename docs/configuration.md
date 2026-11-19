@@ -198,17 +198,18 @@ executes.
 
 ### Review, judging and stalls
 
-| Setting                   | Value                        | Default                                                             | Belongs in   | Meaning                                                                                                                                  |
-| ------------------------- | ---------------------------- | ------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `LLM4TS_JUDGE_ROUNDS`     | a positive integer           | 3 story-review rounds in the epic flows; 2 judge attempts elsewhere | project file | Judge attempts before a story, page or program fails; in the epic flows --review-rounds and --judge-rounds set it too.                   |
-| `LLM4TS_REVIEW_VOTES`     | a positive integer           | 1; 2 in the port flows                                              | project file | Independent votes of the adversarial review lens per round.                                                                              |
-| `LLM4TS_REVIEW_FIXER`     | separate                     | the implementer's own chat fixes review findings                    | project file | separate sends review findings to a fresh fixer chat.                                                                                    |
-| `LLM4TS_MERGE_REVISIONS`  | a whole number, 0 or more    | 1                                                                   | project file | Times a story whose merge turns the epic gates red goes back to be fixed; 0 fails at once. --merge-revisions sets it too.                |
-| `LLM4TS_TASK_CONCURRENCY` | a positive integer           | 1                                                                   | project file | Coders working on one story at once; --task-concurrency sets it too.                                                                     |
-| `LLM4TS_DEFER_FINDINGS`   | on or off                    | off                                                                 | project file | Fixes only Critical review findings in place and defers the rest to one refine round after the last merge; --defer-findings sets it too. |
-| `LLM4TS_DEFER_TESTS`      | on or off                    | off                                                                 | project file | Records the judge's tests score as debt instead of failing the story; --defer-tests sets it too.                                         |
-| `LLM4TS_STALL_REPEATS`    | a positive integer           | 5                                                                   | project file | Ends a coder turn that repeats one tool call this many times in a row; at least 2.                                                       |
-| `LLM4TS_STALL_MINUTES`    | a positive number of minutes | no silence limit                                                    | project file | Ends a coder turn that prints nothing for this long.                                                                                     |
+| Setting                   | Value                        | Default                                                             | Belongs in   | Meaning                                                                                                                                                      |
+| ------------------------- | ---------------------------- | ------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LLM4TS_JUDGE_ROUNDS`     | a positive integer           | 3 story-review rounds in the epic flows; 2 judge attempts elsewhere | project file | Judge attempts before a story, page or program fails; in the epic flows --review-rounds and --judge-rounds set it too.                                       |
+| `LLM4TS_REVIEW_VOTES`     | a positive integer           | 1; 2 in the port flows                                              | project file | Independent votes of the adversarial review lens per round.                                                                                                  |
+| `LLM4TS_REVIEW_FIXER`     | separate                     | the implementer's own chat fixes review findings                    | project file | separate sends review findings to a fresh fixer chat.                                                                                                        |
+| `LLM4TS_MERGE_REVISIONS`  | a whole number, 0 or more    | 1                                                                   | project file | Times a story whose merge turns the epic gates red goes back to be fixed; 0 fails at once. --merge-revisions sets it too.                                    |
+| `LLM4TS_TASK_CONCURRENCY` | a positive integer           | 1                                                                   | project file | Coders working on one story at once; --task-concurrency sets it too.                                                                                         |
+| `LLM4TS_DEFER_FINDINGS`   | on or off                    | off                                                                 | project file | Fixes only Critical review findings in place and defers the rest to one refine round after the last merge; --defer-findings sets it too.                     |
+| `LLM4TS_DEFER_TESTS`      | on or off                    | off                                                                 | project file | Records the judge's tests score as debt instead of failing the story; --defer-tests sets it too.                                                             |
+| `LLM4TS_TEST_FIRST`       | on or off                    | on                                                                  | project file | epic-stories writes each story's tests first and proves them red before its tasks are planned; off (or --no-test-first) plans tasks straight from the story. |
+| `LLM4TS_STALL_REPEATS`    | a positive integer           | 5                                                                   | project file | Ends a coder turn that repeats one tool call this many times in a row; at least 2.                                                                           |
+| `LLM4TS_STALL_MINUTES`    | a positive number of minutes | no silence limit                                                    | project file | Ends a coder turn that prints nothing for this long.                                                                                                         |
 
 ### Context and estate bounds
 
@@ -778,6 +779,12 @@ acceptance outcomes as tests owed; `epic-stories --harden` plans the open
 debt as a refine round under the full bar and marks it paid once that round
 settles. The judge's bar is part of its cached verdict's key, so a story
 that failed on `tests 0` is judged afresh when rerun with `--defer-tests`.
+
+`epic-stories` is test-first unless `LLM4TS_TEST_FIRST=off` or
+`--no-test-first` (ADR 0053). Each story with acceptance criteria first gets
+tests that the test gate proves red; they are frozen before its tasks are
+planned. Set `LLM4TS_TEST_REPORT` or `LLM4TS_TEST_ONE`, as for `epic-mvp`, to
+prove each criterion red rather than the whole suite.
 
 Votes multiply only the adversarial lens; the concern lenses run once. With a
 roster, consecutive votes take turns across executors (ADR 0019), so two

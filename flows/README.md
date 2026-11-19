@@ -388,6 +388,14 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   excused: the score, its reasoning, and each acceptance outcome as a test
   owed. Read it, then `--harden --epic <id>` plans that debt as a refine
   round under the full bar, as `epic-draft --harden` does.
+- Test-first is the default (ADR 0053). Before a story's tasks are planned,
+  its coder writes tests for each acceptance criterion, tagged `[story#n]`.
+  A reviewer reads them, and the test gate must fail. The tests are then
+  committed and frozen, and the tasks write the code that makes them pass.
+  `LLM4TS_TEST_REPORT` or `LLM4TS_TEST_ONE` proves each criterion red rather
+  than the whole suite. `--no-test-first` (or `LLM4TS_TEST_FIRST=off`) plans
+  tasks straight from the story, as before 4.10; `--defer-tests` and
+  `--harden` turn it off too.
 - `LLM4TS_REASONER` (default `claude`, or `gemini`) splits, reviews every
   task and judges every story; `LLM4TS_CODER` (default `pi`) implements.
   `LLM4TS_REASONING_MODEL` / `LLM4TS_CODER_MODEL` pick their models (pi
