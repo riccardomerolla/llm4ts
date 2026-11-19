@@ -10,41 +10,32 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import type { JsonSchema } from "@llm4ts/core/Models"
-import { makeChat } from "@llm4ts/flow/Chat"
 import type { FlowLlmError } from "@llm4ts/flow/FlowError"
 import {
   FlowAborted,
-  StoryFailed,
   StoryPlanInvalid,
   type FlowError,
   type PersistenceError
 } from "@llm4ts/flow/FlowError"
-import { CriterionChecked, Info, Parked, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import { CriterionChecked, Info, Parked } from "@llm4ts/flow/FlowEvents"
 import { loadVersioned, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 import { Plan, Task } from "@llm4ts/flow/Plan"
-import { correctnessReviewer, lintCommand, reviewWith } from "@llm4ts/flow/Review"
-import { Reviewer } from "@llm4ts/flow/Reviewer"
+import { correctnessReviewer } from "@llm4ts/flow/Review"
 import {
   RedTests,
   RedTestsVersion,
   redTestsPath,
   type EpicReport,
-  type RedPhase,
   type StorySeats
 } from "@llm4ts/flow/Stories"
 import { Story, StoryPlan } from "@llm4ts/flow/StoryPlan"
 import {
-  commandFor,
   criterionTags,
   evidenceSourceFromEnvironment,
-  parseJUnit,
-  statusFromReport,
-  testPaths,
-  type CriterionStatus,
   type EvidenceSource
 } from "@llm4ts/flow/TestEvidence"
 import { structuredAndPublish } from "@llm4ts/flow/Usage"
-import { nodeProcessExecutor, ScriptUsage } from "@llm4ts/runner"
+import { ScriptUsage } from "@llm4ts/runner"
 import {
   storyJsonSchema,
   storyPlanInstructions,
@@ -53,6 +44,7 @@ import {
   type EpicUnitContext,
   type PlanInputs
 } from "./epic-stories.ts"
+import { evidenceAt, redPhaseOf } from "./red-phase.ts"
 
 // ---- Flags ------------------------------------------------------------------
 
@@ -195,180 +187,14 @@ export const mvpPreflight = (
     ? Effect.fail(ScriptUsage.make({ message: evidenceRequired }))
     : Effect.void
 
-/**
- * The status of each tag in a checkout. `written(tag)` says the test sources
- * carry it, so a tag a report does not show (a suite that cannot load yet)
- * reads red rather than missing.
- */
-export const evidenceAt = (
-  source: EvidenceSource,
-  unit: EpicUnitContext,
-  workDir: string,
-  tags: ReadonlyArray<string>,
-  written: (tag: string) => boolean,
-  events: FlowEventsShape,
-  /** The checkout's uncommitted paths, to refuse a report git would commit. */
-  uncommitted?: Effect.Effect<ReadonlyArray<string>, FlowError>
-): Effect.Effect<ReadonlyMap<string, CriterionStatus>, FlowError> =>
-  Effect.gen(function* () {
-    const appRoot = join(workDir, unit.appDir)
-    const statuses = new Map<string, CriterionStatus>()
-    if (source._tag === "Report") {
-      if (unit.testGate === undefined) {
-        return yield* FlowAborted.make({
-          message: `LLM4TS_TEST_REPORT is set but the gates name no test command to write it`
-        })
-      }
-      const report = join(appRoot, source.path)
-      yield* unit.files.remove(report)
-      // Red is the point of a red phase: the gate's verdict is read from the report.
-      yield* unit.testGate(workDir, events)
-      const cases = parseJUnit((yield* unit.files.read(report)) ?? "")
-      // A report git can see would be committed by a story and dirty the
-      // epic checkout: it must be ignored, and it never outlives the read.
-      const relative = join(unit.appDir, source.path)
-      const visible = uncommitted === undefined ? false : (yield* uncommitted).includes(relative)
-      yield* unit.files.remove(report)
-      if (visible) {
-        return yield* FlowAborted.make({
-          message: `the test report ${relative} is not git-ignored: add it to .gitignore, then rerun`
-        })
-      }
-      for (const tag of tags) {
-        statuses.set(tag, statusFromReport(tag, cases, written(tag)))
-      }
-      return statuses
-    }
-    for (const tag of tags) {
-      const result = yield* lintCommand(
-        nodeProcessExecutor,
-        events,
-        commandFor(source.argv, tag),
-        appRoot
-      )
-      statuses.set(tag, result.isClean ? "green" : written(tag) ? "red" : "missing")
-    }
-    return statuses
-  })
-
 // ---- The red phase ----------------------------------------------------------
 
-export const redTestsPrompt = (story: Story, tags: ReadonlyArray<string>): string =>
-  [
-    `Red phase of the story "${story.title}" (test-first). Write ONLY tests now — no production code.`,
-    "",
-    "For each outcome below, write one or more tests whose NAME contains its tag exactly, for",
-    'example it("[story-id#1] shows the balance", …). The tests assert the observable outcome and',
-    "MUST FAIL now, because the behaviour does not exist yet; importing a module the story will",
-    "create is fine. Put them in the story's owned test paths, beside the code they cover, in the",
-    "repository's test style. Do not commit. Once written, these tests are frozen: the",
-    "implementation will be judged by them alone.",
-    "",
-    ...story.acceptance.map((outcome, index) => `${tags[index] ?? ""} ${outcome}`)
-  ].join("\n")
-
-/** The one lens on the red tests: do they pin down the outcomes, and only them. */
-export const redTestsLens = Reviewer.make({
-  name: "red-tests",
-  systemPrompt: [
-    "You review tests written BEFORE the implementation, which will be the only check of it.",
-    "For each tagged outcome, check that its tests assert the outcome itself (not an",
-    "implementation detail), would fail on a wrong implementation, and cannot pass vacuously",
-    "(no assertion, a mocked subject, a hard-coded expectation). Report only those gaps, one",
-    "finding per gap, naming the tag. Production code is absent on purpose; never report that."
-  ].join("\n"),
-  screen: "The tests leave an outcome unasserted, assert a detail, or could pass vacuously."
-})
-
-const tagsWritten = (
-  files: PlainFileStoreShape,
-  workDir: string,
-  paths: ReadonlyArray<string>
-): Effect.Effect<string, PersistenceError> =>
-  Effect.map(
-    Effect.forEach(paths, (path) => files.read(join(workDir, path))),
-    (texts) => texts.filter((text): text is string => text !== undefined).join("\n")
-  )
-
 /**
- * The story's red phase: the coder writes tagged tests, one review round
- * reads them, one fix turn answers it; every outcome must then be red. An
- * outcome with no tagged test after one more turn fails the story; one
- * whose tests already pass is parked as "check the outcome".
+ * The story's red phase under epic-mvp: per-test evidence, an outcome no
+ * test names fails the story, one green before implementation is parked.
  */
-export const mvpRedPhase =
-  (source: EvidenceSource, unit: EpicUnitContext) =>
-  (
-    story: Story,
-    seats: StorySeats,
-    workDir: string,
-    system: string,
-    events: FlowEventsShape
-  ): Effect.Effect<RedPhase, FlowError> =>
-    Effect.gen(function* () {
-      const git = seats.context.git
-      const tags = criterionTags(story.id, story.acceptance)
-      const chat = yield* makeChat(seats.context.coder, { system, events, agent: "coder" })
-      yield* chat.ask(redTestsPrompt(story, tags))
-
-      const reviewer = seats.context.roster?.forRole("reviewer") ?? seats.context.reasoning
-      const review = yield* reviewWith(
-        reviewer,
-        events,
-        redTestsLens,
-        `red tests: ${story.title}`,
-        yield* git.diffAll
-      )
-      if (!review.isClean) {
-        yield* chat.ask(
-          [
-            "A reviewer read your tests. Fix these gaps in the tests (still no production code):",
-            ...review.issues.map((issue) => `- ${issue.title}: ${issue.description}`)
-          ].join("\n")
-        )
-      }
-
-      const check = Effect.gen(function* () {
-        const changed = testPaths(yield* git.uncommittedFiles)
-        const text = yield* tagsWritten(unit.files, workDir, changed)
-        const statuses = yield* evidenceAt(
-          source,
-          unit,
-          workDir,
-          tags,
-          (tag) => text.includes(tag),
-          events,
-          git.uncommittedFiles
-        )
-        return { changed, statuses }
-      })
-      let seen = yield* check
-      const missing = () => tags.filter((tag) => seen.statuses.get(tag) === "missing")
-      if (missing().length > 0) {
-        yield* chat.ask(
-          `No test names these outcomes yet: ${missing().join(", ")}. Write them, with the tag in the test name.`
-        )
-        seen = yield* check
-      }
-      if (missing().length > 0) {
-        return yield* StoryFailed.make({
-          story: story.id,
-          reason: `red phase: no test names ${missing().join(", ")}`
-        })
-      }
-      const parked: Array<string> = []
-      for (const [index, tag] of tags.entries()) {
-        const status = seen.statuses.get(tag) ?? "missing"
-        yield* events.publish(CriterionChecked.make({ story: story.id, tag, status }))
-        if (status === "green") {
-          const item = `${tag} ${story.acceptance[index] ?? ""}`
-          const reason = "its tests pass before implementation: check the outcome or its test"
-          parked.push(`${item} — ${reason}`)
-          yield* events.publish(Parked.make({ story: story.id, item, reason, mvp: false }))
-        }
-      }
-      return { frozen: seen.changed, parked }
-    })
+export const mvpRedPhase = (source: EvidenceSource, unit: EpicUnitContext) =>
+  redPhaseOf({ evidence: source, strict: true, park: true }, unit)
 
 /** One green task per story: the tests are the plan. */
 export const greenTaskPlan = (

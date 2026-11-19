@@ -526,6 +526,22 @@ export const storyTaskPlanInstructions = (story: Story): string =>
     '[{"title":"...","description":"...","completed":false}]}'
   ].join("\n")
 
+/**
+ * What the task planner is told after a red phase (ADR 0053): the tests are
+ * written and frozen, so the tasks write the production code that makes
+ * them pass and never plan the tests again.
+ */
+export const redTestsNote = (frozen: ReadonlyArray<string>): ReadonlyArray<string> =>
+  frozen.length === 0
+    ? []
+    : [
+        "",
+        "The story's tests are already written, committed and frozen (test-first):",
+        bullets(frozen),
+        "Plan the tasks that make them pass by writing production code. Do not plan a task that",
+        "writes, changes, skips or deletes these tests; a task may add further tests of its own."
+      ]
+
 /** The coder plans its own tasks from the story — the orchestrator split the epic, not the story. */
 export const defaultPlanTasks = (
   seats: StorySeats,
@@ -1927,7 +1943,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
             `story ${story.id}: plan tasks`,
             planTasks(watchedSeats, story, text)
           ),
-        prompt,
+        [prompt, ...redTestsNote(redTests?.frozen ?? [])].join("\n"),
         laneOf(story)
       ),
       system: taskSystem,

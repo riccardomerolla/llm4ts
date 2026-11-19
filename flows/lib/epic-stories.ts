@@ -32,6 +32,7 @@ import {
   type StoryPlanInvalid
 } from "@llm4ts/flow/FlowError"
 import { Info, type FlowEventsShape } from "@llm4ts/flow/FlowEvents"
+import { testPaths } from "@llm4ts/flow/TestEvidence"
 import { nodePreflight } from "@llm4ts/flow/NodePreflight"
 import type { Pack } from "@llm4ts/flow/Pack"
 import { applyApprovedRetros } from "@llm4ts/flow/Retro"
@@ -176,6 +177,9 @@ export const epicUsage = [
   "                      excused are written to debt.md (the coder is still asked for tests;",
   "                      a red test gate still fails). LLM4TS_DEFER_TESTS=1 sets it too",
   "  --harden            plan the epic's open debt as a refine round under the full bar",
+  "  --no-test-first     plan a story's tasks straight from it; by default its coder first",
+  "                      writes one test per acceptance criterion, proves them red with the",
+  "                      test gate, and they are frozen (ADR 0053). LLM4TS_TEST_FIRST=off sets it",
   "Seats: LLM4TS_REASONER (claude|gemini|…, default claude) splits, reviews, judges;",
   "       LLM4TS_CODER (default pi) implements; LLM4TS_REASONING_MODEL / LLM4TS_CODER_MODEL",
   "       pick their models (pi: provider/model); LLM4TS_CODER_FLAGS / LLM4TS_REASONING_FLAGS",
@@ -1130,6 +1134,9 @@ export const storyPlanInstructions = (
     "- A story fits one agent session: one screen, one contract, or one component.",
     "- Every story OWNS the test files it must write (the judge asks for tests): list them",
     "  in `owned` explicitly — a story cannot add a test outside its owned paths.",
+    "- No story only writes tests: each story writes the tests of its own behaviour, and the",
+    '  composition story tests only its wiring. Never plan a last story that "writes the tests"',
+    '  or "tests and integrates" what other stories built.',
     `- Use exactly this epicId: "${epicId}". Copy the epic text into "epic".`,
     "",
     "Respond only with JSON:",
@@ -1158,16 +1165,51 @@ export const generateStoryPlan = (
   /** The repository digest (`orientationFor`), so stories can name real paths. */
   orientation?: string
 ): Effect.Effect<StoryPlan, FlowLlmError> =>
-  structuredAndPublish(
-    reasoning,
-    events,
-    `${storyPlanInstructions(epicId, guidance, orientation)}\n\nEpic:\n${brief ?? epic}`,
-    StoryPlan,
-    storyPlanJsonSchema
-  ).pipe(
-    // The id and the epic text are ours, whatever the model echoed back.
-    Effect.map((plan) => StoryPlan.make({ ...plan, epicId, epic }))
-  )
+  Effect.gen(function* () {
+    const prompt = `${storyPlanInstructions(epicId, guidance, orientation)}\n\nEpic:\n${brief ?? epic}`
+    const ask = (text: string) =>
+      structuredAndPublish(reasoning, events, text, StoryPlan, storyPlanJsonSchema).pipe(
+        // The id and the epic text are ours, whatever the model echoed back.
+        Effect.map((plan) => StoryPlan.make({ ...plan, epicId, epic }))
+      )
+    const first = yield* ask(prompt)
+    const testOnly = testOnlyStories(first)
+    if (testOnly.length === 0) {
+      return first
+    }
+    // Asked once more; a plan that keeps one is the operator's to edit (ADR 0053).
+    const second = yield* ask(
+      [
+        prompt,
+        "",
+        `Your previous plan had stories that only write tests: ${testOnly.join(", ")}.`,
+        "Plan again: move each test into the story whose behaviour it covers."
+      ].join("\n")
+    )
+    const still = testOnlyStories(second)
+    if (still.length > 0) {
+      yield* events.publish(
+        Info.make({
+          message: `story plan: ${still.join(", ")} only write tests; move them into the stories they cover before running (edit plan.md)`
+        })
+      )
+    }
+    return second
+  })
+
+/**
+ * Stories that own nothing but test files and are not test migrations: the
+ * catch-all "write the tests" story that test-first rules out (ADR 0053).
+ */
+export const testOnlyStories = (plan: StoryPlan): ReadonlyArray<string> =>
+  plan.stories
+    .filter(
+      (story) =>
+        !story.testsChange &&
+        story.owned.length > 0 &&
+        testPaths(story.owned).length === story.owned.length
+    )
+    .map((story) => story.id)
 
 // ---- Refine rounds (ADR 0021) ---------------------------------------------------
 

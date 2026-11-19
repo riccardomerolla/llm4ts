@@ -25,6 +25,9 @@
 // (shape kept, content removed) rather than deleting them (ADR 0025).
 // With --defer-tests the judge's tests score is never a finding and what it
 // excused is written to debt.md; --harden plans that debt (ADR 0045).
+// Test-first by default (ADR 0053): before a story's tasks are planned, its
+// coder writes one test per acceptance criterion, the test gate proves them
+// red, and they are frozen; --no-test-first (LLM4TS_TEST_FIRST=off) skips it.
 import * as Effect from "effect/Effect"
 import { runFlowMain } from "@llm4ts/runner"
 import { epicStoriesOptions, parseStoriesFlags } from "./lib/debt.ts"

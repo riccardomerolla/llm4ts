@@ -38,6 +38,7 @@ import {
   renderEpicReport,
   startingCodeOf,
   storyPrompt,
+  redTestsNote,
   storyTaskPlanInstructions,
   type StoriesOptions,
   type StorySeats
@@ -2023,6 +2024,14 @@ describe("story prompts carry the acceptance criteria", () => {
     assert.include(instructions, "Depends on: <n, …>")
     assert.include(instructions, "Depends on: none")
     assert.include(instructions, "Owns: <paths>")
+  })
+
+  it("redTestsNote names the frozen tests the tasks make pass (ADR 0053)", () => {
+    const note = redTestsNote(["src/a/a.test.ts"]).join("\n")
+    assert.include(note, "src/a/a.test.ts")
+    assert.include(note, "make them pass by writing production code")
+    assert.include(note, "Do not plan a task that")
+    assert.deepStrictEqual(redTestsNote([]), [])
   })
 })
 
