@@ -391,8 +391,9 @@ pnpm --filter @llm4ts/flows epic-stories -- \
 - A story its last round would fail gets one rescue first (ADR 0054). The
   judge's agent takes the coder's seat for one turn on the open findings,
   with write access. Then the gates must be green and the judge gives one
-  more verdict. With a roster, the rescuer is a judge executor away from
-  the coder, and the next verdict avoids it. `--no-rescue` (or
+  more verdict. With a roster, the rescuer is an executor listed as both
+  `judge` and `coder`, away from the story's coder, and the next verdict
+  avoids it; a judge-only executor never writes. `--no-rescue` (or
   `LLM4TS_RESCUE=off`) fails the story at once.
 - Test-first is the default (ADR 0053). Before a story's tasks are planned,
   its coder writes tests for each acceptance criterion, tagged `[story#n]`.

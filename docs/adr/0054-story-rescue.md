@@ -35,8 +35,12 @@ findings back to the coder.
      context as `FlowContextShape.rescuer`.
    - With a roster: a judge slot is leased away from the story's coder, as
      for a verdict, and the executor is seated as a coder, so it writes
-     (`RosterSeatOptions.seatAs`). With no other judge executor free, the
-     coder's own executor is borrowed, as the judge would be.
+     (`RosterSeatOptions.seatAs`). Only an executor the roster lists as both
+     `judge` and `coder` can rescue: one listed as a judge alone was meant to
+     stay read-only, so it is never seated as a coder (`rosterSeat` refuses
+     it), and a roster with no such executor has no rescuer. With no other
+     candidate free, the coder's own executor is borrowed when it is listed
+     for both, as the judge would be.
 3. **The verdict after a rescue comes from someone else where it can.**
    With a roster, the executor that rescued is avoided by the story's later
    leases, the judge's included (`onLease`). Without a roster there is one

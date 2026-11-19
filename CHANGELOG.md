@@ -13,8 +13,10 @@
   moves on; otherwise it fails as before, saying the rescue did not clear it.
   - Without a roster, the rescuer is `LLM4TS_REASONER` with its reasoning
     model and flags.
-  - With a roster, it is a judge executor away from the story's coder,
-    seated as a coder, and the next verdict avoids that executor.
+  - With a roster, it is an executor listed as both `judge` and `coder`,
+    away from the story's coder, and the next verdict avoids it. An executor
+    listed as a judge alone is never given write access; a roster with no
+    executor listed for both has no rescue.
   - It is on by default; `--no-rescue` or `LLM4TS_RESCUE=off` turns it off.
   - Library: `FlowRunnerOptions.rescuer`, `FlowContextShape.rescuer`,
     `StoriesOptions.rescue`, `RosterSeatOptions.seatAs` and `onLease`, and

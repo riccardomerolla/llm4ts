@@ -557,6 +557,27 @@ describe("Roster seats", () => {
     )
   )
 
+  it.effect("a judge-only executor is never seated as a coder (ADR 0054)", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* makeCollectingFlowEvents
+        const log = yield* Ref.make<ReadonlyArray<string>>([])
+        const judgeOnly = executor("judge-only", { harness: "claude", roles: ["judge"] })
+        const roster = yield* makeRoster({ executors: [judgeOnly], events })
+        const rescuer = rosterSeat(
+          roster,
+          { seatFor: seatFor(log, () => undefined) },
+          "judge",
+          "/wt/a",
+          { events, label: "story a", seatAs: "coder" }
+        )
+        const refused = yield* Effect.flip(text(rescuer, "fix it"))
+        assert.include(String(refused), "not listed as a coder")
+        assert.deepStrictEqual(yield* Ref.get(log), [])
+      })
+    )
+  )
+
   it.effect("a per-call lease names what the call is for, so parallel calls read apart", () =>
     Effect.scoped(
       Effect.gen(function* () {

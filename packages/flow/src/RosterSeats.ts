@@ -162,10 +162,23 @@ export const rosterSeat = (
     })
 
   const seatOf = (executor: ExecutorSpec): Effect.Effect<RosterSeat, LlmError> =>
-    Effect.andThen(
-      options.onLease === undefined ? Effect.void : options.onLease(executor.id),
-      source.seatFor(executor, options.seatAs ?? role, workDir).pipe(Effect.mapError(asLlmError))
-    )
+    // Seated as another role only when the roster lists it for that role too:
+    // a judge-only executor is never given a coder's write access (ADR 0054).
+    options.seatAs !== undefined && !hasRole(executor, options.seatAs)
+      ? Effect.fail(
+          asLlmError(
+            RosterExhausted.make({
+              role: options.seatAs,
+              reasons: [`executor '${executor.id}' is not listed as a ${options.seatAs}`]
+            })
+          )
+        )
+      : Effect.andThen(
+          options.onLease === undefined ? Effect.void : options.onLease(executor.id),
+          source
+            .seatFor(executor, options.seatAs ?? role, workDir)
+            .pipe(Effect.mapError(asLlmError))
+        )
 
   /**
    * After a failure that took `executor` out of the round, whether another

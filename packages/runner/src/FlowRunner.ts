@@ -893,14 +893,22 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
         const rescuedBy = yield* Ref.make<string | undefined>(undefined)
         const view = viewFor(held, workDir, label, laneEvents, lane, rescuedBy)
         // The rescuer leases a judge slot and writes as a coder, away from
-        // the story's own coder where it can (ADR 0054).
+        // the story's own coder where it can (ADR 0054). Only an executor the
+        // roster lists as both judge and coder may write as one: a judge-only
+        // executor stays read-only, and with none there is no rescuer.
+        const notRescuers = document.executors
+          .filter((spec) => !(rolesOf(spec).includes("judge") && rolesOf(spec).includes("coder")))
+          .map((spec) => spec.id)
+        const canRescue = notRescuers.length < document.executors.length
         const rescuer =
-          options.rescuer === undefined
+          options.rescuer === undefined || !canRescue
             ? undefined
             : decorated(
                 rosterSeat(roster, source, "judge", workDir, {
                   events: laneEvents,
-                  avoid: Effect.map(held.executor, (id) => (id === undefined ? [] : [id])),
+                  avoid: Effect.map(held.executor, (id) =>
+                    id === undefined ? notRescuers : [id, ...notRescuers]
+                  ),
                   borrow: held.lease,
                   label,
                   seatAs: "coder",
