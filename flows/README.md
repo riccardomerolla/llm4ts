@@ -388,6 +388,13 @@ pnpm --filter @llm4ts/flows epic-stories -- \
   excused: the score, its reasoning, and each acceptance outcome as a test
   owed. Read it, then `--harden --epic <id>` plans that debt as a refine
   round under the full bar, as `epic-draft --harden` does.
+- A story its last round would fail gets one rescue first (ADR 0054). The
+  judge's agent takes the coder's seat for one turn on the open findings,
+  with write access. Then the gates must be green and the judge gives one
+  more verdict. With a roster, the rescuer is an executor listed as both
+  `judge` and `coder`, away from the story's coder, and the next verdict
+  avoids it; a judge-only executor never writes. `--no-rescue` (or
+  `LLM4TS_RESCUE=off`) fails the story at once.
 - Test-first is the default (ADR 0053). Before a story's tasks are planned,
   its coder writes tests for each acceptance criterion, tagged `[story#n]`.
   A reviewer reads them, and the test gate must fail. The tests are then

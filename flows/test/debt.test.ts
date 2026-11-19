@@ -146,6 +146,7 @@ describe("epic-stories --defer-tests and --harden flags (ADR 0045)", () => {
         deferTests: true,
         harden: false,
         testFirst: false,
+        rescue: true,
         testEvidence: undefined,
         argv: ["--epic", "e"]
       })
@@ -160,6 +161,7 @@ describe("epic-stories --defer-tests and --harden flags (ADR 0045)", () => {
         deferTests: false,
         harden: true,
         testFirst: false,
+        rescue: true,
         testEvidence: undefined,
         argv: ["--refine", "--epic", "e"]
       })
@@ -176,7 +178,7 @@ describe("epic-stories --defer-tests and --harden flags (ADR 0045)", () => {
   )
 
   it("each flag picks its policy", () => {
-    const off = { testFirst: false, testEvidence: undefined, argv: [] }
+    const off = { testFirst: false, rescue: false, testEvidence: undefined, argv: [] }
     const plain = epicStoriesOptions({ deferTests: false, harden: false, ...off })
     assert.strictEqual(plain.storyJudge, rubricStoryJudge)
     assert.isUndefined(plain.afterUnit)
@@ -232,10 +234,38 @@ describe("epic-stories test-first (ADR 0053)", () => {
       deferTests: false,
       harden: false,
       testFirst: true,
+      rescue: false,
       testEvidence: undefined,
       argv: []
     })
     assert.strictEqual(on.storyJudge, rubricStoryJudge)
     assert.isDefined(on.stories?.(unit).redPhase)
+  })
+})
+
+describe("epic-stories rescue (ADR 0054)", () => {
+  it.effect("is on by default; --no-rescue and LLM4TS_RESCUE=off turn it off", () =>
+    Effect.gen(function* () {
+      const plain = yield* parseStoriesFlags(["--epic", "e"], {})
+      assert.isTrue(plain.rescue)
+      const flag = yield* parseStoriesFlags(["--no-rescue", "--epic", "e"], {})
+      assert.isFalse(flag.rescue)
+      assert.deepStrictEqual(flag.argv, ["--epic", "e"])
+      assert.isFalse((yield* parseStoriesFlags([], { LLM4TS_RESCUE: "off" })).rescue)
+    })
+  )
+
+  it("rides on every policy", () => {
+    const flags = { testFirst: false, rescue: true, testEvidence: undefined, argv: [] }
+    for (const [deferTests, harden] of [
+      [false, false],
+      [true, false],
+      [false, true]
+    ] as const) {
+      assert.isTrue(epicStoriesOptions({ ...flags, deferTests, harden }).rescue)
+    }
+    assert.isUndefined(
+      epicStoriesOptions({ ...flags, rescue: false, deferTests: false, harden: false }).rescue
+    )
   })
 })

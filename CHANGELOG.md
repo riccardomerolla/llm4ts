@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A story gets one rescue before it fails** (ADR 0054). In `epic-stories`,
+  when a story's last round still leaves its gates red or its judge not
+  cleared, the judge's agent takes the coder's seat for one turn. It runs
+  with write access, in the story's worktree, on every open finding. Its
+  work is committed as `<story>: rescue`, then the gates must be green and
+  the judge gives one more verdict. Cleared, the story merges and the epic
+  moves on; otherwise it fails as before, saying the rescue did not clear it.
+  - Without a roster, the rescuer is `LLM4TS_REASONER` with its reasoning
+    model and flags.
+  - With a roster, it is an executor listed as both `judge` and `coder`,
+    away from the story's coder, and the next verdict avoids it. An executor
+    listed as a judge alone is never given write access; a roster with no
+    executor listed for both has no rescue.
+  - It is on by default; `--no-rescue` or `LLM4TS_RESCUE=off` turns it off.
+  - Library: `FlowRunnerOptions.rescuer`, `FlowContextShape.rescuer`,
+    `StoriesOptions.rescue`, `RosterSeatOptions.seatAs` and `onLease`, and
+    `rescuePrompt` in `@llm4ts/flow/Stories`.
+
 ## 4.10.0
 
 ### Changed

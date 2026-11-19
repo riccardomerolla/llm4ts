@@ -187,6 +187,12 @@ export interface FlowRunnerOptions {
    */
   readonly judgment?: ConnectorConfig
   /**
+   * The judge's agent with write access, for a story's rescue turn (ADR
+   * 0054): usually the reasoning seat's config. Over a roster the rescuer is
+   * a judge executor seated as a coder instead; this config only turns it on.
+   */
+  readonly rescuer?: ConnectorConfig
+  /**
    * `llm` (default) answers on the judgment seat; `typesafe` uses the hosted
    * Jev model with `TYPESAFE_API_KEY` from the environment. Unset, the
    * environment's `LLM4TS_JUDGMENT_BACKEND` decides, then `llm`.
@@ -631,6 +637,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       readonly reviewers: ReadonlyArray<LlmServiceShape>
       readonly judge: LlmServiceShape
       readonly judgment: JudgmentShape
+      readonly rescuer?: LlmServiceShape
     },
     FlowError,
     Scope.Scope
@@ -649,7 +656,16 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     const judgmentSeat =
       judgmentConfig === undefined ? reasoningService : yield* resolveSeat(judgmentConfig, workDir)
     const judgment = yield* judgmentFor(judgmentSeat, judgmentConfig ?? reasoning, runEnvironment)
-    return { coder, reasoning: reasoningService, reviewers, judge: judgmentSeat, judgment }
+    const rescuer =
+      options.rescuer === undefined ? undefined : yield* resolveSeat(options.rescuer, workDir)
+    return {
+      coder,
+      reasoning: reasoningService,
+      reviewers,
+      judge: judgmentSeat,
+      judgment,
+      ...(rescuer === undefined ? {} : { rescuer })
+    }
   })
   const contextAt = (
     workDir: string,
@@ -659,6 +675,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       readonly reviewers: ReadonlyArray<LlmServiceShape>
       readonly judge: LlmServiceShape
       readonly judgment: JudgmentShape
+      readonly rescuer?: LlmServiceShape
     },
     rebind: boolean,
     laneEvents: FlowEventsShape = events,
@@ -669,6 +686,9 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       coder: { ...seats.coder, ...decorated(seats.coder, "coder", laneEvents, lane) },
       judgment: timedJudgment(seats.judgment, laneEvents),
       judge: decorated(seats.judge, "judgment", laneEvents, lane),
+      ...(seats.rescuer === undefined
+        ? {}
+        : { rescuer: decorated(seats.rescuer, "rescuer", laneEvents, lane) }),
       git: makeGitTool(dependencies.process, workDir, laneEvents),
       hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
       events: laneEvents,
@@ -834,13 +854,17 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       workDir: string,
       label: string,
       laneEvents: FlowEventsShape,
-      lane: string | undefined
+      lane: string | undefined,
+      /** The executor that rescued this context's story, avoided by its later calls. */
+      rescuedBy: Ref.Ref<string | undefined>
     ): RosterView => ({
       forRole: (role) =>
         decorated(
           rosterSeat(roster, source, role, workDir, {
             events: laneEvents,
-            avoid: Effect.map(held.executor, (id) => (id === undefined ? [] : [id])),
+            avoid: Effect.map(Effect.all([held.executor, Ref.get(rescuedBy)]), (ids) =>
+              ids.filter((id): id is string => id !== undefined)
+            ),
             borrow: held.lease,
             label
           }),
@@ -866,7 +890,34 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
     ): Effect.Effect<FlowContextShape, FlowError> =>
       Effect.gen(function* () {
         const lane = rebind ? undefined : label
-        const view = viewFor(held, workDir, label, laneEvents, lane)
+        const rescuedBy = yield* Ref.make<string | undefined>(undefined)
+        const view = viewFor(held, workDir, label, laneEvents, lane, rescuedBy)
+        // The rescuer leases a judge slot and writes as a coder, away from
+        // the story's own coder where it can (ADR 0054). Only an executor the
+        // roster lists as both judge and coder may write as one: a judge-only
+        // executor stays read-only, and with none there is no rescuer.
+        const notRescuers = document.executors
+          .filter((spec) => !(rolesOf(spec).includes("judge") && rolesOf(spec).includes("coder")))
+          .map((spec) => spec.id)
+        const canRescue = notRescuers.length < document.executors.length
+        const rescuer =
+          options.rescuer === undefined || !canRescue
+            ? undefined
+            : decorated(
+                rosterSeat(roster, source, "judge", workDir, {
+                  events: laneEvents,
+                  avoid: Effect.map(held.executor, (id) =>
+                    id === undefined ? notRescuers : [id, ...notRescuers]
+                  ),
+                  borrow: held.lease,
+                  label,
+                  seatAs: "coder",
+                  onLease: (id) => Ref.set(rescuedBy, id)
+                }),
+                "rescuer",
+                laneEvents,
+                lane
+              )
         const judgmentSeat =
           options.judgment === undefined
             ? undefined
@@ -889,6 +940,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
           coder: decorated(held.service, "coder", laneEvents, lane, held),
           judgment,
           judge,
+          ...(rescuer === undefined ? {} : { rescuer }),
           git: makeGitTool(dependencies.process, workDir, laneEvents),
           hosting: makeGitHubTool(dependencies.process, workDir, laneEvents),
           events: laneEvents,

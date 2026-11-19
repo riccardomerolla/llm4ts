@@ -970,6 +970,22 @@ describe("Stories executor", () => {
     })
   )
 
+  it.effect("task mode: out of revisions, a rescue clears the story (ADR 0054)", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness()
+      const turns = yield* Ref.make(0)
+      const rescuer = scriptedCoder(turns, () => "fixed")
+      const context = { ...(yield* makeContext(harness)), rescuer }
+      const options = yield* makeOptions(harness, single, context, {
+        rescue: true,
+        judge: () => Effect.map(Ref.get(turns), (n) => (n === 0 ? red("never good enough") : clean))
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      assert.strictEqual(report.stories[0]?.judge, "judge cleared after a rescue (round 3)")
+    })
+  )
+
   it.effect("judge feedback gets one revision task, then the story fails", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness()
@@ -2705,12 +2721,17 @@ describe("Stories executor: story-level review (ADR 0044)", () => {
   const storyRun = (
     seat: LlmServiceShape,
     overrides: Partial<StoriesOptions>,
-    harnessOverrides: Parameters<typeof makeHarness>[0] = {}
+    harnessOverrides: Parameters<typeof makeHarness>[0] = {},
+    rescuer?: LlmServiceShape
   ) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness(harnessOverrides)
       const base = yield* makeContext(harness)
-      const context: FlowContextShape = { ...base, reviewers: [seat] }
+      const context: FlowContextShape = {
+        ...base,
+        reviewers: [seat],
+        ...(rescuer === undefined ? {} : { rescuer })
+      }
       const options = yield* makeOptions(harness, single, context, {
         reviewers: [lensOf("a"), lensOf("b")],
         reviewAt: "story",
@@ -2849,6 +2870,73 @@ describe("Stories executor: story-level review (ADR 0044)", () => {
         "judge not cleared after 2 story review rounds"
       )
       assert.include(report.stories[0]?.reason ?? "", "never good enough")
+    })
+  )
+
+  it.effect("out of rounds, the judge's agent rescues the story and the judge clears it", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const told = yield* Ref.make<ReadonlyArray<string>>([])
+      const turns = yield* Ref.make(0)
+      const rescuer = scriptedCoder(turns, (_turn, prompt) => {
+        Effect.runSync(Ref.update(told, (all) => [...all, prompt]))
+        return "fixed"
+      })
+      const { context, options } = yield* storyRun(
+        lensSeat({}, prompts),
+        {
+          reviewRounds: 2,
+          rescue: true,
+          judge: () =>
+            Effect.map(Ref.get(turns), (n) => (n === 0 ? red("never good enough") : clean))
+        },
+        {},
+        rescuer
+      )
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "done")
+      assert.include(report.stories[0]?.judge ?? "", "judge cleared after a rescue")
+      assert.strictEqual(yield* Ref.get(turns), 1)
+      const asked = (yield* Ref.get(told)).join("\n")
+      assert.include(asked, "You are taking over story a")
+      assert.include(asked, "judge not cleared after 2 story review rounds")
+      assert.include(asked, "never good enough")
+    })
+  )
+
+  it.effect("a rescue the judge still does not clear fails the story", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const turns = yield* Ref.make(0)
+      const rescuer = scriptedCoder(turns, () => "tried")
+      const { context, options } = yield* storyRun(
+        lensSeat({}, prompts),
+        {
+          reviewRounds: 2,
+          rescue: true,
+          judge: () => Effect.succeed(red("never good enough"))
+        },
+        {},
+        rescuer
+      )
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "failed")
+      assert.include(report.stories[0]?.reason ?? "", "judge not cleared after a rescue")
+      assert.strictEqual(yield* Ref.get(turns), 1)
+    })
+  )
+
+  it.effect("without a rescuer the story fails as before, rescue on or not", () =>
+    Effect.gen(function* () {
+      const prompts = yield* Ref.make<ReadonlyArray<string>>([])
+      const { context, options } = yield* storyRun(lensSeat({}, prompts), {
+        reviewRounds: 2,
+        rescue: true,
+        judge: () => Effect.succeed(red("never good enough"))
+      })
+      const report = yield* implementStoriesFlow(context, options)
+      assert.strictEqual(report.stories[0]?.status, "failed")
+      assert.notInclude(report.stories[0]?.reason ?? "", "rescue")
     })
   )
 

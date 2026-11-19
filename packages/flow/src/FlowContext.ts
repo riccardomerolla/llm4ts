@@ -37,6 +37,12 @@ export interface FlowContextShape {
    * on a context built by hand; judges then fall back to `reasoning`.
    */
   readonly judge?: LlmServiceShape
+  /**
+   * The judge's agent with write access, for the one rescue turn a story
+   * gets when its last round would fail it (ADR 0054): over a roster, a
+   * judge executor seated as a coder. Absent unless the flow asks for it.
+   */
+  readonly rescuer?: LlmServiceShape
   readonly coderCapabilities: ConnectorCapabilities
   readonly userPrompt: string
   readonly workDir: string

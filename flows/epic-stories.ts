@@ -28,6 +28,9 @@
 // Test-first by default (ADR 0053): before a story's tasks are planned, its
 // coder writes one test per acceptance criterion, the test gate proves them
 // red, and they are frozen; --no-test-first (LLM4TS_TEST_FIRST=off) skips it.
+// A story its last round would fail gets one rescue turn by the judge's
+// agent, with write access, before it fails (ADR 0054); --no-rescue
+// (LLM4TS_RESCUE=off) fails it at once.
 import * as Effect from "effect/Effect"
 import { runFlowMain } from "@llm4ts/runner"
 import { epicStoriesOptions, parseStoriesFlags } from "./lib/debt.ts"

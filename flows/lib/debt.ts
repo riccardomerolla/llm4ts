@@ -187,6 +187,8 @@ export interface StoriesFlags {
    * `--harden`, whose stories are not held to tests written first.
    */
   readonly testFirst: boolean
+  /** The rescue (ADR 0054): on unless `--no-rescue` or LLM4TS_RESCUE=off. */
+  readonly rescue: boolean
   /** LLM4TS_TEST_REPORT or LLM4TS_TEST_ONE: per-criterion proof for the red phase. */
   readonly testEvidence: EvidenceSource | undefined
   /** Everything else, for the spine's own flags (`--harden` becomes `--refine`). */
@@ -211,21 +213,22 @@ export const parseStoriesFlags = (
       settingValue("LLM4TS_TEST_FIRST", environment) &&
       !deferTests &&
       !harden
-    const rest = argv.filter(
-      (arg) => arg !== "--defer-tests" && arg !== "--harden" && arg !== "--no-test-first"
-    )
+    const rescue = !argv.includes("--no-rescue") && settingValue("LLM4TS_RESCUE", environment)
+    const ours = new Set(["--defer-tests", "--harden", "--no-test-first", "--no-rescue"])
+    const rest = argv.filter((arg) => !ours.has(arg))
     return {
       deferTests,
       harden,
       testFirst,
+      rescue,
       testEvidence: evidenceSourceFromEnvironment(environment),
       argv: harden ? ["--refine", ...rest] : rest
     }
   })
 
-/** epic-stories' policy for its flags: the rubric judge, excusing tests, or hardening. */
-export const epicStoriesOptions = (flags: StoriesFlags): EpicStoriesOptions =>
-  flags.harden
+/** epic-stories' policy for its flags: the rubric judge, excusing tests, or hardening; then the rescue. */
+export const epicStoriesOptions = (flags: StoriesFlags): EpicStoriesOptions => {
+  const policy: EpicStoriesOptions = flags.harden
     ? hardenOptions
     : flags.deferTests
       ? {
@@ -237,3 +240,5 @@ export const epicStoriesOptions = (flags: StoriesFlags): EpicStoriesOptions =>
           storyJudge: rubricStoryJudge,
           ...(flags.testFirst ? { stories: storiesTestFirst(flags.testEvidence) } : {})
         }
+  return flags.rescue ? { ...policy, rescue: true } : policy
+}

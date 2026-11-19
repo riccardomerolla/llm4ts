@@ -353,6 +353,13 @@ export const settings = {
     fallback: fallback.value(false, "off"),
     doc: "Records the judge's tests score as debt instead of failing the story; --defer-tests sets it too."
   }),
+  LLM4TS_RESCUE: setting({
+    group: "review",
+    scope: "project",
+    value: Value.toggle,
+    fallback: fallback.value(true, "on"),
+    doc: "epic-stories gives a story its last round would fail one rescue turn by the judge's agent, with write access, before failing it; off (or --no-rescue) fails it at once."
+  }),
   LLM4TS_TEST_FIRST: setting({
     group: "review",
     scope: "project",
