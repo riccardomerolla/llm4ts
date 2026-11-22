@@ -40,6 +40,6 @@
     "@llm4ts/core": "workspace:*",
     "@llm4ts/flow": "workspace:*",
     "@llm4ts/runner": "workspace:*",
-    "effect": "4.1.4"
+    "effect": "4.1.5"
   }
 }

@@ -275,6 +275,6 @@ Internal engineering reference:
 4.x since 2026-11-13. [CHANGELOG.md](CHANGELOG.md) lists every removal
 with what replaces it; a module marked `// @internal` has no subpath
 (ADR 0050), and importing package-private files is unsupported. Effect 4
-(4.1.4, pinned exactly).
+(4.1.5, pinned exactly).
 
 Licensed under MIT.
