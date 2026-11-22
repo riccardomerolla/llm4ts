@@ -103,6 +103,15 @@ const typeNames = (type: unknown): ReadonlyArray<string> => {
   return []
 }
 
+/** A pointer token's URI escapes decoded; a malformed escape stays as written. */
+const uriDecoded = (token: string): string => {
+  try {
+    return decodeURIComponent(token)
+  } catch {
+    return token
+  }
+}
+
 /** Resolves a local JSON pointer (`#/a/b~1c`) against a root document. */
 const resolvePointer = (
   root: unknown,
@@ -114,13 +123,7 @@ const resolvePointer = (
   if (!fragment.startsWith("/")) return { found: false, value: undefined }
   let current: unknown = root
   for (const rawToken of fragment.slice(1).split("/")) {
-    let token = rawToken
-    try {
-      token = decodeURIComponent(rawToken)
-    } catch {
-      token = rawToken
-    }
-    token = token.replace(/~1/g, "/").replace(/~0/g, "~")
+    const token = uriDecoded(rawToken).replace(/~1/g, "/").replace(/~0/g, "~")
     if (Array.isArray(current)) {
       const index = Number(token)
       if (!Number.isInteger(index) || index < 0 || index >= current.length) {
