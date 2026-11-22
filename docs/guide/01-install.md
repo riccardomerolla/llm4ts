@@ -14,9 +14,13 @@ For a permanent command, install it globally; the rest of this guide writes
 npm i -g @llm4ts/shell
 ```
 
-You need Node 22.6 or newer (flows run with its type stripping). Flows are TypeScript files that Node runs
-directly with type stripping, so there is no build step anywhere in this
-guide.
+You need Node 22.6 or newer, on macOS or Linux. Flows are TypeScript files
+that Node runs directly with type stripping, so there is no build step
+anywhere in this guide.
+
+Windows is not supported. llm4ts has code for launching agents there, but
+nothing tests it, and on Windows a prompt that contains repository or issue
+text is not safe to hand to an agent's `.cmd` shim. Use WSL instead.
 
 ## Read the doctor report
 

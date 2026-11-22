@@ -22,8 +22,8 @@ flowchart LR
 
 ## Try it in one minute
 
-Node 22.6 or newer, nothing to install, no credentials: the built-in `hello`
-flow talks to the mock provider.
+Node 22.6 or newer on macOS or Linux, nothing to install, no credentials: the
+built-in `hello` flow talks to the mock provider. Windows is not supported.
 
 ```bash
 npx -y @llm4ts/shell run hello "What is llm4ts?"
