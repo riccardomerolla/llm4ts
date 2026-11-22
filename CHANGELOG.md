@@ -1,5 +1,13 @@
 # Changelog
 
+## 4.11.2
+
+### Changed
+
+- Contributors: the tests run on vitest 5.1.1 with `@vitest/coverage-v8`
+  5.1.1, the range `@effect/vitest` supports (PR #88). The portal example
+  follows. The published packages are unchanged by it.
+
 ## 4.11.1
 
 ### Changed
