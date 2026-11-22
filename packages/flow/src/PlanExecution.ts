@@ -4,6 +4,7 @@ import * as Fiber from "effect/Fiber"
 import * as Queue from "effect/Queue"
 import * as Semaphore from "effect/Semaphore"
 import {
+  Info,
   StageCompleted,
   StageFailed,
   StageStarted,
@@ -15,7 +16,7 @@ import {
 import { withKindSpan, type SpanOptions } from "./Spans.ts"
 import { FlowAborted, describeFlowError, type FlowError } from "./FlowError.ts"
 import { taskGraph, type Plan, type Task, type TaskNode } from "./Plan.ts"
-import type { PlanStoreShape } from "./Persistence.ts"
+import type { PlanStoreShape, TaskAttemptsShape } from "./Persistence.ts"
 import { pathWithin } from "./StoryPlan.ts"
 
 const errorMessage = describeFlowError
@@ -68,15 +69,53 @@ const withSatisfies = (description: string): { readonly satisfies?: ReadonlyArra
   return satisfies === undefined ? {} : { satisfies }
 }
 
+/** What a task's run is told about the runs before it (ADR 0056). */
+export interface TaskAttempt {
+  /** Earlier runs of this task that a dead process cut off; 0 on a first run. */
+  readonly cutOff: number
+}
+
+/**
+ * Runs a task under the plan's cut-off journal: marked before, unmarked when
+ * it ends while the process lives. `lock` keeps tasks that run at once from
+ * writing the journal over each other.
+ */
+const journaled = <A, E, R>(
+  attempts: TaskAttemptsShape | undefined,
+  lock: Semaphore.Semaphore,
+  events: FlowEventsShape,
+  task: Task,
+  run: (attempt: TaskAttempt) => Effect.Effect<A, E, R>
+): Effect.Effect<A, E | FlowError, R> => {
+  if (attempts === undefined) {
+    return run({ cutOff: 0 })
+  }
+  return Effect.gen(function* () {
+    const cutOff = yield* lock.withPermit(attempts.begin(task.title))
+    if (cutOff > 0) {
+      yield* events.publish(
+        Info.make({
+          message: `task "${task.title}": ${cutOff} earlier run(s) were cut off before they finished`
+        })
+      )
+    }
+    return yield* Effect.onExit(run({ cutOff }), (exit) =>
+      Effect.ignore(lock.withPermit(attempts.end(task.title, Exit.isSuccess(exit))))
+    )
+  })
+}
+
 export const implementTaskLoop = Effect.fn("@llm4ts/flow/PlanExecution.implementTaskLoop")(
   function* <E, R>(
     store: PlanStoreShape,
     events: FlowEventsShape,
     planPath: string,
     plan: Plan,
-    perTask: (task: Task, planSoFar: Plan) => Effect.Effect<void, E, R>
+    perTask: (task: Task, planSoFar: Plan, attempt: TaskAttempt) => Effect.Effect<void, E, R>
   ): Effect.fn.Return<Plan, E | FlowError, R> {
     let current = plan
+    const attempts = store.attempts?.(planPath)
+    const lock = yield* Semaphore.make(1)
     const count = plan.tasks.length
     yield* events.publish(
       TasksPlanned.make({
@@ -93,7 +132,12 @@ export const implementTaskLoop = Effect.fn("@llm4ts/flow/PlanExecution.implement
         yield* events.publish(
           TaskStarted.make({ index, count, title: task.title, ...withSatisfies(task.description) })
         )
-        yield* stage(events, task.title, perTask(task, current))
+        const planSoFar = current
+        yield* stage(
+          events,
+          task.title,
+          journaled(attempts, lock, events, task, (attempt) => perTask(task, planSoFar, attempt))
+        )
         current = current.complete(task.title)
         yield* store.save(planPath, current)
         yield* events.publish(TaskCompleted.make({ index, count, title: task.title }))
@@ -134,6 +178,8 @@ export interface AsideRequest {
   /** The plan's size, for `task n/m`. */
   readonly count: number
   readonly planSoFar: Plan
+  /** What the task's run is told about the runs before it (ADR 0056). */
+  readonly attempt: TaskAttempt
   /** Runs `effect` while no task runs at home: the merge back into the story. */
   readonly exclusive: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   /** Says the task started, on the coder it got; call it once that coder is held. */
@@ -170,7 +216,7 @@ export const implementTaskGraph = Effect.fn("@llm4ts/flow/PlanExecution.implemen
     events: FlowEventsShape,
     planPath: string,
     plan: Plan,
-    perTask: (task: Task, planSoFar: Plan) => Effect.Effect<void, E, R>,
+    perTask: (task: Task, planSoFar: Plan, attempt: TaskAttempt) => Effect.Effect<void, E, R>,
     parallel: ParallelTasks<E2, R2>
   ): Effect.fn.Return<Plan, E | E2 | FlowError, R | R2> {
     const graph = taskGraph(plan)
@@ -191,8 +237,10 @@ export const implementTaskGraph = Effect.fn("@llm4ts/flow/PlanExecution.implemen
     const last = new Set<number>()
     const running = new Map<number, "home" | "aside">()
     const fibers: Array<Fiber.Fiber<unknown, unknown>> = []
-    const finished = yield* Queue.unbounded<Finished<E | E2>>()
+    const finished = yield* Queue.unbounded<Finished<E | E2 | FlowError>>()
     const home = yield* Semaphore.make(1)
+    const attempts = store.attempts?.(planPath)
+    const journal = yield* Semaphore.make(1)
     const exclusive = <A, EX, RX>(effect: Effect.Effect<A, EX, RX>) => home.withPermit(effect)
 
     const started = (
@@ -235,7 +283,13 @@ export const implementTaskGraph = Effect.fn("@llm4ts/flow/PlanExecution.implemen
               exclusive(
                 Effect.andThen(
                   started(pick),
-                  stage(events, pick.task.title, perTask(pick.task, snapshot))
+                  stage(
+                    events,
+                    pick.task.title,
+                    journaled(attempts, journal, events, pick.task, (attempt) =>
+                      perTask(pick.task, snapshot, attempt)
+                    )
+                  )
                 )
               ).pipe(
                 Effect.as(undefined),
@@ -258,10 +312,11 @@ export const implementTaskGraph = Effect.fn("@llm4ts/flow/PlanExecution.implemen
           continue
         }
         running.set(node.index, "aside")
-        const request: AsideRequest = {
+        const request = (attempt: TaskAttempt): AsideRequest => ({
           node,
           count,
           planSoFar: current,
+          attempt,
           exclusive,
           announce: (coder) =>
             started(node, {
@@ -269,10 +324,12 @@ export const implementTaskGraph = Effect.fn("@llm4ts/flow/PlanExecution.implemen
               ...(coder.executor === undefined ? {} : { executor: coder.executor }),
               ...(coder.clone === undefined ? {} : { clone: coder.clone })
             })
-        }
+        })
         fibers.push(
           yield* Effect.forkChild(
-            parallel.aside(request).pipe(
+            journaled(attempts, journal, events, node.task, (attempt) =>
+              parallel.aside(request(attempt))
+            ).pipe(
               Effect.exit,
               Effect.flatMap((exit) => Queue.offer(finished, { kind: "aside", node, exit }))
             )

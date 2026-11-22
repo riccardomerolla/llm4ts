@@ -8,6 +8,7 @@ import type { LlmServiceShape } from "@llm4ts/core/LlmService"
 import { ConnectorCapabilities, LlmChunk, TokenUsage, type Message } from "@llm4ts/core/Models"
 import { gitOwnershipInstruction } from "@llm4ts/flow/Chat"
 import {
+  cutOffNote,
   implementPlanFlow,
   flowReviewer,
   completeAndPublish,
@@ -22,7 +23,7 @@ import type { GitHubToolShape } from "@llm4ts/flow/GitHubTool"
 import { Plan, Task } from "@llm4ts/flow/Plan"
 import { ReviewIssue, ReviewResult } from "@llm4ts/flow/Review"
 import { GateBaseline } from "@llm4ts/flow/GateTriage"
-import { makeMemoryPlainFileStore, makePlanStore } from "@llm4ts/flow/Persistence"
+import { attemptsPath, makeMemoryPlainFileStore, makePlanStore } from "@llm4ts/flow/Persistence"
 import { unsupportedScoreLabels } from "@llm4ts/core/LabelScoring"
 import { makeFakeJudgment } from "@llm4ts/core/judgment/FakeJudgment"
 import { JudgmentBackendError } from "@llm4ts/core/judgment/Judgment"
@@ -262,6 +263,53 @@ describe("Flow", () => {
       assert.strictEqual(prompts.length, 2)
       assert.match(prompts[0] ?? "", /do the first thing/)
       assert.isTrue(persisted?.tasks.every((task) => task.completed))
+    })
+  )
+
+  it.effect("tells the coder when an earlier run of its task was cut off (ADR 0056)", () =>
+    Effect.gen(function* () {
+      const events = yield* makeFlowEventHub()
+      const asked = yield* Ref.make<ReadonlyArray<string>>([])
+      const gitLog = yield* Ref.make<GitLog>({ branches: [], commits: [] })
+      const planPath = ".llm4ts/plan.md"
+      const memory = yield* makeMemoryPlainFileStore({
+        [attemptsPath(planPath)]: JSON.stringify({
+          schemaVersion: 1,
+          value: { tasks: { "first task": { running: true, cutOff: 0 } } }
+        })
+      })
+      const context: FlowContextShape = {
+        reasoning: cleanReviewer,
+        coder: coderService(asked),
+        git: makeFakeGit(gitLog),
+        hosting: failingHosting,
+        events,
+        reviewers: [cleanReviewer],
+        coderCapabilities: ConnectorCapabilities.make({}),
+        userPrompt: "implement the plan",
+        workDir: "/repo",
+        workspace: "/repo"
+      }
+
+      yield* implementPlanFlow(context, {
+        store: makePlanStore(memory.store),
+        planPath,
+        plan: Effect.succeed(
+          Plan.make({
+            epicId: "epic-1",
+            tasks: [
+              Task.make({ title: "first task", description: "do the first thing" }),
+              Task.make({ title: "second task", description: "do the second thing" })
+            ]
+          })
+        )
+      })
+
+      const prompts = yield* Ref.get(asked)
+      assert.isTrue((prompts[0] ?? "").startsWith(cutOffNote))
+      assert.match(prompts[0] ?? "", /do the first thing/)
+      assert.notInclude(prompts[1] ?? "", cutOffNote)
+      assert.isUndefined((yield* memory.files)[attemptsPath(planPath)])
     })
   )
 

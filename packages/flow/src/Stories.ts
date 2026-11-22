@@ -62,6 +62,7 @@ import {
 } from "./Perimeter.ts"
 import {
   loadVersioned,
+  attemptsPath,
   makePlanStore,
   saveVersioned,
   type PlainFileStoreShape
@@ -1298,6 +1299,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       // fresh branch would inherit "every task complete" and skip the coder.
       // The notes its tasks carried describe the old definition: gone too.
       yield* files.remove(planPath(story))
+      yield* files.remove(attemptsPath(planPath(story)))
       yield* files.remove(notesPath(story))
       yield* files.remove(redTestsPath(options.stateDir, story.id))
       stored = undefined
