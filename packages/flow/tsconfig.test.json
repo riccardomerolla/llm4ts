@@ -3,7 +3,6 @@
   "include": ["test"],
   "references": [{ "path": "tsconfig.src.json" }, { "path": "../core/tsconfig.src.json" }],
   "compilerOptions": {
-    "baseUrl": ".",
     "noEmit": true,
     "rootDir": "test",
     "tsBuildInfoFile": ".tsbuildinfo/test.tsbuildinfo",

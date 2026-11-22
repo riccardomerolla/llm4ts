@@ -8,7 +8,6 @@
     { "path": "../runner/tsconfig.src.json" }
   ],
   "compilerOptions": {
-    "baseUrl": ".",
     "noEmit": true,
     "rootDir": "test",
     "tsBuildInfoFile": ".tsbuildinfo/test.tsbuildinfo",

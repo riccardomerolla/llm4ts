@@ -9,7 +9,6 @@
     { "path": "../packages/js/tsconfig.src.json" }
   ],
   "compilerOptions": {
-    "baseUrl": ".",
     "noEmit": true,
     "rootDir": "test",
     "tsBuildInfoFile": ".tsbuildinfo/test.tsbuildinfo",
