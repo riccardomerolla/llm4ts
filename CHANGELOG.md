@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Effect 4.1.5.** Every `effect` and `@effect/*` pin moves from 4.1.4 to
+  4.1.5 (`@effect/platform-node`, `@effect/platform-node-shared`,
+  `@effect/vitest`), still exact, peers included. A flow project that
+  installs its own `@llm4ts/*` packages must pin `effect` at 4.1.5 too.
+  Nothing changes for a run.
+
 ## 4.11.0
 
 ### Added

@@ -94,9 +94,9 @@
     "typescript"
   ],
   "peerDependencies": {
-    "effect": "4.1.4"
+    "effect": "4.1.5"
   },
   "devDependencies": {
-    "effect": "4.1.4"
+    "effect": "4.1.5"
   }
 }
