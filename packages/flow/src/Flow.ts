@@ -34,7 +34,8 @@ import {
   implementTaskLoop,
   stage,
   type AsideOutcome,
-  type AsideRequest
+  type AsideRequest,
+  type TaskAttempt
 } from "./PlanExecution.ts"
 import { truth } from "@llm4ts/core/judgment/Schemas"
 import { certaintyOf, decide, judgmentOf, type JudgmentMode } from "./Judgment.ts"
@@ -257,6 +258,13 @@ export const satisfiedByJudgment = Effect.fn("@llm4ts/flow/Flow.satisfiedByJudgm
   return answer.truth >= 0.5
 })
 
+/** What a coder is told when an earlier run of its task died with the process (ADR 0056). */
+export const cutOffNote = [
+  "An earlier run of this task was cut off before it finished and may have partially run.",
+  "Its changes, if any, are uncommitted in the working tree: look at them first (git status, git diff),",
+  "keep what is right, and finish the task from there instead of starting over."
+].join("\n")
+
 const defaultCommitMessage = (plan: Plan, task: Task): string => `${plan.epicId}: ${task.title}`
 
 const composeSystem = (base: string | undefined, note: string): string =>
@@ -326,7 +334,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
   /** The task's body in `ctx`: the plan's own context at home, another one aside (ADR 0034). */
   const taskBody =
     (ctx: FlowContextShape, over: TaskOverrides) =>
-    (task: Task, planSoFar: Plan): Effect.Effect<void, FlowError> => {
+    (task: Task, planSoFar: Plan, attempt: TaskAttempt): Effect.Effect<void, FlowError> => {
       const lint = "lint" in over ? over.lint : options.lint
       const onTaskReply = "onTaskReply" in over ? over.onTaskReply : options.onTaskReply
       const system = over.system ?? options.system
@@ -368,11 +376,13 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
               yield* onTaskReply(task, reply, trailerIn(found), taskStartedAt)
             }
           })
+        const taskPrompt =
+          attempt.cutOff === 0 ? plan.taskPrompt(task) : `${cutOffNote}\n\n${plan.taskPrompt(task)}`
         yield* keepFindings(
           yield* coder.ask(
             options.carry === undefined
-              ? plan.taskPrompt(task)
-              : `${withNotes(plan.taskPrompt(task), notes)}\n${findingsRequest}`
+              ? taskPrompt
+              : `${withNotes(taskPrompt, notes)}\n${findingsRequest}`
           )
         )
         const produced = yield* ctx.git.diffAll
@@ -523,7 +533,7 @@ export const implementPlanFlow = Effect.fn("@llm4ts/flow/Flow.implementPlan")(fu
         concurrency: parallel.concurrency,
         aside: (request) =>
           parallel.aside(request, (ctx, over) =>
-            taskBody(ctx, over)(request.node.task, request.planSoFar)
+            taskBody(ctx, over)(request.node.task, request.planSoFar, request.attempt)
           )
       }
     )

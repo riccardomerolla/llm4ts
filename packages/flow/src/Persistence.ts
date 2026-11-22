@@ -2,7 +2,12 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
-import { PersistenceError, PlanParseError, UnsupportedSchemaVersion } from "./FlowError.ts"
+import {
+  FlowAborted,
+  PersistenceError,
+  PlanParseError,
+  UnsupportedSchemaVersion
+} from "./FlowError.ts"
 import type { FlowError } from "./FlowError.ts"
 import { parsePlan } from "./Plan.ts"
 import type { Plan } from "./Plan.ts"
@@ -93,9 +98,89 @@ export interface PlanStoreShape {
     path: string,
     create: Effect.Effect<Plan, E, R>
   ) => Effect.Effect<Plan, E | PersistenceError | PlanParseError, R>
+  /**
+   * The cut-off journal of the plan at `path` (ADR 0056). A store without
+   * one runs every task as if no run of it had ever been cut off.
+   */
+  readonly attempts?: (path: string) => TaskAttemptsShape
 }
 
-export const makePlanStore = (files: PlainFileStoreShape): PlanStoreShape => {
+/**
+ * Which of a plan's tasks were running when their process died (ADR 0056).
+ * A task's run is marked before it starts and unmarked when it ends while
+ * the process lives, whatever the ending; a mark found at the next start
+ * is a run that was cut off.
+ */
+export interface TaskAttemptsShape {
+  /**
+   * Marks the task running and answers how many of its earlier runs were
+   * cut off. Fails, marking nothing, once that count reaches the limit.
+   */
+  readonly begin: (task: string) => Effect.Effect<number, FlowError>
+  /** The run ended while the process lived; a completed task leaves the journal. */
+  readonly end: (task: string, completed: boolean) => Effect.Effect<void, FlowError>
+}
+
+/** Where the cut-off journal of the plan at `planPath` lives. */
+export const attemptsPath = (planPath: string): string => `${planPath}.attempts.json`
+
+/** A task whose run was cut off this many times is not started again. */
+export const defaultCutOffLimit = 3
+
+const TaskAttempt = Schema.Struct({ running: Schema.Boolean, cutOff: Schema.Int })
+const TaskAttempts = Schema.Struct({ tasks: Schema.Record(Schema.String, TaskAttempt) })
+const taskAttemptsVersion = 1
+
+export const makeTaskAttempts = (
+  files: PlainFileStoreShape,
+  planPath: string,
+  cutOffLimit: number = defaultCutOffLimit
+): TaskAttemptsShape => {
+  const path = attemptsPath(planPath)
+  const load = Effect.map(
+    loadVersioned(files, path, taskAttemptsVersion, TaskAttempts),
+    (stored) => stored?.tasks ?? {}
+  )
+  const save = (tasks: typeof TaskAttempts.Type.tasks): Effect.Effect<void, FlowError> =>
+    Object.keys(tasks).length === 0
+      ? files.remove(path)
+      : saveVersioned(files, path, taskAttemptsVersion, TaskAttempts, { tasks })
+  return {
+    begin: (task) =>
+      Effect.gen(function* () {
+        const tasks = yield* load
+        const stored = tasks[task]
+        const cutOff = (stored?.cutOff ?? 0) + (stored?.running === true ? 1 : 0)
+        if (cutOff >= cutOffLimit) {
+          return yield* FlowAborted.make({
+            message: `task "${task}" was cut off ${cutOff} time(s) before it finished and is not started again; delete ${path} to run it once more`
+          })
+        }
+        yield* save({ ...tasks, [task]: { running: true, cutOff } })
+        return cutOff
+      }),
+    end: (task, completed) =>
+      Effect.gen(function* () {
+        const tasks = yield* load
+        const stored = tasks[task]
+        if (stored === undefined) {
+          return
+        }
+        const { [task]: _ended, ...others } = tasks
+        yield* save(completed ? others : { ...others, [task]: { ...stored, running: false } })
+      })
+  }
+}
+
+export interface PlanStoreOptions {
+  /** A task cut off this many times is not started again; default `defaultCutOffLimit`. */
+  readonly cutOffLimit?: number
+}
+
+export const makePlanStore = (
+  files: PlainFileStoreShape,
+  options: PlanStoreOptions = {}
+): PlanStoreShape => {
   const save = (path: string, plan: Plan): Effect.Effect<void, PersistenceError> =>
     files.writeAtomic(path, plan.render)
 
@@ -117,8 +202,9 @@ export const makePlanStore = (files: PlainFileStoreShape): PlanStoreShape => {
   return {
     save,
     load,
-    remove: files.remove,
-    recoverOrCreate
+    remove: (path) => Effect.andThen(files.remove(path), files.remove(attemptsPath(path))),
+    recoverOrCreate,
+    attempts: (path) => makeTaskAttempts(files, path, options.cutOffLimit)
   }
 }
 

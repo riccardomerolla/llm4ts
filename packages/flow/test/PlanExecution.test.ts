@@ -13,7 +13,7 @@ import {
 import { kindAttribute, withKindSpan } from "@llm4ts/flow/Spans"
 import { recordingTracer } from "./support/RecordingTracer.ts"
 import { Plan, Task } from "@llm4ts/flow/Plan"
-import { makePlanStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { attemptsPath, makePlanStore, type PlainFileStoreShape } from "@llm4ts/flow/Persistence"
 
 const memoryFiles = (state: Ref.Ref<Readonly<Record<string, string>>>): PlainFileStoreShape => ({
   read: (path) => Ref.get(state).pipe(Effect.map((files) => files[path])),
@@ -401,6 +401,172 @@ describe("implementTaskGraph (ADR 0034)", () => {
         )
       )
       assert.strictEqual(error._tag, "Aborted")
+    })
+  )
+})
+
+describe("the cut-off journal (ADR 0056)", () => {
+  const journal = attemptsPath("plan.md")
+  const marked = (tasks: Record<string, { running: boolean; cutOff: number }>): string =>
+    JSON.stringify({ schemaVersion: 1, value: { tasks } })
+  const plan = Plan.make({
+    epicId: "epic",
+    tasks: [Task.make({ title: "a", description: "" }), Task.make({ title: "b", description: "" })]
+  })
+  const setup = (initial: Readonly<Record<string, string>>) =>
+    Effect.gen(function* () {
+      const files = yield* Ref.make(initial)
+      const events = yield* makeCollectingFlowEvents
+      const seen = yield* Ref.make<ReadonlyArray<readonly [string, number]>>([])
+      return { files, events, seen, store: makePlanStore(memoryFiles(files)) }
+    })
+
+  it.effect("marks a task while it runs and leaves no journal once every task is done", () =>
+    Effect.gen(function* () {
+      const { files, events, seen, store } = yield* setup({})
+      const during = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+      yield* implementTaskLoop(store, events, "plan.md", plan, (task, _plan, attempt) =>
+        Effect.gen(function* () {
+          yield* Ref.update(seen, (current) => [...current, [task.title, attempt.cutOff] as const])
+          const disk = (yield* Ref.get(files))[journal]
+          yield* Ref.update(during, (current) => [...current, disk])
+        })
+      )
+
+      assert.deepStrictEqual(yield* Ref.get(seen), [
+        ["a", 0],
+        ["b", 0]
+      ])
+      assert.deepStrictEqual(
+        (yield* Ref.get(during)).map((disk) => JSON.parse(disk ?? "{}").value.tasks),
+        [{ a: { running: true, cutOff: 0 } }, { b: { running: true, cutOff: 0 } }]
+      )
+      assert.isUndefined((yield* Ref.get(files))[journal])
+    })
+  )
+
+  it.effect("tells a task how many of its runs a dead process cut off, and says so", () =>
+    Effect.gen(function* () {
+      const { events, seen, store } = yield* setup({
+        [journal]: marked({ a: { running: true, cutOff: 1 } })
+      })
+      yield* implementTaskLoop(store, events, "plan.md", plan, (task, _plan, attempt) =>
+        Ref.update(seen, (current) => [...current, [task.title, attempt.cutOff] as const])
+      )
+
+      assert.deepStrictEqual(yield* Ref.get(seen), [
+        ["a", 2],
+        ["b", 0]
+      ])
+      const said = (yield* events.recorded).flatMap((event) =>
+        event._tag === "Info" ? [event.message] : []
+      )
+      assert.deepStrictEqual(said, ['task "a": 2 earlier run(s) were cut off before they finished'])
+    })
+  )
+
+  it.effect("does not start a task again once its runs were cut off three times", () =>
+    Effect.gen(function* () {
+      const before = marked({ a: { running: true, cutOff: 2 } })
+      const { files, events, seen, store } = yield* setup({ [journal]: before })
+      const error = yield* Effect.flip(
+        implementTaskLoop(store, events, "plan.md", plan, (task, _plan, attempt) =>
+          Ref.update(seen, (current) => [...current, [task.title, attempt.cutOff] as const])
+        )
+      )
+
+      assert.strictEqual(error._tag, "Aborted")
+      assert.match(
+        error.message,
+        /task "a" was cut off 3 time\(s\).*delete plan\.md\.attempts\.json/
+      )
+      assert.deepStrictEqual(yield* Ref.get(seen), [])
+      assert.strictEqual((yield* Ref.get(files))[journal], before)
+    })
+  )
+
+  it.effect("honours the store's own limit", () =>
+    Effect.gen(function* () {
+      const files = yield* Ref.make<Readonly<Record<string, string>>>({
+        [journal]: marked({ a: { running: true, cutOff: 0 } })
+      })
+      const events = yield* makeCollectingFlowEvents
+      const store = makePlanStore(memoryFiles(files), { cutOffLimit: 1 })
+      const error = yield* Effect.flip(
+        implementTaskLoop(store, events, "plan.md", plan, () => Effect.void)
+      )
+      assert.match(error.message, /was cut off 1 time/)
+    })
+  )
+
+  it.effect("a task that fails while the process lives is not counted as cut off", () =>
+    Effect.gen(function* () {
+      const { files, events, seen, store } = yield* setup({})
+      yield* Effect.flip(
+        implementTaskLoop(store, events, "plan.md", plan, () =>
+          Effect.fail(FlowAborted.make({ message: "gates red" }))
+        )
+      )
+      assert.deepStrictEqual(JSON.parse((yield* Ref.get(files))[journal] ?? "{}").value.tasks, {
+        a: { running: false, cutOff: 0 }
+      })
+
+      yield* implementTaskLoop(store, events, "plan.md", plan, (task, _plan, attempt) =>
+        Ref.update(seen, (current) => [...current, [task.title, attempt.cutOff] as const])
+      )
+      assert.deepStrictEqual(yield* Ref.get(seen), [
+        ["a", 0],
+        ["b", 0]
+      ])
+    })
+  )
+
+  it.effect("removing a plan removes its journal", () =>
+    Effect.gen(function* () {
+      const { files, store } = yield* setup({
+        "plan.md": plan.render,
+        [journal]: marked({ a: { running: true, cutOff: 0 } })
+      })
+      yield* store.remove("plan.md")
+      assert.deepStrictEqual(yield* Ref.get(files), {})
+    })
+  )
+
+  it.effect("journals a task that runs beside the held coder too", () =>
+    Effect.gen(function* () {
+      const graph = Plan.make({
+        epicId: "epic",
+        tasks: [
+          Task.make({ title: "a", description: "" }),
+          Task.make({ title: "b", description: "Depends on: 1\nOwns: src/b" }),
+          Task.make({ title: "c", description: "Depends on: 1\nOwns: src/c" })
+        ]
+      })
+      const { events, seen, store } = yield* setup({
+        [journal]: marked({ c: { running: true, cutOff: 0 } })
+      })
+      const note = (title: string, cutOff: number) =>
+        Ref.update(seen, (current) => [...current, [title, cutOff] as const])
+      yield* implementTaskGraph(
+        store,
+        events,
+        "plan.md",
+        graph,
+        (task, _plan, attempt) => note(task.title, attempt.cutOff),
+        {
+          concurrency: 2,
+          aside: (request) =>
+            Effect.as(note(request.node.task.title, request.attempt.cutOff), "merged" as const)
+        }
+      )
+      assert.deepStrictEqual(
+        [...(yield* Ref.get(seen))].sort(([left], [right]) => left.localeCompare(right)),
+        [
+          ["a", 0],
+          ["b", 0],
+          ["c", 1]
+        ]
+      )
     })
   )
 })

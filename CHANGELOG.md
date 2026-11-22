@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A task cut off by a dead process is resumed knowingly** (ADR 0056). A
+  plan now keeps a small journal beside its file,
+  `<plan>.attempts.json`. When the flow's process dies while a task runs
+  (a crash, a kill, the machine going down), the next run tells the coder
+  that an earlier run may have partially run and to start from the
+  uncommitted changes in the working tree. Stopping a flow with Ctrl-C, a
+  red gate or a failed review does not count.
+- **A task cut off three times is not started again.** The plan fails with
+  a message naming the task and the journal file; delete the file to run
+  the task once more. `makePlanStore(files, { cutOffLimit })` changes the
+  limit.
+- Flow authors: the task body passed to `implementTaskLoop` and
+  `implementTaskGraph` receives a third argument, `TaskAttempt`
+  (`{ cutOff }`), and `AsideRequest` carries it as `attempt`.
+
 ## 4.11.5
 
 ### Changed

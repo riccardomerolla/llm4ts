@@ -92,6 +92,10 @@ exports no module. The following modules are the main entry points.
   agents.
 - `@llm4ts/flow/Plan`, `Planner`, `PlanExecution`, and `Persistence`: structured
   planning and resumable work.
+  A plan store keeps a cut-off journal beside the plan
+  (`makeTaskAttempts`, ADR 0056): a task whose process died is run again
+  with `TaskAttempt.cutOff` above zero, and not at all after
+  `cutOffLimit` cut-offs.
 - `@llm4ts/flow/Workspace`: contained filesystem access.
 - `@llm4ts/flow/GitTool`, `GitHubTool`, and `AzureDevOpsTool`: audited repository
   and forge boundaries. `GitTool.diffVsBaseScoped(base, paths)` is the
