@@ -1,5 +1,14 @@
 # Changelog
 
+## 4.11.3
+
+### Changed
+
+- Contributors: the repository lints with ESLint 10.15 and `@eslint/js`
+  10.0.1 (PR #89). The lint scripts pass `-c eslint.config.mjs`, since
+  ESLint 10 would otherwise pick up the starter templates' own configs. The
+  portal example follows. The published packages are unchanged by it.
+
 ## 4.11.2
 
 ### Changed
