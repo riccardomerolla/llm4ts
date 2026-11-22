@@ -660,12 +660,11 @@ export interface BriefSummary {
 /** The names of the epic folders of a repository. */
 export const epicDirs = (workDir: string): Effect.Effect<ReadonlyArray<string>> =>
   Effect.tryPromise(() => readdir(epicsDir(workDir), { withFileTypes: true })).pipe(
-    Effect.map(
-      (entries): ReadonlyArray<string> =>
-        entries
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => entry.name)
-          .sort()
+    Effect.map((entries): ReadonlyArray<string> =>
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
     ),
     Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([]))
   )

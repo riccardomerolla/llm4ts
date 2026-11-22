@@ -193,13 +193,11 @@ export const verbalizedScoreLabelSequence =
                   })
           return Effect.result(entry)
         }).pipe(
-          Effect.map(
-            (entries): LabelSequence => ({
-              entries,
-              ...(usage === undefined ? {} : { usage }),
-              ...(model === undefined ? {} : { model })
-            })
-          )
+          Effect.map((entries): LabelSequence => ({
+            entries,
+            ...(usage === undefined ? {} : { usage }),
+            ...(model === undefined ? {} : { model })
+          }))
         )
       )
     )

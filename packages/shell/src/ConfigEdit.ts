@@ -98,12 +98,10 @@ export interface ActionChoice {
 /** What an open setting offers; a removal only for a file that holds it. */
 export const settingActions = (held: ReadonlyArray<FileLayer>): ReadonlyArray<ActionChoice> => [
   { title: "change the value", action: { kind: "change" } },
-  ...held.map(
-    (layer): ActionChoice => ({
-      title: `remove it from the ${layer} file`,
-      action: { kind: "remove", layer }
-    })
-  ),
+  ...held.map((layer): ActionChoice => ({
+    title: `remove it from the ${layer} file`,
+    action: { kind: "remove", layer }
+  })),
   { title: "back", action: { kind: "back" } }
 ]
 

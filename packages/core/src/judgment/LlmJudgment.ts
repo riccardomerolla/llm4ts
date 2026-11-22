@@ -259,10 +259,10 @@ export const makeLlmJudgment = (
     Effect.forEach(
       entries,
       ([key, question]) =>
-        Effect.map(
-          Effect.result(scoreQuestion(input.state, key, question)),
-          (outcome): Outcome => [key, outcome]
-        ),
+        Effect.map(Effect.result(scoreQuestion(input.state, key, question)), (outcome): Outcome => [
+          key,
+          outcome
+        ]),
       { concurrency: config.concurrency }
     )
 
@@ -332,8 +332,9 @@ export const makeLlmJudgment = (
           // Usage was reported once for the whole call; the per-question reads carry none.
           answered.push([key, Result.succeed(combine(question, reads, batchModel))])
         } else {
-          yield* hooks.onFallback?.(key, `shared-prefix batch: ${reason ?? "unreadable"}`) ??
-            Effect.void
+          yield* (
+            hooks.onFallback?.(key, `shared-prefix batch: ${reason ?? "unreadable"}`) ?? Effect.void
+          )
           retry.push([key, question])
         }
       }

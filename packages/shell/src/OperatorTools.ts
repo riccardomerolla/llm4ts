@@ -366,17 +366,15 @@ export const readHandlers = (
       Effect.gen(function* () {
         const repo = yield* resolveRepo(deps.config, repoId)
         const doctor = yield* deps.doctor
-        const connectors = doctor.connectors.map(
-          (connector): ConnectorHealthOut => ({
-            id: connector.id,
-            availability: connector.status.availability,
-            authStatus: connector.status.authStatus,
-            probe: connector.probe,
-            ...(connector.status.latency === undefined
-              ? {}
-              : { latencyMs: Math.round(Duration.toMillis(connector.status.latency)) })
-          })
-        )
+        const connectors = doctor.connectors.map((connector): ConnectorHealthOut => ({
+          id: connector.id,
+          availability: connector.status.availability,
+          authStatus: connector.status.authStatus,
+          probe: connector.probe,
+          ...(connector.status.latency === undefined
+            ? {}
+            : { latencyMs: Math.round(Duration.toMillis(connector.status.latency)) })
+        }))
         const roster = yield* deps.roster(repo.path).pipe(
           Effect.map((report) => ({ report, note: undefined })),
           Effect.catch((error) =>

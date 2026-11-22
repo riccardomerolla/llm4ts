@@ -35,14 +35,12 @@ export const makeDirectoryStubTransport = (
     if (operation === undefined)
       return Effect.succeed(stubFault(`stub: no operation for action ${action}`))
     return Effect.tryPromise(() => readFile(join(directory, `${operation.name}.xml`))).pipe(
-      Effect.map(
-        (bytes): SoapHttpResponse => ({
-          status: 200,
-          headers: { "content-type": "text/xml; charset=utf-8" },
-          body: new Uint8Array(bytes),
-          elapsedMs: 1
-        })
-      ),
+      Effect.map((bytes): SoapHttpResponse => ({
+        status: 200,
+        headers: { "content-type": "text/xml; charset=utf-8" },
+        body: new Uint8Array(bytes),
+        elapsedMs: 1
+      })),
       Effect.orElseSucceed(() => stubFault(`stub: no ${operation.name}.xml`))
     )
   },

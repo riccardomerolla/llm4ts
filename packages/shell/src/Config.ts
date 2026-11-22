@@ -192,13 +192,11 @@ export const parseConfigFile = (text: string, path: string): ConfigFile => {
     lines,
     problems: lines
       .filter((line) => line._tag === "Malformed")
-      .map(
-        (line): ConfigProblem => ({
-          severity: "error",
-          kind: "malformed",
-          message: `${path}:${line.line}: not a NAME=value line`
-        })
-      )
+      .map((line): ConfigProblem => ({
+        severity: "error",
+        kind: "malformed",
+        message: `${path}:${line.line}: not a NAME=value line`
+      }))
   }
 }
 

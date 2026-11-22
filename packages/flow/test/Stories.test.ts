@@ -335,21 +335,18 @@ const makeHarness = (
   })
 
 const makeContext = (harness: Harness) =>
-  Effect.map(
-    makeFlowEventHub(),
-    (events): FlowContextShape => ({
-      reasoning: cleanReviewer,
-      coder: coder("done"),
-      git: epicGit(harness),
-      hosting,
-      events,
-      reviewers: [cleanReviewer],
-      coderCapabilities: ConnectorCapabilities.make({}),
-      userPrompt: "epic",
-      workDir: "/repo",
-      workspace: "/repo"
-    })
-  )
+  Effect.map(makeFlowEventHub(), (events): FlowContextShape => ({
+    reasoning: cleanReviewer,
+    coder: coder("done"),
+    git: epicGit(harness),
+    hosting,
+    events,
+    reviewers: [cleanReviewer],
+    coderCapabilities: ConnectorCapabilities.make({}),
+    userPrompt: "epic",
+    workDir: "/repo",
+    workspace: "/repo"
+  }))
 
 const story = (id: string, dependsOn: ReadonlyArray<string> = []): Story =>
   Story.make({

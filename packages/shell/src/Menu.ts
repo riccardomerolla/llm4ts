@@ -47,15 +47,13 @@ const selectCoder = Effect.fn("@llm4ts/shell/Menu.selectCoder")(function* (
       value: undefined,
       description: "LLM4TS_CODER from the environment or the config files"
     },
-    ...coderChoices.map(
-      (choice): Prompt.SelectChoice<string | undefined> => ({
-        title:
-          findOnPath(choice.executable, environment) === undefined
-            ? choice.token
-            : `${choice.token} ✓ found`,
-        value: choice.token
-      })
-    )
+    ...coderChoices.map((choice): Prompt.SelectChoice<string | undefined> => ({
+      title:
+        findOnPath(choice.executable, environment) === undefined
+          ? choice.token
+          : `${choice.token} ✓ found`,
+      value: choice.token
+    }))
   ]
   return yield* Prompt.run(Prompt.Select({ message: "Which coding agent?", choices }))
 })

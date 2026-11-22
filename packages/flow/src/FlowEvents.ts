@@ -442,11 +442,7 @@ export class ExecutorHandedOver extends Schema.TaggedClass<ExecutorHandedOver>()
 ) {}
 
 export type RosterEvent =
-  | ExecutorLeased
-  | ExecutorReleased
-  | ExecutorExcluded
-  | ExecutorResumed
-  | ExecutorHandedOver
+  ExecutorLeased | ExecutorReleased | ExecutorExcluded | ExecutorResumed | ExecutorHandedOver
 
 const resumedWords: Readonly<Record<ExecutorResumed["why"], string>> = {
   expired: "back in the round",

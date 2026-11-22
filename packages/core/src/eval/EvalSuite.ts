@@ -32,14 +32,12 @@ export const run = Effect.fn("@llm4ts/core/eval/EvalSuite.run")(function* <In>(
     const minimum = testCase.minPerDimension ?? 1
     if (repeats <= 1) {
       return evaluator.evaluate(testCase.input).pipe(
-        Effect.map(
-          (result): CaseReport => ({
-            name: testCase.name,
-            result,
-            repeated: undefined,
-            passed: result.meets(minimum)
-          })
-        )
+        Effect.map((result): CaseReport => ({
+          name: testCase.name,
+          result,
+          repeated: undefined,
+          passed: result.meets(minimum)
+        }))
       )
     }
     return repeat(evaluator, testCase.input, repeats, spreadThreshold).pipe(

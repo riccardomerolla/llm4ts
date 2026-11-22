@@ -244,10 +244,12 @@ export const failClassifiedCliError = Effect.fn(
 ): Effect.fn.Return<never, LlmError> {
   const now = yield* DateTime.now
   const timeZone = yield* Effect.sync(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
-  return yield* classifyUsageLimit(provider, raw, now, timeZone) ??
+  return yield* (
+    classifyUsageLimit(provider, raw, now, timeZone) ??
     ProviderError.make({
       message: `${fallbackPrefix}: ${raw}`
     })
+  )
 })
 
 /** The first `x.y.z` in a CLI's `--version` answer, if it holds one. */
