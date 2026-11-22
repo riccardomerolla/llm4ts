@@ -9,68 +9,112 @@ on:
   # matching v<version> tag once the publish has succeeded.
   workflow_dispatch:
 
-permissions:
-  # write pushes the release tag on the dispatch path and creates the GitHub
-  # Release on both; job-level permissions cannot be split per trigger.
-  contents: write
-  id-token: write
+# Nothing by default: each job asks for what it needs. Every check (and the
+# dev tooling it runs) is in `verify`, which can only read; `publish` holds
+# the write and OIDC permissions and runs only the build and the publish.
+permissions: {}
 
 jobs:
-  npm:
+  verify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: "pnpm"
 
-      # pnpm publish delegates to the system npm CLI; trusted publishing (OIDC)
-      # needs npm >= 11.5.1, newer than the one bundled with Node 22.
-      - run: npm install -g npm@latest
-
       - run: pnpm install --frozen-lockfile
 
+      # The version is read once here and passed on through env, never pasted
+      # into a script: a tag name is text from outside the workflow.
       - name: Resolve release version
         id: version
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             version="$(node -p "require('./packages/core/package.json').version")"
-            if git ls-remote --exit-code origin "refs/tags/v$version" >/dev/null 2>&1; then
+            if git ls-remote --exit-code "https://github.com/$GITHUB_REPOSITORY" "refs/tags/v$version" >/dev/null 2>&1; then
               echo "::error::tag v$version already exists — bump with pnpm version:set first"
               exit 1
             fi
           else
             version="${GITHUB_REF_NAME#v}"
           fi
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$version' is not a semantic version"
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Verify every package is at ${{ steps.version.outputs.version }}
+      - name: Verify every package is at the release version
+        env:
+          RELEASE: ${{ steps.version.outputs.version }}
         run: |
-          release="${{ steps.version.outputs.version }}"
           for pkg in packages/*/package.json; do
             version="$(node -p "require('./$pkg').version")"
-            if [ "$version" != "$release" ]; then
-              echo "::error::$pkg is $version but the release version is $release"
+            if [ "$version" != "$RELEASE" ]; then
+              echo "::error::$pkg is $version but the release version is $RELEASE"
               exit 1
             fi
           done
 
-      # The GitHub Release body is this version's CHANGELOG.md section. Read
-      # before anything is published: a release with no entry stops here.
-      - name: Release notes for ${{ steps.version.outputs.version }}
-        run: node scripts/release-notes.mjs "${{ steps.version.outputs.version }}" > "$RUNNER_TEMP/release-notes.md"
+      # A release with no CHANGELOG.md entry stops here, before anything is
+      # published; `publish` reads the same section again for the GitHub Release.
+      - name: Release notes exist
+        env:
+          RELEASE: ${{ steps.version.outputs.version }}
+        run: node scripts/release-notes.mjs "$RELEASE" > /dev/null
 
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm format:check
+      - run: pnpm unused
       - run: pnpm test
       - run: pnpm build
       - run: node scripts/pack-smoke.mjs
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      # write pushes the release tag on the dispatch path and creates the
+      # GitHub Release on both; id-token is npm trusted publishing (OIDC).
+      contents: write
+      id-token: write
+    env:
+      RELEASE: ${{ needs.verify.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      # pnpm publish delegates to the system npm CLI; trusted publishing (OIDC)
+      # needs npm >= 11.5.1, newer than the one bundled with Node 22. Pinned,
+      # so a new npm release cannot change what a release runs.
+      - run: npm install -g npm@11.21.3
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Release notes
+        run: node scripts/release-notes.mjs "$RELEASE" > "$RUNNER_TEMP/release-notes.md"
+
       # Authenticates via npm trusted publishing (OIDC) — no token required.
       - run: pnpm --recursive --filter "./packages/**" publish --access public --no-git-checks
 
@@ -80,11 +124,10 @@ jobs:
       - name: Tag the released commit
         if: github.event_name == 'workflow_dispatch'
         run: |
-          version="${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "v$version"
-          git push origin "v$version"
+          git tag "v$RELEASE"
+          git push origin "v$RELEASE"
 
       # Last, so the tag exists on both paths. Rerunning a release whose
       # GitHub Release already exists refreshes its notes.
@@ -92,7 +135,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="v${{ steps.version.outputs.version }}"
+          tag="v$RELEASE"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "$tag" --notes-file "$RUNNER_TEMP/release-notes.md"
           else

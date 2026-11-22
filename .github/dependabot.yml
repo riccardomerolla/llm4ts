@@ -1,0 +1,23 @@
+# Keeps the pinned action SHAs and the dev tooling current (review F2, F9).
+# Effect is pinned exactly across the workspace and bumped by hand as a
+# migration (tsc -b --force, pack smoke), so Dependabot leaves it alone.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: "effect"
+      - dependency-name: "@effect/*"
+    groups:
+      dev-tools:
+        dependency-type: development
+        update-types: ["minor", "patch"]
