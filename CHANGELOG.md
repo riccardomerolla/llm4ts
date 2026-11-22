@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Windows is not supported**, and the README and the install guide now
+  say so: run llm4ts on macOS or Linux, or under WSL. Nothing tests the
+  Windows launch code, and there a prompt carrying repository or issue text
+  is not safe to hand to an agent's `.cmd` shim.
+- Contributors: CI runs on Node 22 and Node 24.
+
 ## 4.11.4
 
 ### Changed
