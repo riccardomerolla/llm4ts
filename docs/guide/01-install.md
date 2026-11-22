@@ -14,7 +14,7 @@ For a permanent command, install it globally; the rest of this guide writes
 npm i -g @llm4ts/shell
 ```
 
-You need Node 22 or newer. Flows are TypeScript files that Node runs
+You need Node 22.6 or newer (flows run with its type stripping). Flows are TypeScript files that Node runs
 directly with type stripping, so there is no build step anywhere in this
 guide.
 

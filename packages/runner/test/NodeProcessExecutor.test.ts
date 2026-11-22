@@ -48,6 +48,33 @@ describe("NodeProcessExecutor", () => {
     })
   )
 
+  it.effect(
+    "captured mode bounds a flood: stdout keeps its head, stderr its tail, each cut marked",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* nodeProcessExecutor.run(
+          nodeCommand(
+            [
+              'const out = []; for (let i = 0; i < 200005; i++) out.push("o" + i)',
+              'process.stdout.write(out.join("\\n") + "\\n")',
+              'const err = []; for (let i = 0; i < 25000; i++) err.push("e" + i)',
+              'process.stderr.write(err.join("\\n") + "\\n")'
+            ].join("; ")
+          ),
+          process.cwd(),
+          {}
+        )
+        assert.strictEqual(result.stdout.length, 200_001)
+        assert.strictEqual(result.stdout[0], "o0")
+        assert.strictEqual(result.stdout[199_999], "o199999")
+        assert.strictEqual(result.stdout.at(-1), "[llm4ts: 5 more line(s) of output not kept]")
+        assert.strictEqual(result.stderr.length, 10_001)
+        assert.strictEqual(result.stderr[0], "[llm4ts: 15000 earlier line(s) of output not kept]")
+        assert.strictEqual(result.stderr.at(-1), "e24999")
+      }),
+    30_000
+  )
+
   it.effect("fails when the executable cannot be started", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(

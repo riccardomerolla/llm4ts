@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.17.1",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.6.0"
   },
   "scripts": {
     "build": "node scripts/sync-shell-flows.mjs && tsc -b tsconfig.json && node scripts/build-web.mjs",

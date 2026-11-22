@@ -10,7 +10,7 @@ where the next begins.
 
 | Chapter                                             | You will                                                                       | Needs              |
 | --------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------ |
-| [1. Install](01-install.md)                         | Run `llm4ts doctor` and `llm4ts list`                                          | Node 22+           |
+| [1. Install](01-install.md)                         | Run `llm4ts doctor` and `llm4ts list`                                          | Node 22.6+         |
 | [2. Run a flow](02-run-a-flow.md)                   | Seed a disposable repo and watch `implement` plan, code, commit                | a coding agent     |
 | [3. Your first flow](03-your-first-flow.md)         | Run the built-in `hello`, copy it, point it at your coding agent               | nothing            |
 | [4. Fork a built-in](04-fork-a-built-in.md)         | Copy `implement`, change its prompt and gates                                  | a coding agent     |
