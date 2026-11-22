@@ -22,7 +22,7 @@ flowchart LR
 
 ## Try it in one minute
 
-Node 22 or newer, nothing to install, no credentials: the built-in `hello`
+Node 22.6 or newer, nothing to install, no credentials: the built-in `hello`
 flow talks to the mock provider.
 
 ```bash

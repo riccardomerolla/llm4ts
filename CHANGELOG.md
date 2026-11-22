@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Node 22.6 or newer.** Every package's `engines` said `node >=22`, but
+  flows run with `--experimental-strip-types`, which Node 22.0 to 22.5
+  reject. The floor now says 22.6.0, as do the README and the install guide.
+- **Captured process output is bounded.** A process run in captured mode
+  (gates, non-streaming agent calls) keeps the first 200,000 lines of stdout
+  and the last 10,000 of stderr, and marks any cut, instead of holding all
+  of a runaway CLI's output in memory.
+- Contributors: `pnpm test:coverage` now counts `flows/` and `kits/` and
+  fails below 88% lines, 87% statements, 85% functions and 77% branches. A
+  test holds the read-only seat check's assumption that every connector
+  resolves synchronously.
+
 ## 4.11.3
 
 ### Changed

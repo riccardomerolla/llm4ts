@@ -6,7 +6,7 @@
   "type": "module",
   "sideEffects": false,
   "engines": {
-    "node": ">=22"
+    "node": ">=22.6.0"
   },
   "bin": {
     "llm4ts": "./dist/cli-main.js"

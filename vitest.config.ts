@@ -30,8 +30,29 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "lcov"],
-      include: ["packages/**/src/**/*.ts"],
-      exclude: ["packages/**/test/**", "**/*.d.ts"]
+      // About two points under the 2026-11-22 figures (90.0% lines, 79.0%
+      // branches), so `pnpm test:coverage` fails when coverage drops (review F10).
+      thresholds: { lines: 88, statements: 87, functions: 85, branches: 77 },
+      include: ["packages/**/src/**/*.ts", "flows/**/*.ts", "kits/**/*.ts"],
+      exclude: [
+        "**/test/**",
+        "**/*.d.ts",
+        "**/dist/**",
+        // Copies the build puts inside the shell package.
+        "packages/shell/flows/**",
+        "packages/shell/kits/**",
+        // Process entry points: smoke tests run them as child processes,
+        // which in-process coverage cannot see.
+        "flows/*.ts",
+        "kits/*/flows/*.ts",
+        "kits/*/tools/**",
+        // Ported data and other stacks' templates, not llm4ts code (as in .prettierignore).
+        "flows/fixtures/**",
+        "kits/*/packs/**",
+        "kits/*/patterns/**",
+        "kits/*/scaffolds/**",
+        "kits/*/fixtures/**"
+      ]
     }
   }
 })
