@@ -109,6 +109,19 @@ describe("runner connector presets", () => {
     assert.include(problem ?? "", "advisory")
   })
 
+  // readOnlySeatProblem resolves a connector with Effect.runSync, which holds
+  // only while every connector factory is synchronous (review F13): a factory
+  // that turns async fails here rather than in a run.
+  it("every coder preset resolves synchronously for the read-only check", () => {
+    for (const name of coderIds) {
+      const preset = coderFor(name)
+      assert.isDefined(preset, name)
+      if (preset === undefined) continue
+      const problem = readOnlySeatProblem(asReadOnly(preset))
+      assert.notInclude(problem ?? "", "cannot be resolved", name)
+    }
+  })
+
   it("enriches API defaults and credentials without replacing explicit values", () => {
     const enriched = enrichApiConnector(openAI, {
       OPENAI_API_KEY: "secret"

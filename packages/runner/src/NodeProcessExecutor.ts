@@ -16,6 +16,26 @@ import { InvalidRequestError, ProviderError, type LlmError } from "@llm4ts/core/
 import { windowsInvocation } from "./WindowsCommand.ts"
 
 const maxStderrLines = 256
+/**
+ * Captured mode keeps a process's output in memory to hand it back whole, so
+ * a chatty CLI is bounded (review F16): stdout keeps its first lines (the
+ * reply a caller parses), stderr its last (where a failure says why). Far
+ * above any real reply or gate log; a cut is marked in the output.
+ */
+const maxCapturedStdoutLines = 200_000
+const maxCapturedStderrLines = 10_000
+
+/** `lines` within `limit`, keeping the head or the tail, with a marker for what was dropped. */
+const boundedLines = (
+  lines: ReadonlyArray<string>,
+  dropped: number,
+  keep: "head" | "tail"
+): ReadonlyArray<string> =>
+  dropped === 0
+    ? lines
+    : keep === "head"
+      ? [...lines, `[llm4ts: ${dropped} more line(s) of output not kept]`]
+      : [`[llm4ts: ${dropped} earlier line(s) of output not kept]`, ...lines]
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -118,24 +138,42 @@ const awaitCapturedProcess = (
   Effect.callback((resume) => {
     const stdout: Array<string> = []
     const stderr: Array<string> = []
+    let stdoutDropped = 0
+    let stderrDropped = 0
     const outLines = readline.createInterface({ input: child.stdout })
     const errLines = readline.createInterface({ input: child.stderr })
 
     const onStdout = (line: string): void => {
-      stdout.push(line)
+      if (stdout.length < maxCapturedStdoutLines) {
+        stdout.push(line)
+      } else {
+        stdoutDropped += 1
+      }
+    }
+    // Trimmed in batches, so a flood costs a splice per limit's worth of lines.
+    const trimStderr = (): void => {
+      const excess = stderr.length - maxCapturedStderrLines
+      if (excess > 0) {
+        stderr.splice(0, excess)
+        stderrDropped += excess
+      }
     }
     const onStderr = (line: string): void => {
       stderr.push(line)
+      if (stderr.length >= 2 * maxCapturedStderrLines) {
+        trimStderr()
+      }
     }
     const onError = (error: Error): void => {
       resume(Effect.fail(processFailure(argv, error.message)))
     }
     const onClose = (exitCode: number | null): void => {
+      trimStderr()
       resume(
         Effect.succeed(
           ProcessResult.make({
-            stdout,
-            stderr,
+            stdout: boundedLines(stdout, stdoutDropped, "head"),
+            stderr: boundedLines(stderr, stderrDropped, "tail"),
             exitCode: exitCode ?? -1
           })
         )
