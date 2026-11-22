@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.11.1
 
 ### Changed
 
@@ -9,6 +9,9 @@
   `@effect/vitest`), still exact, peers included. A flow project that
   installs its own `@llm4ts/*` packages must pin `effect` at 4.1.5 too.
   Nothing changes for a run.
+- Contributors: the repository builds with TypeScript 6.0.3,
+  typescript-eslint 8.73, prettier 3.10, tsx 4.23, esbuild 0.28 and
+  geist 1.9 (PR #87). The published packages are unchanged by it.
 
 ## 4.11.0
 
