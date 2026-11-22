@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.11.4
 
 ### Changed
 
@@ -15,6 +15,11 @@
   fails below 88% lines, 87% statements, 85% functions and 77% branches. A
   test holds the read-only seat check's assumption that every connector
   resolves synchronously.
+- Contributors: the Release workflow runs every check in a read-only job and
+  publishes from a separate one, pins npm and every action to an exact
+  version, and passes the version through the environment. CI is read-only
+  and enforces the coverage thresholds. Dependabot keeps the actions and the
+  dev tools current (PR #91).
 
 ## 4.11.3
 
