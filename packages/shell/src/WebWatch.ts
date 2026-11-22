@@ -236,14 +236,11 @@ export const webWatchApp = Effect.fn("@llm4ts/shell/WebWatch.app")(function* (
   const target: WatchTarget = yield* resolveTraceTarget(options, dependencies)
   const replay = options.replay === true
   const start = yield* startingTree(target, dependencies.files, options.idleAfterMs)
-  const load = Effect.map(
-    readTrace(dependencies.files, target.tracePath),
-    (lines): Loaded => ({
-      runId: lines[0]?.runId,
-      lastSeq: lines.at(-1)?.seq,
-      steps: stepsOfTrace(lines)
-    })
-  )
+  const load = Effect.map(readTrace(dependencies.files, target.tracePath), (lines): Loaded => ({
+    runId: lines[0]?.runId,
+    lastSeq: lines.at(-1)?.seq,
+    steps: stepsOfTrace(lines)
+  }))
   // Read once up front, so a missing or unreadable trace fails before serving.
   yield* load
   const speedOf = (asked: number | undefined): number =>

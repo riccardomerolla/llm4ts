@@ -116,12 +116,10 @@ export const parseFromText = Effect.fn("@llm4ts/core/StructuredOutput.parseFromT
   const candidates = jsonCandidates(raw)
   const attempts = candidates.map((candidate) =>
     Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(candidate).pipe(
-      Effect.mapError(
-        (error): CandidateFailure => ({
-          candidate,
-          error
-        })
-      )
+      Effect.mapError((error): CandidateFailure => ({
+        candidate,
+        error
+      }))
     )
   )
 

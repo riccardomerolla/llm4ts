@@ -141,8 +141,7 @@ export interface Pack {
   /** `## Audit` (ADR 0028): `- dimensions: a, b, c` the rulebook auditors take; default list in the flow. */
   readonly audit: ReadonlyArray<string> | undefined
   readonly diagnostics:
-    | { readonly command: ReadonlyArray<string>; readonly format: DiagnosticsFormat }
-    | undefined
+    { readonly command: ReadonlyArray<string>; readonly format: DiagnosticsFormat } | undefined
   readonly dir: string
   readonly gate: (name: string) => ReadonlyArray<string> | undefined
   readonly prompt: (name: string) => string | undefined

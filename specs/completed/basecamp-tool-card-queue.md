@@ -52,6 +52,7 @@ Comments:
 Creation and assignment (`BasecampWrite`):
 
 - `createCard(column, title, content, assignee?)` — `basecamp cards create
+
 <title> [body] -c <columnId> [--assignee <name>] --json`; returns the
   created `Card`.
 - `assignCard(card, assignee)` — `basecamp cards update`.

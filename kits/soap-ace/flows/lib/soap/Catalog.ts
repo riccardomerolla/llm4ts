@@ -270,11 +270,10 @@ export const contentModel = (type: ComplexTypeDef): Particle => {
     }
     const children = top.map((entry): Particle => {
       if (typeof entry !== "number") return legacyElement(entry)
-      const alternatives = [...(choices.get(entry)?.values() ?? [])].map(
-        (members): Particle =>
-          members.length === 1 && members[0] !== undefined
-            ? legacyElement(members[0])
-            : { kind: "sequence", min: 1, max: 1, children: members.map(legacyElement) }
+      const alternatives = [...(choices.get(entry)?.values() ?? [])].map((members): Particle =>
+        members.length === 1 && members[0] !== undefined
+          ? legacyElement(members[0])
+          : { kind: "sequence", min: 1, max: 1, children: members.map(legacyElement) }
       )
       return { kind: "choice", min: 1, max: 1, children: alternatives }
     })

@@ -1416,14 +1416,11 @@ describe("pruneUnknownAnchors", () => {
     ]
   })
   const gitListing = (known: ReadonlyArray<string>) =>
-    Effect.map(
-      Ref.make<ReadonlyArray<string>>([]),
-      (log): GitToolShape => ({
-        ...gitOver(log, ""),
-        listFiles: (paths) =>
-          Effect.succeed(known.filter((file) => paths.some((prefix) => file.startsWith(prefix))))
-      })
-    )
+    Effect.map(Ref.make<ReadonlyArray<string>>([]), (log): GitToolShape => ({
+      ...gitOver(log, ""),
+      listFiles: (paths) =>
+        Effect.succeed(known.filter((file) => paths.some((prefix) => file.startsWith(prefix))))
+    }))
 
   it.effect("drops anchors no tracked file lies under and says so", () =>
     Effect.gen(function* () {

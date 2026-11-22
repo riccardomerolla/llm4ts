@@ -565,11 +565,10 @@ export const maskDocument = (
         value: maskValue(attribute.value, attributePath, ruleFor(attribute.name.local, options))
       }
     })
-    const children = element.children.map(
-      (child): XmlNode =>
-        child._tag === "text"
-          ? { _tag: "text", value: maskValue(child.value, path, rule) }
-          : walk(child, path)
+    const children = element.children.map((child): XmlNode =>
+      child._tag === "text"
+        ? { _tag: "text", value: maskValue(child.value, path, rule) }
+        : walk(child, path)
     )
     return { ...element, attributes, children }
   }

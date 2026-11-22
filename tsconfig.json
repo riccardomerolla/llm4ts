@@ -1,7 +1,6 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "@llm4ts/core/*": ["./packages/core/src/*"],
       "@llm4ts/flow/*": ["./packages/flow/src/*"],

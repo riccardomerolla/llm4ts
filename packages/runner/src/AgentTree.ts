@@ -53,8 +53,7 @@ export interface TreeLane {
   readonly lastEventAt: number
   /** What the lane is doing now and since when: a tool, or thinking after one. */
   readonly activity:
-    | { readonly text: string; readonly since: number; readonly tool: boolean }
-    | undefined
+    { readonly text: string; readonly since: number; readonly tool: boolean } | undefined
   /** Its coder turns' durations, and its gates' total (`Timed`). */
   readonly turns: ReadonlyArray<number>
   readonly gatesMs: number
@@ -1684,22 +1683,18 @@ const meter = (fraction: number): ReadonlyArray<Span> => {
 const judgmentOf = (state: TreeState, width: number): Array<Line> => {
   const { verdict } = state
   const rows: Array<Line> = [
-    ...(verdict?.dimensions ?? []).map(
-      (dimension): Line => [
-        span(dimension.id.padEnd(16)),
-        ...meter(dimension.max === 0 ? 0 : dimension.score / dimension.max),
-        span(`  ${dimension.score}/${dimension.max}`)
-      ]
-    ),
+    ...(verdict?.dimensions ?? []).map((dimension): Line => [
+      span(dimension.id.padEnd(16)),
+      ...meter(dimension.max === 0 ? 0 : dimension.score / dimension.max),
+      span(`  ${dimension.score}/${dimension.max}`)
+    ]),
     ...state.judgments
       .slice(-judgmentRows)
-      .map(
-        (judgment): Line => [
-          span(judgment.key.padEnd(16)),
-          ...meter(judgment.certainty),
-          span(`  ${judgment.certainty.toFixed(2)} ${judgment.decision}`)
-        ]
-      ),
+      .map((judgment): Line => [
+        span(judgment.key.padEnd(16)),
+        ...meter(judgment.certainty),
+        span(`  ${judgment.certainty.toFixed(2)} ${judgment.decision}`)
+      ]),
     ...(verdict === undefined
       ? []
       : [

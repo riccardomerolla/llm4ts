@@ -109,14 +109,7 @@ export interface RefineSessionOptions {
 }
 
 type Action =
-  | "programs"
-  | "scenarios"
-  | "deepen"
-  | "run"
-  | "answer"
-  | "regroup"
-  | "approve"
-  | "exit"
+  "programs" | "scenarios" | "deepen" | "run" | "answer" | "regroup" | "approve" | "exit"
 
 const dispositionChoices: ReadonlyArray<Prompt.SelectChoice<Disposition | "?">> = [
   { title: "drop", value: "drop", description: "deprecated — will not exist in the target" },

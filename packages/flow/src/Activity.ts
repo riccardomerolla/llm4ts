@@ -133,15 +133,7 @@ interface OpenTool {
 }
 
 export type ToolCategory =
-  | "explore"
-  | "edit"
-  | "test"
-  | "build"
-  | "install"
-  | "git"
-  | "script"
-  | "delegate"
-  | "other"
+  "explore" | "edit" | "test" | "build" | "install" | "git" | "script" | "delegate" | "other"
 
 /**
  * A harness handing work to a sub-agent of its own: Claude's Agent (Task

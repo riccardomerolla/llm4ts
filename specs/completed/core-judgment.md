@@ -24,7 +24,7 @@ and replace, except `noul` is `truth` and every answer carries `origin` and `sup
   `TruthQuestion { type: "truth", instructions, criteria?: { true, false } }`,
   `ScoringMethod` (`logprobs | verbalized | sampled | reasoning | hosted`),
   `Calibration` (`none | claimed | measured`), `AnswerOrigin { backend,
-  model?, method, calibration, escalated }`,
+model?, method, calibration, escalated }`,
   `ChoiceAnswer { choice, probabilities, confidence, reportedConfidence?, support, origin }`,
   `ScoreAnswer { score, legend, probabilities, confidence, reportedConfidence?, support, origin }`,
   `TruthAnswer { truth, support, origin }`, `JudgmentRequest { state, questions }`,

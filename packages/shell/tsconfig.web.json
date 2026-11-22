@@ -3,7 +3,6 @@
   "include": ["web-src"],
   "references": [{ "path": "tsconfig.src.json" }, { "path": "../runner/tsconfig.src.json" }],
   "compilerOptions": {
-    "baseUrl": ".",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "rootDir": "web-src",
     "outDir": ".tsbuildinfo/web",

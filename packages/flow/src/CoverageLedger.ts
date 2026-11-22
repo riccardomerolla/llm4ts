@@ -161,16 +161,14 @@ const claimsOf = (epicId: string, brief: EpicBrief): ReadonlyArray<Located> => {
     }))
   return [
     ...brief.scope.flatMap((item) =>
-      item.citations.map(
-        (citation): Located => ({
-          epicId,
-          approved,
-          disposition: "in-scope",
-          note: item.title,
-          program: citation.program,
-          scenario: citation.scenario
-        })
-      )
+      item.citations.map((citation): Located => ({
+        epicId,
+        approved,
+        disposition: "in-scope",
+        note: item.title,
+        program: citation.program,
+        scenario: citation.scenario
+      }))
     ),
     ...disposed("dropped", brief.dropped),
     ...disposed("provided", brief.provided),

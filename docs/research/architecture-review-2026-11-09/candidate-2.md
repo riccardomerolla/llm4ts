@@ -365,9 +365,7 @@ export interface ConnectorSpec {
   readonly aliases: ReadonlyArray<string> // ["claude"]
   readonly executable?: string // cli only
 }
-export const connectors = [
-  /* 16 rows */
-] as const satisfies ReadonlyArray<ConnectorSpec>
+export const connectors = [/* 16 rows */] as const satisfies ReadonlyArray<ConnectorSpec>
 export type ConnectorName = (typeof connectors)[number]["id"]
 export const connectorSpec: (idOrAlias: string) => ConnectorSpec | undefined = () => undefined // not implemented
 // Derived, not written: ConnectorIds, connectorProvider, providerConnectorId,

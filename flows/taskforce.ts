@@ -73,24 +73,22 @@ const files = nodePlainFileStore
 
 const namesIn = (dir: string, suffix: string): Effect.Effect<ReadonlyArray<string>> =>
   Effect.tryPromise(() => readdir(dir, { withFileTypes: true })).pipe(
-    Effect.map(
-      (entries): ReadonlyArray<string> =>
-        entries
-          .filter((entry) => entry.isFile() && entry.name.endsWith(suffix))
-          .map((entry) => entry.name.slice(0, -suffix.length))
-          .sort()
+    Effect.map((entries): ReadonlyArray<string> =>
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(suffix))
+        .map((entry) => entry.name.slice(0, -suffix.length))
+        .sort()
     ),
     Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([]))
   )
 
 const foldersIn = (dir: string): Effect.Effect<ReadonlyArray<string>> =>
   Effect.tryPromise(() => readdir(dir, { withFileTypes: true })).pipe(
-    Effect.map(
-      (entries): ReadonlyArray<string> =>
-        entries
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => entry.name)
-          .sort()
+    Effect.map((entries): ReadonlyArray<string> =>
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
     ),
     Effect.catch(() => Effect.succeed<ReadonlyArray<string>>([]))
   )

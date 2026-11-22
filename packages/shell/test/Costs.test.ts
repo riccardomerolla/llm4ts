@@ -47,16 +47,13 @@ const traces: Readonly<Record<string, string>> = {
   "/b/.llm4ts/trace-4.jsonl": tokensLine(0, at("2026-09-20T11:00:00Z"), "4", 500)
 }
 
-const dependencies = Effect.map(
-  makeMemoryPlainFileStore(traces),
-  (memory): CostsDependencies => ({
-    files: memory.store,
-    listTraces: (directory) =>
-      Object.keys(traces)
-        .filter((path) => path.startsWith(`${directory}/`))
-        .sort()
-  })
-)
+const dependencies = Effect.map(makeMemoryPlainFileStore(traces), (memory): CostsDependencies => ({
+  files: memory.store,
+  listTraces: (directory) =>
+    Object.keys(traces)
+      .filter((path) => path.startsWith(`${directory}/`))
+      .sort()
+}))
 
 describe("trace discovery", () => {
   it("recognises the runner's trace names and prefixed variants only", () => {

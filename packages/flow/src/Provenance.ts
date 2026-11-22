@@ -53,22 +53,20 @@ export const makeProvenanceStore = (files: PlainFileStoreShape): ProvenanceStore
     )
 
   const load = (path: string): Effect.Effect<Provenance, FlowError> =>
-    Effect.flatMap(
-      files.read(path),
-      (contents): Effect.Effect<Provenance, FlowError> =>
-        contents === undefined
-          ? Effect.fail(
-              PersistenceError.make({
-                message: `provenance manifest does not exist: ${path}`
+    Effect.flatMap(files.read(path), (contents): Effect.Effect<Provenance, FlowError> =>
+      contents === undefined
+        ? Effect.fail(
+            PersistenceError.make({
+              message: `provenance manifest does not exist: ${path}`
+            })
+          )
+        : Schema.decodeUnknownEffect(Schema.fromJsonString(Provenance))(contents).pipe(
+            Effect.mapError((error) =>
+              PlanParseError.make({
+                message: `malformed provenance manifest ${path}: ${String(error)}`
               })
             )
-          : Schema.decodeUnknownEffect(Schema.fromJsonString(Provenance))(contents).pipe(
-              Effect.mapError((error) =>
-                PlanParseError.make({
-                  message: `malformed provenance manifest ${path}: ${String(error)}`
-                })
-              )
-            )
+          )
     )
 
   const extend = (
