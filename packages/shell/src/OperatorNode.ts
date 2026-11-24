@@ -17,6 +17,7 @@ import { nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import { nodeListEpics } from "./Watch.ts"
 import { discoverFlows, type FlowTierPaths } from "./FlowCatalog.ts"
 import { nodeFlowProcess, type FlowProcessShape } from "./FlowProcess.ts"
+import { inboxOf } from "./Inbox.ts"
 import type { OperatorConfig } from "./OperatorConfig.ts"
 import { runOperatorServer } from "./OperatorServer.ts"
 import type { OperatorDeps } from "./OperatorTools.ts"
@@ -156,7 +157,8 @@ export const nodeOperatorRuntime = (
     flows: (repoPath) =>
       discoverFlows(tierPaths(repoPath)).pipe(Effect.provide(NodeFileSystem.layer)),
     now: Clock.currentTimeMillis,
-    environment
+    environment,
+    control: (repoPath) => inboxOf(nodePlainFileStore, environment, repoPath)
   },
   flowProcess: nodeFlowProcess,
   serve: runOperatorServer,

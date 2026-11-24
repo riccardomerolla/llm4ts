@@ -29,6 +29,8 @@ import {
   type TraceFold
 } from "./RunReaders.ts"
 import { FlowLaunchError } from "./FlowProcess.ts"
+import { InboxListing, inboxListing, retryOf, skipOf } from "./Inbox.ts"
+import type { ControlAction } from "@llm4ts/flow/Control"
 import { resolveRepo, type OperatorDeps } from "./OperatorTools.ts"
 import {
   epicDirOf,
@@ -66,7 +68,17 @@ export const runWaitTool = Tool.make("run_wait", {
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
 
-export const waitToolkit = Toolkit.make(runWaitTool)
+export const controlListTool = Tool.make("control_list", {
+  description:
+    "An epic's control inbox (ADR 0057): the retry and skip commands still pending and the last ones answered, each with its outcome (applied, refused with a reason, or expired).",
+  parameters: Schema.Struct({ repo: repoParam, epic: Schema.String }),
+  success: InboxListing,
+  failure: Schema.Union([UnknownRepo, UnknownEpic, PersistenceError])
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+
+export const waitToolkit = Toolkit.make(runWaitTool, controlListTool)
 
 const pollInterval = "500 millis"
 const defaultWaitSeconds = 120
@@ -114,6 +126,13 @@ export const waitHandlers = (
           }
           yield* Effect.sleep(pollInterval)
         }
+      }),
+
+    control_list: ({ repo: repoId, epic }) =>
+      Effect.gen(function* () {
+        const repo = yield* resolveRepo(deps.config, repoId)
+        yield* epicDirOf(deps, repo, epic)
+        return yield* inboxListing(deps.control(repo.path), epic)
       })
   })
 
@@ -201,7 +220,49 @@ export const approveTool = Tool.make("approve", {
   ])
 }).annotate(Tool.Destructive, false)
 
-export const actToolkit = Toolkit.make(startRunTool, stopRunTool, retroStartTool, approveTool)
+const steerFailures = Schema.Union([NotAllowed, UnknownRepo, UnknownEpic, PersistenceError])
+const Steered = Schema.Struct({
+  /** The command's id: `control_list` and the run's events name it. */
+  id: Schema.String,
+  epic: Schema.String,
+  story: Schema.String
+})
+
+export const storyRetryTool = Tool.make("story_retry", {
+  description:
+    "Ask a live epic run to run a failed story again; stories held behind it are freed. Returns once the command is written: the outcome (applied, refused, expired) is in control_list and in the run's events. With no run live the command expires.",
+  parameters: Schema.Struct({
+    repo: repoParam,
+    epic: Schema.String,
+    story: Schema.String,
+    requestId: Schema.optional(Schema.String)
+  }),
+  success: Steered,
+  failure: steerFailures
+}).annotate(Tool.Destructive, false)
+
+export const storySkipTool = Tool.make("story_skip", {
+  description:
+    "Ask a live epic run to leave a story out: one not started is not launched, a running one is interrupted, and its dependents wait as they do for a failed story. Returns once the command is written; see control_list for the outcome.",
+  parameters: Schema.Struct({
+    repo: repoParam,
+    epic: Schema.String,
+    story: Schema.String,
+    reason: Schema.optional(Schema.String),
+    requestId: Schema.optional(Schema.String)
+  }),
+  success: Steered,
+  failure: steerFailures
+}).annotate(Tool.Destructive, true)
+
+export const actToolkit = Toolkit.make(
+  startRunTool,
+  stopRunTool,
+  retroStartTool,
+  storyRetryTool,
+  storySkipTool,
+  approveTool
+)
 
 const knobsOf = (params: typeof StartRunParams.Type): OperatorKnobs => ({
   ...(params.task === undefined ? {} : { task: params.task }),
@@ -358,6 +419,25 @@ export const actHandlers = (
       }
     })
 
+  // Whoever may start and stop a run may steer it (ADR 0057).
+  const steer = (
+    repoId: string | undefined,
+    epic: string,
+    command: ControlAction,
+    requestId: string | undefined
+  ) =>
+    Effect.gen(function* () {
+      yield* requireRun
+      const repo = yield* resolveRepo(deps.config, repoId)
+      yield* epicDirOf(deps, repo, epic)
+      const written = yield* deps.control(repo.path).submit(epic, {
+        by: "mcp",
+        command,
+        ...(requestId === undefined ? {} : { id: requestId })
+      })
+      return { id: written.id, epic, story: written.command.story }
+    })
+
   return actToolkit.of({
     start_run: (params) =>
       Effect.gen(function* () {
@@ -388,6 +468,11 @@ export const actHandlers = (
           flags: ["--epic", epic, ...(run === undefined ? [] : ["--run", run])]
         })
       }),
+
+    story_retry: ({ repo, epic, story, requestId }) => steer(repo, epic, retryOf(story), requestId),
+
+    story_skip: ({ repo, epic, story, reason, requestId }) =>
+      steer(repo, epic, skipOf(story, reason ?? "skipped by the operator"), requestId),
 
     approve: ({ repo: repoId, epic, id }) =>
       Effect.gen(function* () {

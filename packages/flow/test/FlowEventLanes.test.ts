@@ -24,6 +24,8 @@ import {
   Info,
   JudgmentObserved,
   type Lane,
+  ControlApplied,
+  ControlRefused,
   Parked,
   ReviewFinding,
   ReviewFindingDemoted,
@@ -355,6 +357,12 @@ const cases: {
   },
   Parked: {
     event: Parked.make({ story: "home", item: "export", reason: "later", mvp: false })
+  },
+  ControlApplied: {
+    event: ControlApplied.make({ id: "c-1", command: "RetryStory", story: "home", by: "cli" })
+  },
+  ControlRefused: {
+    event: ControlRefused.make({ id: "c-2", command: "SkipStory", story: "home", by: "cli" })
   }
 }
 
@@ -397,8 +405,8 @@ const through = (lane: Lane, event: FlowEvent): Effect.Effect<FlowEvent | undefi
 const allCases = Object.values(cases)
 
 describe("withLane stamps each event as the stamped switch did", () => {
-  it("covers the fourteen events it stamps and leaves the other nineteen alone", () => {
-    assert.strictEqual(allCases.length, 33)
+  it("covers the fourteen events it stamps and leaves the other twenty-one alone", () => {
+    assert.strictEqual(allCases.length, 35)
     assert.strictEqual(allCases.filter((entry) => entry.stamped !== undefined).length, 14)
   })
 
@@ -622,7 +630,7 @@ describe("laneOf", () => {
       "RoundtableTurn",
       "StoryJudged"
     ])
-    assert.strictEqual(by("none").length, 12)
+    assert.strictEqual(by("none").length, 14)
   })
 })
 

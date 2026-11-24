@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **A control inbox for running epics** (ADR 0057). `llm4ts inbox retry
+<story>` runs a story that failed in the live run again and frees the
+  stories held behind it; `llm4ts inbox skip <story> --reason …` leaves a
+  story out, interrupting it if it runs, and its dependents wait. `llm4ts
+inbox` lists pending and answered commands. The operator server gains
+  `story_retry` and `story_skip` under `--allow-run` and the read-only
+  `control_list`.
+- Commands are lines in
+  `~/.local/state/llm4ts/control/<checkout>/<epic>.jsonl`, outside the
+  checkout. The story scheduler reads the log every two seconds and answers
+  each command with a receipt: applied, refused with a reason, or expired.
+  A command is for the run live when it is written; a run expires what it
+  finds at its start and what it leaves at its end.
+- `ControlApplied` and `ControlRefused` events, printed on the terminal and
+  returned by `run_wait`. `StoryStatusChanged` carries the reason a story
+  failed, waits or was skipped.
+- A story's outcome can be `skipped`. An epic that ends with a skipped story
+  is not finished: its run ends with `EpicUnfinished`, as for a failed one.
+
 ## 4.13.0
 
 ### Changed

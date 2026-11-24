@@ -1,3 +1,4 @@
+import { makeControlInbox } from "@llm4ts/flow/Control"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -79,7 +80,9 @@ const interruptedBy = (signal: InterruptSignal) =>
           probe: () => Effect.succeed(false),
           flows: () => Effect.succeed([]),
           now: Effect.succeed(0),
-          environment: { HOME: "/home/op", XDG_STATE_HOME: "/state" }
+          environment: { HOME: "/home/op", XDG_STATE_HOME: "/state" },
+          control: () =>
+            makeControlInbox({ files: memory.store, root: "/state/llm4ts/control/app" })
         },
         flowProcess: fake.process,
         serve: (_config, deps) =>
@@ -153,7 +156,9 @@ describe("runMcp", () => {
               probe: () => Effect.succeed(false),
               flows: () => Effect.succeed([]),
               now: Effect.succeed(0),
-              environment: { HOME: "/home/op", XDG_STATE_HOME: "/state" }
+              environment: { HOME: "/home/op", XDG_STATE_HOME: "/state" },
+              control: () =>
+                makeControlInbox({ files: memory.store, root: "/state/llm4ts/control/app" })
             },
             flowProcess: fake.process,
             serve: () => Effect.fail("port in use" as const)

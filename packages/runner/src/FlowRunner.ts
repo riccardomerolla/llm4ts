@@ -116,6 +116,8 @@ import { nodeGeminiCliExecutor } from "./NodeGeminiCliExecutor.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 import { childGroups, nodeProcessExecutor } from "./NodeProcessExecutor.ts"
 import { nodeWriterLock, writerLockPath } from "./NodeWriterLock.ts"
+import { controlRoot } from "./CheckoutState.ts"
+import { makeControlInbox } from "@llm4ts/flow/Control"
 import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
 import { asReadOnly, prepareConnector, withSeatSettings } from "./Connectors.ts"
 import {
@@ -686,6 +688,12 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       ...(rescuer === undefined ? {} : { rescuer })
     }
   })
+  // The control inbox of this checkout's epics (ADR 0057): on the root
+  // context only, where the story scheduler runs.
+  const control = makeControlInbox({
+    files: given.files,
+    root: controlRoot(options.environment ?? process.env, options.workDir)
+  })
   const contextAt = (
     workDir: string,
     seats: {
@@ -718,6 +726,7 @@ export const makeFlowRunnerContext = Effect.fn("@llm4ts/runner/FlowRunner.makeCo
       userPrompt: options.userPrompt,
       workDir,
       workspace: options.workspace,
+      ...(rebind ? { control } : {}),
       // Rebinding is one level deep: a story worktree's context has no
       // `contextFor` of its own — nothing in the design nests worktrees.
       ...(rebind

@@ -1,3 +1,4 @@
+import { makeControlInbox } from "@llm4ts/flow/Control"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -86,7 +87,8 @@ const depsFor = (config: OperatorConfig) =>
       probe: () => Effect.succeed(false),
       flows: () => Effect.succeed([]),
       now: Effect.succeed(t0 + 60_000),
-      environment: {}
+      environment: {},
+      control: () => makeControlInbox({ files: memory.store, root: "/state/llm4ts/control/repo" })
     }
     return deps
   })

@@ -2870,6 +2870,9 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                 concurrency,
                 ...(deferring ? { deferNonBlocking: true } : {}),
                 failFast: flags.failFast,
+                ...(context.control === undefined
+                  ? {}
+                  : { control: context.control, controlEpic: epicId }),
                 ...(options.rescue === true ? { rescue: true } : {}),
                 ...(options.stories === undefined ? {} : options.stories(unitContext(work)))
               }
@@ -3013,20 +3016,21 @@ export const retroHint = (
 }
 
 /**
- * What a run of an epic fails with when it leaves stories failed or waiting
- * (ADR 0058); `undefined` when every story is done.
+ * What a run of an epic fails with when it leaves stories failed, waiting or
+ * skipped (ADR 0058, ADR 0057); `undefined` when every story is done.
  */
 export const epicUnfinished = (
   report: EpicReport,
   epicId: string,
   stateDir: string
 ): EpicUnfinished | undefined =>
-  report.count("failed") === 0 && report.count("waiting") === 0
+  report.count("failed") === 0 && report.count("waiting") === 0 && report.count("skipped") === 0
     ? undefined
     : EpicUnfinished.make({
         epicId,
         done: report.count("done"),
         failed: report.count("failed"),
         waiting: report.count("waiting"),
+        skipped: report.count("skipped"),
         report: join(stateDir, "report.md")
       })

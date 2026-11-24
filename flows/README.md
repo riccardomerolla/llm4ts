@@ -685,6 +685,10 @@ its slots and a priority per role:
 - `llm4ts roster` shows the pool and who is out; `llm4ts roster pause <id>
 [--for 2h]` and `resume <id>` control it across runs. `llm4ts run
 --roster none` ignores it, `--executors a,b` narrows it.
+- `llm4ts inbox retry <story>` and `llm4ts inbox skip <story> --reason …`
+  steer the live run of an epic without stopping the other stories;
+  `llm4ts inbox` shows what is pending and how each command was answered
+  (ADR 0057).
 - `env` values reference variables (`"${LEMONADE_API_KEY}"`), never secrets;
   provider settings stay in each harness's own config. API providers
   (`lm-studio`, `ollama`, `openai`, …) may reason but not code.

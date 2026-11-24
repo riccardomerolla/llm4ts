@@ -386,8 +386,32 @@ export class StoryStatusChanged extends Schema.TaggedClass<StoryStatusChanged>()
   "StoryStatusChanged",
   {
     id: Schema.String,
-    status: Schema.Literals(["planned", "active", "waiting", "done", "failed", "skipped"])
+    status: Schema.Literals(["planned", "active", "waiting", "done", "failed", "skipped"]),
+    /** Why a story failed, waits or was skipped (ADR 0057). */
+    reason: Schema.optionalKey(Schema.String)
   }
+) {}
+
+const controlFields = {
+  /** The command's id in the control log. */
+  id: Schema.String,
+  command: Schema.Literals(["RetryStory", "SkipStory"]),
+  story: Schema.String,
+  /** Where the command came from, as its writer said. */
+  by: Schema.String,
+  reason: Schema.optionalKey(Schema.String)
+}
+
+/** A command from the control inbox changed the run (ADR 0057). */
+export class ControlApplied extends Schema.TaggedClass<ControlApplied>()(
+  "ControlApplied",
+  controlFields
+) {}
+
+/** A command from the control inbox was refused; `reason` says why (ADR 0057). */
+export class ControlRefused extends Schema.TaggedClass<ControlRefused>()(
+  "ControlRefused",
+  controlFields
 ) {}
 
 export class ExecutorLeased extends Schema.TaggedClass<ExecutorLeased>()("ExecutorLeased", {
@@ -525,6 +549,8 @@ export const FlowEvent = Schema.Union([
   TaskStarted,
   TaskCompleted,
   StoryStatusChanged,
+  ControlApplied,
+  ControlRefused,
   CriterionChecked,
   Parked
 ])
@@ -741,6 +767,8 @@ const laneRules = {
     })
   ),
   StoryStatusChanged: unlaned,
+  ControlApplied: unlaned,
+  ControlRefused: unlaned,
   CriterionChecked: carried,
   Parked: carried
 } satisfies {

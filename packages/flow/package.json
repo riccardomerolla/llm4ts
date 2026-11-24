@@ -26,6 +26,7 @@
     "./Chat": "./dist/Chat.js",
     "./ChiefAction": "./dist/ChiefAction.js",
     "./Context": "./dist/Context.js",
+    "./Control": "./dist/Control.js",
     "./CostLedger": "./dist/CostLedger.js",
     "./CostReport": "./dist/CostReport.js",
     "./CostTracker": "./dist/CostTracker.js",

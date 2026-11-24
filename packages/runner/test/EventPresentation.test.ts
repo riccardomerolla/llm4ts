@@ -12,6 +12,8 @@ import {
   CapabilityDeniedEvent,
   CapabilityUnenforceable,
   CapabilityUsedEvent,
+  ControlApplied,
+  ControlRefused,
   CriterionChecked,
   EvidenceChecked,
   ExecutorExcluded,
@@ -217,6 +219,22 @@ const cases: {
     Parked.make({ story: "home", item: "export", reason: "later", mvp: false, lane }),
     "0111",
     "an event"
+  ],
+  ControlApplied: [
+    ControlApplied.make({ id: "c-1", command: "RetryStory", story: "home", by: "cli" }),
+    "1111",
+    "an event"
+  ],
+  ControlRefused: [
+    ControlRefused.make({
+      id: "c-2",
+      command: "SkipStory",
+      story: "home",
+      by: "mcp",
+      reason: "story home is done"
+    }),
+    "1111",
+    "an event"
   ]
 }
 
@@ -266,6 +284,8 @@ describe("eventPresentation", () => {
       "Aborted",
       "Began",
       "CapabilityUnenforceable",
+      "ControlApplied",
+      "ControlRefused",
       "CriterionChecked",
       "ExecutorExcluded",
       "ExecutorHandedOver",
@@ -281,6 +301,10 @@ describe("eventPresentation", () => {
     assert.deepStrictEqual(presentationOf(cases.Aborted[0]).digest?.(cases.Aborted[0]), {
       text: "aborted: stopped"
     })
+    assert.deepStrictEqual(
+      presentationOf(cases.ControlRefused[0]).digest?.(cases.ControlRefused[0]),
+      { text: "skip of story home by mcp refused: story home is done", lane: "home" }
+    )
   })
 })
 
