@@ -57,6 +57,7 @@ const program = Effect.gen(function* () {
       // No coder turn is ever taken: the read-only reasoning seat fills both.
       coder: reasoning,
       reasoning,
+      readOnly: true,
       environment: process.env
     },
     (context) =>

@@ -102,6 +102,7 @@
     "./Wall": "./dist/Wall.js",
     "./WorkQueue": "./dist/WorkQueue.js",
     "./Workspace": "./dist/Workspace.js",
+    "./WriterLock": "./dist/WriterLock.js",
     "./endpoint/Auth": "./dist/endpoint/Auth.js",
     "./endpoint/Endpoints": "./dist/endpoint/Endpoints.js",
     "./endpoint/Transport": "./dist/endpoint/Transport.js",

@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **One writing run per checkout, held by the flow** (ADR 0058, proposed). A
+  flow takes a lock file under `~/.local/state/llm4ts/locks/` before it
+  writes anything, so a second writing run on the same checkout fails with
+  `CheckoutBusy`, naming the run that holds it, whether it was started from
+  a terminal, by the operator server or by another process. A lock whose
+  run is gone still holds while a process that run started is alive.
+  `epic-retro` and `chief` take no lock; `LLM4TS_WRITER_LOCK=off` turns it
+  off, and the operator sets that under `--parallel-runs` above 1.
+- **A turn's processes end with the turn.** Coding agents, gates and setup
+  commands each run in their own process group, and ending one ends what it
+  started. A subprocess a coder left running no longer writes into the
+  checkout after a stop. Children have no controlling terminal.
+
+- **A red epic fails its run** (ADR 0058). `epic-stories`,
+  `epic-stories-board`, `epic-mvp` and `epic-draft` exit 1 with
+  `EpicUnfinished`, and the trace ends `failed`, when a run leaves stories
+  failed or waiting. The board, the report and the retro hint are written
+  first. Such a run used to exit 0 and end `completed`.
+
+### Fixed
+
+- Two operator servers, or `llm4ts run` beside a supervised run, could both
+  write one repository and commit every plan task twice; the cut-off journal
+  (ADR 0056) then counted the live run as cut off.
+
 ## 4.12.0
 
 ### Added

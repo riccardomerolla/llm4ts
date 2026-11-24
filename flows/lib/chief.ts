@@ -63,6 +63,7 @@ export const chiefRunOptions = (
   coder: reasoning,
   reasoning,
   roster: "none",
+  readOnly: true,
   environment
 })
 

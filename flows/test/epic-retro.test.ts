@@ -9,7 +9,7 @@ import { retroApprovalOf } from "@llm4ts/flow/Retro"
 import { EpicReport, EpicReportVersion, StoryOutcome } from "@llm4ts/flow/Stories"
 import { Story, StoryPlan, makeStoryPlanStore } from "@llm4ts/flow/StoryPlan"
 import { parseEpicRetroArgs, resolveRetroTarget, runRetro } from "../lib/epic-retro.ts"
-import { retroHint } from "../lib/epic-stories.ts"
+import { epicUnfinished, retroHint } from "../lib/epic-stories.ts"
 import { scripted } from "./support.ts"
 
 const stateDir = "/repo/.llm4ts/epics/conto"
@@ -250,5 +250,13 @@ describe("the end-of-run hint", () => {
     })
     assert.isUndefined(retroHint(green, "/repo", "conto-abc"))
     assert.isTrue(Info.make({ message: "x" })._tag === "Info")
+    // The same report decides how the run ends (ADR 0058): red fails it.
+    const unfinished = epicUnfinished(red, "conto", "/repo/.llm4ts/epics/conto-abc")
+    assert.strictEqual(unfinished?._tag, "EpicUnfinished")
+    assert.strictEqual(
+      unfinished?.message,
+      "epic 'conto' is not finished: 0 done, 1 failed, 1 waiting — see /repo/.llm4ts/epics/conto-abc/report.md; run the epic again to resume"
+    )
+    assert.isUndefined(epicUnfinished(green, "conto", "/repo/.llm4ts/epics/conto-abc"))
   })
 })
