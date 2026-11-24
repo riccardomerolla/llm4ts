@@ -16,6 +16,7 @@
     ".": "./dist/index.js",
     "./AgentTree": "./dist/AgentTree.js",
     "./AgentTreeSurface": "./dist/AgentTreeSurface.js",
+    "./CheckoutState": "./dist/CheckoutState.js",
     "./Cli": "./dist/Cli.js",
     "./Connectors": "./dist/Connectors.js",
     "./Doctor": "./dist/Doctor.js",

@@ -227,7 +227,7 @@ export class EpicIncomplete extends Schema.TaggedError<EpicIncomplete>()("EpicIn
 }
 
 /**
- * A run of an epic ended with stories failed or waiting (ADR 0058). Raised
+ * A run of an epic ended with stories failed, waiting or skipped (ADR 0058). Raised
  * after the board, the report and the retro hint are written, so the run
  * ends `failed` and its process exits non-zero.
  */
@@ -236,10 +236,13 @@ export class EpicUnfinished extends Schema.TaggedError<EpicUnfinished>()("EpicUn
   done: Schema.Int,
   failed: Schema.Int,
   waiting: Schema.Int,
+  skipped: Schema.Int,
   report: Schema.String
 }) {
   get message(): string {
-    return `epic '${this.epicId}' is not finished: ${this.done} done, ${this.failed} failed, ${this.waiting} waiting — see ${this.report}; run the epic again to resume`
+    return `epic '${this.epicId}' is not finished: ${this.done} done, ${this.failed} failed, ${this.waiting} waiting${
+      this.skipped === 0 ? "" : `, ${this.skipped} skipped`
+    } — see ${this.report}; run the epic again to resume`
   }
 }
 

@@ -136,9 +136,10 @@ What the setup protects:
   duration and the status, never the arguments.
 - The server binds loopback unless `--host` says otherwise and does no TLS.
   Reach it through the ssh forward, or a TLS reverse proxy you run.
-- `start_run`, `stop_run` and `retro_start` exist only with `--allow-run`;
-  `approve` exists only with `--allow-approve`. The token alone cannot add
-  them.
+- `start_run`, `stop_run`, `retro_start`, `story_retry` and `story_skip`
+  exist only with `--allow-run`; `approve` exists only with
+  `--allow-approve`. The token alone cannot add them. `control_list`, which
+  only reads an epic's control inbox, is always there.
 - The bot names repositories by id, never by path, and cannot set
   environment variables. It cannot pass `--repo`, `-C`, `--prompt-file`,
   `--allow-mutating`, `--yes`, `--env` or `--target` to a flow.

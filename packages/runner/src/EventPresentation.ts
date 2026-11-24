@@ -1,5 +1,11 @@
 import * as Schema from "effect/Schema"
-import type { FlowEvent, FlowEventByTag, FlowEventTag } from "@llm4ts/flow/FlowEvents"
+import type {
+  ControlApplied,
+  ControlRefused,
+  FlowEvent,
+  FlowEventByTag,
+  FlowEventTag
+} from "@llm4ts/flow/FlowEvents"
 
 export const Verbosity = Schema.Literals(["Quiet", "Normal", "Verbose", "Debug"])
 export type Verbosity = typeof Verbosity.Type
@@ -35,6 +41,14 @@ const laned = (lane: string | undefined): { readonly lane?: string } =>
 const capability = "a capability check"
 const roster = "a roster change"
 const other = "an event"
+
+/** `retry of story home by cli`, or with `refused: <why>` (ADR 0057). */
+export const controlText = (event: ControlApplied | ControlRefused): string => {
+  const what = `${event.command === "RetryStory" ? "retry" : "skip"} of story ${event.story} by ${event.by}`
+  return event._tag === "ControlApplied"
+    ? `${what}${event.reason === undefined ? "" : `: ${event.reason}`}`
+    : `${what} refused: ${event.reason ?? "no reason given"}`
+}
 
 /**
  * Screen and digest policy for every event. Exhaustive by type: adding an
@@ -149,6 +163,16 @@ export const eventPresentation: {
     line: "Normal",
     kind: other,
     digest: (event) => ({ text: `parked ${event.item}: ${event.reason}`, lane: event.story })
+  },
+  ControlApplied: {
+    line: "Quiet",
+    kind: other,
+    digest: (event) => ({ text: controlText(event), lane: event.story })
+  },
+  ControlRefused: {
+    line: "Quiet",
+    kind: other,
+    digest: (event) => ({ text: controlText(event), lane: event.story })
   }
 }
 

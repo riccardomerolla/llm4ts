@@ -1,3 +1,4 @@
+import type { ControlInboxShape } from "./Control.ts"
 import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import type * as Scope from "effect/Scope"
@@ -69,6 +70,8 @@ export interface FlowContextShape {
    * this context's coder. Absent on a run with one executor per seat.
    */
   readonly roster?: RosterView
+  /** The control inbox of this checkout's epics (ADR 0057): the root context only. */
+  readonly control?: ControlInboxShape
   /** The trace this run writes (ADR 0022), when it writes one: the root context only. */
   readonly trace?: { readonly runId: string; readonly path: string }
 }

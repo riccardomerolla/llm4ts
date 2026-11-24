@@ -19,6 +19,8 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse"
 import {
   actHandlers,
   actToolkit,
+  storyRetryTool,
+  storySkipTool,
   approveTool,
   retroStartTool,
   startRunTool,
@@ -49,7 +51,13 @@ const serverInfo = {
   protocols: [McpProtocol.v2025_06_18]
 } as const
 
-const runToolkit = Toolkit.make(startRunTool, stopRunTool, retroStartTool)
+const runToolkit = Toolkit.make(
+  startRunTool,
+  stopRunTool,
+  retroStartTool,
+  storyRetryTool,
+  storySkipTool
+)
 const approveToolkit = Toolkit.make(approveTool)
 
 /** The act tools a configuration allows: `--allow-run` and `--allow-approve` each add their own. */
@@ -74,7 +82,9 @@ const actLayer = (
     const handlers = runToolkit.of({
       start_run: act.start_run,
       stop_run: act.stop_run,
-      retro_start: act.retro_start
+      retro_start: act.retro_start,
+      story_retry: act.story_retry,
+      story_skip: act.story_skip
     })
     return McpServer.toolkit(runToolkit).pipe(Layer.provide(runToolkit.toLayer(handlers)))
   }

@@ -267,6 +267,8 @@ export interface StoryProgress {
   readonly failed: ReadonlySet<string>
   /** On hold behind a failed predecessor. */
   readonly waiting: ReadonlySet<string>
+  /** Left out of this run by a control command (ADR 0057). */
+  readonly skipped?: ReadonlySet<string>
   readonly running: ReadonlySet<string>
 }
 
@@ -277,6 +279,7 @@ export const readyStories = (plan: StoryPlan, progress: StoryProgress): Readonly
       !progress.done.has(story.id) &&
       !progress.failed.has(story.id) &&
       !progress.waiting.has(story.id) &&
+      progress.skipped?.has(story.id) !== true &&
       !progress.running.has(story.id) &&
       story.dependsOn.every((dependency) => progress.done.has(dependency))
   )

@@ -7,6 +7,7 @@
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
@@ -49,6 +50,8 @@ import {
   withLane,
   type FlowEventsShape
 } from "./FlowEvents.ts"
+import { ControlApplied, ControlRefused } from "./FlowEvents.ts"
+import { decideControl, waitingFor, type ControlInboxShape } from "./Control.ts"
 import { timeEffect, withTimedRole } from "./Timing.ts"
 import { statusPaths, type GitToolShape } from "./GitTool.ts"
 import {
@@ -206,8 +209,11 @@ export const frozenTestsGate = (
 
 export const EpicReportVersion = 1
 
-/** `waiting`: on hold behind a failed predecessor, runs once that is fixed. */
-export const OutcomeStatus = Schema.Literals(["done", "failed", "waiting"])
+/**
+ * `waiting`: on hold behind a failed or skipped predecessor, runs once that
+ * is done. `skipped`: left out of this run by a control command (ADR 0057).
+ */
+export const OutcomeStatus = Schema.Literals(["done", "failed", "waiting", "skipped"])
 export type OutcomeStatus = typeof OutcomeStatus.Type
 
 export class StoryOutcome extends Schema.Class<StoryOutcome>("StoryOutcome")({
@@ -249,7 +255,9 @@ export const renderEpicReport = (report: EpicReport): string => {
     "> the CLI seats report no usage. They are not measurements.",
     "",
     `- Epic branch: \`${report.epicBranch}\``,
-    `- Stories: ${report.stories.length} (done ${report.count("done")}, failed ${report.count("failed")}, waiting ${report.count("waiting")})`,
+    `- Stories: ${report.stories.length} (done ${report.count("done")}, failed ${report.count("failed")}, waiting ${report.count("waiting")}${
+      report.count("skipped") === 0 ? "" : `, skipped ${report.count("skipped")}`
+    })`,
     "",
     "| Story | Status | Branch | Est. tokens | Est. cost | Note |",
     "| --- | --- | --- | --- | --- | --- |"
@@ -896,6 +904,15 @@ export interface StoriesOptions {
    * executor stops launching stories instead of failing each in turn.
    */
   readonly awaitRecovery?: (reason: string) => Effect.Effect<void, FlowError>
+  /**
+   * The control inbox (ADR 0057): retry and skip commands for this run's
+   * stories, polled while it runs. Absent, the run is not steered.
+   */
+  readonly control?: ControlInboxShape
+  /** How often the inbox is read; default two seconds. */
+  readonly controlPollMs?: number
+  /** The epic's name in the inbox: its state folder. Default: the plan's epic id. */
+  readonly controlEpic?: string
 }
 
 /**
@@ -2703,6 +2720,7 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       done: byStatus("done"),
       failed: byStatus("failed"),
       waiting: byStatus("waiting"),
+      skipped: byStatus("skipped"),
       running: yield* Ref.get(running)
     }
   })
@@ -2720,11 +2738,12 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           dependent === undefined ||
           current.done.has(id) ||
           current.failed.has(id) ||
+          current.skipped.has(id) ||
           current.waiting.has(id)
         ) {
           continue
         }
-        const reason = `waiting for ${story.id}`
+        const reason = waitingFor(story.id)
         yield* record(StoryOutcome.make({ id, title: dependent.title, status: "waiting", reason }))
         yield* board.wait(id, reason)
       }
@@ -2736,10 +2755,126 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
   let toldLaunch: string | undefined
   /** Stories retried once after the serving engine recovered. */
   const recovered = new Set<string>()
+  /** The fiber of each running story, so a skip can interrupt it. */
+  const fibers = new Map<string, Fiber.Fiber<void>>()
+
+  // ---- Control inbox (ADR 0057) ---------------------------------------------
+  const control = options.control
+  const controlRunId = context.trace?.runId ?? "run"
+  const controlEpic = options.controlEpic ?? plan.epicId
+  const forget = (ids: ReadonlySet<string>): Effect.Effect<void> =>
+    Ref.update(outcomes, (current) => current.filter((outcome) => !ids.has(outcome.id)))
+  // A command is for the run live when it was written: what a run finds at
+  // its start, or leaves at its end, expires.
+  const expireControl =
+    control === undefined
+      ? Effect.void
+      : Effect.gen(function* () {
+          for (const command of yield* control.pending(controlEpic)) {
+            yield* control.receipt(controlEpic, {
+              id: command.id,
+              runId: controlRunId,
+              outcome: "expired"
+            })
+          }
+        })
+  const applyControl =
+    control === undefined
+      ? Effect.void
+      : Effect.gen(function* () {
+          for (const command of yield* control.pending(controlEpic)) {
+            const current = yield* progress
+            const known = yield* Ref.get(outcomes)
+            const decision = decideControl(
+              plan,
+              {
+                done: current.done,
+                failed: current.failed,
+                skipped: current.skipped,
+                running: current.running,
+                waiting: new Map(
+                  known.flatMap((outcome) =>
+                    outcome.status === "waiting"
+                      ? [[outcome.id, outcome.reason ?? ""] as const]
+                      : []
+                  )
+                ),
+                ...(halted === undefined ? {} : { halted })
+              },
+              command.command
+            )
+            const told = {
+              id: command.id,
+              command: command.command._tag,
+              story: command.command.story,
+              by: command.by
+            }
+            let refusal = decision._tag === "Refused" ? decision.reason : undefined
+            if (decision._tag === "Skip" && decision.interrupt) {
+              const fiber = fibers.get(decision.story)
+              if (fiber !== undefined) {
+                yield* Fiber.interrupt(fiber)
+                // It ended on its own first: its result is in the queue.
+                if (Exit.isSuccess(yield* Fiber.await(fiber))) {
+                  refusal = `story ${decision.story} finished before it could be skipped`
+                }
+              }
+            }
+            if (refusal !== undefined) {
+              yield* control.receipt(controlEpic, {
+                id: command.id,
+                runId: controlRunId,
+                outcome: "refused",
+                reason: refusal
+              })
+              yield* events.publish(ControlRefused.make({ ...told, reason: refusal }))
+              continue
+            }
+            if (decision._tag === "Retry") {
+              yield* forget(new Set([decision.story, ...decision.release]))
+            }
+            if (decision._tag === "Skip") {
+              const story = plan.story(decision.story)
+              if (story !== undefined) {
+                fibers.delete(story.id)
+                yield* Ref.update(running, (set) => {
+                  const next = new Set(set)
+                  next.delete(story.id)
+                  return next
+                })
+                yield* forget(new Set([story.id]))
+                yield* record(
+                  StoryOutcome.make({
+                    id: story.id,
+                    title: story.title,
+                    status: "skipped",
+                    reason: decision.reason
+                  })
+                )
+                yield* board.skip(story.id, decision.reason)
+                yield* holdDependents(story)
+              }
+            }
+            yield* control.receipt(controlEpic, {
+              id: command.id,
+              runId: controlRunId,
+              outcome: "applied"
+            })
+            yield* events.publish(
+              ControlApplied.make({
+                ...told,
+                ...(decision._tag === "Skip" ? { reason: decision.reason } : {})
+              })
+            )
+          }
+        })
+
+  yield* expireControl
 
   yield* Effect.scoped(
     Effect.gen(function* () {
       while (true) {
+        yield* applyControl
         /** The roster's coder capacity when a ready story was left waiting for it. */
         let starvedAt: number | undefined
         if (halted === undefined) {
@@ -2761,9 +2896,13 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
           const launching = ready.slice(0, Math.max(0, slots))
           for (const story of launching) {
             yield* Ref.update(running, (set) => new Set([...set, story.id]))
-            yield* Effect.forkScoped(
-              attempt(story).pipe(
-                Effect.flatMap((completion) => Queue.offer(completions, completion))
+            fibers.set(
+              story.id,
+              yield* Effect.forkScoped(
+                attempt(story).pipe(
+                  Effect.flatMap((completion) => Queue.offer(completions, completion)),
+                  Effect.asVoid
+                )
               )
             )
           }
@@ -2810,17 +2949,27 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
         // grows (an executor back from a cooldown, a health probe, a resume),
         // not when the next running story happens to end.
         const roster = context.roster
-        const next: Option.Option<Completion> =
+        const completed = Effect.map(Queue.take(completions), Option.some)
+        const grown =
           starvedAt === undefined || roster === undefined
-            ? Option.some(yield* Queue.take(completions))
-            : yield* Effect.raceFirst(
-                Effect.map(Queue.take(completions), Option.some),
+            ? completed
+            : Effect.raceFirst(
+                completed,
                 Effect.as(roster.capacityChanged("coder", starvedAt), Option.none<Completion>())
               )
+        // With an inbox, the wait also ends every poll interval, and the top
+        // of the loop reads the commands.
+        const next: Option.Option<Completion> = yield* control === undefined
+          ? grown
+          : Effect.raceFirst(
+              grown,
+              Effect.as(Effect.sleep(options.controlPollMs ?? 2000), Option.none<Completion>())
+            )
         if (Option.isNone(next)) {
           continue
         }
         const completion = next.value
+        fibers.delete(completion.story.id)
         yield* Ref.update(running, (set) => {
           const next = new Set(set)
           next.delete(completion.story.id)
@@ -2883,6 +3032,8 @@ export const implementStoriesFlow = Effect.fn("@llm4ts/flow/Stories.implement")(
       }
     })
   )
+
+  yield* expireControl
 
   if (halted !== undefined) {
     const stopped = halted

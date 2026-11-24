@@ -14,7 +14,7 @@ import {
   rosterEventMessage,
   type ReviewFindings
 } from "@llm4ts/flow/FlowEvents"
-import { atLeast, presentationOf, type Verbosity } from "./EventPresentation.ts"
+import { atLeast, controlText, presentationOf, type Verbosity } from "./EventPresentation.ts"
 import { formatCount } from "./Format.ts"
 
 /** Lives in `Format`, which the `watch --web` page shares; kept here for importers. */
@@ -246,6 +246,10 @@ export const terminalLine = (
       return palette.info(safe(event.message))
     case "CriterionChecked":
       return palette.info(`criterion ${safe(event.tag)}: ${event.status}`)
+    case "ControlApplied":
+      return palette.info(`control: ${safe(controlText(event))}`)
+    case "ControlRefused":
+      return palette.fail(`control: ${safe(controlText(event))}`)
     case "Parked":
       return palette.info(
         `parked${event.mvp ? " (MVP)" : ""}: ${safe(event.story)} — ${safe(event.item)} (${safe(event.reason)})`

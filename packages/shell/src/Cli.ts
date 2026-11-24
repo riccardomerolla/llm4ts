@@ -27,8 +27,18 @@ import {
   makeWatchProgram,
   nodeTraceSources,
   nodeWatchDependencies,
-  type WatchOptions
+  type WatchOptions,
+  nodeListEpics
 } from "./Watch.ts"
+import {
+  epicFor,
+  epicsOf,
+  inboxListing,
+  inboxOf,
+  renderInboxListing,
+  retryOf,
+  skipOf
+} from "./Inbox.ts"
 import { nodeWebWatchDependencies, runWebWatch } from "./WebWatch.ts"
 import { makeProfileProgram, type ProfileOptions } from "./Profile.ts"
 import {
@@ -887,6 +897,87 @@ const rosterCommand = Command.make("roster", { repo: rosterRepo }, (config) =>
   Command.withSubcommands([rosterPauseCommand, rosterResumeCommand])
 )
 
+// ---- inbox (ADR 0057) -------------------------------------------------------
+
+const inboxRepo = Flag.String("repo").pipe(
+  Flag.optional,
+  Flag.withDescription("Repository whose epic to steer (defaults to the current directory)")
+)
+const inboxEpic = Flag.String("epic").pipe(
+  Flag.optional,
+  Flag.withDescription("The epic, when the repository has more than one")
+)
+
+/** The checkout's inbox and the epic a command line means. */
+const inboxTarget = (flags: {
+  readonly repo: Option.Option<string>
+  readonly epic: Option.Option<string>
+}) =>
+  Effect.gen(function* () {
+    const repoPath = resolve(Option.getOrElse(flags.repo, () => process.cwd()))
+    const epic = yield* epicFor(epicsOf(nodeListEpics, repoPath), Option.getOrUndefined(flags.epic))
+    return { epic, inbox: inboxOf(nodePlainFileStore, process.env, repoPath) }
+  })
+
+const written = (what: string, epic: string, id: string): string =>
+  `${what} written to epic ${epic} (${id}). A live run applies it within two seconds; \`llm4ts inbox\` shows the outcome. With no run live, the next run expires it.`
+
+const inboxRetryCommand = Command.make(
+  "retry",
+  {
+    story: Argument.String("story").pipe(Argument.withDescription("Story id")),
+    repo: inboxRepo,
+    epic: inboxEpic
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const { epic, inbox } = yield* inboxTarget(config)
+      const command = yield* inbox.submit(epic, { by: "cli", command: retryOf(config.story) })
+      yield* Console.log(written(`retry of story ${config.story}`, epic, command.id))
+    })
+).pipe(
+  Command.withDescription(
+    "Run a story that failed in the live run again; stories held behind it are freed"
+  )
+)
+
+const inboxSkipCommand = Command.make(
+  "skip",
+  {
+    story: Argument.String("story").pipe(Argument.withDescription("Story id")),
+    reason: Flag.String("reason").pipe(
+      Flag.withDescription("Why the story is left out; recorded on the board and the report")
+    ),
+    repo: inboxRepo,
+    epic: inboxEpic
+  },
+  (config) =>
+    Effect.gen(function* () {
+      const { epic, inbox } = yield* inboxTarget(config)
+      const command = yield* inbox.submit(epic, {
+        by: "cli",
+        command: skipOf(config.story, config.reason)
+      })
+      yield* Console.log(written(`skip of story ${config.story}`, epic, command.id))
+    })
+).pipe(
+  Command.withDescription(
+    "Leave a story out of the live run: not launched, or interrupted if it runs; its dependents wait"
+  )
+)
+
+const inboxCommand = Command.make("inbox", { repo: inboxRepo, epic: inboxEpic }, (config) =>
+  Effect.gen(function* () {
+    const { epic, inbox } = yield* inboxTarget(config)
+    yield* Console.log(renderInboxListing(yield* inboxListing(inbox, epic)))
+  })
+).pipe(
+  Command.withDescription(
+    "The control inbox of a running epic (ADR 0057): pending and answered commands; retry or skip a story"
+  ),
+  Command.withSubcommands([inboxRetryCommand, inboxSkipCommand])
+)
+
 // ---- graph (ADR 0030) -------------------------------------------------------
 
 const graphFormats: ReadonlyArray<GraphFormat> = ["text", "json", "mermaid", "dot"]
@@ -1307,6 +1398,7 @@ export const shellCommand = Command.make("llm4ts", {}, () =>
     profileCommand,
     graphCommand,
     rosterCommand,
+    inboxCommand,
     geminiBridgeCommand,
     mcpCommand,
     chatCommand,

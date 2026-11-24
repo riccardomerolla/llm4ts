@@ -1,3 +1,4 @@
+import { makeControlInbox } from "@llm4ts/flow/Control"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -220,7 +221,8 @@ const seeded = (extra: Readonly<Record<string, string>> = {}, options: SeedOptio
         }),
       flows: () => Effect.succeed(options.flows ?? []),
       now: Effect.succeed(t0 + 60_000),
-      environment: options.environment ?? {}
+      environment: options.environment ?? {},
+      control: () => makeControlInbox({ files, root: "/state/llm4ts/control/repo-0a1b2c3d" })
     }
     return { deps, probed, memory }
   })
@@ -587,6 +589,66 @@ describe("OperatorActTools", () => {
       const unknown = yield* Effect.flip(handlers.start_run({ flow: "nope" }, context))
       assert.strictEqual(unknown._tag, "UnknownFlow")
       assert.strictEqual(fake.started.length, 1)
+    })
+  )
+
+  it.effect("story_retry and story_skip write commands control_list then shows", () =>
+    Effect.gen(function* () {
+      const { deps } = yield* seeded({}, { config: allowed })
+      const act = actHandlers(deps)
+      const wait = waitHandlers(deps)
+      const retried = yield* act.story_retry(
+        { epic: "conto", story: "home", requestId: "req-1" },
+        context
+      )
+      assert.deepStrictEqual(retried, { id: "req-1", epic: "conto", story: "home" })
+      // The same requestId writes nothing new.
+      yield* act.story_retry({ epic: "conto", story: "home", requestId: "req-1" }, context)
+      const skipped = yield* act.story_skip({ epic: "conto", story: "list" }, context)
+      const inbox = deps.control(repoPath)
+      yield* inbox.receipt("conto", {
+        id: "req-1",
+        runId: "op-1",
+        outcome: "refused",
+        reason: "story home is running"
+      })
+      const listing = yield* wait.control_list({ epic: "conto" }, context)
+      assert.deepStrictEqual(
+        listing.pending.map((entry) => [
+          entry.id,
+          entry.command,
+          entry.story,
+          entry.by,
+          entry.reason
+        ]),
+        [[skipped.id, "skip", "list", "mcp", "skipped by the operator"]]
+      )
+      assert.deepStrictEqual(
+        listing.answered.map((entry) => [entry.id, entry.outcome, entry.refusal, entry.runId]),
+        [["req-1", "refused", "story home is running", "op-1"]]
+      )
+      // An epic is a folder on disk; a client's text never becomes a path.
+      const unknown = yield* Effect.flip(
+        act.story_retry({ epic: "../other", story: "home" }, context)
+      )
+      assert.strictEqual(unknown._tag, "UnknownEpic")
+      assert.strictEqual(
+        (yield* Effect.flip(wait.control_list({ epic: "nope" }, context)))._tag,
+        "UnknownEpic"
+      )
+    })
+  )
+
+  it.effect("steering needs --allow-run; reading the inbox does not", () =>
+    Effect.gen(function* () {
+      const { deps } = yield* seeded()
+      const act = actHandlers(deps)
+      const retry = yield* Effect.flip(act.story_retry({ epic: "conto", story: "home" }, context))
+      assert.strictEqual(retry._tag, "NotAllowed")
+      const skip = yield* Effect.flip(act.story_skip({ epic: "conto", story: "home" }, context))
+      assert.strictEqual(skip._tag, "NotAllowed")
+      const listing = yield* waitHandlers(deps).control_list({ epic: "conto" }, context)
+      assert.deepStrictEqual(listing, { epic: "conto", pending: [], answered: [] })
     })
   )
 

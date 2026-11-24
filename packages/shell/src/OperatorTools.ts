@@ -1,3 +1,4 @@
+import type { ControlInboxShape } from "@llm4ts/flow/Control"
 import { join } from "node:path"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -83,6 +84,8 @@ export interface OperatorDeps extends RunLookupDeps {
   readonly flows: (repoPath: string) => Effect.Effect<ReadonlyArray<DiscoveredFlow>, unknown>
   readonly now: Effect.Effect<number>
   readonly environment: Readonly<Record<string, string | undefined>>
+  /** A checkout's control inbox (ADR 0057). */
+  readonly control: (repoPath: string) => ControlInboxShape
 }
 
 /** The repository a tool call means; the id may be left out when the server serves one. */

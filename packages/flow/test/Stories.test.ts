@@ -2,6 +2,13 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as TestClock from "effect/testing/TestClock"
+import {
+  makeMemoryControlInbox,
+  RetryStory,
+  SkipStory,
+  type ControlInboxShape
+} from "@llm4ts/flow/Control"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -3133,4 +3140,185 @@ describe("Stories executor: story-level review (ADR 0044)", () => {
       }
     })
   )
+
+  describe("control inbox (ADR 0057)", () => {
+    const receiptsOf = (inbox: ControlInboxShape, epic: string) =>
+      Effect.map(inbox.log(epic), (log) =>
+        log.commands.map((command) => {
+          const receipt = log.receipts.get(command.id)
+          return [command.id, receipt?.outcome, receipt?.reason] as const
+        })
+      )
+    /** A context over its own hub, and the control events the hub carried. */
+    const observed = (harness: Harness) =>
+      Effect.gen(function* () {
+        const hub = yield* makeFlowEventHub()
+        const context: FlowContextShape = { ...(yield* makeContext(harness)), events: hub }
+        const seen = yield* Ref.make<ReadonlyArray<string>>([])
+        yield* Effect.forkScoped(
+          Stream.runForEach(hub.stream, (event) =>
+            event._tag === "ControlApplied" || event._tag === "ControlRefused"
+              ? Ref.update(seen, (all) => [
+                  ...all,
+                  `${event._tag}:${event.command}:${event.story}:${event.by}`
+                ])
+              : Effect.void
+          )
+        )
+        yield* Effect.yieldNow
+        return { context, seen }
+      })
+
+    it.effect("a retry runs a failed story again and frees the stories held behind it", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const latchB = yield* Deferred.make<void>()
+          const harness = yield* makeHarness({
+            redGates: ["/repo/.llm4ts/worktrees/a"],
+            latches: new Map([["b", latchB]])
+          })
+          const { context, seen } = yield* observed(harness)
+          const { inbox } = yield* makeMemoryControlInbox()
+          // Left by an earlier run: it must not fire in this one.
+          yield* inbox.submit("diamond", {
+            id: "old",
+            by: "cli",
+            command: SkipStory.make({ story: "b", reason: "last week" })
+          })
+          const options = yield* makeOptions(harness, diamond, context, { control: inbox })
+          const fiber = yield* Effect.forkScoped(implementStoriesFlow(context, options))
+          yield* settle(
+            Effect.map(
+              statusOf(options),
+              (status) => status.get("a") === "failed" && status.get("c") === "waiting"
+            ),
+            "a failed, c waiting"
+          )
+          assert.deepStrictEqual(yield* receiptsOf(inbox, "diamond"), [
+            ["old", "expired", undefined]
+          ])
+
+          // The person fixes what broke, then asks for the story again.
+          yield* Ref.set(harness.redGates, new Set())
+          yield* inbox.submit("diamond", {
+            by: "cli",
+            command: RetryStory.make({ story: "a" })
+          })
+          yield* inbox.submit("diamond", {
+            by: "mcp",
+            command: RetryStory.make({ story: "b" })
+          })
+          yield* TestClock.adjust(2000)
+          yield* settle(
+            Effect.map(statusOf(options), (status) => status.get("c") === "done"),
+            "c done after the retry of a"
+          )
+          yield* Deferred.succeed(latchB, undefined)
+          const report = yield* Fiber.join(fiber)
+
+          assert.deepStrictEqual(
+            report.stories.map((outcome) => [outcome.id, outcome.status]),
+            [
+              ["a", "done"],
+              ["b", "done"],
+              ["c", "done"],
+              ["d", "done"]
+            ]
+          )
+          assert.deepStrictEqual(yield* receiptsOf(inbox, "diamond"), [
+            ["old", "expired", undefined],
+            ["c-1", "applied", undefined],
+            ["c-2", "refused", "story b is running"]
+          ])
+          assert.deepStrictEqual(yield* Ref.get(seen), [
+            "ControlApplied:RetryStory:a:cli",
+            "ControlRefused:RetryStory:b:mcp"
+          ])
+        })
+      )
+    )
+
+    it.effect("a skip interrupts a running story, and its dependents wait", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const latchA = yield* Deferred.make<void>()
+          const latchB = yield* Deferred.make<void>()
+          const harness = yield* makeHarness({
+            latches: new Map([
+              ["a", latchA],
+              ["b", latchB]
+            ])
+          })
+          const context = yield* makeContext(harness)
+          const { inbox } = yield* makeMemoryControlInbox()
+          const options = yield* makeOptions(harness, diamond, context, {
+            control: inbox,
+            concurrency: 2
+          })
+          const fiber = yield* Effect.forkScoped(implementStoriesFlow(context, options))
+          yield* settle(
+            Effect.map(
+              statusOf(options),
+              (status) => status.get("a") === "active" && status.get("b") === "active"
+            ),
+            "a and b active"
+          )
+          yield* inbox.submit("diamond", {
+            by: "cli",
+            command: SkipStory.make({ story: "b", reason: "burning tokens" })
+          })
+          yield* TestClock.adjust(2000)
+          yield* settle(
+            Effect.map(statusOf(options), (status) => status.get("b") === "skipped"),
+            "b skipped"
+          )
+          // b's latch is never released: the story was interrupted, not finished.
+          yield* Deferred.succeed(latchA, undefined)
+          const report = yield* Fiber.join(fiber)
+
+          assert.deepStrictEqual(
+            report.stories.map((outcome) => [outcome.id, outcome.status, outcome.reason]),
+            [
+              ["a", "done", undefined],
+              ["b", "skipped", "burning tokens"],
+              ["c", "done", undefined],
+              ["d", "waiting", "waiting for b"]
+            ]
+          )
+          assert.strictEqual(report.count("skipped"), 1)
+          assert.include(renderEpicReport(report), "waiting 1, skipped 1")
+          assert.notInclude(yield* Ref.get(harness.log), "merge:story/diamond/b")
+          assert.deepStrictEqual(yield* receiptsOf(inbox, "diamond"), [
+            ["c-1", "applied", undefined]
+          ])
+        })
+      )
+    )
+
+    it.effect("a run with nothing running ends and expires what it did not apply", () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({ redGates: ["/repo/.llm4ts/worktrees/a"] })
+        const context = yield* makeContext(harness)
+        const { inbox } = yield* makeMemoryControlInbox()
+        const options = yield* makeOptions(harness, single, context, {
+          control: inbox,
+          // Written as the story's gates run: the run ends before the next poll.
+          gates: (workDir) =>
+            Effect.as(
+              inbox.submit("single", {
+                id: "late",
+                by: "cli",
+                command: SkipStory.make({ story: "zz", reason: "x" })
+              }),
+              red(`gates failed in ${workDir}`)
+            ).pipe(Effect.orDie)
+        })
+        const report = yield* implementStoriesFlow(context, options)
+        assert.strictEqual(report.count("failed"), 1)
+        const outcomes = (yield* receiptsOf(inbox, "single")).map(([, outcome]) => outcome)
+        assert.isTrue(outcomes.every((outcome) => outcome === "expired" || outcome === "refused"))
+        assert.deepStrictEqual(yield* inbox.pending("single"), [])
+      })
+    )
+  })
 })

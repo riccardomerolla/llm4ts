@@ -398,8 +398,10 @@ export const makeAdoBoardSync = Effect.fn("@llm4ts/flow/BoardSync.makeAdo")(func
 
 /** A board whose every move is also a `StoryStatusChanged` event, so the trace carries the board (ADR 0033). */
 export const eventedBoard = (board: BoardSyncShape, events: FlowEventsShape): BoardSyncShape => {
-  const moved = (id: string, status: BoardStatus): Effect.Effect<void> =>
-    events.publish(StoryStatusChanged.make({ id, status }))
+  const moved = (id: string, status: BoardStatus, reason?: string): Effect.Effect<void> =>
+    events.publish(
+      StoryStatusChanged.make({ id, status, ...(reason === undefined ? {} : { reason }) })
+    )
   return {
     plan: (items) =>
       Effect.andThen(
@@ -408,9 +410,9 @@ export const eventedBoard = (board: BoardSyncShape, events: FlowEventsShape): Bo
       ),
     start: (id) => Effect.andThen(board.start(id), moved(id, "active")),
     complete: (id, result) => Effect.andThen(board.complete(id, result), moved(id, "done")),
-    fail: (id, reason) => Effect.andThen(board.fail(id, reason), moved(id, "failed")),
-    skip: (id, reason) => Effect.andThen(board.skip(id, reason), moved(id, "skipped")),
-    wait: (id, reason) => Effect.andThen(board.wait(id, reason), moved(id, "waiting")),
+    fail: (id, reason) => Effect.andThen(board.fail(id, reason), moved(id, "failed", reason)),
+    skip: (id, reason) => Effect.andThen(board.skip(id, reason), moved(id, "skipped", reason)),
+    wait: (id, reason) => Effect.andThen(board.wait(id, reason), moved(id, "waiting", reason)),
     snapshot: board.snapshot
   }
 }

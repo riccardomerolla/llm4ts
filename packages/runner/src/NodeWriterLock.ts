@@ -1,16 +1,13 @@
-import { createHash, randomBytes } from "node:crypto"
-import { linkSync, mkdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { basename, dirname, join, resolve } from "node:path"
+import { randomBytes } from "node:crypto"
+import { linkSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 import * as Effect from "effect/Effect"
 import { PersistenceError } from "@llm4ts/flow/FlowError"
 import { makeWriterLock, type WriterLockHost, type WriterLockShape } from "@llm4ts/flow/WriterLock"
+import { checkoutKey, stateHome } from "./CheckoutState.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
 
 type Environment = Readonly<Record<string, string | undefined>>
-
-const set = (value: string | undefined): string | undefined =>
-  value !== undefined && value.length > 0 ? value : undefined
 
 /**
  * A checkout's lock file (ADR 0058):
@@ -18,19 +15,8 @@ const set = (value: string | undefined): string | undefined =>
  * hex from the SHA-256 of the checkout's real path. Outside the checkout,
  * where a coder cannot delete it.
  */
-export const writerLockPath = (environment: Environment, workDir: string): string => {
-  let real = resolve(workDir)
-  try {
-    real = realpathSync(real)
-  } catch {
-    // not on disk (yet): the resolved path names it
-  }
-  const stateHome =
-    set(environment.XDG_STATE_HOME) ?? join(set(environment.HOME) ?? homedir(), ".local", "state")
-  const name = basename(real).replace(/[^A-Za-z0-9._-]/g, "_")
-  const key = createHash("sha256").update(real).digest("hex").slice(0, 8)
-  return join(stateHome, "llm4ts", "locks", `${name}-${key}.json`)
-}
+export const writerLockPath = (environment: Environment, workDir: string): string =>
+  join(stateHome(environment), "locks", `${checkoutKey(workDir)}.json`)
 
 // A signal 0 that fails with EPERM found a process it may not signal: alive.
 const signalable = (target: number): boolean => {

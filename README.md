@@ -82,6 +82,10 @@ and [ADR 0051](docs/adr/0051-web-watch.md).
   `xml-validate` and `soap-call`): [ADR 0048](docs/adr/0048-tool-catalog.md).
 - `llm4ts mcp`: the same runs for an MCP client such as Claude Code or
   Grok Bot, over stdio or `--http`: [ADR 0041](docs/adr/0041-mcp-operator-server.md).
+- `llm4ts inbox`: steer a live epic without stopping it. `inbox retry
+<story>` runs a failed story again, `inbox skip <story> --reason …`
+  leaves one out; an MCP client does the same with `story_retry` and
+  `story_skip`: [ADR 0057](docs/adr/0057-control-inbox.md).
 - `llm4ts chat --space <space>`: a Chief of Staff in a Google Chat space
   answers `/bot` questions about the repository's runs, starts flows and
   posts their progress, through the `gws` CLI and your own login:
