@@ -1,6 +1,6 @@
 # ADR 0058: One Writing Run Per Checkout, And A Red Epic Fails
 
-Status: Proposed · Date: 2026-11-24 · Extends ADR 0041, ADR 0056
+Status: Accepted · Date: 2026-11-24 · Extends ADR 0041, ADR 0056
 
 ## Context
 

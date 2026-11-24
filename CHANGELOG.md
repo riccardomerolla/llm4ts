@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 4.13.0
 
 ### Changed
 
-- **One writing run per checkout, held by the flow** (ADR 0058, proposed). A
+- **One writing run per checkout, held by the flow** (ADR 0058). A
   flow takes a lock file under `~/.local/state/llm4ts/locks/` before it
   writes anything, so a second writing run on the same checkout fails with
   `CheckoutBusy`, naming the run that holds it, whether it was started from
