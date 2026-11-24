@@ -3,7 +3,11 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
-import { childEnvironment, nodeProcessExecutor } from "@llm4ts/runner/NodeProcessExecutor"
+import {
+  childEnvironment,
+  childGroups,
+  nodeProcessExecutor
+} from "@llm4ts/runner/NodeProcessExecutor"
 
 const nodeCommand = (script: string): ReadonlyArray<string> => [process.execPath, "-e", script]
 
@@ -127,6 +131,42 @@ describe("NodeProcessExecutor", () => {
       assert.strictEqual(error._tag, "ProviderError")
       assert.match(error.message, /boom/)
       assert.match(error.message, /7/)
+    })
+  )
+
+  it.effect("ends what a child started when the child is ended", () =>
+    Effect.gen(function* () {
+      // The child starts a process of its own and prints both pids.
+      const script =
+        'const { spawn } = require("node:child_process");' +
+        'const inner = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });' +
+        'console.log(process.pid + " " + inner.pid); setInterval(() => {}, 1000)'
+      const result = yield* Stream.runCollect(
+        nodeProcessExecutor
+          .runStreaming(nodeCommand(script), process.cwd(), {})
+          .pipe(Stream.take(1))
+      )
+      const [child, inner] = (result[0] ?? "").split(" ").map(Number)
+      assert.isTrue(Number.isInteger(child) && Number.isInteger(inner))
+      assert.isTrue(yield* eventuallyDead(child ?? 0))
+      assert.isTrue(yield* eventuallyDead(inner ?? 0))
+      assert.notInclude(childGroups.current(), child)
+    })
+  )
+
+  it.effect("names a running child's process group while it runs", () =>
+    Effect.gen(function* () {
+      const seen: Array<ReadonlyArray<number>> = []
+      const unsubscribe = childGroups.subscribe(() => seen.push(childGroups.current()))
+      const result = yield* nodeProcessExecutor.run(
+        nodeCommand("console.log(process.pid)"),
+        process.cwd(),
+        {}
+      )
+      unsubscribe()
+      const pid = Number(result.stdout[0])
+      assert.isTrue(seen.some((groups) => groups.includes(pid)))
+      assert.notInclude(childGroups.current(), pid)
     })
   )
 

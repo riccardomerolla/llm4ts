@@ -40,7 +40,10 @@ import { makeMemoryPlainFileStore, type PlainFileStoreShape } from "@llm4ts/flow
 import { JudgmentObservation, judgmentLogPath } from "@llm4ts/flow/JudgmentLog"
 import { TraceLine } from "@llm4ts/flow/FlowRecorder"
 import { makeMemoryTranscriptSink } from "@llm4ts/flow/Transcript"
-import { FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
+import { CheckoutBusy, FlowAborted, type FlowError } from "@llm4ts/flow/FlowError"
+import { makeMemoryWriterLockHost, makeWriterLock } from "@llm4ts/flow/WriterLock"
+import { writerLockPath } from "@llm4ts/runner/NodeWriterLock"
+import * as Scope from "effect/Scope"
 import {
   drainShortfall,
   flowMainSignals,
@@ -301,6 +304,98 @@ describe("embedded runner", () => {
           )
         })
       )
+  )
+})
+
+describe("the writer lock", () => {
+  const prepare = (environment: Readonly<Record<string, string | undefined>>) =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make<Readonly<Record<string, string>>>({})
+      const mock = makeMockProvider(LlmConfig.make({ provider: "Mock", model: "mock" }))
+      // Another process, pid 100, runs `implement` on this checkout.
+      const other = yield* makeMemoryWriterLockHost(100)
+      const mine = yield* makeMemoryWriterLockHost(200, other)
+      const path = writerLockPath(environment, "/repo")
+      const otherRun = yield* Scope.make()
+      yield* makeWriterLock(other.host)
+        .hold({ path, workDir: "/repo", runId: "run-other", flow: "implement", startedAt: 1 })
+        .pipe(Scope.provide(otherRun))
+      const dependencies = {
+        registry: makeConnectorRegistry([
+          {
+            connectorId: ConnectorIds.Mock,
+            kind: "Api" as const,
+            create: () => Effect.succeed(mock)
+          }
+        ]),
+        process: (yield* makeFakeProcessExecutor()).executor,
+        files: files(state),
+        writerLock: makeWriterLock(mine.host)
+      }
+      const surface: TerminalSurface = {
+        palette: plainTerminalPalette,
+        log: () => Effect.void,
+        setStatus: () => Effect.void,
+        suspend: (effect) => effect
+      }
+      const options = {
+        workDir: "/repo",
+        workspace: "/repo",
+        userPrompt: "do it",
+        coder: ApiConnectorConfig.make({ connectorId: ConnectorIds.Mock }),
+        surface,
+        runId: "run-mine",
+        environment
+      }
+      const bodyRan = yield* Ref.make(false)
+      const run = (overrides: { readonly readOnly?: boolean } = {}) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const bundle = yield* makeFlowRunnerContext({ ...options, ...overrides }, dependencies)
+            return yield* runWithBundle(
+              bundle,
+              { ...options, ...overrides },
+              () => Ref.set(bodyRan, true),
+              dependencies
+            )
+          })
+        )
+      return { run, bodyRan, state, other, otherRun }
+    })
+
+  it.effect("a second writing run stops before its body, its trace and its ledger", () =>
+    Effect.gen(function* () {
+      const { run, bodyRan, state, other, otherRun } = yield* prepare({ XDG_STATE_HOME: "/state" })
+      const refused = yield* run().pipe(Effect.flip)
+      assert.instanceOf(refused, CheckoutBusy)
+      if (refused instanceof CheckoutBusy) {
+        assert.strictEqual(refused.runId, "run-other")
+        assert.strictEqual(refused.flow, "implement")
+      }
+      // Nothing of the refused run exists: no plan task was started, so the
+      // cut-off journal (ADR 0056) cannot count the live run as cut off.
+      assert.isFalse(yield* Ref.get(bodyRan))
+      assert.deepStrictEqual(
+        Object.keys(yield* Ref.get(state)).filter((file) => !file.endsWith(".gitignore")),
+        []
+      )
+      // Once the other run is over, this one runs and leaves no lock behind.
+      yield* Scope.close(otherRun, Exit.void)
+      yield* run()
+      assert.isTrue(yield* Ref.get(bodyRan))
+      assert.deepStrictEqual(yield* other.files, {})
+    })
+  )
+
+  it.effect("a read-only run and a run with the lock off start beside a writing run", () =>
+    Effect.gen(function* () {
+      const readOnly = yield* prepare({ XDG_STATE_HOME: "/state" })
+      yield* readOnly.run({ readOnly: true })
+      assert.isTrue(yield* Ref.get(readOnly.bodyRan))
+      const off = yield* prepare({ XDG_STATE_HOME: "/state", LLM4TS_WRITER_LOCK: "off" })
+      yield* off.run()
+      assert.isTrue(yield* Ref.get(off.bodyRan))
+    })
   )
 })
 

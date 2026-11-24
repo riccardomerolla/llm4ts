@@ -78,6 +78,55 @@ export const childEnvironment = (
   return { ...inherited, ...envVars }
 }
 
+/**
+ * Every child leads its own process group (ADR 0058), so ending it ends what
+ * it started too: a coding agent's own subprocess must not keep writing into
+ * the checkout after the turn, the stop or the run is over. Not on Windows,
+ * where `detached` means a new console.
+ */
+const ownGroups = process.platform !== "win32"
+
+const liveGroups = new Set<number>()
+const groupListeners = new Set<() => void>()
+let exitHookInstalled = false
+
+const killGroup = (pgid: number): void => {
+  try {
+    process.kill(-pgid, "SIGKILL")
+  } catch {
+    // the group is already empty
+  }
+}
+
+const groupsChanged = (): void => {
+  for (const listener of groupListeners) listener()
+}
+
+const trackGroup = (pid: number | undefined): void => {
+  if (!ownGroups || pid === undefined) return
+  liveGroups.add(pid)
+  // A process that exits without running finalizers (a second Ctrl-C) still
+  // takes its children with it; they no longer share the terminal's group.
+  if (!exitHookInstalled) {
+    exitHookInstalled = true
+    process.once("exit", () => {
+      for (const group of liveGroups) killGroup(group)
+    })
+  }
+  groupsChanged()
+}
+
+/** The process groups of the children running now, for the writer lock. */
+export const childGroups = {
+  current: (): ReadonlyArray<number> => [...liveGroups],
+  subscribe: (listener: () => void): (() => void) => {
+    groupListeners.add(listener)
+    return () => {
+      groupListeners.delete(listener)
+    }
+  }
+}
+
 const spawnChild = (
   argv: ReadonlyArray<string>,
   cwd: string,
@@ -101,20 +150,28 @@ const spawnChild = (
   const spawnArgs = windows === undefined ? args : windows.args
 
   return Effect.try({
-    try: () =>
-      spawn(file, spawnArgs, {
+    try: () => {
+      const child = spawn(file, spawnArgs, {
         cwd,
         env: childEnvironment(process.env, envVars),
         stdio: "pipe",
+        ...(ownGroups ? { detached: true } : {}),
         ...(windows === undefined ? {} : { windowsVerbatimArguments: windows.verbatim })
-      }),
+      })
+      trackGroup(child.pid)
+      return child
+    },
     catch: (error) => processFailure(argv, errorMessage(error))
   })
 }
 
 const killChild = (child: ChildProcessWithoutNullStreams): Effect.Effect<void> =>
   Effect.sync(() => {
-    if (child.exitCode === null && child.signalCode === null) {
+    const pid = child.pid
+    if (ownGroups && pid !== undefined) {
+      killGroup(pid)
+      if (liveGroups.delete(pid)) groupsChanged()
+    } else if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGKILL")
     }
   })

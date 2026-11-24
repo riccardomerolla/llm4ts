@@ -32,6 +32,7 @@
     "./NodeProcessExecutor": "./dist/NodeProcessExecutor.js",
     "./NodeTemporaryFiles": "./dist/NodeTemporaryFiles.js",
     "./NodeWorkspace": "./dist/NodeWorkspace.js",
+    "./NodeWriterLock": "./dist/NodeWriterLock.js",
     "./Packs": "./dist/Packs.js",
     "./PiModels": "./dist/PiModels.js",
     "./RunSummary": "./dist/RunSummary.js",

@@ -783,6 +783,15 @@ export const settings = {
     doc: "The Gemini model the bridge reasons with."
   }),
 
+  // ---- run lifecycle ---------------------------------------------------------
+  LLM4TS_WRITER_LOCK: setting({
+    group: "launch",
+    scope: "global",
+    value: Value.toggle,
+    fallback: fallback.value(true, "on"),
+    doc: "One writing run per checkout: a second one is refused while the first, or a process it started, is alive. off lets runs write side by side."
+  }),
+
   // ---- operator ---------------------------------------------------------------
   LLM4TS_MCP_TOKEN: setting({
     group: "operator",

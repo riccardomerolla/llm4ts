@@ -17,6 +17,7 @@ import {
 } from "@llm4ts/flow/OperatorSchemas"
 import type { OperatorKnobs } from "@llm4ts/flow/OperatorSchemas"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import { checkoutBusy, type LiveHolder } from "@llm4ts/flow/WriterLock"
 import { prepareLaunch, type FlagAssignment } from "./Config.ts"
 import { FlowLaunchError, type FlowProcessHandle, type FlowProcessShape } from "./FlowProcess.ts"
 
@@ -71,6 +72,17 @@ export interface SupervisorOptions {
   readonly readOnlyFlows?: ReadonlySet<string>
   /** The 4-hex run id suffix; injectable so tests are deterministic. */
   readonly random?: () => string
+  /**
+   * Who holds a checkout's writer lock (ADR 0058): a run this registry does
+   * not know, started from a terminal or by another server, or processes
+   * such a run left behind. Absent, only the registry is consulted.
+   */
+  readonly writerHolder?: (
+    repoPath: string
+  ) => Effect.Effect<
+    { readonly path: string; readonly live: LiveHolder } | undefined,
+    PersistenceError
+  >
 }
 
 /** Knobs that become the flow's argv, in a fixed order; `flags` come last. */
@@ -124,6 +136,7 @@ export const makeRunSupervisor = (
     const graceMs = options.graceMs ?? 30_000
     const readOnlyFlows = options.readOnlyFlows ?? new Set(["epic-retro", "chief"])
     const random = options.random ?? randomHex
+    const writesAlone = options.parallelRuns === 1
     const stateDir = (repoId: string) => operatorStateDir(options.environment, repoId)
     const registryPath = (repoId: string) => join(stateDir(repoId), "runs.jsonl")
 
@@ -228,6 +241,19 @@ export const makeRunSupervisor = (
                 runId: newest.runId
               })
             }
+            // The flow takes the lock itself; asking first refuses the run
+            // before anything is recorded or spawned.
+            if (writesAlone && options.writerHolder !== undefined) {
+              const held = yield* options
+                .writerHolder(request.repo.path)
+                .pipe(Effect.catch(() => Effect.succeed(undefined)))
+              if (held !== undefined) {
+                return yield* new RunInProgress({
+                  message: checkoutBusy(held.path, held.live).message,
+                  runId: held.live.holder.runId
+                })
+              }
+            }
           }
           const startedAt = yield* Clock.currentTimeMillis
           const taken = (id: string) => live.has(id) || existing.some((run) => run.runId === id)
@@ -259,7 +285,12 @@ export const makeRunSupervisor = (
             base: childEnvironment(request.baseEnvironment),
             flags: knobAssignments(request.knobs),
             files: options.files,
-            extra: { LLM4TS_RUN_ID: runId, LLM4TS_TRACE_PATH: tracePath }
+            extra: {
+              LLM4TS_RUN_ID: runId,
+              LLM4TS_TRACE_PATH: tracePath,
+              // Several writing runs were asked for: they do not lock each other out.
+              ...(writesAlone ? {} : { LLM4TS_WRITER_LOCK: "off" })
+            }
           }).pipe(Effect.mapError((error) => new FlowLaunchError({ message: error.message })))
           launching.add(runId)
           return yield* Effect.gen(function* () {

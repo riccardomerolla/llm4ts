@@ -21,7 +21,8 @@ import {
   makeRunSupervisor,
   operatorStateDir
 } from "@llm4ts/shell/RunSupervisor"
-import type { StartRun, SupervisorRepo } from "@llm4ts/shell/RunSupervisor"
+import type { StartRun, SupervisorOptions, SupervisorRepo } from "@llm4ts/shell/RunSupervisor"
+import { WriterHolder, type LiveHolder } from "@llm4ts/flow/WriterLock"
 
 const environment = { HOME: "/home/op", XDG_STATE_HOME: "/state" }
 const repo: SupervisorRepo = { id: "app", path: "/work/app" }
@@ -39,6 +40,8 @@ const setup = (
   options: {
     readonly alive?: ReadonlyArray<number>
     readonly files?: (store: PlainFileStoreShape) => PlainFileStoreShape
+    readonly parallelRuns?: number
+    readonly writerHolder?: SupervisorOptions["writerHolder"]
   } = {}
 ) =>
   Effect.gen(function* () {
@@ -51,7 +54,8 @@ const setup = (
       environment,
       files: options.files === undefined ? memory.store : options.files(memory.store),
       process: fake.process,
-      parallelRuns: 1,
+      parallelRuns: options.parallelRuns ?? 1,
+      ...(options.writerHolder === undefined ? {} : { writerHolder: options.writerHolder }),
       random: () => (suffix++).toString(16)
     })
     const registry = memory.files.pipe(
@@ -273,6 +277,62 @@ describe("RunSupervisor", () => {
         assert.strictEqual(second.runId, first.runId)
         assert.strictEqual((yield* fake.started).length, 1)
         yield* fake.exit(first.pid ?? 0, { code: 0, signal: undefined })
+      })
+    )
+  )
+
+  it.effect("a checkout a run outside the registry writes is refused, read-only flows aside", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // A run started from a terminal holds the checkout's writer lock.
+        const live: LiveHolder = {
+          holder: new WriterHolder({
+            pid: 77,
+            runId: "run-cli",
+            flow: "implement",
+            workDir: repo.path,
+            startedAt: 1,
+            groups: []
+          }),
+          alive: "run",
+          groups: []
+        }
+        const asked: Array<string> = []
+        const { fake, supervisor, registry } = yield* setup(
+          {},
+          {
+            writerHolder: (repoPath) => {
+              asked.push(repoPath)
+              return Effect.succeed({ path: "/state/llm4ts/locks/app.json", live })
+            }
+          }
+        )
+        const refused = yield* supervisor.start(request("implement")).pipe(Effect.flip)
+        assert.instanceOf(refused, RunInProgress)
+        if (refused instanceof RunInProgress) {
+          assert.strictEqual(refused.runId, "run-cli")
+          assert.match(refused.message, /is being written by run run-cli \(implement\), pid 77/)
+        }
+        assert.deepStrictEqual(asked, [repo.path])
+        assert.deepStrictEqual(yield* fake.started, [])
+        assert.deepStrictEqual(yield* registry, [])
+        const retro = yield* supervisor.start(request("epic-retro"))
+        yield* fake.exit(retro.pid ?? 0, { code: 0, signal: undefined })
+      })
+    )
+  )
+
+  it.effect("runs allowed to write side by side do not lock each other out", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const alone = yield* setup()
+        const one = yield* alone.supervisor.start(request("implement"))
+        assert.isUndefined((yield* alone.fake.started)[0]?.environment.LLM4TS_WRITER_LOCK)
+        yield* alone.fake.exit(one.pid ?? 0, { code: 0, signal: undefined })
+        const beside = yield* setup({}, { parallelRuns: 2 })
+        const two = yield* beside.supervisor.start(request("implement"))
+        assert.strictEqual((yield* beside.fake.started)[0]?.environment.LLM4TS_WRITER_LOCK, "off")
+        yield* beside.fake.exit(two.pid ?? 0, { code: 0, signal: undefined })
       })
     )
   )

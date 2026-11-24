@@ -24,6 +24,7 @@ import { structuredAndPublish } from "@llm4ts/flow/Usage"
 import {
   EpicBriefInvalid,
   EpicBriefNotApproved,
+  EpicUnfinished,
   EpicCheckoutDirty,
   LandingFailed,
   RefineRefused,
@@ -2882,6 +2883,15 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                 message: `${work.label.replace("Epic: ", "epic ")}: ${report.count("done")} done, ${report.count("failed")} failed, ${report.count("waiting")} waiting — report at ${join(work.stateDir, "report.md")} (usage figures estimated)`
               })
             )
+          // A unit that left stories failed or waiting fails the run, once
+          // everything about it is written (ADR 0058).
+          const unfinished = (
+            work: { readonly stateDir: string },
+            report: EpicReport
+          ): Effect.Effect<void, EpicUnfinished> => {
+            const error = epicUnfinished(report, plan.epicId, work.stateDir)
+            return error === undefined ? Effect.void : Effect.fail(error)
+          }
           const report = yield* runUnit(unit)
           yield* summarize(unit, report)
           if (options.afterUnit !== undefined) {
@@ -2892,14 +2902,14 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
             yield* events.publish(Info.make({ message: hint }))
           }
           if (!deferring) {
-            return
+            return yield* unfinished(unit, report)
           }
           // Deferred findings (ADR 0031) become one refine round once the
           // epic's own stories are all merged. A round's own deferrals are
           // listed, never planned again, so the follow-up cannot loop.
           const feedbackText = yield* deferredFeedback(files, unit.stateDir, unit.plan)
           if (feedbackText === undefined) {
-            return
+            return yield* unfinished(unit, report)
           }
           const settledPlan = report.count("failed") === 0 && report.count("waiting") === 0
           if (unit.stateDir !== stateDir || !settledPlan) {
@@ -2912,7 +2922,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
                 }`
               })
             )
-            return
+            return yield* unfinished(unit, report)
           }
           const stray = statusPaths(yield* context.git.status)
           if (stray.length > 0) {
@@ -2976,6 +2986,7 @@ export const runEpicStories = (options: EpicStoriesOptions) =>
           if (roundHint !== undefined) {
             yield* events.publish(Info.make({ message: roundHint }))
           }
+          yield* unfinished(roundUnit, roundReport)
         })
     )
   })
@@ -3000,3 +3011,22 @@ export const retroHint = (
   ].join(", ")
   return `${what}: llm4ts run epic-retro --repo ${workDir} -- --epic ${epicDir} reads this run's trace and transcripts and proposes fixes for the next run`
 }
+
+/**
+ * What a run of an epic fails with when it leaves stories failed or waiting
+ * (ADR 0058); `undefined` when every story is done.
+ */
+export const epicUnfinished = (
+  report: EpicReport,
+  epicId: string,
+  stateDir: string
+): EpicUnfinished | undefined =>
+  report.count("failed") === 0 && report.count("waiting") === 0
+    ? undefined
+    : EpicUnfinished.make({
+        epicId,
+        done: report.count("done"),
+        failed: report.count("failed"),
+        waiting: report.count("waiting"),
+        report: join(stateDir, "report.md")
+      })

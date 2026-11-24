@@ -321,11 +321,12 @@ executes.
 
 ### Set by llm4ts
 
-| Setting             | Value  | Default                                         | Belongs in    | Meaning                                                                  |
-| ------------------- | ------ | ----------------------------------------------- | ------------- | ------------------------------------------------------------------------ |
-| `LLM4TS_FLOW`       | text   | set by the launcher                             | set by llm4ts | The running flow's name, for its spans.                                  |
-| `LLM4TS_RUN_ID`     | text   | the runner makes one                            | set by llm4ts | The run's id, set by the MCP operator so it can find the run it started. |
-| `LLM4TS_TRACE_PATH` | a path | `.llm4ts/trace-<start>.jsonl` in the repository | set by llm4ts | Where the run writes its trace, set by the MCP operator.                 |
+| Setting              | Value     | Default                                         | Belongs in    | Meaning                                                                                                                                     |
+| -------------------- | --------- | ----------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM4TS_WRITER_LOCK` | on or off | on                                              | global file   | One writing run per checkout: a second one is refused while the first, or a process it started, is alive. off lets runs write side by side. |
+| `LLM4TS_FLOW`        | text      | set by the launcher                             | set by llm4ts | The running flow's name, for its spans.                                                                                                     |
+| `LLM4TS_RUN_ID`      | text      | the runner makes one                            | set by llm4ts | The run's id, set by the MCP operator so it can find the run it started.                                                                    |
+| `LLM4TS_TRACE_PATH`  | a path    | `.llm4ts/trace-<start>.jsonl` in the repository | set by llm4ts | Where the run writes its trace, set by the MCP operator.                                                                                    |
 
 <!-- settings:end -->
 

@@ -12,6 +12,7 @@ import { collectDoctorReport } from "@llm4ts/runner/Doctor"
 import { httpProbe, rosterReport } from "@llm4ts/runner/ExecutorRoster"
 import { interruptOnSignal, type SignalSource } from "@llm4ts/runner/FlowRunner"
 import { nodePlainFileStore } from "@llm4ts/runner/NodePlainFileStore"
+import { nodeWriterLock, writerLockPath } from "@llm4ts/runner/NodeWriterLock"
 import { nodeTranscriptFiles } from "@llm4ts/runner/Transcripts"
 import { nodeListEpics } from "./Watch.ts"
 import { discoverFlows, type FlowTierPaths } from "./FlowCatalog.ts"
@@ -19,7 +20,7 @@ import { nodeFlowProcess, type FlowProcessShape } from "./FlowProcess.ts"
 import type { OperatorConfig } from "./OperatorConfig.ts"
 import { runOperatorServer } from "./OperatorServer.ts"
 import type { OperatorDeps } from "./OperatorTools.ts"
-import { makeRunSupervisor } from "./RunSupervisor.ts"
+import { makeRunSupervisor, type SupervisorOptions } from "./RunSupervisor.ts"
 
 /**
  * The Node side of `llm4ts mcp` (ADR 0041): the operator's dependencies over
@@ -36,6 +37,8 @@ export interface McpRuntime<E> {
   readonly serve: (config: OperatorConfig, deps: OperatorDeps) => Effect.Effect<never, E>
   /** How long stopping a run waits after SIGINT before SIGTERM; the supervisor's default when absent. */
   readonly graceMs?: number
+  /** Who holds a checkout's writer lock; the supervisor consults only its registry when absent. */
+  readonly writerHolder?: SupervisorOptions["writerHolder"]
 }
 
 /**
@@ -58,6 +61,7 @@ export const runMcp = <E>(
         files: runtime.operator.files,
         process: runtime.flowProcess,
         parallelRuns: config.parallelRuns,
+        ...(runtime.writerHolder === undefined ? {} : { writerHolder: runtime.writerHolder }),
         ...(runtime.graceMs === undefined ? {} : { graceMs: runtime.graceMs })
       })
       const fiber = yield* Effect.forkScoped(
@@ -75,6 +79,18 @@ export const runMcp = <E>(
     )
   )
 }
+
+/** The writer lock on disk, as the supervisor asks for it. */
+export const nodeWriterHolder =
+  (
+    environment: Readonly<Record<string, string | undefined>>
+  ): NonNullable<SupervisorOptions["writerHolder"]> =>
+  (repoPath) => {
+    const path = writerLockPath(environment, repoPath)
+    return nodeWriterLock
+      .holder(path)
+      .pipe(Effect.map((live) => (live === undefined ? undefined : { path, live })))
+  }
 
 /** A file's text, or `undefined` when it cannot be read (the `mcp` config and token file). */
 export const nodeRead = (path: string): Effect.Effect<string | undefined> =>
@@ -143,5 +159,6 @@ export const nodeOperatorRuntime = (
     environment
   },
   flowProcess: nodeFlowProcess,
-  serve: runOperatorServer
+  serve: runOperatorServer,
+  writerHolder: nodeWriterHolder(environment)
 })

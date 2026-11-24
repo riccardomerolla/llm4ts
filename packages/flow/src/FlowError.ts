@@ -226,6 +226,23 @@ export class EpicIncomplete extends Schema.TaggedError<EpicIncomplete>()("EpicIn
   }
 }
 
+/**
+ * A run of an epic ended with stories failed or waiting (ADR 0058). Raised
+ * after the board, the report and the retro hint are written, so the run
+ * ends `failed` and its process exits non-zero.
+ */
+export class EpicUnfinished extends Schema.TaggedError<EpicUnfinished>()("EpicUnfinished", {
+  epicId: Schema.String,
+  done: Schema.Int,
+  failed: Schema.Int,
+  waiting: Schema.Int,
+  report: Schema.String
+}) {
+  get message(): string {
+    return `epic '${this.epicId}' is not finished: ${this.done} done, ${this.failed} failed, ${this.waiting} waiting — see ${this.report}; run the epic again to resume`
+  }
+}
+
 /** Landing an epic failed; the target branch was left untouched. */
 export class LandingFailed extends Schema.TaggedError<LandingFailed>()("LandingFailed", {
   epicBranch: Schema.String,
@@ -437,6 +454,25 @@ export class PlanPending extends Schema.TaggedError<PlanPending>()("PlanPending"
   }
 }
 
+/** A writing run was asked for on a checkout another run is writing (ADR 0058). */
+export class CheckoutBusy extends Schema.TaggedError<CheckoutBusy>()("CheckoutBusy", {
+  workDir: Schema.String,
+  lockPath: Schema.String,
+  pid: Schema.Int,
+  runId: Schema.String,
+  flow: Schema.optionalKey(Schema.String),
+  /** `children`: the run is gone, processes it started are not. */
+  alive: Schema.Literals(["run", "children"]),
+  groups: Schema.Array(Schema.Int)
+}) {
+  get message(): string {
+    const run = `run ${this.runId}${this.flow === undefined ? "" : ` (${this.flow})`}`
+    return this.alive === "run"
+      ? `${this.workDir} is being written by ${run}, pid ${this.pid}; a second writing run is not started. Stop that run first`
+      : `${run} is gone, but processes it started are still running and may write to ${this.workDir} (process group ${this.groups.join(", ")}). End them and run again; if they are not that run's, remove ${this.lockPath}`
+  }
+}
+
 export const FlowError = Schema.Union([
   PersistenceError,
   PlanParseError,
@@ -458,6 +494,7 @@ export const FlowError = Schema.Union([
   RosterExhausted,
   RosterInvalid,
   EpicIncomplete,
+  EpicUnfinished,
   LandingFailed,
   StoryFailed,
   Stalled,
@@ -474,6 +511,7 @@ export const FlowError = Schema.Union([
   AgendaPending,
   PlanInvalid,
   ReportInvalid,
-  PlanPending
+  PlanPending,
+  CheckoutBusy
 ])
 export type FlowError = typeof FlowError.Type

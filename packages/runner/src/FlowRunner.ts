@@ -85,6 +85,7 @@ import { makeJudgmentLog, type JudgmentLogShape } from "@llm4ts/flow/JudgmentLog
 import { makeGitHubTool } from "@llm4ts/flow/GitHubTool"
 import { makeGitTool } from "@llm4ts/flow/GitTool"
 import type { PlainFileStoreShape } from "@llm4ts/flow/Persistence"
+import type { WriterLockShape } from "@llm4ts/flow/WriterLock"
 import { ignoringRunState } from "@llm4ts/flow/RunState"
 import { makeTransientRetry } from "@llm4ts/flow/TransientRetry"
 import {
@@ -113,7 +114,8 @@ import { executorConfig, httpProbe, loadRosterDocument, rosterStatePath } from "
 import { nodeHttpClient } from "./NodeHttpClient.ts"
 import { nodeGeminiCliExecutor } from "./NodeGeminiCliExecutor.ts"
 import { nodePlainFileStore } from "./NodePlainFileStore.ts"
-import { nodeProcessExecutor } from "./NodeProcessExecutor.ts"
+import { childGroups, nodeProcessExecutor } from "./NodeProcessExecutor.ts"
+import { nodeWriterLock, writerLockPath } from "./NodeWriterLock.ts"
 import { nodeTemporaryFiles } from "./NodeTemporaryFiles.ts"
 import { asReadOnly, prepareConnector, withSeatSettings } from "./Connectors.ts"
 import {
@@ -143,6 +145,16 @@ export interface FlowRunnerDependencies {
   readonly http?: HttpClientShape
   /** Where `--transcript` writes, given its directory; files on disk by default. */
   readonly transcriptSink?: (directory: string) => TranscriptSink
+  /**
+   * One writing run per checkout (ADR 0058). Absent, no lock is taken: the
+   * Node dependencies supply it, test fakes need not.
+   */
+  readonly writerLock?: WriterLockShape
+  /** The process groups of the children running now, recorded in the lock. */
+  readonly childGroups?: {
+    readonly current: () => ReadonlyArray<number>
+    readonly subscribe: (listener: () => void) => () => void
+  }
 }
 
 export interface NodeConnectorDependencies {
@@ -166,6 +178,8 @@ export const nodeFlowRunnerDependencies = (): FlowRunnerDependencies => ({
   process: nodeProcessExecutor,
   files: nodePlainFileStore,
   http: nodeHttpClient,
+  writerLock: nodeWriterLock,
+  childGroups,
   registry: createConnectorRegistry({
     http: nodeHttpClient,
     process: nodeProcessExecutor,
@@ -225,6 +239,11 @@ export interface FlowRunnerOptions {
    * `workDir/.llm4ts/`, which `llm4ts costs` and replay read back.
    */
   readonly persistRun?: boolean
+  /**
+   * The run writes nothing to the checkout but its own run state, so it
+   * takes no writer lock and may run beside a writing run (ADR 0058).
+   */
+  readonly readOnly?: boolean
   readonly runId?: string
   readonly verbosity?: Verbosity
   readonly surface?: TerminalSurface
@@ -1061,6 +1080,45 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
   const costLedgerPath =
     options.costLedgerPath ??
     (persistRun ? join(options.workDir, ".llm4ts", CostLedgerFileName) : undefined)
+  // Before anything is written: a second writing run on this checkout stops
+  // here, with no trace, no ledger line and no cut-off counted (ADR 0058).
+  const writerLock = dependencies.writerLock
+  if (
+    writerLock !== undefined &&
+    options.readOnly !== true &&
+    settingValue("LLM4TS_WRITER_LOCK", environment) !== false
+  ) {
+    const flowName = settingValue("LLM4TS_FLOW", environment)
+    const held = yield* writerLock.hold({
+      path: writerLockPath(environment, options.workDir),
+      workDir: options.workDir,
+      runId: bundle.runId,
+      startedAt,
+      ...(flowName === undefined ? {} : { flow: flowName })
+    })
+    const groups = dependencies.childGroups
+    if (groups !== undefined) {
+      // One write at a time, each with the groups alive when it runs, so the
+      // file never ends on an older list than the last change.
+      const writing = yield* Semaphore.make(1)
+      let closed = false
+      const record = writing.withPermits(1)(
+        Effect.suspend(() => (closed ? Effect.void : held.setGroups(groups.current())))
+      )
+      const unsubscribe = groups.subscribe(() => {
+        Effect.runFork(record)
+      })
+      // Under the permit, so no write lands after the lock is released.
+      yield* Effect.addFinalizer(() =>
+        writing.withPermits(1)(
+          Effect.sync(() => {
+            closed = true
+            unsubscribe()
+          })
+        )
+      )
+    }
+  }
   const tracker = bundle.tracker
   const classic = options.surface ?? (yield* makeTerminalSurface(environment))
   // The agent tree (ADR 0022) takes the screen only where it fits: a real

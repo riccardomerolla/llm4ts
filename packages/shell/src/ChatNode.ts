@@ -29,7 +29,7 @@ import {
 import { nodeListTraces } from "./Costs.ts"
 import { discoverFlows, type FlowTierPaths } from "./FlowCatalog.ts"
 import { nodeFlowProcess } from "./FlowProcess.ts"
-import { nodeListFiles } from "./OperatorNode.ts"
+import { nodeListFiles, nodeWriterHolder } from "./OperatorNode.ts"
 import { makeRunSupervisor } from "./RunSupervisor.ts"
 import { ShellUsageError } from "./ShellErrors.ts"
 import { nodeListEpics } from "./Watch.ts"
@@ -132,7 +132,8 @@ export const nodeChatDeps = (
       environment,
       files: nodePlainFileStore,
       process: nodeFlowProcess,
-      parallelRuns: 1
+      parallelRuns: 1,
+      writerHolder: nodeWriterHolder(environment)
     })
     const deps: Omit<ChatLoopDeps, "decide"> = {
       chat: makeGoogleChatTool(nodeProcessExecutor, path, noEvents),
