@@ -179,8 +179,15 @@ export const cliVersionProbeHealthCheck = (
           Effect.catch(() => Effect.succeed<AuthStatus>("Unknown"))
         )
   return probe.executor.run([probe.binary, ...(probe.versionArgs ?? ["--version"])], cwd, {}).pipe(
-    Effect.andThen(authStatus),
-    Effect.map((auth) => HealthStatus.make({ availability: "Healthy", authStatus: auth })),
+    // A binary that answers its version probe with a failure is not usable,
+    // whatever is at that name on the PATH.
+    Effect.flatMap((version) =>
+      version.exitCode === 0
+        ? Effect.map(authStatus, (auth) =>
+            HealthStatus.make({ availability: "Healthy", authStatus: auth })
+          )
+        : Effect.succeed(cliProbeUnhealthy)
+    ),
     Effect.catch(() => Effect.succeed(cliProbeUnhealthy))
   )
 }

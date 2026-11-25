@@ -650,7 +650,7 @@ elsewhere), and `LLM4TS_EXCLUDE_DIRS` (replaces the pruned directory list).
 ## Usage estimates
 
 Every seat the runner resolves is metered, so a run always accounts for its
-tokens even when the backend reports none (Antigravity and Cursor on the
+tokens even when the backend reports none (Cursor on the
 [capability matrix](provider-capabilities.md)). The estimate counts
 characters on both sides of a request and is published under the model label
 `estimated:<model>`, which keeps it in its own column of `llm4ts costs` and out

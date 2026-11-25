@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+The Antigravity (`agy`) connector, checked against agy 1.5.17 with real
+turns. The capability docs and ADRs 0005 and 0010 carry the evidence.
+
+### Fixed
+
+- **agy replies keep their line breaks.** A streamed reply came back with
+  its lines joined end to end, so a plan, a list or a code block from an agy
+  seat reached the flow as one line. Every flow reads a seat as a stream.
+- **An exhausted agy quota is typed, with its reset time.** agy says
+  "Individual quota reached … Resets in 3h39m18s", which no rule matched,
+  and the streaming path typed nothing at all. It is now a `UsageLimitError`
+  with `resetAt`, so a roster parks the executor until then (ADR 0019); a
+  reset within two minutes is a `RateLimitError`.
+- **A read-only agy seat answers the question.** It ran under `--mode plan`,
+  which removes no tool and turns the task into a planning workflow: a
+  judge asked for JSON wrote a plan and asked for approval. It now passes
+  session deny rules for shell commands and file writes, and drops a
+  coder's `mode` and `dangerously-skip-permissions` flags. The grade stays
+  `advisory`.
+- **An agy coder can run commands.** The `antigravity` preset no longer sets
+  `mode: accept-edits`, under which a headless agy denies every shell
+  command and ends the turn with an empty reply. Such a turn now fails,
+  typed, naming what was denied.
+
+### Changed
+
+- The agy connector reads `--output-format stream-json`: token usage per
+  turn (`usageReporting` is now `true`, so the seat is measured, not
+  estimated), tool calls as they start and end, and the model that served
+  the turn.
+- The prompt goes to agy on stdin, not in its arguments: a long prompt meets
+  no argument-size limit and does not show in the process list.
+  `buildAntigravityArgv` still builds the one-shot `--print` command.
+- A CLI whose version probe exits non-zero is `Unhealthy` for every
+  connector on the `versionProbe` seam; only a failure to start it was
+  before. agy uses that seam now.
+- `effort` on an agy seat is still ignored, on purpose: agy names the
+  effort in the model id and fails a turn whose `--effort` disagrees with
+  it.
+
 ## 4.16.0
 
 ### Added

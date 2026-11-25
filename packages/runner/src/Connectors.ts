@@ -50,11 +50,11 @@ export const pi = CliConnectorConfig.make({
   connectorId: ConnectorIds.Pi
 })
 
+// No `mode`: under `accept-edits` a headless agy denies every shell command
+// (nobody is there to approve it), so a coder could not run a test. Its
+// default mode reviews commands itself.
 export const antigravity = CliConnectorConfig.make({
-  connectorId: ConnectorIds.AntigravityCli,
-  flags: {
-    mode: "accept-edits"
-  }
+  connectorId: ConnectorIds.AntigravityCli
 })
 
 export const grok = CliConnectorConfig.make({

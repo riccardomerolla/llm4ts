@@ -209,6 +209,32 @@ describe("makeCliConnector", () => {
           : "Unknown"
   }
 
+  it.effect("a version probe that exits non-zero is an unusable CLI", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeProcessExecutor({
+        responses: new Map([
+          [
+            processCommandKey(["fake-cli", "--version"]),
+            ProcessResult.make({ stdout: [], stderr: ["cannot execute"], exitCode: 126 })
+          ]
+        ])
+      })
+      const connector = makeCliConnector({
+        ...cliPrimitives,
+        versionProbe: { executor: fake.executor, binary: "fake-cli", authProbe: loggedOutIsInvalid }
+      })
+      const health = yield* connector.healthCheck
+
+      assert.strictEqual(health.availability, "Unhealthy")
+      assert.strictEqual(health.authStatus, "Unknown")
+      // The login is not asked of a binary that does not run.
+      assert.deepStrictEqual(
+        (yield* fake.recorded).map((invocation) => invocation.argv),
+        [["fake-cli", "--version"]]
+      )
+    })
+  )
+
   it.effect(
     "asks the auth probe after the version probe and reports a logged-out CLI as Invalid",
     () =>

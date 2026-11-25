@@ -49,9 +49,8 @@ describe("runner connector presets", () => {
     })
     assert.strictEqual(gemini.connectorId.value, "gemini-cli")
     assert.strictEqual(pi.connectorId.value, "pi")
-    assert.deepStrictEqual(antigravity.flags, {
-      mode: "accept-edits"
-    })
+    // No mode: `accept-edits` denies a headless agy its shell commands.
+    assert.deepStrictEqual(antigravity.flags, {})
     assert.strictEqual(grok.connectorId.value, "grok")
     assert.strictEqual(cursor.connectorId.value, "cursor")
     assert.strictEqual(opencode.connectorId.value, "opencode")

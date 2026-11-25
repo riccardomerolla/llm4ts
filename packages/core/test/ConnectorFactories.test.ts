@@ -122,8 +122,8 @@ describe("ConnectorFactories", () => {
       assert.isTrue(mock.capabilities.usageReporting)
 
       // Read-only enforcement grades (ADR 0010): claude's --tools allowlist
-      // is a real removal; gemini/antigravity lean on unverified plan modes;
-      // API providers execute no tools at all.
+      // is a real removal; antigravity's deny rules were seen to hold on two
+      // tools, not on all of them; API providers execute no tools at all.
       assert.strictEqual(claude.capabilities.readOnlyEnforcement, "enforced")
       // Plan mode is a policy-engine deny from gemini 0.37.0; older CLIs refuse the seat.
       assert.strictEqual(gemini.capabilities.readOnlyEnforcement, "enforced")

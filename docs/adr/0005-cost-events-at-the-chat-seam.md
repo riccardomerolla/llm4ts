@@ -49,3 +49,10 @@ The chat seam is no longer the only producer. The judgment layers
 (`TypeSafeJudgment`, `LlmJudgment`) publish `TokensUsed` for every request
 they answer, with agent `"judgment"`, because a judgment is not a chat and
 never passes through `Chat` or `completeAndPublish`.
+
+### Amendment (2026-11-25): Antigravity reports usage
+
+agy 1.5.17 prints token counts under `--output-format stream-json`, one
+`usage` per model response. The connector reads them (`usageReporting` is
+`true`), so an Antigravity seat is measured, not estimated. Cursor is the
+one CLI left that reports none.

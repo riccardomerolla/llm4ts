@@ -16,6 +16,10 @@ const claudeLimitSignals: ReadonlyArray<string> = [
   "hit your"
 ]
 const geminiReset = /reset after\s+((?:\d+(?:ms|[dhms]))+)/i
+// agy 1.5.17: "Individual quota reached. Please upgrade your subscription to
+// increase your limits. Resets in 3h39m18s."
+const antigravityQuota = /quota reached/i
+const antigravityReset = /resets in\s+((?:\d+(?:ms|[dhms]))+)/i
 const resetComponent = /(\d+)(ms|[dhms])/gi
 const shortResetLimit = Duration.seconds(120)
 
@@ -256,8 +260,28 @@ export const classifyUsageLimit = (
           })
         : undefined
     }
+    case "antigravity": {
+      const resetSpecification = antigravityQuota.test(text)
+        ? text.match(antigravityReset)?.[1]
+        : undefined
+      if (resetSpecification !== undefined) {
+        const duration = resetDuration(resetSpecification)
+        return Duration.toMillis(duration) <= Duration.toMillis(shortResetLimit)
+          ? RateLimitError.make({ retryAfter: duration })
+          : UsageLimitError.make({
+              resetAt: DateTime.addDuration(now, duration),
+              provider,
+              message: text
+            })
+      }
+      return antigravityQuota.test(text) || isRelayedQuota(text)
+        ? UsageLimitError.make({
+            provider,
+            message: text
+          })
+        : undefined
+    }
     case "pi":
-    case "antigravity":
       return isRelayedQuota(text)
         ? UsageLimitError.make({
             provider,

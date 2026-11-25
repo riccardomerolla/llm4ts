@@ -105,3 +105,31 @@ whole subject and nothing is to be explored. The headless denial rule in
 `write.toml` and the engine's non-interactive deny default both arrived
 with gemini-cli #23668, first released in 0.37.0, so `geminiReadOnlyFloor`
 is unchanged.
+
+### Amendment (2026-11-25): Antigravity read-only is deny rules, not plan mode
+
+Antigravity's `--mode plan` has the fault Gemini's had. Checked on agy
+1.5.17 with `--output-format stream-json`, whose `init` event lists the
+tools: the list is the same 60 tools with and without `--mode plan`, and the
+mode replaces the task with a planning workflow. A judge asked whether a
+file contains a word, answer in JSON, wrote a plan file and asked for
+approval instead. The flag is also not checked: `--mode bogus` is accepted.
+
+A read-only Antigravity seat now passes session-only deny rules,
+`--settings '{"permissions":{"deny":["command(*)","write_file(*)"]}}'`. With
+them a file write and a shell command each failed before running ("Matches
+user-configured deny rule") and the model answered in its own voice. The
+seat drops a coder's `mode` and `dangerously-skip-permissions` flags (the
+second switches the `init` event's `permission_mode` to `always-proceed`
+even beside `--mode plan`); a `settings` flag the operator wrote replaces
+the deny rules, as `flags.tools` does on Claude.
+
+The grade stays `advisory`. Two tools were observed, not the surface: the
+browser, MCP, notebook and subagent tools were not each tried under the
+rules, and whether `write_file(*)` covers every editing tool is inferred
+from the tool name the stream reports, not read from agy's policy.
+
+The coder preset loses `mode: accept-edits`: under it a headless agy denies
+every shell command, since nobody can approve it, and ends the turn
+`SUCCESS` with an empty reply. The connector now fails such a turn, typed,
+naming what was denied.

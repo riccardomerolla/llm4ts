@@ -20,7 +20,34 @@ describe("UsageLimits", () => {
       )
     }
     assert.isUndefined(classifyUsageLimit("pi", "rate limited", now, "UTC"))
+    assert.isUndefined(classifyUsageLimit("antigravity", "rate limited", now, "UTC"))
+    // pi relays other providers; agy's own wording is not pi's.
+    assert.isUndefined(classifyUsageLimit("pi", "Individual quota reached.", now, "UTC"))
     assert.isUndefined(classifyUsageLimit("pi", "503: engine is recovering", now, "UTC"))
+  })
+
+  it("reads agy's quota message and the time it says the quota resets", () => {
+    // agy 1.5.17, 2026-11-25, in the result event and on stderr.
+    const text =
+      "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 3h39m18s."
+    const limit = classifyUsageLimit("antigravity", text, now, "UTC")
+    assert.strictEqual(limit?._tag, "UsageLimitError")
+    assert.strictEqual(
+      limit?._tag === "UsageLimitError" && limit.resetAt !== undefined
+        ? DateTime.formatIso(limit.resetAt)
+        : undefined,
+      "2026-06-04T16:06:18.000Z"
+    )
+    // A reset a retry can wait out is a rate limit, not a parked executor.
+    assert.strictEqual(
+      classifyUsageLimit("antigravity", "Individual quota reached. Resets in 45s.", now, "UTC")
+        ?._tag,
+      "RateLimitError"
+    )
+    assert.strictEqual(
+      classifyUsageLimit("antigravity", "Individual quota reached.", now, "UTC")?._tag,
+      "UsageLimitError"
+    )
   })
 
   it("parses a future Codex wall-clock reset today", () => {

@@ -12,7 +12,7 @@ connector. Runtime availability and authentication are reported separately by
 | Claude CLI                    | CLI  |       yes |               yes |             yes |               yes |       yes |      yes |      yes |  enforced | mapped                                     | enforced          |
 | Codex, Pi CLI                 | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  enforced | mapped                                     | partial           |
 | Gemini CLI                    | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  enforced | ignored                                    | partial           |
-| Antigravity CLI               | CLI  |       yes |               yes |              no |               yes |        no |       no |       no |  advisory | ignored                                    | ignored           |
+| Antigravity CLI               | CLI  |       yes |               yes |             yes |               yes |        no |       no |       no |  advisory | ignored                                    | ignored           |
 | OpenCode, Grok CLI            | CLI  |       yes |               yes |             yes |                no |        no |       no |       no |  advisory | ignored                                    | ignored           |
 | Cursor CLI                    | CLI  |       yes |               yes |              no |                no |        no |       no |       no |   ignored | ignored                                    | ignored           |
 
@@ -20,9 +20,9 @@ The OpenCode HTTP compatibility provider exists as a direct API adapter, but the
 stable `opencode` registry identifier deliberately resolves to the CLI connector
 to match the reference release.
 
-Prompt transport is provider-specific. Claude, Codex, Pi, and Gemini execution
-use stdin. Antigravity, OpenCode, Grok, and Cursor retain positional prompts
-because their source-compatible headless commands require them. Secrets remain
+Prompt transport is provider-specific. Claude, Codex, Pi, Gemini, and
+Antigravity execution use stdin. OpenCode, Grok, and Cursor retain positional
+prompts because their source-compatible headless commands require them. Secrets remain
 in environment variables or HTTP headers and are never rendered into argv.
 
 Usage reporting means the connector parses token counts from its backend and
@@ -59,8 +59,18 @@ connector's `readOnly` mapping restricts its harness (ADR 0010):
   before the first turn on anything older. API providers execute no tools at
   all, so read-only holds vacuously.
 - **advisory** — an approval/permission MODE the harness may not treat as a
-  capability gate (Grok `--permission-mode plan`, OpenCode `--agent plan`,
-  Antigravity `mode: plan`). Upgrading a connector to enforced requires
+  capability gate (Grok `--permission-mode plan`, OpenCode `--agent plan`),
+  or a policy seen to hold on some tools and not yet on all of them.
+  Antigravity read-only passes session deny rules
+  (`--settings '{"permissions":{"deny":["command(*)","write_file(*)"]}}'`):
+  on agy 1.5.17 a file write and a shell command were both refused with
+  "Matches user-configured deny rule", but its browser, MCP, notebook and
+  subagent tools were not each tried, so the grade stays advisory. Its
+  `--mode plan` is not used: it removes no tool from the advertised list and
+  replaces the task with a planning workflow, so a judge asked for JSON
+  answers with a plan. A read-only seat also drops a coder's `mode` and
+  `dangerously-skip-permissions` flags; a `settings` flag the operator wrote
+  replaces the deny rules. Upgrading a connector to enforced requires
   observing the harness's advertised tool list, or its policy, with and
   without the flag, not the flag's name.
 - **ignored** — the flag maps only to an approval default indistinguishable
@@ -90,6 +100,12 @@ its harness's default until a roster entry sets one.
 `max` becomes `xhigh` where the harness's top level is called that. Whether a
 given model accepts a given level is the backend's business: a level the
 model rejects fails the call with the backend's own words.
+
+Antigravity has an `--effort` flag and is still `ignored`: agy names the
+effort in the model id (`gemini-3.8-flash-high`), and the flag fails the turn
+when the id names another level or the model has no such level (agy 1.5.17:
+`--model gpt-oss-120b-medium conflicts with --effort=low`). Choose the
+effort with the model id, or pass `effort` among the seat's flags.
 
 ## Isolated headless
 

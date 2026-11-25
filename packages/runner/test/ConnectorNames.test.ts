@@ -38,7 +38,7 @@ describe("connector names", () => {
     assert.strictEqual(coderFor("  Claude ")?.connectorId.value, "claude-cli")
     assert.deepStrictEqual(coderFor("claude")?.flags, { "permission-mode": "acceptEdits" })
     assert.deepStrictEqual(coderFor("codex")?.flags, { sandbox: "workspace-write" })
-    assert.deepStrictEqual(coderFor("agy")?.flags, { mode: "accept-edits" })
+    assert.deepStrictEqual(coderFor("agy")?.flags, {})
     for (const name of ["nope", "mock", "openai", "lm-studio", ""]) {
       assert.isUndefined(coderFor(name))
     }
