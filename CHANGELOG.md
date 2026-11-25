@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`@llm4ts/temporal`** (ADR 0060), a sixth package, not published to npm
+  yet. It runs a flow as a Temporal activity by starting the installed
+  `llm4ts` bin, so the run keeps the writer lock and the exit code of a run
+  from a terminal. The `flowRun` workflow takes `retryStory` and `skipStory`
+  signals, which reach a live epic through its control inbox.
+- A retry finds the run an earlier attempt left: it returns one that
+  completed, waits for one that is still alive, and resumes one that was
+  cut off. Run ids are derived from the workflow, the activity and the
+  attempt.
+- A cancelled workflow closes after its run and the processes below it are
+  gone. Against a dev server it closed 4.5 s after the request.
+- Failures are typed (`InvalidRequest`, `FlowFailed`, `TaskCutOff`,
+  `CheckoutBusy`, `RunCutOff`, `LaunchFailed`); the first three are never
+  retried, and attempts end at four by default.
+- A trace's `RunEnded` line carries `error`, the tag of the failure a failed
+  run ended with.
+
+### Changed
+
+- A task cut off three times (ADR 0056) fails with `TaskCutOff`, a tag of
+  its own, where it failed with `Aborted`. The message is the same.
+
 ## 4.15.0
 
 ### Added

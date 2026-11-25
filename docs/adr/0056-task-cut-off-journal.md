@@ -71,9 +71,9 @@ carry over is knowing that a run was cut off, and counting.
   its gates, has one cut-off left. Only finishing the task clears it.
 - The limit is an option of the store, not yet a setting an operator can
   change from the command line or a config file (ADR 0049).
-- The failure is `FlowAborted`, not a tag of its own: nothing branches on
-  it yet, and a new tag would have to be added to every match on
-  `FlowError`.
+- The failure was `FlowAborted` at first. Since ADR 0060 it is
+  `TaskCutOff`, a tag of its own: a caller that retries runs has to tell it
+  from any other stop.
 - Work above the task is unchanged. A story's own steps outside its plan
   (the red phase, the story-level review, the judge) are not journaled; a
   crash there re-runs the step as before.

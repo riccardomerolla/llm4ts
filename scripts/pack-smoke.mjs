@@ -160,6 +160,10 @@ import { verbalizedScoreLabels } from "@llm4ts/core/LabelScoring"
 import { makeMlxLmProvider } from "@llm4ts/core/providers/MlxLmProvider"
 import { decide, defaultJudgmentPolicy } from "@llm4ts/flow/Judgment"
 import { createClient } from "@llm4ts/js"
+import { existsSync } from "node:fs"
+import { flowWorkerOptions } from "@llm4ts/temporal"
+import { installedCli } from "@llm4ts/temporal/NodeFlowHost"
+import { flowActivityOptions } from "@llm4ts/temporal/Policy"
 
 assert.equal(typeof runNode, "function")
 assert.equal(typeof runFlowMain, "function")
@@ -195,6 +199,16 @@ assert.ok(response.content.length > 0)
 const health = await client.health()
 assert.ok(health.availability)
 
+// The Temporal package loads from an install, not only resolves: its
+// activities import the flow and runner subpaths they are built on, the
+// workflow file is where the worker's bundler will look, and the bin it
+// starts is the installed shell's.
+const temporal = flowWorkerOptions()
+assert.equal(typeof temporal.activities.runFlow, "function")
+assert.ok(existsSync(temporal.workflowsPath), temporal.workflowsPath)
+assert.ok(existsSync(installedCli()), installedCli())
+assert.equal(flowActivityOptions().retry.maximumAttempts, 4)
+
 const surface = JSON.parse(readFileSync(new URL("./surface.json", import.meta.url), "utf8"))
 for (const { specifier, open } of surface) {
   let code = "resolved"
@@ -210,6 +224,7 @@ assert.ok(closed.some(({ specifier }) => specifier.startsWith("@llm4ts/shell/"))
 await assert.rejects(import(closed[0].specifier), { code: "ERR_PACKAGE_PATH_NOT_EXPORTED" })
 
 console.log("pack smoke: all imports resolved, mock completion succeeded")
+console.log("pack smoke: the Temporal package loaded, with its workflow file and the shell's bin on disk")
 console.log(
   \`pack smoke: \${surface.length - closed.length} public subpaths resolve, \${closed.length} internal ones are refused\`
 )

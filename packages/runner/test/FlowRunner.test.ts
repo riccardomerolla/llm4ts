@@ -930,15 +930,26 @@ describe("runner cost ledger", () => {
             const line = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TraceLine))(
               last ?? ""
             )
-            return [line.kind, line.fields.outcome]
+            return [line.kind, line.fields.outcome, line.fields.error ?? "no error"]
           })
         )
-      assert.deepStrictEqual(yield* endOf(Effect.succeed("done")), ["RunEnded", "completed"])
+      assert.deepStrictEqual(yield* endOf(Effect.succeed("done")), [
+        "RunEnded",
+        "completed",
+        "no error"
+      ])
+      // A failed run names the tag of its failure, so a caller can tell a
+      // stop a retry cannot change from one it can (ADR 0060).
       assert.deepStrictEqual(yield* endOf(Effect.fail(FlowAborted.make({ message: "no" }))), [
         "RunEnded",
-        "failed"
+        "failed",
+        "Aborted"
       ])
-      assert.deepStrictEqual(yield* endOf(Effect.interrupt), ["RunEnded", "interrupted"])
+      assert.deepStrictEqual(yield* endOf(Effect.interrupt), [
+        "RunEnded",
+        "interrupted",
+        "no error"
+      ])
     })
   )
 

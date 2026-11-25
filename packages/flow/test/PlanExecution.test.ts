@@ -475,7 +475,7 @@ describe("the cut-off journal (ADR 0056)", () => {
         )
       )
 
-      assert.strictEqual(error._tag, "Aborted")
+      assert.strictEqual(error._tag, "TaskCutOff")
       assert.match(
         error.message,
         /task "a" was cut off 3 time\(s\).*delete plan\.md\.attempts\.json/

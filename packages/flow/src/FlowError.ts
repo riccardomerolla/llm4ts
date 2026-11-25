@@ -476,6 +476,18 @@ export class CheckoutBusy extends Schema.TaggedError<CheckoutBusy>()("CheckoutBu
   }
 }
 
+/** A task whose runs were cut off too often is not started again (ADR 0056). */
+export class TaskCutOff extends Schema.TaggedError<TaskCutOff>()("TaskCutOff", {
+  task: Schema.String,
+  cutOff: Schema.Int,
+  /** The journal to delete to run the task once more. */
+  journalPath: Schema.String
+}) {
+  get message(): string {
+    return `task "${this.task}" was cut off ${this.cutOff} time(s) before it finished and is not started again; delete ${this.journalPath} to run it once more`
+  }
+}
+
 export const FlowError = Schema.Union([
   PersistenceError,
   PlanParseError,
@@ -515,6 +527,7 @@ export const FlowError = Schema.Union([
   PlanInvalid,
   ReportInvalid,
   PlanPending,
-  CheckoutBusy
+  CheckoutBusy,
+  TaskCutOff
 ])
 export type FlowError = typeof FlowError.Type

@@ -37,8 +37,12 @@ export interface FlowRecorderShape extends StreamRecorder {
   readonly shortfall: Effect.Effect<TraceShortfall | undefined>
   readonly record: (event: FlowEvent) => Effect.Effect<void>
   readonly consume: (hub: FlowEventHub) => Effect.Effect<void, never, Scope.Scope>
-  /** Appends the `RunEnded` line: a reader knows the run is over, not stalled. */
-  readonly end: (outcome: RunOutcome) => Effect.Effect<void>
+  /**
+   * Appends the `RunEnded` line: a reader knows the run is over, not stalled.
+   * `error` is the tag of the failure a failed run ended with, so a caller
+   * can tell a busy checkout from a task that is not started again.
+   */
+  readonly end: (outcome: RunOutcome, error?: string) => Effect.Effect<void>
   /** Waits for this recorder to catch up; `false` means it gave up first. */
   readonly awaitDrained: (hub: FlowEventHub, timeout?: Duration.Input) => Effect.Effect<boolean>
 }
@@ -117,7 +121,8 @@ export const makeFlowRecorder = Effect.fn("@llm4ts/flow/FlowRecorder.make")(func
           event._tag === "UsageProgress" ? Effect.void : record(event)
         )
       ),
-    end: (outcome) => append("RunEnded", { outcome }),
+    end: (outcome, error) =>
+      append("RunEnded", { outcome, ...(error === undefined ? {} : { error }) }),
     awaitDrained: (hub, timeout) => Effect.map(hub.drained(timeout), (report) => report.complete)
   }
   return recorder
