@@ -1,6 +1,6 @@
 {
   "name": "@llm4ts/temporal",
-  "version": "4.15.0",
+  "version": "4.16.0",
   "private": true,
   "description": "Temporal activities and a workflow that run llm4ts flows",
   "license": "MIT",

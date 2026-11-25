@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.16.0
 
 ### Added
 
@@ -18,6 +18,11 @@
 - Failures are typed (`InvalidRequest`, `FlowFailed`, `TaskCutOff`,
   `CheckoutBusy`, `RunCutOff`, `LaunchFailed`); the first three are never
   retried, and attempts end at four by default.
+- A workflow names a flow and tunes it; what the worker executes stays in
+  the worker's environment. The input takes a plain flow name, no
+  `llm4ts run` flags, and only settings whose value is one of a fixed list
+  of words, plus a `LLM4TS_CHILD_ENV_DROP` that adds to the worker's. A
+  worker accepts more with `acceptSettings`; secrets are never accepted.
 - A trace's `RunEnded` line carries `error`, the tag of the failure a failed
   run ended with.
 
