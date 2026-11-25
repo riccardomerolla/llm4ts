@@ -4,7 +4,7 @@ The workspace follows one dependency direction:
 
 ```text
 core → flow → runner → js
-                 └────→ shell
+                 └────→ shell → temporal
 ```
 
 No package imports another package's `src` directory. `@llm4ts/runner`'s
@@ -12,7 +12,8 @@ root export is the flow author's barrel: re-exports of the runner and flow
 verbs a flow script uses, with the subpath exports staying the contract for
 everything else. `pnpm unused` fails when a package's source or tests import
 a package above it in this order; `js` and `shell` share a layer, so the
-runner knows nothing of the shell.
+runner knows nothing of the shell. `temporal` sits above the shell and
+reaches it through its bin only.
 
 The public surface is decided in the sources (ADR 0050). A module whose
 first line is `// @internal: <reason>` has no subpath; every other module
@@ -86,6 +87,19 @@ no model itself: the decision runs as a flow.
 plain configuration, delegates to the same connector registry, converts typed
 failures to `Llm4tsError`, and supports `AbortSignal`. It contains no provider or
 workflow implementation.
+
+## Temporal
+
+`@llm4ts/temporal` runs a flow as a Temporal activity (ADR 0060). The
+activity starts the installed `llm4ts` bin in its own process group, so the
+run takes the writer lock and ends its own children as from a terminal. A
+run's id is derived from the workflow, the activity and the attempt, which
+lets a retry find the run an earlier attempt left: it returns a completed
+one, waits for a live one, and resumes a cut-off one. `Policy` holds the
+activity options, the failure types and their retry rule as pure data;
+`Activities` are Effects over a `FlowHost`; `Workflows` is the one file
+written against Temporal's promise API, because it runs in Temporal's
+sandbox. The package is `private` until its npm entry exists.
 
 ## Security and resources
 

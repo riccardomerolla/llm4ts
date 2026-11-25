@@ -21,11 +21,13 @@ historical, frozen at 2.54.1. Do not follow or update them.
 
 ```text
 core → flow → runner → js
-                 └────→ shell
+                 └────→ shell → temporal
 ```
 
 `shell` is the interactive terminal entry point and `llm4ts` CLI (ADR 0006);
-the runner keeps zero knowledge of it. Stack-specific material (packs,
+the runner keeps zero knowledge of it. `temporal` runs flows as Temporal
+activities by starting the shell's bin; it imports no shell module and is
+not published yet (ADR 0060). Stack-specific material (packs,
 scaffolds, pattern cards, kit flows) lives in `kits/` (ADR 0014), not in a
 package.
 
@@ -94,7 +96,7 @@ published artifacts resolve for an external consumer.
 Publishing is tag-driven via npm trusted publishing (OIDC) — no tokens:
 
 ```bash
-pnpm version:set X.Y.Z   # bumps all five packages in lockstep
+pnpm version:set X.Y.Z   # bumps every package in lockstep
 # update CHANGELOG.md, commit, then:
 git tag vX.Y.Z && git push origin main vX.Y.Z
 ```

@@ -1,0 +1,73 @@
+{
+  "name": "@llm4ts/temporal",
+  "version": "4.15.0",
+  "private": true,
+  "description": "Temporal activities and a workflow that run llm4ts flows",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "exports": {
+    ".": "./dist/Worker.js",
+    "./Activities": "./dist/Activities.js",
+    "./Contract": "./dist/Contract.js",
+    "./FlowHost": "./dist/FlowHost.js",
+    "./NodeFlowHost": "./dist/NodeFlowHost.js",
+    "./Policy": "./dist/Policy.js",
+    "./Worker": "./dist/Worker.js",
+    "./Workflows": "./dist/Workflows.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "clean": "tsc -b tsconfig.json --clean",
+    "test": "vitest run test"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/riccardomerolla/llm4ts.git",
+    "directory": "packages/temporal"
+  },
+  "homepage": "https://github.com/riccardomerolla/llm4ts#readme",
+  "bugs": {
+    "url": "https://github.com/riccardomerolla/llm4ts/issues"
+  },
+  "keywords": [
+    "llm",
+    "effect",
+    "ai",
+    "agents",
+    "workflow",
+    "temporal",
+    "typescript"
+  ],
+  "dependencies": {
+    "@llm4ts/flow": "workspace:*",
+    "@llm4ts/runner": "workspace:*",
+    "@llm4ts/shell": "workspace:*"
+  },
+  "peerDependencies": {
+    "@temporalio/activity": "^1.26.0",
+    "@temporalio/common": "^1.26.0",
+    "@temporalio/workflow": "^1.26.0",
+    "effect": "4.1.5"
+  },
+  "devDependencies": {
+    "@temporalio/activity": "1.26.0",
+    "@temporalio/client": "1.26.0",
+    "@temporalio/common": "1.26.0",
+    "@temporalio/testing": "1.26.0",
+    "@temporalio/worker": "1.26.0",
+    "@temporalio/workflow": "1.26.0",
+    "effect": "4.1.5"
+  }
+}

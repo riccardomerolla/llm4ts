@@ -7,7 +7,9 @@
       "@llm4ts/runner": ["./packages/runner/src/index.ts"],
       "@llm4ts/runner/*": ["./packages/runner/src/*"],
       "@llm4ts/js/*": ["./packages/js/src/*"],
-      "@llm4ts/shell/*": ["./packages/shell/src/*"]
+      "@llm4ts/shell/*": ["./packages/shell/src/*"],
+      "@llm4ts/temporal": ["./packages/temporal/src/Worker.ts"],
+      "@llm4ts/temporal/*": ["./packages/temporal/src/*"]
     }
   },
   "include": [],
@@ -17,6 +19,7 @@
     { "path": "./packages/runner" },
     { "path": "./packages/js" },
     { "path": "./packages/shell" },
+    { "path": "./packages/temporal" },
     { "path": "./examples" },
     { "path": "./flows" },
     { "path": "./kits" }

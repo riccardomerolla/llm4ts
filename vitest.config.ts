@@ -11,7 +11,8 @@ export default defineConfig({
       "@llm4ts/flow": path.resolve(repositoryRoot, "packages/flow/src"),
       "@llm4ts/runner": path.resolve(repositoryRoot, "packages/runner/src"),
       "@llm4ts/js": path.resolve(repositoryRoot, "packages/js/src"),
-      "@llm4ts/shell": path.resolve(repositoryRoot, "packages/shell/src")
+      "@llm4ts/shell": path.resolve(repositoryRoot, "packages/shell/src"),
+      "@llm4ts/temporal": path.resolve(repositoryRoot, "packages/temporal/src")
     }
   },
   test: {
@@ -41,6 +42,9 @@ export default defineConfig({
         // Copies the build puts inside the shell package.
         "packages/shell/flows/**",
         "packages/shell/kits/**",
+        // Runs only inside Temporal's workflow sandbox: the opt-in live test
+        // drives it against a dev server, which in-process coverage cannot see.
+        "packages/temporal/src/Workflows.ts",
         // Process entry points: smoke tests run them as child processes,
         // which in-process coverage cannot see.
         "flows/*.ts",

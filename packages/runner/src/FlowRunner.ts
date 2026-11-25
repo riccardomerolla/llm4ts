@@ -1338,7 +1338,7 @@ export const runWithBundle = Effect.fn("@llm4ts/runner/FlowRunner.runWithBundle"
     ),
     // Last, after every event is in: the trace's final line says how it ended.
     Effect.onExit((exit) =>
-      recorder === undefined ? Effect.void : recorder.end(runOutcomeOf(exit))
+      recorder === undefined ? Effect.void : recorder.end(runOutcomeOf(exit), failureTagOf(exit))
     )
   )
 })
@@ -1360,6 +1360,20 @@ const runOutcomeOf = <A, E>(exit: Exit.Exit<A, E>): RunOutcome =>
     : Cause.hasInterruptsOnly(exit.cause)
       ? "interrupted"
       : "failed"
+
+/** The `_tag` of the typed failure a run ended with, for the trace's last line. */
+const failureTagOf = <A, E>(exit: Exit.Exit<A, E>): string | undefined => {
+  if (Exit.isSuccess(exit)) return undefined
+  const failure = Cause.findErrorOption(exit.cause)
+  if (failure._tag === "None") return undefined
+  const error: unknown = failure.value
+  return typeof error === "object" &&
+    error !== null &&
+    "_tag" in error &&
+    typeof error._tag === "string"
+    ? error._tag
+    : undefined
+}
 
 /**
  * The shell's launch check for a run that did not come through it: an

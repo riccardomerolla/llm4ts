@@ -199,13 +199,14 @@ by copying a skill directory.
 
 ## Packages
 
-| Package          | Purpose                                                             |
-| ---------------- | ------------------------------------------------------------------- |
-| `@llm4ts/shell`  | The `llm4ts` command: run, watch, costs, profile, mcp, chat, config |
-| `@llm4ts/runner` | Node runner; its root export is the flow author's barrel            |
-| `@llm4ts/flow`   | Plans, events, persistence, repositories, review, packs             |
-| `@llm4ts/core`   | Models, connectors, providers, eval, judgments, redaction           |
-| `@llm4ts/js`     | Promise-based client for calling an LLM from any JS program         |
+| Package            | Purpose                                                             |
+| ------------------ | ------------------------------------------------------------------- |
+| `@llm4ts/shell`    | The `llm4ts` command: run, watch, costs, profile, mcp, chat, config |
+| `@llm4ts/runner`   | Node runner; its root export is the flow author's barrel            |
+| `@llm4ts/flow`     | Plans, events, persistence, repositories, review, packs             |
+| `@llm4ts/core`     | Models, connectors, providers, eval, judgments, redaction           |
+| `@llm4ts/js`       | Promise-based client for calling an LLM from any JS program         |
+| `@llm4ts/temporal` | Runs flows as Temporal activities (ADR 0060); not on npm yet        |
 
 ## Configuration
 

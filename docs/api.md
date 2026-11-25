@@ -290,3 +290,21 @@ threadName?)`; a lapsed login is `GwsLoginRequired`. `gws` holds the
 The Effect packages preserve typed error channels. The JavaScript facade rejects
 Promises with `Llm4tsError` because exceptions are its explicit compatibility
 contract.
+
+## Temporal
+
+`@llm4ts/temporal` (ADR 0060, not published yet) exports:
+
+- `flowWorkerOptions(settings?)` from the root and `@llm4ts/temporal/Worker`:
+  the workflow file, the activities and the heartbeat throttle, to spread
+  into `Worker.create`;
+- `@llm4ts/temporal/Workflows`: the `flowRun` workflow, the `retryStory` and
+  `skipStory` signals and the `flowRunState` query;
+- `@llm4ts/temporal/Activities`: `makeFlowActivities(host, timings?)`, and
+  the programs behind them, `runFlowProgram` and `steerProgram`;
+- `@llm4ts/temporal/Policy`: `flowActivityOptions`, `steerActivityOptions`,
+  `workerDefaults`, `classifyEnding`, `finalFailures`, `runIdFor`;
+- `@llm4ts/temporal/Contract`: the `FlowRunInput`, `FlowRunResult`,
+  `SteerInput` and `SteerResult` schemas and the `FailureType` literals;
+- `@llm4ts/temporal/FlowHost` and `@llm4ts/temporal/NodeFlowHost`: what the
+  activities need from the machine, and `makeNodeFlowHost`.

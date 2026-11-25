@@ -3,9 +3,9 @@ import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import {
-  FlowAborted,
   PersistenceError,
   PlanParseError,
+  TaskCutOff,
   UnsupportedSchemaVersion
 } from "./FlowError.ts"
 import type { FlowError } from "./FlowError.ts"
@@ -152,9 +152,7 @@ export const makeTaskAttempts = (
         const stored = tasks[task]
         const cutOff = (stored?.cutOff ?? 0) + (stored?.running === true ? 1 : 0)
         if (cutOff >= cutOffLimit) {
-          return yield* FlowAborted.make({
-            message: `task "${task}" was cut off ${cutOff} time(s) before it finished and is not started again; delete ${path} to run it once more`
-          })
+          return yield* TaskCutOff.make({ task, cutOff, journalPath: path })
         }
         yield* save({ ...tasks, [task]: { running: true, cutOff } })
         return cutOff

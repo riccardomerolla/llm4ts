@@ -157,10 +157,12 @@ const cycles = []
   for (const file of modules) if (!index.has(file)) visit(file)
 }
 
-// Package direction: core → flow → runner → {js, shell}. A package imports only
-// packages on a lower layer; js and shell share a layer, so neither imports the
-// other, and the runner keeps zero knowledge of the shell (ADR 0006).
-const layer = { core: 0, flow: 1, runner: 2, js: 3, shell: 3 }
+// Package direction: core → flow → runner → {js, shell} → temporal. A package
+// imports only packages on a lower layer; js and shell share a layer, so
+// neither imports the other, and the runner keeps zero knowledge of the shell
+// (ADR 0006). temporal starts the shell's bin and imports none of its modules
+// (ADR 0060).
+const layer = { core: 0, flow: 1, runner: 2, js: 3, shell: 3, temporal: 4 }
 for (const pkg of packages) {
   if (layer[pkg] === undefined) {
     console.error(`package ${pkg} has no layer in scripts/unused-modules.mjs`)
@@ -189,7 +191,7 @@ const upward = packages
 for (const violation of upward) console.error(`upward import: ${violation}`)
 if (upward.length > 0) {
   console.error(
-    "\nPackages depend in one direction: core → flow → runner → {js, shell}. Move the shared code down to the lower package."
+    "\nPackages depend in one direction: core → flow → runner → {js, shell} → temporal. Move the shared code down to the lower package."
   )
 }
 
