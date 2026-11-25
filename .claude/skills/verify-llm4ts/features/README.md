@@ -43,6 +43,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Tool catalog](./tool-catalog.md) covers `tool list`, `tool describe` and `tool run`, with passing and failing reports.
 - [Run reports](./run-reports.md) covers `costs` and `profile` over a finished run.
 - [Chat](./chat.md) covers `llm4ts chat` against a stand-in `gws` space: listen, answer, start a run, observe, stop.
+- [Control inbox](./inbox.md) covers `inbox retry`, `inbox skip` and the `inbox` listing against a live `epic-stories` run over a stub agent.
 - [Config files](./config.md) covers `config show`, `set`, `unset`, `init` and the guided `config edit`, `run --set`, the launch warnings and the required-setting preflight.
 
-Not mapped yet: the modernize, epic, port, soap, roundtable and taskforce flows, `graph`, `roster`, and the interactive surfaces named under "Not covered" in the skill.
+Not mapped yet: the modernize, port, soap, roundtable and taskforce flows, the epic flows beyond the steered run in the inbox recipe, `graph`, `roster`, and the interactive surfaces named under "Not covered" in the skill.

@@ -1,6 +1,6 @@
 ---
 name: verify-llm4ts
-description: Drive the locally built llm4ts CLI the way a user does and capture proof. Use after changing packages/*/src, flows/ or kits/ when tests are not enough and you need to show the real `llm4ts` command behaving correctly (flow runs with a stubbed coding agent, `llm4ts tool`, list/view/kits, costs/profile).
+description: Drive the locally built llm4ts CLI the way a user does and capture proof. Use after changing packages/*/src, flows/ or kits/ when tests are not enough and you need to show the real `llm4ts` command behaving correctly (flow runs with a stubbed coding agent, steering a live epic with `llm4ts inbox`, `llm4ts tool`, list/view/kits, costs/profile).
 ---
 
 # Verify llm4ts
@@ -82,7 +82,7 @@ Proof standards:
 $V cleanup $R
 ```
 
-This removes the sandbox directory that `$V new` created and nothing else. The evidence directory stays. Run it after a failed attempt too. A `cli` command is synchronous, so there is no process to kill.
+This removes the sandbox directory that `$V new` created and nothing else. The evidence directory stays. Run it after a failed attempt too. A `cli` command is synchronous, so there is no process to kill, unless a recipe put one in the background ([features/inbox.md](features/inbox.md), [features/chat.md](features/chat.md)): wait for it or kill it first.
 
 ## Isolation
 
@@ -97,4 +97,5 @@ Each run has its own sandbox, so runs can go side by side. Never point `$V cli` 
 - `verify.sh` is the harness. Commands: `build`, `doctor`, `new`, `path`, `stub`, `cli`, `snapshot`, `cleanup`, `help`.
 - `term.sh` is the terminal driver for interactive commands. Commands: `start`, `keys`, `shot`, `stop`. It needs tmux.
 - `stubs/implement.cjs` is the responder for the `implement` flow.
+- `stubs/epic.cjs` is the responder for `epic-stories`: three stories, one of them slow on demand; `stubs/epic-gate.sh` is a gate that is red for one story while a flag file exists ([features/inbox.md](features/inbox.md)).
 - `stubs/chief.cjs` answers the Chief behind `llm4ts chat` and the runs it starts; `stubs/gws.cjs` is a stand-in `gws` for a Chat space ([features/chat.md](features/chat.md)).
