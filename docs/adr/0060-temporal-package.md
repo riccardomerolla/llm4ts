@@ -66,11 +66,16 @@ rest shaped this package:
    refused. The activity adds `TEMPORAL_*` to the run's
    `LLM4TS_CHILD_ENV_DROP` (ADR 0059); a list in the input adds to the
    worker's and never replaces it.
-   **Nor does a command.** A setting llm4ts runs as a command (gates,
-   worktree setup), a coding agent's flags and the `--set` run flag are
-   refused too: whoever may start a workflow picks a flow and tunes it,
-   and what the worker's machine executes stays in the worker's
-   environment.
+   **Nor does a command, a path or an address.** Whoever may start a
+   workflow picks a flow by name and tunes it; what the worker's machine
+   executes, reads and connects to stays in the worker's environment. So
+   the input has no `llm4ts run` flags, the flow is a name and never a
+   path, and a setting is accepted only when its grammar is a closed list
+   of words (a toggle, a choice). Gates, the worktree setup, a coding
+   agent's flags, a pack or roster path and a URL setting are all
+   refused. A worker that trusts every caller of its task queue can list
+   more settings in `acceptSettings`. `LLM4TS_WRITER_LOCK` is never
+   accepted: finding an earlier attempt's run depends on the lock.
 10. **The rules are testable without a server.** Options, failure
     classification and ids are a pure module (`Policy`); the activities are
     Effects over a `FlowHost` and run against a fake one, and through

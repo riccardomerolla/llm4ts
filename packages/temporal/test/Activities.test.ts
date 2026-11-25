@@ -39,20 +39,12 @@ describe("runFlowProgram", () => {
       const fiber = yield* Effect.forkChild(
         run(fake, 1, {
           ...input,
-          runFlags: ["--roster", "none"],
           settings: { LLM4TS_CODER: "codex" }
         })
       )
       yield* settle
       const [request] = fake.started
-      assert.deepStrictEqual(request?.args, [
-        "run",
-        "--roster",
-        "none",
-        "implement",
-        "--",
-        "Add multiply"
-      ])
+      assert.deepStrictEqual(request?.args, ["run", "implement", "--", "Add multiply"])
       assert.strictEqual(request?.cwd, "/repo")
       assert.strictEqual(request?.environment.LLM4TS_RUN_ID, idOf(1))
       assert.strictEqual(request?.environment.LLM4TS_TRACE_PATH, tracePath("/repo", idOf(1)))
@@ -239,6 +231,25 @@ describe("runFlowProgram", () => {
     })
   )
 
+  it.live("a setting the worker lists is accepted from a workflow", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeHost()
+      const fiber = yield* Effect.forkChild(
+        runFlowProgram(
+          fake.host,
+          scopeOf(1),
+          { ...input, settings: { LLM4TS_ROSTER: "none" } },
+          { ...timings, acceptSettings: ["LLM4TS_ROSTER"] }
+        )
+      )
+      yield* settle
+      assert.strictEqual(fake.started[0]?.environment.LLM4TS_ROSTER, "none")
+      yield* fake.writeEnd("/repo", idOf(1), "completed")
+      yield* fake.finish(100)
+      yield* Fiber.join(fiber)
+    })
+  )
+
   it.live("refuses a request that cannot run as written", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeHost()
@@ -268,23 +279,35 @@ describe("runFlowProgram", () => {
         String((yield* refused({ ...input, settings: { LLM4TS_MCP_TOKEN: "t" } }))[2]),
         /is a secret/
       )
+      for (const settings of [
+        { LLM4TS_GATES: "sh -c id" },
+        { LLM4TS_CODER_FLAGS: "x=y" },
+        { LLM4TS_PACK: "/tmp/pack" },
+        { LLM4TS_ROSTER: "/tmp/roster.json" },
+        { LLM4TS_WORKTREE_ROOT: "/tmp" }
+      ]) {
+        assert.match(
+          String((yield* refused({ ...input, settings }))[2]),
+          /is not accepted from a workflow/
+        )
+      }
       assert.match(
-        String((yield* refused({ ...input, settings: { LLM4TS_GATES: "sh -c id" } }))[2]),
-        /decides what the worker executes/
+        String((yield* refused({ ...input, settings: { LLM4TS_WRITER_LOCK: "off" } }))[2]),
+        /set by the activity/
       )
-      assert.match(
-        String((yield* refused({ ...input, settings: { LLM4TS_CODER_FLAGS: "x=y" } }))[2]),
-        /decides what the worker executes/
-      )
-      assert.match(
-        String((yield* refused({ ...input, runFlags: ["--set", "LLM4TS_GATES=id"] }))[2]),
-        /--set is not a run flag here/
-      )
-      assert.match(
-        String((yield* refused({ ...input, runFlags: ["--set=LLM4TS_GATES=id"] }))[2]),
-        /--set is not a run flag here/
-      )
+      for (const flow of ["../flows/evil.ts", "--set", "/tmp/flow.js", ""]) {
+        assert.match(String((yield* refused({ ...input, flow }))[2]), /is not a flow's name/)
+      }
       assert.deepStrictEqual(fake.started, [])
+      // The run flags left the contract: an unknown key does not become an argument.
+      const fiber = yield* Effect.forkChild(
+        run(fake, 1, { ...input, runFlags: ["--set", "LLM4TS_GATES=id"] })
+      )
+      yield* settle
+      assert.deepStrictEqual(fake.started[0]?.args, ["run", "implement", "--", "Add multiply"])
+      yield* fake.writeEnd("/repo", idOf(1), "completed")
+      yield* fake.finish(100)
+      yield* Fiber.join(fiber)
     })
   )
 })

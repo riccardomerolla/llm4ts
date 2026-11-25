@@ -55,10 +55,19 @@ const result = await new Client().workflow.execute("flowRun", {
 
 Inputs are stored in workflow history in plain text. Pass `LLM4TS_*`
 settings in `settings`; a secret setting is refused, so keep credentials in
-the worker's environment. Settings that llm4ts runs as a command
-(`LLM4TS_GATES`, the worktree setup), a coding agent's flags and the `--set`
-run flag are refused as well: set those in the worker's environment. A
-`LLM4TS_CHILD_ENV_DROP` in the input adds to the worker's list.
+the worker's environment.
+
+A workflow picks a flow by name and tunes it. By default it may pass only
+settings whose value is one of a fixed list of words (on/off settings,
+`LLM4TS_CODER`), plus `LLM4TS_CHILD_ENV_DROP`, which adds to the worker's
+list. Anything that can carry a command, a path or a URL (`LLM4TS_GATES`,
+`LLM4TS_PACK`, `LLM4TS_ROSTER`, `LLM4TS_CODER_HEALTH_URL`) is refused: set it in
+the worker's environment, or, when every caller of the task queue is
+trusted with it, list it on the worker:
+
+```ts
+flowWorkerOptions({ timings: { acceptSettings: ["LLM4TS_PACK"] } })
+```
 
 ## What to expect
 

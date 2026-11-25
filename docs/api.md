@@ -300,7 +300,7 @@ contract.
   into `Worker.create`;
 - `@llm4ts/temporal/Workflows`: the `flowRun` workflow, the `retryStory` and
   `skipStory` signals and the `flowRunState` query;
-- `@llm4ts/temporal/Activities`: `makeFlowActivities(host, timings?)`, and
+- `@llm4ts/temporal/Activities`: `makeFlowActivities(host, options?)`, and
   the programs behind them, `runFlowProgram` and `steerProgram`;
 - `@llm4ts/temporal/Policy`: `flowActivityOptions`, `steerActivityOptions`,
   `workerDefaults`, `classifyEnding`, `finalFailures`, `runIdFor`;

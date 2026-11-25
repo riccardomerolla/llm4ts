@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url"
-import { makeFlowActivities, type FlowActivities, type FlowActivityTimings } from "./Activities.ts"
+import { makeFlowActivities, type FlowActivities, type FlowActivityOptions } from "./Activities.ts"
 import type { FlowHost } from "./FlowHost.ts"
 import { makeNodeFlowHost, type NodeFlowHostOptions } from "./NodeFlowHost.ts"
 import { workerDefaults } from "./Policy.ts"
@@ -26,7 +26,8 @@ export interface FlowWorkerOptions {
 export interface FlowWorkerSettings extends NodeFlowHostOptions {
   /** A host other than the Node one; `cli` and `environment` are then ignored. */
   readonly host?: FlowHost
-  readonly timings?: FlowActivityTimings
+  /** Timings, and the settings a workflow may pass beyond the default ones. */
+  readonly timings?: FlowActivityOptions
 }
 
 export const flowWorkerOptions = (settings: FlowWorkerSettings = {}): FlowWorkerOptions => ({

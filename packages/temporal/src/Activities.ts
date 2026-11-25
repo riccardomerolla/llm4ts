@@ -3,7 +3,7 @@ import { ApplicationFailure, Context } from "@temporalio/activity"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { RetryStory, SkipStory, makeControlInbox } from "@llm4ts/flow/Control"
-import { isSettingName, settingFacts, settingValue } from "@llm4ts/flow/Settings"
+import { isSettingName, settingFacts, settingValue, type SettingName } from "@llm4ts/flow/Settings"
 import {
   FlowRunFailure,
   FlowRunInput,
@@ -32,6 +32,16 @@ export interface FlowActivityTimings {
   readonly graceMs?: number
 }
 
+export interface FlowActivityOptions extends FlowActivityTimings {
+  /**
+   * Settings a workflow may pass besides the ones accepted by default. A
+   * setting on this list can carry a path, a URL or a command into the
+   * worker's machine: list one only when every caller of the task queue is
+   * trusted with it.
+   */
+  readonly acceptSettings?: ReadonlyArray<SettingName>
+}
+
 /** What a `runFlow` attempt knows about itself. */
 export interface AttemptScope {
   readonly workflowId: string
@@ -52,23 +62,33 @@ const failure = (type: FlowRunFailure["type"], message: string, runId?: string):
 
 const invalid = (message: string): FlowRunFailure => failure("InvalidRequest", message)
 
-/** The names a caller may not set: the run's identity is the activity's to give. */
-const reserved = new Set(["LLM4TS_RUN_ID", "LLM4TS_TRACE_PATH", "LLM4TS_FLOW"])
-
-/** Settings whose value is handed to a coding agent's command line. */
-const agentFlags = new Set(["LLM4TS_CODER_FLAGS", "LLM4TS_REASONING_FLAGS"])
+/**
+ * The names no caller may set: the run's identity is the activity's to
+ * give, and finding an earlier attempt's run needs the writer lock.
+ */
+const reserved = new Set([
+  "LLM4TS_RUN_ID",
+  "LLM4TS_TRACE_PATH",
+  "LLM4TS_FLOW",
+  "LLM4TS_WRITER_LOCK"
+])
 
 /**
  * A workflow's caller picks a flow and tunes it; what the worker's machine
- * executes stays the worker's to decide.
+ * executes, reads and connects to stays the worker's to decide. So a setting
+ * is accepted only when its grammar is a closed list of words (a toggle, a
+ * choice), which cannot carry a path, a URL or a command. The drop list is
+ * accepted too: a caller's names only add to the worker's.
  */
-const checkFlags = (flags: ReadonlyArray<string>): Effect.Effect<void, FlowRunFailure> =>
-  flags.some((flag) => flag === "--set" || flag.startsWith("--set="))
-    ? Effect.fail(invalid("--set is not a run flag here: pass settings in `settings`"))
-    : Effect.void
+const acceptedByDefault = (name: SettingName): boolean =>
+  name === "LLM4TS_CHILD_ENV_DROP" || settingFacts(name).choices.length > 0
+
+/** A flow is named as `llm4ts list` shows it: never a path, never a flag. */
+const flowName = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 
 const checkSettings = (
-  settings: Readonly<Record<string, string>>
+  settings: Readonly<Record<string, string>>,
+  accepted: ReadonlyArray<SettingName>
 ): Effect.Effect<void, FlowRunFailure> => {
   for (const name of Object.keys(settings)) {
     if (!isSettingName(name)) {
@@ -83,10 +103,10 @@ const checkSettings = (
         invalid(`${name} is a secret: set it in the worker's environment, not in the workflow`)
       )
     }
-    if (settingFacts(name).runs || agentFlags.has(name)) {
+    if (!acceptedByDefault(name) && !accepted.includes(name)) {
       return Effect.fail(
         invalid(
-          `${name} decides what the worker executes: set it in the worker's environment, not in the workflow`
+          `${name} is not accepted from a workflow: set it in the worker's environment, or list it in the worker's acceptSettings`
         )
       )
     }
@@ -115,7 +135,7 @@ export const runFlowProgram = (
   host: FlowHost,
   scope: AttemptScope,
   raw: unknown,
-  timings: FlowActivityTimings = {}
+  timings: FlowActivityOptions = {}
 ): Effect.Effect<FlowRunResult, FlowRunFailure> => {
   const heartbeatMs = timings.heartbeatMs ?? 2_000
   const pollMs = timings.pollMs ?? 500
@@ -129,8 +149,10 @@ export const runFlowProgram = (
       return yield* invalid(`repo must be an absolute path, got '${input.repo}'`)
     }
     const settings = input.settings ?? {}
-    yield* checkSettings(settings)
-    yield* checkFlags(input.runFlags ?? [])
+    if (!flowName.test(input.flow)) {
+      return yield* invalid(`'${input.flow}' is not a flow's name`)
+    }
+    yield* checkSettings(settings, timings.acceptSettings ?? [])
 
     const idOf = (attempt: number): string => runIdFor(scope.workflowId, scope.activityId, attempt)
     const result = (runId: string, adopted: boolean): FlowRunResult => ({
@@ -207,12 +229,7 @@ export const runFlowProgram = (
     const runId = idOf(scope.attempt)
     const child = yield* host
       .start({
-        args: [
-          "run",
-          ...(input.runFlags ?? []),
-          input.flow,
-          ...(input.args.length === 0 ? [] : ["--", ...input.args])
-        ],
+        args: ["run", input.flow, ...(input.args.length === 0 ? [] : ["--", ...input.args])],
         cwd: input.repo,
         environment: {
           ...host.environment,
@@ -325,7 +342,7 @@ export interface FlowActivities {
 /** The activities to register on a worker. */
 export const makeFlowActivities = (
   host: FlowHost,
-  timings: FlowActivityTimings = {}
+  timings: FlowActivityOptions = {}
 ): FlowActivities => ({
   runFlow: (input) => {
     const context = Context.current()

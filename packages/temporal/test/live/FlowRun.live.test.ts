@@ -99,6 +99,7 @@ const makeSandbox = (): { sandbox: string; repo: string; environment: Record<str
       TMPDIR: process.env.TMPDIR ?? "/tmp",
       NO_COLOR: "1",
       LLM4TS_CODER: "claude",
+      LLM4TS_ROSTER: "none",
       // What a worker on Temporal Cloud holds; it must stop at the flow.
       TEMPORAL_API_KEY: "live-test-placeholder"
     }
@@ -150,7 +151,6 @@ describe.skipIf(!live)("flowRun against a Temporal dev server", () => {
   const request = (repo: string) => ({
     repo,
     flow: "implement",
-    runFlags: ["--roster", "none"],
     args: ["Add a multiply function"]
   })
 

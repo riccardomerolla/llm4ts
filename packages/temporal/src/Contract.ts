@@ -16,11 +16,9 @@ export const FlowRunInput = Schema.Struct({
   repo: Schema.String,
   /** The flow's name, as `llm4ts list` shows it. */
   flow: Schema.String,
-  /** Flags of `llm4ts run` itself, before the flow's name (`--roster none`). */
-  runFlags: Schema.optionalKey(Schema.Array(Schema.String)),
   /** The flow's own arguments. */
   args: Schema.Array(Schema.String),
-  /** `LLM4TS_*` settings for this run; a secret setting is refused. */
+  /** `LLM4TS_*` settings for this run, from the ones the worker accepts. */
   settings: Schema.optionalKey(SettingsMap)
 })
 export type FlowRunInput = typeof FlowRunInput.Type
