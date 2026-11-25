@@ -238,6 +238,42 @@ describe("childEnvironment", () => {
     )
   })
 
+  it("withholds the variables LLM4TS_CHILD_ENV_DROP names, by name or wildcard", () => {
+    assert.deepStrictEqual(
+      childEnvironment(
+        {
+          PATH: "/usr/bin",
+          ANTHROPIC_API_KEY: "a",
+          TEMPORAL_API_KEY: "t",
+          TEMPORAL_ADDRESS: "cloud:7233",
+          AWS_SECRET_ACCESS_KEY: "s",
+          MY_AWS_NOTE: "kept",
+          GITHUB_TOKEN: "g",
+          LLM4TS_CHILD_ENV_DROP: "TEMPORAL_*, AWS_*,GITHUB_TOKEN"
+        },
+        {}
+      ),
+      { PATH: "/usr/bin", ANTHROPIC_API_KEY: "a", MY_AWS_NOTE: "kept" }
+    )
+  })
+
+  it("treats every character of a drop-list name but * literally", () => {
+    assert.deepStrictEqual(
+      childEnvironment({ A_B: "1", AxB: "2", "A.B": "3", LLM4TS_CHILD_ENV_DROP: "A.B" }, {}),
+      { A_B: "1", AxB: "2" }
+    )
+  })
+
+  it("still passes a variable the run sets for the child itself", () => {
+    assert.deepStrictEqual(
+      childEnvironment(
+        { GEMINI_API_KEY: "shell", LLM4TS_CHILD_ENV_DROP: "*_API_KEY" },
+        { GEMINI_API_KEY: "bridge" }
+      ),
+      { GEMINI_API_KEY: "bridge" }
+    )
+  })
+
   it.effect("a spawned process does not see LLM4TS_ variables", () =>
     Effect.gen(function* () {
       process.env.LLM4TS_PROBE = "visible"

@@ -792,6 +792,14 @@ export const settings = {
     doc: "One writing run per checkout: a second one is refused while the first, or a process it started, is alive. off lets runs write side by side."
   }),
 
+  LLM4TS_CHILD_ENV_DROP: setting({
+    group: "launch",
+    scope: "global",
+    value: Value.names,
+    fallback: fallback.off("children inherit every variable but LLM4TS_*"),
+    doc: "Variables withheld from every process a run starts (coding agents, gates, setup commands): names, with * as a wildcard, e.g. TEMPORAL_*,AWS_*. A variable the run sets for a child itself still reaches it."
+  }),
+
   // ---- operator ---------------------------------------------------------------
   LLM4TS_MCP_TOKEN: setting({
     group: "operator",

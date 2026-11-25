@@ -126,4 +126,5 @@ Reported by the same review, not decided here:
 
 - **Children inherit the parent's environment.** Only `LLM4TS_*` is removed
   on the way to a coding agent, so any credential in the launching shell
-  reaches it.
+  reaches it. Decided in ADR 0059: `LLM4TS_CHILD_ENV_DROP` names
+  what children do not inherit.

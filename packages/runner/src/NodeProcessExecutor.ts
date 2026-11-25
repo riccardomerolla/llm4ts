@@ -13,6 +13,7 @@ import {
   type ProcessExecutorShape
 } from "@llm4ts/core/ProcessExecutor"
 import { InvalidRequestError, ProviderError, type LlmError } from "@llm4ts/core/Errors"
+import { settingValue } from "@llm4ts/flow/Settings"
 import { windowsInvocation } from "./WindowsCommand.ts"
 
 const maxStderrLines = 256
@@ -59,19 +60,40 @@ const processFailure = (argv: ReadonlyArray<string>, detail: string): ProviderEr
  */
 const orchestratorOwn = (name: string): boolean => name === "_" || name.startsWith("LLM4TS_")
 
+/** A drop-list entry as a test on a variable name; `*` stands for any run of characters. */
+const dropped = (patterns: ReadonlyArray<string>): ((name: string) => boolean) => {
+  const tests = patterns
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern.length > 0)
+    .map(
+      (pattern) =>
+        new RegExp(
+          `^${pattern
+            .split("*")
+            .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+            .join(".*")}$`
+        )
+    )
+  return (name) => tests.some((test) => test.test(name))
+}
+
 /**
  * What a child process inherits: this process's environment without the
- * orchestrator's own variables, then `envVars`. A coding agent, a gate or a
- * setup command has no use for llm4ts's knobs, and an agent that lists its
- * environment should not be pointed at the tool running it.
+ * orchestrator's own variables and without those `LLM4TS_CHILD_ENV_DROP`
+ * names, then `envVars`. A coding agent, a gate or a setup command has no
+ * use for llm4ts's knobs, and an agent that lists its environment should not
+ * be pointed at the tool running it, nor handed a credential of the shell
+ * that launched the run (ADR 0059). `envVars` are what the run means the
+ * child to have, so the drop list does not touch them.
  */
 export const childEnvironment = (
   parent: Readonly<Record<string, string | undefined>>,
   envVars: Readonly<Record<string, string>>
 ): Record<string, string> => {
+  const withheld = dropped(settingValue("LLM4TS_CHILD_ENV_DROP", parent) ?? [])
   const inherited: Record<string, string> = {}
   for (const [name, value] of Object.entries(parent)) {
-    if (value !== undefined && !orchestratorOwn(name)) {
+    if (value !== undefined && !orchestratorOwn(name) && !withheld(name)) {
       inherited[name] = value
     }
   }

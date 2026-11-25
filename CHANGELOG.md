@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`LLM4TS_CHILD_ENV_DROP`** (ADR 0059): variables withheld from every
+  process a run starts (coding agents, gates, setup commands). Names
+  separated by commas, with `*` as a wildcard: `TEMPORAL_*,AWS_*`. Unset,
+  children inherit everything but `LLM4TS_*`, as before. A variable the run
+  sets for a child itself still reaches it.
+
 ## 4.14.0
 
 ### Added
