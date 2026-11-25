@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4.17.0
 
 The Antigravity (`agy`) connector, checked against agy 1.5.17 with real
 turns. The capability docs and ADRs 0005 and 0010 carry the evidence.
