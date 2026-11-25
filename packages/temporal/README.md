@@ -55,7 +55,10 @@ const result = await new Client().workflow.execute("flowRun", {
 
 Inputs are stored in workflow history in plain text. Pass `LLM4TS_*`
 settings in `settings`; a secret setting is refused, so keep credentials in
-the worker's environment.
+the worker's environment. Settings that llm4ts runs as a command
+(`LLM4TS_GATES`, the worktree setup), a coding agent's flags and the `--set`
+run flag are refused as well: set those in the worker's environment. A
+`LLM4TS_CHILD_ENV_DROP` in the input adds to the worker's list.
 
 ## What to expect
 

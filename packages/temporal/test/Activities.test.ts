@@ -222,6 +222,23 @@ describe("runFlowProgram", () => {
     })
   )
 
+  it.live("a drop list in the request adds to the worker's and never replaces it", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakeHost({ PATH: "/bin", LLM4TS_CHILD_ENV_DROP: "AWS_*" })
+      const fiber = yield* Effect.forkChild(
+        run(fake, 1, { ...input, settings: { LLM4TS_CHILD_ENV_DROP: "GH_TOKEN" } })
+      )
+      yield* settle
+      assert.strictEqual(
+        fake.started[0]?.environment.LLM4TS_CHILD_ENV_DROP,
+        "AWS_*,GH_TOKEN,TEMPORAL_*"
+      )
+      yield* fake.writeEnd("/repo", idOf(1), "completed")
+      yield* fake.finish(100)
+      yield* Fiber.join(fiber)
+    })
+  )
+
   it.live("refuses a request that cannot run as written", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakeHost()
@@ -250,6 +267,22 @@ describe("runFlowProgram", () => {
       assert.match(
         String((yield* refused({ ...input, settings: { LLM4TS_MCP_TOKEN: "t" } }))[2]),
         /is a secret/
+      )
+      assert.match(
+        String((yield* refused({ ...input, settings: { LLM4TS_GATES: "sh -c id" } }))[2]),
+        /decides what the worker executes/
+      )
+      assert.match(
+        String((yield* refused({ ...input, settings: { LLM4TS_CODER_FLAGS: "x=y" } }))[2]),
+        /decides what the worker executes/
+      )
+      assert.match(
+        String((yield* refused({ ...input, runFlags: ["--set", "LLM4TS_GATES=id"] }))[2]),
+        /--set is not a run flag here/
+      )
+      assert.match(
+        String((yield* refused({ ...input, runFlags: ["--set=LLM4TS_GATES=id"] }))[2]),
+        /--set is not a run flag here/
       )
       assert.deepStrictEqual(fake.started, [])
     })

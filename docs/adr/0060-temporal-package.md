@@ -64,7 +64,13 @@ rest shaped this package:
 9. **Nothing secret enters history.** Inputs name a checkout, a flow, its
    arguments and `LLM4TS_*` settings; a setting whose scope is `secret` is
    refused. The activity adds `TEMPORAL_*` to the run's
-   `LLM4TS_CHILD_ENV_DROP` (ADR 0059).
+   `LLM4TS_CHILD_ENV_DROP` (ADR 0059); a list in the input adds to the
+   worker's and never replaces it.
+   **Nor does a command.** A setting llm4ts runs as a command (gates,
+   worktree setup), a coding agent's flags and the `--set` run flag are
+   refused too: whoever may start a workflow picks a flow and tunes it,
+   and what the worker's machine executes stays in the worker's
+   environment.
 10. **The rules are testable without a server.** Options, failure
     classification and ids are a pure module (`Policy`); the activities are
     Effects over a `FlowHost` and run against a fake one, and through

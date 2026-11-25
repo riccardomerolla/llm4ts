@@ -55,6 +55,18 @@ const invalid = (message: string): FlowRunFailure => failure("InvalidRequest", m
 /** The names a caller may not set: the run's identity is the activity's to give. */
 const reserved = new Set(["LLM4TS_RUN_ID", "LLM4TS_TRACE_PATH", "LLM4TS_FLOW"])
 
+/** Settings whose value is handed to a coding agent's command line. */
+const agentFlags = new Set(["LLM4TS_CODER_FLAGS", "LLM4TS_REASONING_FLAGS"])
+
+/**
+ * A workflow's caller picks a flow and tunes it; what the worker's machine
+ * executes stays the worker's to decide.
+ */
+const checkFlags = (flags: ReadonlyArray<string>): Effect.Effect<void, FlowRunFailure> =>
+  flags.some((flag) => flag === "--set" || flag.startsWith("--set="))
+    ? Effect.fail(invalid("--set is not a run flag here: pass settings in `settings`"))
+    : Effect.void
+
 const checkSettings = (
   settings: Readonly<Record<string, string>>
 ): Effect.Effect<void, FlowRunFailure> => {
@@ -69,6 +81,13 @@ const checkSettings = (
       // Workflow history is stored in plain text.
       return Effect.fail(
         invalid(`${name} is a secret: set it in the worker's environment, not in the workflow`)
+      )
+    }
+    if (settingFacts(name).runs || agentFlags.has(name)) {
+      return Effect.fail(
+        invalid(
+          `${name} decides what the worker executes: set it in the worker's environment, not in the workflow`
+        )
       )
     }
   }
@@ -111,6 +130,7 @@ export const runFlowProgram = (
     }
     const settings = input.settings ?? {}
     yield* checkSettings(settings)
+    yield* checkFlags(input.runFlags ?? [])
 
     const idOf = (attempt: number): string => runIdFor(scope.workflowId, scope.activityId, attempt)
     const result = (runId: string, adopted: boolean): FlowRunResult => ({
@@ -199,10 +219,12 @@ export const runFlowProgram = (
           ...settings,
           LLM4TS_RUN_ID: runId,
           LLM4TS_TRACE_PATH: tracePathFor(input.repo, runId),
-          // The worker's Temporal credentials stop at the flow (ADR 0059).
-          LLM4TS_CHILD_ENV_DROP: dropListWith(
-            settingValue("LLM4TS_CHILD_ENV_DROP", { ...host.environment, ...settings })
-          )
+          // The worker's Temporal credentials stop at the flow (ADR 0059). A
+          // caller's list adds to the worker's; it never replaces it.
+          LLM4TS_CHILD_ENV_DROP: dropListWith([
+            ...(settingValue("LLM4TS_CHILD_ENV_DROP", host.environment) ?? []),
+            ...(settingValue("LLM4TS_CHILD_ENV_DROP", settings) ?? [])
+          ])
         }
       })
       .pipe(Effect.mapError((error) => failure("LaunchFailed", error.message, runId)))
